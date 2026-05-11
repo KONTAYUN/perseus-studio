@@ -6,16 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"time"
+
+	"webide-backend/internal/idgen"
 
 	_ "modernc.org/sqlite"
 )
 
-var storeIDSeq atomic.Uint64
-
 func nextStoreID(prefix string, now time.Time) string {
-	return fmt.Sprintf("%s_%d_%d", prefix, now.UnixNano(), storeIDSeq.Add(1))
+	return idgen.NewAt(prefix, now)
 }
 
 func Open(path string) (*sql.DB, error) {

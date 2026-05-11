@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"webide-backend/internal/ai"
+	"webide-backend/internal/idgen"
 )
 
 type workspaceFileRef struct {
@@ -71,7 +71,7 @@ func buildChatAttachment(id, name string, size int64, raw []byte, totalTextChars
 	mimeType := detectAttachmentMIME(name, raw)
 	id = strings.TrimSpace(id)
 	if id == "" {
-		id = fmt.Sprintf("att_%d", time.Now().UTC().UnixNano())
+		id = idgen.New("att")
 	}
 	metadata := chatAttachmentMetadata{
 		ID:   id,

@@ -13,6 +13,7 @@ import (
 
 	"webide-backend/internal/ai"
 	"webide-backend/internal/config"
+	"webide-backend/internal/idgen"
 	"webide-backend/internal/store"
 	"webide-backend/internal/tasks"
 	"webide-backend/internal/usersvc"
@@ -279,5 +280,5 @@ func writeAIError(w http.ResponseWriter, status int, err error) {
 }
 
 func newTaskID() string {
-	return fmt.Sprintf("task_%d", time.Now().UTC().UnixNano())
+	return idgen.New("task")
 }

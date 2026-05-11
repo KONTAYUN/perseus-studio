@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"webide-backend/internal/idgen"
 	"webide-backend/internal/store"
 )
 
 func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, messageID, name, argumentsJSON string, opts RunOptions, profile providerRuntimeProfile) (string, ToolEvent) {
 	startedAt := time.Now()
-	toolCallID := fmt.Sprintf("tc_%d", startedAt.UTC().UnixNano())
+	toolCallID := idgen.NewAt("tc", startedAt)
 	logTask(opts, "info", fmt.Sprintf("tool call started: %s", name))
 	emitToolLifecycleEvent(opts, "tool_call_started", "info", map[string]any{
 		"tool_call_id":      toolCallID,

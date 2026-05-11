@@ -2,12 +2,12 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
+
+	"webide-backend/internal/idgen"
 )
 
 type DiagnosticLog struct {
@@ -156,11 +156,7 @@ INSERT INTO diagnostic_logs (
 }
 
 func newDiagnosticID(now time.Time) string {
-	var raw [4]byte
-	if _, err := rand.Read(raw[:]); err == nil {
-		return fmt.Sprintf("diag_%d_%s", now.UnixNano(), hex.EncodeToString(raw[:]))
-	}
-	return fmt.Sprintf("diag_%d", now.UnixNano())
+	return idgen.NewAt("diag", now)
 }
 
 func (s *DiagnosticStore) List(ctx context.Context, query DiagnosticLogQuery) ([]DiagnosticLog, error) {

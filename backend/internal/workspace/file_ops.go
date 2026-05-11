@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"webide-backend/internal/idgen"
 )
 
 func (s *Service) ReadFile(path string) (FileReadResult, error) {
@@ -356,7 +358,7 @@ func (s *Service) renameValidated(cleanOld, cleanNew string) (PathChangeResult, 
 }
 
 func (s *Service) createFileVersion(ctx context.Context, path string, content []byte, source string) (string, error) {
-	versionID := fmt.Sprintf("fv_%d", time.Now().UTC().UnixNano())
+	versionID := idgen.New("fv")
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO file_versions (id, user_id, path, content_text, size_bytes, content_hash, source, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)

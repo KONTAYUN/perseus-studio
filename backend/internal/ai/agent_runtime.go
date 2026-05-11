@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
+	"webide-backend/internal/idgen"
 	"webide-backend/internal/store"
 )
 
@@ -269,7 +269,7 @@ func (r *agentRuntime) ensureActiveAssistantMessage(content string) {
 		return
 	}
 	r.activeAssistantSegment++
-	r.activeAssistantMessageID = fmt.Sprintf("active_msg_%d", time.Now().UTC().UnixNano())
+	r.activeAssistantMessageID = idgen.New("active_msg")
 	r.opts.OnAssistantMessageStarted(r.activeAssistantMessageID, content, r.activeAssistantSegment)
 }
 
