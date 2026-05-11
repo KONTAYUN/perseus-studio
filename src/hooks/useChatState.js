@@ -9,12 +9,14 @@ import {
   normalizeSkillId,
 } from './chatReferenceUtils.js';
 import {
+  agentEventText,
   appendUniqueProgressItem,
   buildAssistantRunShell,
   buildProgressItem,
   hasStreamingAssistantMessage,
   isPendingStatusText,
   mapPendingAssistant,
+  nextLoadingStatus,
   normalizeConversationMessage,
   normalizeConversationMessages,
   updateLoadingState,
