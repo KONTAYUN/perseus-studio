@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"webide-backend/internal/ai"
 	"webide-backend/internal/api"
@@ -28,6 +29,13 @@ func main() {
 	userStore := store.NewUserStore(db)
 	if err := userStore.Migrate(context.Background()); err != nil {
 		log.Fatalf("migrate users: %v", err)
+	}
+	sessionStore := store.NewSessionStore(db)
+	if err := sessionStore.Migrate(context.Background()); err != nil {
+		log.Fatalf("migrate sessions: %v", err)
+	}
+	if err := sessionStore.DeleteExpired(context.Background(), time.Now()); err != nil {
+		log.Fatalf("cleanup sessions: %v", err)
 	}
 
 	if cfg.AdminUsername != "" && cfg.AdminPassword != "" {
@@ -91,7 +99,7 @@ func main() {
 
 	manager.Start(ctx)
 
-	handler := api.NewServer(taskStore, agentRunStore, configStore, conversationStore, diagnosticStore, userStore, broker, runBroker, factory, aiService, cfg)
+	handler := api.NewServer(taskStore, agentRunStore, configStore, conversationStore, diagnosticStore, userStore, sessionStore, broker, runBroker, factory, aiService, cfg)
 	server := &http.Server{
 		Addr:    cfg.ListenAddr,
 		Handler: handler.Routes(),

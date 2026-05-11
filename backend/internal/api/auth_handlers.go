@@ -47,7 +47,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	s.createSessionAndRespond(w, user)
+	s.createSessionAndRespond(r.Context(), w, user)
 }
 
 func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +88,7 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.createSessionAndRespond(w, user)
+	s.createSessionAndRespond(r.Context(), w, user)
 }
 
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
@@ -125,10 +125,8 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if cookie, err := r.Cookie("perseus_session"); err == nil {
-		s.sessionMu.Lock()
-		delete(s.sessions, cookie.Value)
-		s.sessionMu.Unlock()
+	if cookie, err := r.Cookie("perseus_session"); err == nil && cookie.Value != "" && s.sessions != nil {
+		_ = s.sessions.DeleteSession(r.Context(), cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "perseus_session",
@@ -141,22 +139,19 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 }
 
-func (s *Server) createSessionAndRespond(w http.ResponseWriter, user store.User) {
+func (s *Server) createSessionAndRespond(ctx context.Context, w http.ResponseWriter, user store.User) {
 	token, err := randomSessionToken()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
 	expires := time.Now().Add(30 * 24 * time.Hour)
-	info := SessionInfo{
-		UserID:   user.ID,
-		Username: user.Username,
-		Role:     user.Role,
-		Expires:  expires,
+	if s.sessions != nil {
+		if err := s.sessions.CreateSession(ctx, token, user.ID, expires); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create session")
+			return
+		}
 	}
-	s.sessionMu.Lock()
-	s.sessions[token] = info
-	s.sessionMu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name:     "perseus_session",
 		Value:    token,
@@ -210,17 +205,20 @@ func (s *Server) getSession(r *http.Request) *SessionInfo {
 		return nil
 	}
 	now := time.Now()
-	s.sessionMu.Lock()
-	defer s.sessionMu.Unlock()
-	info, ok := s.sessions[cookie.Value]
-	if !ok {
+	if s.sessions == nil {
 		return nil
 	}
-	if now.After(info.Expires) {
-		delete(s.sessions, cookie.Value)
+	info, ok, err := s.sessions.GetSession(r.Context(), cookie.Value, now)
+	if err != nil || !ok {
 		return nil
 	}
-	return &info
+	session := SessionInfo{
+		UserID:   info.UserID,
+		Username: info.Username,
+		Role:     info.Role,
+		Expires:  info.Expires,
+	}
+	return &session
 }
 
 func (s *Server) requireAdmin(r *http.Request) bool {

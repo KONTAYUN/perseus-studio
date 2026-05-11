@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -77,7 +78,10 @@ func (s *Server) handleAdminUserRoutes(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			s.invalidateUserSessions(userID)
+			if err := s.invalidateUserSessions(r.Context(), userID); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			user, _ := s.users.GetUser(r.Context(), userID)
 			writeJSON(w, http.StatusOK, user)
 		case http.MethodDelete:
@@ -86,7 +90,10 @@ func (s *Server) handleAdminUserRoutes(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			_ = s.diagnostics.ClearUser(r.Context(), userID)
-			s.invalidateUserSessions(userID)
+			if err := s.invalidateUserSessions(r.Context(), userID); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			_ = s.factory.RemoveUserData(userID)
 			writeJSON(w, http.StatusOK, map[string]any{"id": userID})
 		default:
@@ -115,7 +122,10 @@ func (s *Server) handleAdminUserRoutes(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			s.invalidateUserSessions(userID)
+			if err := s.invalidateUserSessions(r.Context(), userID); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			user, _ := s.users.GetUser(r.Context(), userID)
 			writeJSON(w, http.StatusOK, user)
 		case "enable":
@@ -167,12 +177,9 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) invalidateUserSessions(userID string) {
-	s.sessionMu.Lock()
-	for token, info := range s.sessions {
-		if info.UserID == userID {
-			delete(s.sessions, token)
-		}
+func (s *Server) invalidateUserSessions(ctx context.Context, userID string) error {
+	if s.sessions == nil {
+		return nil
 	}
-	s.sessionMu.Unlock()
+	return s.sessions.DeleteUserSessions(ctx, userID)
 }

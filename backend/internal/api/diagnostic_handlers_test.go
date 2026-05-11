@@ -6,9 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"webide-backend/internal/store"
 	"webide-backend/internal/usersvc"
@@ -20,28 +18,42 @@ func TestDiagnosticLogsAPIUsesCurrentUser(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 	defer db.Close()
+	users := store.NewUserStore(db)
+	if err := users.Migrate(t.Context()); err != nil {
+		t.Fatalf("users.Migrate returned error: %v", err)
+	}
+	userA, err := users.CreateUser(t.Context(), "user-a", "password", "user")
+	if err != nil {
+		t.Fatalf("CreateUser user-a returned error: %v", err)
+	}
+	userB, err := users.CreateUser(t.Context(), "user-b", "password", "user")
+	if err != nil {
+		t.Fatalf("CreateUser user-b returned error: %v", err)
+	}
+	sessions := store.NewSessionStore(db)
+	if err := sessions.Migrate(t.Context()); err != nil {
+		t.Fatalf("sessions.Migrate returned error: %v", err)
+	}
 	diagnostics := store.NewDiagnosticStore(db)
 	if err := diagnostics.Migrate(t.Context()); err != nil {
 		t.Fatalf("Migrate returned error: %v", err)
 	}
-	if _, err := diagnostics.Append(t.Context(), store.DiagnosticLogInput{UserID: "user-a", Stage: "a", Level: "error"}); err != nil {
+	if _, err := diagnostics.Append(t.Context(), store.DiagnosticLogInput{UserID: userA.ID, Stage: "a", Level: "error"}); err != nil {
 		t.Fatalf("Append user-a returned error: %v", err)
 	}
-	if _, err := diagnostics.Append(t.Context(), store.DiagnosticLogInput{UserID: "user-b", Stage: "b", Level: "error"}); err != nil {
+	if _, err := diagnostics.Append(t.Context(), store.DiagnosticLogInput{UserID: userB.ID, Stage: "b", Level: "error"}); err != nil {
 		t.Fatalf("Append user-b returned error: %v", err)
 	}
 
 	server := &Server{
 		diagnostics: diagnostics,
 		mux:         http.NewServeMux(),
-		sessions: map[string]SessionInfo{
-			"token-a": {UserID: "user-a", Username: "a", Role: "user", Expires: time.Now().Add(time.Hour)},
-		},
+		sessions:    sessions,
 	}
 	server.register()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/diagnostics/logs?limit=10", nil)
-	req.AddCookie(&http.Cookie{Name: "perseus_session", Value: "token-a"})
+	attachTestSession(t, server, req, "token-a", userA)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -53,7 +65,7 @@ func TestDiagnosticLogsAPIUsesCurrentUser(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("Unmarshal returned error: %v", err)
 	}
-	if len(payload.Logs) != 1 || payload.Logs[0].UserID != "user-a" {
+	if len(payload.Logs) != 1 || payload.Logs[0].UserID != userA.ID {
 		t.Fatalf("expected only user-a logs, got %#v", payload.Logs)
 	}
 }
@@ -64,12 +76,24 @@ func TestDiagnosticExportDoesNotIncludeSecrets(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 	defer db.Close()
+	users := store.NewUserStore(db)
+	if err := users.Migrate(t.Context()); err != nil {
+		t.Fatalf("users.Migrate returned error: %v", err)
+	}
+	userA, err := users.CreateUser(t.Context(), "user-a", "password", "user")
+	if err != nil {
+		t.Fatalf("CreateUser user-a returned error: %v", err)
+	}
+	sessions := store.NewSessionStore(db)
+	if err := sessions.Migrate(t.Context()); err != nil {
+		t.Fatalf("sessions.Migrate returned error: %v", err)
+	}
 	diagnostics := store.NewDiagnosticStore(db)
 	if err := diagnostics.Migrate(t.Context()); err != nil {
 		t.Fatalf("Migrate returned error: %v", err)
 	}
 	if _, err := diagnostics.Append(t.Context(), store.DiagnosticLogInput{
-		UserID:          "user-a",
+		UserID:          userA.ID,
 		Stage:           "provider_error",
 		Level:           "error",
 		BaseURLHost:     "backend.intelalloc.com",
@@ -83,15 +107,12 @@ func TestDiagnosticExportDoesNotIncludeSecrets(t *testing.T) {
 	server := &Server{
 		diagnostics: diagnostics,
 		mux:         http.NewServeMux(),
-		sessionMu:   sync.Mutex{},
-		sessions: map[string]SessionInfo{
-			"token-a": {UserID: "user-a", Username: "a", Role: "user", Expires: time.Now().Add(time.Hour)},
-		},
+		sessions:    sessions,
 	}
 	server.register()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/diagnostics/export?limit=10", nil)
-	req.AddCookie(&http.Cookie{Name: "perseus_session", Value: "token-a"})
+	attachTestSession(t, server, req, "token-a", userA)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -137,20 +158,22 @@ func TestAdminDeleteUserClearsDiagnosticLogs(t *testing.T) {
 	if err := skills.Migrate(t.Context()); err != nil {
 		t.Fatalf("skills.Migrate returned error: %v", err)
 	}
+	sessions := store.NewSessionStore(db)
+	if err := sessions.Migrate(t.Context()); err != nil {
+		t.Fatalf("sessions.Migrate returned error: %v", err)
+	}
 
 	server := &Server{
 		users:       users,
 		diagnostics: diagnostics,
 		factory:     usersvc.NewFactory(db, filepath.Join(t.TempDir(), "users"), skills),
 		mux:         http.NewServeMux(),
-		sessions: map[string]SessionInfo{
-			"admin-token": {UserID: admin.ID, Username: admin.Username, Role: "admin", Expires: time.Now().Add(time.Hour)},
-		},
+		sessions:    sessions,
 	}
 	server.register()
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+target.ID, nil)
-	req.AddCookie(&http.Cookie{Name: "perseus_session", Value: "admin-token"})
+	attachTestSession(t, server, req, "admin-token", admin)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

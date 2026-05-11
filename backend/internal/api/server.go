@@ -34,14 +34,13 @@ type Server struct {
 	conversations *store.ConversationStore
 	diagnostics   *store.DiagnosticStore
 	users         *store.UserStore
+	sessions      *store.SessionStore
 	broker        *tasks.Broker
 	runBroker     *tasks.Broker
 	factory       *usersvc.Factory
 	ai            *ai.Service
 	cfg           config.Config
 	mux           *http.ServeMux
-	sessionMu     sync.Mutex
-	sessions      map[string]SessionInfo
 	runCancelMu   sync.Mutex
 	runCancels    map[string]context.CancelFunc
 }
@@ -112,7 +111,7 @@ type chatAttachmentMetadata struct {
 	Note              string `json:"note,omitempty"`
 }
 
-func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, configStore *store.ConfigStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, userStore *store.UserStore, broker *tasks.Broker, runBroker *tasks.Broker, factory *usersvc.Factory, aiService *ai.Service, cfg config.Config) *Server {
+func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, configStore *store.ConfigStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, userStore *store.UserStore, sessionStore *store.SessionStore, broker *tasks.Broker, runBroker *tasks.Broker, factory *usersvc.Factory, aiService *ai.Service, cfg config.Config) *Server {
 	s := &Server{
 		store:         taskStore,
 		runs:          runStore,
@@ -120,13 +119,13 @@ func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, config
 		conversations: conversationStore,
 		diagnostics:   diagnosticStore,
 		users:         userStore,
+		sessions:      sessionStore,
 		broker:        broker,
 		runBroker:     runBroker,
 		factory:       factory,
 		ai:            aiService,
 		cfg:           cfg,
 		mux:           http.NewServeMux(),
-		sessions:      make(map[string]SessionInfo),
 		runCancels:    make(map[string]context.CancelFunc),
 	}
 	s.register()
