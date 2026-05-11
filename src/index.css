@@ -1,0 +1,414 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --ease-apple: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-apple-soft: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ease-apple {
+  transition-timing-function: var(--ease-apple);
+  animation-timing-function: var(--ease-apple);
+}
+
+.animate-in {
+  animation-duration: 260ms;
+  animation-fill-mode: both;
+  animation-timing-function: var(--ease-apple);
+}
+
+.duration-150.animate-in {
+  animation-duration: 150ms;
+}
+
+.duration-300.animate-in {
+  animation-duration: 300ms;
+}
+
+.duration-500.animate-in {
+  animation-duration: 500ms;
+}
+
+.fade-in {
+  animation-name: perseus-fade-in;
+}
+
+.zoom-in-95 {
+  animation-name: perseus-fade-in, perseus-zoom-in-95;
+}
+
+.zoom-in-98 {
+  animation-name: perseus-fade-in, perseus-zoom-in-98;
+}
+
+.slide-in-from-top-1 {
+  animation-name: perseus-fade-in, perseus-slide-in-from-top-1;
+}
+
+.slide-in-from-right-4 {
+  animation-name: perseus-fade-in, perseus-slide-in-from-right-4;
+}
+
+.zoom-in-95.slide-in-from-top-1 {
+  animation-name: perseus-fade-in, perseus-zoom-in-95-slide-top-1;
+}
+
+.zoom-in-98.slide-in-from-right-4 {
+  animation-name: perseus-fade-in, perseus-zoom-in-98-slide-right-4;
+}
+
+.animate-panel-appear {
+  animation: perseus-panel-appear 900ms var(--ease-apple-soft) both;
+}
+
+.motion-popover {
+  transform-origin: top center;
+  animation: perseus-popover-enter 320ms var(--ease-apple) both;
+}
+
+.motion-popover-right {
+  transform-origin: left top;
+  animation: perseus-popover-right-enter 300ms var(--ease-apple) both;
+}
+
+.motion-modal {
+  transform-origin: center 46%;
+  animation: perseus-modal-enter 420ms var(--ease-apple) both;
+}
+
+.motion-card {
+  animation: perseus-card-enter 460ms var(--ease-apple) both;
+}
+
+.motion-message {
+  animation: perseus-message-enter 420ms var(--ease-apple) both;
+}
+
+.motion-chip {
+  animation: perseus-chip-enter 260ms var(--ease-apple) both;
+}
+
+.motion-row {
+  transition:
+    background-color 180ms var(--ease-apple),
+    border-color 180ms var(--ease-apple),
+    box-shadow 220ms var(--ease-apple),
+    opacity 180ms var(--ease-apple),
+    transform 180ms var(--ease-apple);
+}
+
+.motion-row:hover {
+  transform: translateX(2px);
+}
+
+.motion-button {
+  transition:
+    background-color 180ms var(--ease-apple),
+    color 180ms var(--ease-apple),
+    border-color 180ms var(--ease-apple),
+    box-shadow 220ms var(--ease-apple),
+    transform 180ms var(--ease-apple);
+}
+
+.motion-button:hover {
+  transform: translateY(-1px);
+}
+
+.motion-button:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.motion-soft-focus {
+  transition:
+    border-color 260ms var(--ease-apple),
+    box-shadow 320ms var(--ease-apple),
+    background-color 260ms var(--ease-apple),
+    transform 260ms var(--ease-apple);
+}
+
+.settings-modal-card {
+  transform-origin: center 46%;
+}
+
+.settings-view-enter {
+  animation: perseus-settings-view-enter 520ms var(--ease-apple) both;
+}
+
+.settings-section-appear,
+.settings-card {
+  animation: perseus-settings-card-enter 540ms var(--ease-apple) both;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(1),
+.settings-view-enter > .settings-card:nth-child(1) {
+  animation-delay: 30ms;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(2),
+.settings-view-enter > .settings-card:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(3),
+.settings-view-enter > .settings-card:nth-child(3) {
+  animation-delay: 110ms;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(4),
+.settings-view-enter > .settings-card:nth-child(4) {
+  animation-delay: 150ms;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(5),
+.settings-view-enter > .settings-card:nth-child(5) {
+  animation-delay: 190ms;
+}
+
+.settings-popover-enter {
+  transform-origin: top center;
+  animation: perseus-settings-popover-enter 260ms var(--ease-apple) both;
+}
+
+.settings-expand-enter {
+  transform-origin: top center;
+  animation: perseus-settings-expand-enter 340ms var(--ease-apple) both;
+}
+
+@keyframes perseus-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes perseus-zoom-in-95 {
+  from {
+    transform: scale(0.95);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes perseus-zoom-in-98 {
+  from {
+    transform: scale(0.98);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes perseus-slide-in-from-top-1 {
+  from {
+    transform: translateY(-4px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes perseus-slide-in-from-right-4 {
+  from {
+    transform: translateX(16px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes perseus-zoom-in-95-slide-top-1 {
+  from {
+    transform: translateY(-4px) scale(0.95);
+  }
+  to {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes perseus-zoom-in-98-slide-right-4 {
+  from {
+    transform: translateX(16px) scale(0.98);
+  }
+  to {
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes perseus-panel-appear {
+  0% {
+    opacity: 0;
+    transform: translateX(38px) scale(0.978);
+    filter: blur(2px);
+  }
+  58% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes perseus-settings-view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.992);
+    filter: blur(2px);
+  }
+  55% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes perseus-settings-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.986);
+    filter: blur(1.5px);
+  }
+  70% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes perseus-settings-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes perseus-settings-expand-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scaleY(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes perseus-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.965);
+    filter: blur(1px);
+  }
+  65% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes perseus-popover-right-enter {
+  from {
+    opacity: 0;
+    transform: translateX(10px) scale(0.97);
+    filter: blur(1px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes perseus-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+    filter: blur(2px);
+  }
+  65% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes perseus-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes perseus-message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes perseus-chip-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

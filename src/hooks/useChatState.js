@@ -1,0 +1,1122 @@
+import { useEffect, useRef, useState } from 'react';
+import { API_BASE_URL, apiDelete, apiGet, apiPatch, apiPost, apiPostFormWithSignal } from '../api/client';
+import { attachmentFingerprint, detectFileType } from './ideUtils';
+
+const PLAYFUL_PENDING_STATUSES = ['正在烹饪', '正在裁剪', '正在编写大纲', '正在绘制图纸', '正在打磨细节', '正在铺开画布'];
+const EXTRA_PENDING_STATUSES = ['正在翻阅底稿', '正在装订成册', '正在检查火候', '正在归档素材', '正在搜罗线索', '正在摘录资料', '正在准备工具箱', '正在重新调味'];
+const LOADING_DISPLAY_MIN_MS = 3000;
+const LOADING_BACKSPACE_MS = 28;
+const LOADING_TYPE_MS = 32;
+const DISPLAY_STATUS_POOL = [...PLAYFUL_PENDING_STATUSES, ...EXTRA_PENDING_STATUSES];
+
+function buildAssistantRunShell({ id, conversationId, createdAt, content = '', attachments = [] } = {}) {
+  return {
+    id,
+    conversation_id: conversationId || 'pending',
+    role: 'assistant',
+    content,
+    attachments,
+    pending: true,
+    created_at: createdAt || new Date().toISOString(),
+    progressItems: [],
+    loadingState: {
+      text: PLAYFUL_PENDING_STATUSES[0],
+      visibleText: PLAYFUL_PENDING_STATUSES[0],
+      stage: 'holding',
+      activeSince: Date.now(),
+    },
+    activeMessageId: '',
+  };
+}
+
+function appendUniqueProgressItem(items, nextItem) {
+  if (!nextItem?.id) return items;
+  if ((items || []).some((item) => item.id === nextItem.id)) return items;
+  return [...(items || []), nextItem];
+}
+
+function nextLoadingStatus(seed = 0) {
+  return DISPLAY_STATUS_POOL[seed % DISPLAY_STATUS_POOL.length] || DISPLAY_STATUS_POOL[0];
+}
+
+function buildProgressItem(type, payload = {}, fallbackText = '') {
+  const text = agentEventText(type, payload) || payload.message || fallbackText || '';
+  if (!text) return null;
+  return {
+    id: payload.event_id || `${type}:${payload.tool_call_id || payload.round || payload.path || payload.message || payload.reason || text}`,
+    type,
+    text,
+    toolName: payload.tool_name || '',
+    status: payload.status || '',
+  };
+}
+
+function updateLoadingState(message, now = Date.now()) {
+  const current = message?.loadingState || {
+    text: nextLoadingStatus(0),
+    visibleText: nextLoadingStatus(0),
+    stage: 'holding',
+    activeSince: now,
+  };
+
+  if (!message?.pending) return message;
+  if (current.stage === 'holding' && now-current.activeSince >= LOADING_DISPLAY_MIN_MS) {
+    return {
+      ...message,
+      loadingState: {
+        ...current,
+        stage: 'deleting',
+        activeSince: now,
+      },
+    };
+  }
+
+  if (current.stage === 'deleting' && now-current.activeSince >= LOADING_BACKSPACE_MS) {
+    const nextVisible = current.visibleText.slice(0, -1);
+    if (nextVisible) {
+      return {
+        ...message,
+        loadingState: {
+          ...current,
+          visibleText: nextVisible,
+          activeSince: now,
+        },
+      };
+    }
+    const nextText = nextLoadingStatus((DISPLAY_STATUS_POOL.indexOf(current.text)+1+DISPLAY_STATUS_POOL.length) % DISPLAY_STATUS_POOL.length);
+    return {
+      ...message,
+      loadingState: {
+        text: nextText,
+        visibleText: '',
+        stage: 'typing',
+        activeSince: now,
+      },
+    };
+  }
+
+  if (current.stage === 'typing' && now-current.activeSince >= LOADING_TYPE_MS) {
+    const nextVisible = current.text.slice(0, current.visibleText.length + 1);
+    if (nextVisible.length < current.text.length) {
+      return {
+        ...message,
+        loadingState: {
+          ...current,
+          visibleText: nextVisible,
+          activeSince: now,
+        },
+      };
+    }
+    return {
+      ...message,
+      loadingState: {
+        ...current,
+        visibleText: current.text,
+        stage: 'holding',
+        activeSince: now,
+      },
+    };
+  }
+
+  return message;
+}
+
+function normalizeConversationMessage(message) {
+  if (!message) return message;
+  const next = {
+    attachments: [],
+    ...message,
+  };
+  if (next.role === 'assistant' && next.status === 'streaming') {
+    next.pending = true;
+    next.activeMessageId = next.id;
+    next.loadingState = next.loadingState || {
+      text: nextLoadingStatus(0),
+      visibleText: nextLoadingStatus(0),
+      stage: 'holding',
+      activeSince: Date.now(),
+    };
+  }
+  return next;
+}
+
+function normalizeConversationMessages(items) {
+  return (items || []).map((item) => normalizeConversationMessage(item));
+}
+
+function hasStreamingAssistantMessage(items) {
+  return (items || []).some((item) => item?.role === 'assistant' && (item?.status === 'streaming' || item?.activeMessageId));
+}
+
+function mapPendingAssistant(current, thinkingId, transform) {
+  let updated = false;
+  const next = current.map((item) => {
+    const isPendingTarget =
+      item.id === thinkingId ||
+      (item.role === 'assistant' && item.pending);
+    if (!isPendingTarget || updated) return item;
+    updated = true;
+    return transform(item);
+  });
+  return next;
+}
+
+export default function useChatState({
+  buildCurrentFileContext,
+  confirm,
+  onAssistantToolEvents,
+  onTasksChanged,
+  selectedModel,
+  setSelectedModelId,
+} = {}) {
+  const [chatAttachments, setChatAttachments] = useState([]);
+  const [isConversationMenuOpen, setIsConversationMenuOpen] = useState(false);
+  const [conversations, setConversations] = useState([]);
+  const [currentConversationId, setCurrentConversationId] = useState('');
+  const [conversationMessages, setConversationMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatFileReferences, setChatFileReferences] = useState([]);
+  const [chatSkillReferences, setChatSkillReferences] = useState([]);
+  const [queuedChatMessages, setQueuedChatMessages] = useState([]);
+  const [isChatSending, setIsChatSending] = useState(false);
+  const [chatError, setChatError] = useState('');
+  const [resumableRun, setResumableRun] = useState(null);
+  const [thinkingMode, setThinkingMode] = useState('standard');
+
+  const suppressNextConversationLoadRef = useRef(false);
+  const activeChatAbortRef = useRef(null);
+  const conversationMessagesRef = useRef([]);
+
+  useEffect(() => {
+    conversationMessagesRef.current = conversationMessages;
+  }, [conversationMessages]);
+
+  function formatChatError(error) {
+    const base = error?.message || String(error || '未知错误');
+    if (error?.diagnosticLogId && !base.includes('诊断日志 ID')) {
+      return `${base}\n已记录诊断日志 ID：${error.diagnosticLogId}，可在 设置 → 诊断日志 中导出。`;
+    }
+    return base;
+  }
+
+  useEffect(() => {
+    if (!currentConversationId) {
+      setConversationMessages([]);
+      return;
+    }
+    if (suppressNextConversationLoadRef.current) {
+      suppressNextConversationLoadRef.current = false;
+      return;
+    }
+    loadConversationMessages(currentConversationId);
+  }, [currentConversationId]);
+
+  useEffect(() => {
+    if (isChatSending || queuedChatMessages.length === 0) return;
+    const [nextMessage, ...rest] = queuedChatMessages;
+    setQueuedChatMessages(rest);
+    sendChatPayload(nextMessage);
+  }, [isChatSending, queuedChatMessages]);
+
+  async function loadConversations() {
+    setChatError('');
+    setResumableRun(null);
+    try {
+      const data = await apiGet('/api/conversations');
+      const items = data.items || [];
+      setConversations(items);
+      if (currentConversationId && !items.some((item) => item.id === currentConversationId)) {
+        setCurrentConversationId('');
+        setConversationMessages([]);
+      }
+    } catch (error) {
+      console.error('loadConversations failed', error);
+      setChatError(error.message);
+    }
+  }
+
+  async function loadConversationMessages(conversationID) {
+    if (!conversationID) {
+      setConversationMessages([]);
+      return;
+    }
+    try {
+      const data = await apiGet(`/api/conversations/${encodeURIComponent(conversationID)}/messages`);
+      setConversationMessages(normalizeConversationMessages(data.items || []));
+    } catch (error) {
+      console.error('loadConversationMessages failed', error);
+      setChatError(error.message);
+    }
+  }
+
+  async function ensureConversation(modelProviderID) {
+    if (currentConversationId) return currentConversationId;
+    const conversation = await apiPost('/api/conversations', {
+      selected_model_provider_id: modelProviderID,
+    });
+    suppressNextConversationLoadRef.current = true;
+    setCurrentConversationId(conversation.id);
+    await loadConversations();
+    return conversation.id;
+  }
+
+  async function createNewConversation() {
+    if (!selectedModel?.id) {
+      setChatError('请先在设置页配置并启用模型');
+      return;
+    }
+    setChatError('');
+    setResumableRun(null);
+    try {
+      const conversation = await apiPost('/api/conversations', {
+        selected_model_provider_id: selectedModel.id,
+      });
+      setCurrentConversationId(conversation.id);
+      setConversationMessages([]);
+      setIsConversationMenuOpen(false);
+      await loadConversations();
+    } catch (error) {
+      console.error('createNewConversation failed', error);
+      setChatError(error.message);
+    }
+  }
+
+  async function selectConversation(conversationID) {
+    setCurrentConversationId(conversationID);
+    setIsConversationMenuOpen(false);
+    await loadConversationMessages(conversationID);
+    const conversation = conversations.find((item) => item.id === conversationID);
+    if (conversation?.selected_model_provider_id) {
+      setSelectedModelId?.(conversation.selected_model_provider_id);
+    }
+  }
+
+  async function deleteConversation(conversationID) {
+    setChatError('');
+    setResumableRun(null);
+    try {
+      await apiDelete(`/api/conversations/${encodeURIComponent(conversationID)}`);
+      if (currentConversationId === conversationID) {
+        setCurrentConversationId('');
+        setConversationMessages([]);
+      }
+      await loadConversations();
+    } catch (error) {
+      console.error('deleteConversation failed', error);
+      setChatError(error.message);
+    }
+  }
+
+  async function renameConversation(conversationID, title) {
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+    setChatError('');
+    setResumableRun(null);
+    try {
+      const updated = await apiPatch(`/api/conversations/${encodeURIComponent(conversationID)}`, {
+        title: nextTitle,
+      });
+      setConversations((current) =>
+        current.map((item) => (item.id === conversationID ? { ...item, ...updated } : item))
+      );
+      await loadConversations();
+    } catch (error) {
+      console.error('renameConversation failed', error);
+      setChatError(error.message);
+    }
+  }
+
+  async function branchConversation(messageID) {
+    if (!currentConversationId || !messageID) return;
+    setChatError('');
+    try {
+      const result = await apiPost(`/api/conversations/${encodeURIComponent(currentConversationId)}/branch`, {
+        message_id: messageID,
+      });
+      suppressNextConversationLoadRef.current = true;
+      setCurrentConversationId(result.conversation.id);
+      setConversationMessages(normalizeConversationMessages(result.messages || []));
+      setIsConversationMenuOpen(false);
+      await loadConversations();
+    } catch (error) {
+      console.error('branchConversation failed', error);
+      setChatError(error.message);
+    }
+  }
+
+  async function regenerateLastAssistantMessage(messageID) {
+    if (!currentConversationId || !messageID || isChatSending) return;
+    const selectedIndex = conversationMessages.findIndex((item) => item.id === messageID);
+    const selectedMessage = selectedIndex >= 0 ? conversationMessages[selectedIndex] : null;
+    let lastUserIndex = -1;
+    conversationMessages.forEach((item, index) => {
+      if (item.role === 'user') lastUserIndex = index;
+    });
+    if (!selectedMessage || selectedMessage.role !== 'assistant' || selectedIndex <= lastUserIndex) return;
+    const assistantTail = conversationMessages.slice(lastUserIndex + 1).filter((item) => item.role === 'assistant');
+    const hasMutationTool = assistantTail.some((message) => (message.attachments || []).some((item) =>
+      ['save_workspace_file', 'manage_workspace_path', 'organize_workspace_matches', 'run_workspace_command'].includes(item?.tool_name)
+    ));
+    if (hasMutationTool) {
+      const ok = await confirm?.({
+        title: '重新生成回复',
+        message: '重新生成不会回滚已经执行过的文件修改，确认继续？',
+        confirmLabel: '继续重新生成',
+        tone: 'red',
+      });
+      if (!ok) return;
+    }
+
+    setChatError('');
+    setIsChatSending(true);
+    const thinkingId = `temp_regenerate_${Date.now()}`;
+    const control = { abort: () => {} };
+    activeChatAbortRef.current = control;
+    setConversationMessages((current) =>
+      [
+        ...current.slice(0, Math.max(0, lastUserIndex + 1)),
+        buildAssistantRunShell({
+          id: thinkingId,
+          conversationId: currentConversationId,
+          createdAt: new Date().toISOString(),
+          content: '',
+          attachments: [],
+        }),
+      ]
+    );
+    try {
+      const result = await apiPost(`/api/conversations/${encodeURIComponent(currentConversationId)}/regenerate-last`, {
+        message_id: messageID,
+        thinking_mode: thinkingMode,
+      });
+      if (result.run?.id) {
+        await waitForAgentRun(result.run.id, result.conversation.id, thinkingId, control);
+      } else {
+        await loadConversations();
+        await loadConversationMessages(result.conversation.id);
+      }
+      if (result.task) {
+        onTasksChanged?.(result.task);
+      }
+      await onAssistantToolEvents?.(result.assistant_message?.attachments || []);
+    } catch (error) {
+      console.error('regenerateLastAssistantMessage failed', error);
+      const message = formatChatError(error);
+      setChatError(message);
+      setConversationMessages((current) =>
+        mapPendingAssistant(current, thinkingId, (item) => ({
+          ...item,
+          pending: false,
+          error: true,
+          content: `重新生成失败：${message}`,
+        }))
+      );
+    } finally {
+      if (activeChatAbortRef.current === control) {
+        activeChatAbortRef.current = null;
+      }
+      setIsChatSending(false);
+    }
+  }
+
+  function returnChatHome() {
+    setCurrentConversationId('');
+    setConversationMessages([]);
+    setChatError('');
+    setResumableRun(null);
+    setIsConversationMenuOpen(false);
+  }
+
+  async function sendChatMessage() {
+    const trimmedContent = chatInput.trim();
+    if (!trimmedContent && chatAttachments.length === 0 && chatFileReferences.length === 0 && chatSkillReferences.length === 0) return;
+    if (!selectedModel?.id) {
+      setChatError('请先在设置页配置并启用模型');
+      return;
+    }
+    const payload = {
+      content: trimmedContent,
+      attachments: chatAttachments.map((item) => ({
+        id: item.id,
+        name: item.name,
+        size: item.size,
+        type: item.type,
+        file: item.file,
+      })),
+      fileReferences: chatFileReferences,
+      skillReferences: chatSkillReferences,
+      currentFileContext: buildCurrentFileContext?.() || null,
+      thinkingMode,
+    };
+
+    setChatInput('');
+    setChatAttachments([]);
+    setChatFileReferences([]);
+    setChatSkillReferences([]);
+
+    if (isChatSending) {
+      setQueuedChatMessages((current) => [...current, payload]);
+      setConversationMessages((current) => [
+        ...current,
+        {
+          id: `queued_user_${Date.now()}`,
+          conversation_id: currentConversationId || 'pending',
+          role: 'user',
+          content: trimmedContent,
+          attachments: [
+            ...payload.attachments.map(({ file, ...item }) => item),
+            ...payload.fileReferences,
+            ...payload.skillReferences,
+          ],
+          created_at: new Date().toISOString(),
+          queued: true,
+        },
+      ]);
+      return;
+    }
+
+    await sendChatPayload(payload);
+  }
+
+  async function sendChatPayload(payload) {
+    const trimmedContent = payload.content.trim();
+    const stamp = Date.now();
+    const optimisticId = `temp_user_${stamp}`;
+    const thinkingId = `temp_assistant_${stamp}`;
+    const attachments = payload.attachments.map((item) => ({
+      id: item.id,
+      name: item.name,
+      size: item.size,
+      type: item.type,
+    }));
+    const metadataAttachments = [
+      ...attachments,
+      ...(payload.fileReferences || []),
+      ...(payload.skillReferences || []),
+      ...(payload.currentFileContext ? [payload.currentFileContext] : []),
+    ];
+    const optimisticMessage = {
+      id: optimisticId,
+      conversation_id: currentConversationId || 'pending',
+      role: 'user',
+      content: trimmedContent,
+      attachments: metadataAttachments,
+      created_at: new Date().toISOString(),
+    };
+    const thinkingMessage = buildAssistantRunShell({
+      id: thinkingId,
+      conversationId: currentConversationId || 'pending',
+      createdAt: new Date().toISOString(),
+      content: '',
+      attachments: [],
+    });
+    const filesToSend = payload.attachments.map((item) => item.file).filter(Boolean);
+
+    setChatError('');
+    setResumableRun(null);
+    setConversationMessages((current) => [
+      ...current.filter((item) => !(item.queued && item.content === trimmedContent)),
+      optimisticMessage,
+      thinkingMessage,
+    ]);
+    setIsChatSending(true);
+
+    let conversationID = currentConversationId;
+    const abortController = new AbortController();
+    const control = { abort: () => abortController.abort() };
+    activeChatAbortRef.current = control;
+    try {
+      conversationID = await ensureConversation(selectedModel.id);
+      const formData = new FormData();
+      formData.append('content', trimmedContent);
+      formData.append('model_provider_id', selectedModel.id);
+      formData.append('thinking_mode', payload.thinkingMode || thinkingMode || 'standard');
+      for (const attachment of payload.attachments) {
+        formData.append('attachment_ids[]', attachment.id);
+      }
+      formData.append('workspace_refs_json', JSON.stringify(payload.fileReferences || []));
+      formData.append('selected_skills_json', JSON.stringify(payload.skillReferences || []));
+      if (payload.currentFileContext) {
+        formData.append('current_file_context_json', JSON.stringify(payload.currentFileContext));
+      }
+      for (const file of filesToSend) {
+        formData.append('files[]', file, file.name);
+      }
+      const result = await apiPostFormWithSignal(
+        `/api/conversations/${encodeURIComponent(conversationID)}/messages`,
+        formData,
+        abortController.signal
+      );
+      setCurrentConversationId(result.conversation.id);
+      if (result.run?.id) {
+        await waitForAgentRun(result.run.id, result.conversation.id, thinkingId, control);
+      } else {
+        await loadConversations();
+        await loadConversationMessages(result.conversation.id);
+        if (result.task) {
+          onTasksChanged?.(result.task);
+        }
+        await onAssistantToolEvents?.(result.assistant_message?.attachments || []);
+      }
+    } catch (error) {
+      console.error('sendChatMessage failed', error);
+      if (error?.name === 'AbortError') {
+        setChatError('');
+        setConversationMessages((current) =>
+          mapPendingAssistant(current, thinkingId, (item) => ({
+            ...item,
+            pending: false,
+            canceled: true,
+            content: '已停止生成。',
+          }))
+        );
+        return;
+      }
+      const message = formatChatError(error);
+      setChatError(message);
+      if (error?.runId) {
+        setResumableRun({
+          runId: error.runId,
+          conversationId: error.conversationId || conversationID,
+          diagnosticLogId: error.diagnosticLogId || '',
+        });
+      }
+      const prefix = error?.runId ? '连接中断，可继续这轮任务' : '回复失败';
+      setConversationMessages((current) =>
+        mapPendingAssistant(current, thinkingId, (item) => ({
+          ...item,
+          pending: false,
+          error: true,
+          resumableRunId: error?.runId || '',
+          diagnosticLogId: error?.diagnosticLogId || '',
+          content: `${prefix}：${message}`,
+        }))
+      );
+    } finally {
+      if (activeChatAbortRef.current === control) {
+        activeChatAbortRef.current = null;
+      }
+      setIsChatSending(false);
+    }
+  }
+
+  function stopChatGeneration() {
+    activeChatAbortRef.current?.abort();
+  }
+
+  async function continueAgentRun(runId = resumableRun?.runId, conversationID = resumableRun?.conversationId || currentConversationId) {
+    if (!runId || !conversationID || isChatSending) return;
+    const thinkingId = `temp_resume_${Date.now()}`;
+    setChatError('');
+    setResumableRun(null);
+    setIsChatSending(true);
+    setConversationMessages((current) => [
+      ...current,
+      buildAssistantRunShell({
+        id: thinkingId,
+        conversationId: conversationID,
+        createdAt: new Date().toISOString(),
+        content: '',
+        attachments: [],
+      }),
+    ]);
+    const control = { abort: () => {} };
+    activeChatAbortRef.current = control;
+    try {
+      const result = await apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/resume`, {});
+      const afterSeq = result?.resume_event?.seq || 0;
+      await waitForAgentRun(runId, conversationID, thinkingId, control, afterSeq);
+    } catch (error) {
+      console.error('continueAgentRun failed', error);
+      const message = formatChatError(error);
+      setChatError(message);
+      if (error?.runId) {
+        setResumableRun({
+          runId: error.runId,
+          conversationId: error.conversationId || conversationID,
+          diagnosticLogId: error.diagnosticLogId || '',
+        });
+      }
+      const prefix = error?.runId ? '连接中断，可继续这轮任务' : '继续失败';
+      setConversationMessages((current) =>
+        mapPendingAssistant(current, thinkingId, (item) => ({
+          ...item,
+          pending: false,
+          error: true,
+          resumableRunId: error?.runId || '',
+          diagnosticLogId: error?.diagnosticLogId || '',
+          content: `${prefix}：${message}`,
+        }))
+      );
+    } finally {
+      if (activeChatAbortRef.current === control) {
+        activeChatAbortRef.current = null;
+      }
+      setIsChatSending(false);
+    }
+  }
+
+  async function waitForAgentRun(runId, conversationID, thinkingId, control, afterSeq = 0) {
+    setConversationMessages((current) =>
+      mapPendingAssistant(current, thinkingId, (item) => ({
+        ...item,
+        loadingState: {
+          text: nextLoadingStatus(0),
+          visibleText: nextLoadingStatus(0),
+          stage: 'holding',
+          activeSince: Date.now(),
+        },
+      }))
+    );
+
+    let source = null;
+    let settled = false;
+    let fallbackStarted = false;
+    let loadingTimer = null;
+    const closeSource = () => {
+      if (source) {
+        source.close();
+        source = null;
+      }
+      if (loadingTimer) {
+        window.clearInterval(loadingTimer);
+        loadingTimer = null;
+      }
+    };
+    const refreshFromLatestAssistantMessage = async () => {
+      try {
+        const data = await apiGet(`/api/conversations/${encodeURIComponent(conversationID)}/messages`);
+        const messages = normalizeConversationMessages(data.items || []);
+        setConversationMessages(messages);
+        const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+        await onAssistantToolEvents?.(lastAssistant?.attachments || []);
+      } catch (error) {
+        console.error('refreshFromLatestAssistantMessage failed', error);
+      }
+    };
+    control.abort = () => {
+      closeSource();
+      settled = true;
+      apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {}).catch((error) => {
+        console.error('cancelAgentRun failed', error);
+      });
+    };
+
+    const appendProgress = (type, payload = {}, fallbackText = '') => {
+      const nextItem = buildProgressItem(type, payload, fallbackText);
+      if (!nextItem) return;
+      setConversationMessages((current) =>
+        mapPendingAssistant(current, thinkingId, (item) => ({
+          ...item,
+          progressItems: appendUniqueProgressItem(item.progressItems, nextItem),
+        }))
+      );
+    };
+    const ensureThinkingShell = () => {
+      setConversationMessages((current) => {
+        if (current.some((item) => item.id === thinkingId)) return current;
+        if (hasStreamingAssistantMessage(current)) return current;
+        return [
+          ...current,
+          buildAssistantRunShell({
+            id: thinkingId,
+            conversationId: conversationID,
+            createdAt: new Date().toISOString(),
+            content: '',
+            attachments: [],
+          }),
+        ];
+      });
+    };
+    const finish = async () => {
+      closeSource();
+      await loadConversations();
+      await refreshFromLatestAssistantMessage();
+      settled = true;
+    };
+
+    const fail = (message, diagnosticLogId) => {
+      closeSource();
+      const error = new Error(message || '执行失败');
+      if (diagnosticLogId) error.diagnosticLogId = diagnosticLogId;
+      error.runId = runId;
+      error.conversationId = conversationID;
+      settled = true;
+      throw error;
+    };
+
+    const handleRun = async (run) => {
+      if (!run) return;
+      if (run.status === 'succeeded') {
+        await finish();
+      } else if (run.status === 'failed' || run.status === 'canceled') {
+        await fail(run.error_message || '执行失败', run.diagnostic_log_id);
+      }
+    };
+
+    const handleEvent = async (item) => {
+      const payload = item?.payload || {};
+      const message = agentEventText(item?.type, payload) || payload.message;
+      if (item?.type === 'assistant_message_started') {
+        const assistant = normalizeConversationMessage(payload.assistant_message);
+        if (assistant) {
+          setConversationMessages((current) => {
+            const hasShell = current.some((messageItem) => messageItem.id === thinkingId);
+            if (!hasShell) {
+              return [...current, { ...assistant, pending: true }];
+            }
+            return current.map((messageItem) =>
+              messageItem.id === thinkingId
+                ? {
+                    ...assistant,
+                    pending: true,
+                    activeMessageId: assistant.id,
+                    loadingState: messageItem.loadingState,
+                    progressItems: messageItem.progressItems || [],
+                  }
+                : messageItem
+            );
+          });
+        }
+      } else if (item?.type === 'assistant_message_delta') {
+        const messageId = payload.message_id;
+        const delta = payload.delta || '';
+        if (messageId && delta) {
+          setConversationMessages((current) =>
+            current.map((messageItem) =>
+              (messageItem.id === thinkingId && messageItem.activeMessageId === messageId) || messageItem.id === messageId
+                ? {
+                    ...messageItem,
+                    content: `${messageItem.content || ''}${delta}`,
+                    pending: true,
+                  }
+                : messageItem
+            )
+          );
+        }
+      } else if (item?.type === 'tool_call_completed') {
+        if (payload.status === 'success' && payload.tool_name) {
+          await onAssistantToolEvents?.([
+            {
+              tool_name: payload.tool_name,
+              status: payload.status,
+              path: payload.path || '',
+              old_path: payload.old_path || '',
+              new_path: payload.new_path || '',
+              changed_paths: payload.changed_paths || [],
+              hash: payload.hash || '',
+              version_id: payload.version_id || '',
+            },
+          ]);
+        }
+      } else if (item?.type === 'model_message_started') {
+        ensureThinkingShell();
+      } else if (message && !['assistant_message_completed', 'run_completed', 'model_delta'].includes(item?.type)) {
+        appendProgress(item?.type, payload, message);
+      }
+      if (item?.type === 'assistant_message_completed') {
+        const assistant = normalizeConversationMessage(payload.assistant_message);
+        if (assistant) {
+          setConversationMessages((current) =>
+            current.map((messageItem) =>
+              (messageItem.id === thinkingId && (!messageItem.activeMessageId || messageItem.activeMessageId === assistant.id)) ||
+              messageItem.id === assistant.id
+                ? {
+                    ...assistant,
+                    pending: false,
+                    progressItems: messageItem.progressItems || [],
+                  }
+                : messageItem
+            )
+          );
+          await onAssistantToolEvents?.(assistant.attachments || []);
+        }
+        if (payload.task) {
+          onTasksChanged?.(payload.task);
+        }
+      } else if (item?.type === 'workspace_file_changed') {
+        if (payload.status === 'success' && payload.tool_name) {
+          await onAssistantToolEvents?.([
+            {
+              tool_name: payload.tool_name,
+              status: payload.status || 'success',
+              path: payload.path || '',
+              old_path: payload.old_path || '',
+              new_path: payload.new_path || '',
+              changed_paths: payload.changed_paths || [],
+              hash: payload.hash || '',
+              version_id: payload.version_id || '',
+            },
+          ]);
+        }
+      } else if (item?.type === 'run_failed') {
+        await fail(payload.error || '执行失败', payload.diagnostic_log_id);
+      }
+    };
+
+    const pollUntilDone = async () => {
+      fallbackStarted = true;
+      for (let attempt = 0; attempt < 120 && !settled; attempt += 1) {
+        const run = await apiGet(`/api/agent-runs/${encodeURIComponent(runId)}`);
+        await handleRun(run);
+        if (settled) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      }
+      throw new Error('执行仍在进行，但事件流连接中断，请刷新会话查看结果');
+    };
+
+    loadingTimer = window.setInterval(() => {
+      if (settled) return;
+      setConversationMessages((current) =>
+        mapPendingAssistant(current, thinkingId, (item) => updateLoadingState(item))
+      );
+    }, 80);
+
+    await new Promise((resolve, reject) => {
+      const streamPath = `${API_BASE_URL}/api/agent-runs/${encodeURIComponent(runId)}/stream${
+        afterSeq ? `?after_seq=${encodeURIComponent(afterSeq)}` : ''
+      }`;
+      source = new EventSource(streamPath, {
+        withCredentials: true,
+      });
+      control.abort = () => {
+        closeSource();
+        settled = true;
+        apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {}).catch((error) => {
+          console.error('cancelAgentRun failed', error);
+        });
+        const error = new DOMException('Aborted', 'AbortError');
+        reject(error);
+      };
+      source.addEventListener('run', (event) => {
+        Promise.resolve(handleRun(JSON.parse(event.data)))
+          .then(() => {
+            if (settled) resolve();
+          })
+          .catch(reject);
+      });
+      source.addEventListener('event', (event) => {
+        Promise.resolve(handleEvent(JSON.parse(event.data)))
+          .then(() => {
+            if (settled) resolve();
+          })
+          .catch(reject);
+      });
+      source.onerror = () => {
+        closeSource();
+        if (!fallbackStarted && !settled) {
+          pollUntilDone().then(resolve).catch(reject);
+        }
+      };
+    });
+  }
+
+  function addChatAttachments(fileList) {
+    const seenInBatch = new Set();
+    const nextFiles = Array.from(fileList || [])
+      .filter((file) => {
+        const key = attachmentFingerprint(file);
+        if (seenInBatch.has(key)) return false;
+        seenInBatch.add(key);
+        return true;
+      })
+      .map((file) => ({
+        id: `${attachmentFingerprint(file)}-${Math.random().toString(16).slice(2)}`,
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'unknown',
+        fingerprint: attachmentFingerprint(file),
+      }));
+    if (nextFiles.length === 0) return;
+    setChatAttachments((current) => {
+      const existing = new Set(current.map((item) => item.fingerprint || attachmentFingerprint(item)));
+      const filtered = nextFiles.filter((item) => !existing.has(item.fingerprint));
+      return filtered.length > 0 ? [...current, ...filtered] : current;
+    });
+  }
+
+  function addClipboardAttachments(clipboardData) {
+    const files = [];
+    for (const item of Array.from(clipboardData?.items || [])) {
+      if (item.kind !== 'file') continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      const extension = file.type.split('/')[1] || 'png';
+      const name = file.name || `clipboard-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
+      files.push(new File([file], name, { type: file.type, lastModified: Date.now() }));
+    }
+    addChatAttachments(files);
+    return files.length;
+  }
+
+  function removeChatAttachment(id) {
+    setChatAttachments((current) => current.filter((item) => item.id !== id));
+  }
+
+  function addWorkspaceFileReferences(refs) {
+    const items = Array.isArray(refs) ? refs : [refs];
+    const normalized = items
+      .filter((item) => item?.path)
+      .map((item) => ({
+        id: item.id || `workspace_${item.path}`,
+        name: item.name || item.path.split('/').pop() || item.path,
+        path: item.path,
+        type: 'workspace_file',
+        kind: 'workspace_file',
+        file_type: item.file_type || item.fileType || detectFileType(item.path),
+      }));
+    if (normalized.length === 0) return;
+    setChatFileReferences((current) => {
+      const existing = new Set(current.map((item) => item.path));
+      const next = normalized.filter((item) => !existing.has(item.path));
+      return next.length > 0 ? [...current, ...next] : current;
+    });
+  }
+
+  function removeWorkspaceFileReference(path) {
+    setChatFileReferences((current) => current.filter((item) => item.path !== path));
+  }
+
+  function addSkillReference(skill) {
+    if (!skill?.id || !skill.enabled) return;
+    const skillId = normalizeSkillId(skill.id);
+    setChatSkillReferences((current) => {
+      if (current.some((item) => normalizeSkillId(item.skill_id) === skillId)) return current;
+      return [
+        ...current,
+        {
+          id: `skill_ref_${skillId}`,
+          name: skill.name,
+          description: skill.description || '',
+          type: 'selected_skill',
+          kind: 'selected_skill',
+          skill_id: skillId,
+        },
+      ];
+    });
+  }
+
+  function removeSkillReference(skillId) {
+    const normalized = normalizeSkillId(skillId);
+    setChatSkillReferences((current) => current.filter((item) => normalizeSkillId(item.skill_id) !== normalized));
+  }
+
+  function normalizeSkillId(id) {
+    let value = String(id || '').trim();
+    while (value.startsWith('skill_skill_')) {
+      value = value.slice('skill_'.length);
+    }
+    return value;
+  }
+
+  return {
+    addChatAttachments,
+    addClipboardAttachments,
+    addSkillReference,
+    addWorkspaceFileReferences,
+    chatAttachments,
+    chatError,
+    chatFileReferences,
+    chatInput,
+    chatSkillReferences,
+    continueAgentRun,
+    branchConversation,
+    conversationMessages,
+    conversations,
+    createNewConversation,
+    currentConversationId,
+    deleteConversation,
+    isChatSending,
+    isConversationMenuOpen,
+    loadConversationMessages,
+    loadConversations,
+    removeChatAttachment,
+    removeSkillReference,
+    removeWorkspaceFileReference,
+    resumableRun,
+    regenerateLastAssistantMessage,
+    renameConversation,
+    returnChatHome,
+    selectConversation,
+    sendChatMessage,
+    stopChatGeneration,
+    setChatInput,
+    setCurrentConversationId,
+    setIsConversationMenuOpen,
+    setThinkingMode,
+    thinkingMode,
+  };
+}
+
+function agentEventText(type, payload = {}) {
+  switch (type) {
+    case 'model_call_started':
+      return playfulPendingStatus(type);
+    case 'model_call_attempt_started':
+      return playfulPendingStatus(type);
+    case 'model_call_retrying':
+      return playfulPendingStatus(type);
+    case 'model_call_attempt_completed':
+      return playfulPendingStatus(type);
+    case 'model_call_attempt_failed':
+      return playfulPendingStatus(type);
+    case 'model_stream_recovering':
+      return playfulPendingStatus(type);
+    case 'tool_call_started':
+      return friendlyToolStatus(payload.tool_name, 'started');
+    case 'tool_call_completed':
+      return friendlyToolStatus(payload.tool_name, 'completed');
+    case 'tool_call_failed':
+      return '正在重新调味';
+    case 'tool_result_returned':
+      return payload.is_error ? '正在重新调味' : '';
+    case 'completion_rejected':
+      return '正在检查火候';
+    case 'model_message_started':
+      return playfulPendingStatus(type);
+    case 'model_delta':
+      return '';
+    case 'model_message_completed':
+      return '';
+    case 'diagnostic_created':
+      return playfulPendingStatus(type);
+    case 'run_started':
+      return playfulPendingStatus(type);
+    case 'run_completed':
+      return '执行完成';
+    default:
+      return '';
+  }
+}
+
+function friendlyToolStatus(toolName, phase) {
+  if (toolName === 'inspect_workspace') return '正在铺开画布';
+  if (toolName === 'read_workspace_text') return '正在翻阅底稿';
+  if (toolName === 'save_workspace_file') return phase === 'completed' ? '正在检查火候' : '正在装订成册';
+  if (toolName === 'manage_workspace_path') return phase === 'completed' ? '正在检查火候' : '正在裁剪';
+  if (toolName === 'organize_workspace_matches') return phase === 'completed' ? '正在检查火候' : '正在归档素材';
+  if (toolName === 'run_workspace_command') return '正在测算';
+  if (toolName === 'perseus_search_web' || toolName === 'web_search') return '正在搜罗线索';
+  if (toolName === 'web_extract') return '正在摘录资料';
+  if (toolName === 'list_skills' || toolName === 'read_skill' || toolName === 'install_skill_from_attachment') return '正在准备工具箱';
+  return playfulPendingStatus(toolName || 'default');
+}
+
+function playfulPendingStatus(seed = '') {
+  const text = String(seed || '');
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) % PLAYFUL_PENDING_STATUSES.length;
+  }
+  return PLAYFUL_PENDING_STATUSES[hash] || PLAYFUL_PENDING_STATUSES[0];
+}
+
+function isPendingStatusText(text = '') {
+  const value = text.trim();
+  if (!value) return true;
+  if (value === '已开始执行') return true;
+  if (PLAYFUL_PENDING_STATUSES.includes(value) || EXTRA_PENDING_STATUSES.includes(value)) return true;
+  if (value.startsWith('正在') && value.length <= 12) return true;
+  return false;
+}

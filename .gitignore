@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Runtime data
+data/
+backend/data/
+
+# Environment (may contain secrets)
+.env
+
+# Local-only artifacts and exports
+_local_artifacts/
+.agent_refs/
+.refs/
+.claude/
+deploy-package/
+deploy-package.zip
+perseus-studio.tar
+*.zip
+*.tar
+*.tgz
+
+# Logs
+*.log
+test-results/
+playwright-report/
+
+# Go build cache & binary
+backend/.gocache/
+backend/server.exe
+backend/webide-backend.exe
+backend/*.exe
+backend/webide-backend.exe~
+backend/sse_capture.txt
+
+# Docker overrides
+docker-compose.override.yml
+Dockerfile~
+
+# OS
+.DS_Store
+Thumbs.db

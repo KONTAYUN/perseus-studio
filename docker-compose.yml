@@ -1,0 +1,24 @@
+services:
+  webide:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        IMAGE_REGISTRY: ${IMAGE_REGISTRY:-docker.io}
+        APP_VERSION: ${APP_VERSION:-dev}
+        APP_COMMIT: ${APP_COMMIT:-unknown}
+        APP_BUILT_AT: ${APP_BUILT_AT:-unknown}
+    environment:
+      BACKEND_ADDR: ":8080"
+      BACKEND_DB_PATH: "/data/app.db"
+      WORKSPACE_ROOT: "/data/workspace"
+      UPLOADS_ROOT: "/data/uploads"
+      SKILLS_ROOT: "/data/skills"
+      FRONTEND_DIST: "/app/dist"
+      USER_DATA_ROOT: "/data/users"
+      ENABLE_DEBUG_API: "${ENABLE_DEBUG_API:-false}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
