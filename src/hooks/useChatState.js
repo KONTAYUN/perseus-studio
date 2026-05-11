@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE_URL, apiDelete, apiGet, apiPatch, apiPost, apiPostFormWithSignal } from '../api/client';
-import { attachmentFingerprint, detectFileType } from './ideUtils';
+import {
+  filesFromClipboard,
+  filesToChatAttachments,
+  mergeChatAttachments,
+  mergeSkillReference,
+  mergeWorkspaceReferences,
+  normalizeSkillId,
+} from './chatReferenceUtils.js';
 import {
   appendUniqueProgressItem,
   buildAssistantRunShell,
@@ -764,40 +771,13 @@ export default function useChatState({
   }
 
   function addChatAttachments(fileList) {
-    const seenInBatch = new Set();
-    const nextFiles = Array.from(fileList || [])
-      .filter((file) => {
-        const key = attachmentFingerprint(file);
-        if (seenInBatch.has(key)) return false;
-        seenInBatch.add(key);
-        return true;
-      })
-      .map((file) => ({
-        id: `${attachmentFingerprint(file)}-${Math.random().toString(16).slice(2)}`,
-        file,
-        name: file.name,
-        size: file.size,
-        type: file.type || 'unknown',
-        fingerprint: attachmentFingerprint(file),
-      }));
+    const nextFiles = filesToChatAttachments(fileList);
     if (nextFiles.length === 0) return;
-    setChatAttachments((current) => {
-      const existing = new Set(current.map((item) => item.fingerprint || attachmentFingerprint(item)));
-      const filtered = nextFiles.filter((item) => !existing.has(item.fingerprint));
-      return filtered.length > 0 ? [...current, ...filtered] : current;
-    });
+    setChatAttachments((current) => mergeChatAttachments(current, nextFiles));
   }
 
   function addClipboardAttachments(clipboardData) {
-    const files = [];
-    for (const item of Array.from(clipboardData?.items || [])) {
-      if (item.kind !== 'file') continue;
-      const file = item.getAsFile();
-      if (!file) continue;
-      const extension = file.type.split('/')[1] || 'png';
-      const name = file.name || `clipboard-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
-      files.push(new File([file], name, { type: file.type, lastModified: Date.now() }));
-    }
+    const files = filesFromClipboard(clipboardData);
     addChatAttachments(files);
     return files.length;
   }
@@ -807,23 +787,7 @@ export default function useChatState({
   }
 
   function addWorkspaceFileReferences(refs) {
-    const items = Array.isArray(refs) ? refs : [refs];
-    const normalized = items
-      .filter((item) => item?.path)
-      .map((item) => ({
-        id: item.id || `workspace_${item.path}`,
-        name: item.name || item.path.split('/').pop() || item.path,
-        path: item.path,
-        type: 'workspace_file',
-        kind: 'workspace_file',
-        file_type: item.file_type || item.fileType || detectFileType(item.path),
-      }));
-    if (normalized.length === 0) return;
-    setChatFileReferences((current) => {
-      const existing = new Set(current.map((item) => item.path));
-      const next = normalized.filter((item) => !existing.has(item.path));
-      return next.length > 0 ? [...current, ...next] : current;
-    });
+    setChatFileReferences((current) => mergeWorkspaceReferences(current, refs));
   }
 
   function removeWorkspaceFileReference(path) {
@@ -831,35 +795,12 @@ export default function useChatState({
   }
 
   function addSkillReference(skill) {
-    if (!skill?.id || !skill.enabled) return;
-    const skillId = normalizeSkillId(skill.id);
-    setChatSkillReferences((current) => {
-      if (current.some((item) => normalizeSkillId(item.skill_id) === skillId)) return current;
-      return [
-        ...current,
-        {
-          id: `skill_ref_${skillId}`,
-          name: skill.name,
-          description: skill.description || '',
-          type: 'selected_skill',
-          kind: 'selected_skill',
-          skill_id: skillId,
-        },
-      ];
-    });
+    setChatSkillReferences((current) => mergeSkillReference(current, skill));
   }
 
   function removeSkillReference(skillId) {
     const normalized = normalizeSkillId(skillId);
     setChatSkillReferences((current) => current.filter((item) => normalizeSkillId(item.skill_id) !== normalized));
-  }
-
-  function normalizeSkillId(id) {
-    let value = String(id || '').trim();
-    while (value.startsWith('skill_skill_')) {
-      value = value.slice('skill_'.length);
-    }
-    return value;
   }
 
   return {
