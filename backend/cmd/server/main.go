@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -78,9 +77,6 @@ func main() {
 		log.Fatalf("ensure user data root: %v", err)
 	}
 
-	if err := os.MkdirAll(cfg.UploadsRoot, 0o755); err != nil {
-		log.Fatalf("ensure uploads: %v", err)
-	}
 	if err := taskStore.RequeueRunningTasks(context.Background()); err != nil {
 		log.Fatalf("requeue running tasks: %v", err)
 	}

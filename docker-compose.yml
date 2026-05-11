@@ -11,9 +11,6 @@ services:
     environment:
       BACKEND_ADDR: ":8080"
       BACKEND_DB_PATH: "/data/app.db"
-      WORKSPACE_ROOT: "/data/workspace"
-      UPLOADS_ROOT: "/data/uploads"
-      SKILLS_ROOT: "/data/skills"
       FRONTEND_DIST: "/app/dist"
       USER_DATA_ROOT: "/data/users"
       ENABLE_DEBUG_API: "${ENABLE_DEBUG_API:-false}"

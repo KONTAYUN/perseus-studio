@@ -23,9 +23,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM ${IMAGE_REGISTRY}/library/debian:bookworm-slim AS runtime
 ENV BACKEND_ADDR=:8080 \
     BACKEND_DB_PATH=/data/app.db \
-    WORKSPACE_ROOT=/data/workspace \
-    UPLOADS_ROOT=/data/uploads \
-    SKILLS_ROOT=/data/skills \
     FRONTEND_DIST=/app/dist \
     TASK_WORKER_COUNT=2 \
     USER_DATA_ROOT=/data/users
@@ -54,7 +51,7 @@ WORKDIR /app
 COPY --from=backend-build /out/webide-backend /app/webide-backend
 COPY --from=frontend-build /src/dist /app/dist
 
-RUN mkdir -p /data/workspace /data/uploads /data/skills /data/users
+RUN mkdir -p /data/users
 
 EXPOSE 8080
 CMD ["/app/webide-backend"]

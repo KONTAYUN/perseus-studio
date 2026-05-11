@@ -10,9 +10,6 @@ import (
 type Config struct {
 	ListenAddr      string
 	DatabasePath    string
-	WorkspaceRoot   string
-	UploadsRoot     string
-	SkillsRoot      string
 	StaticRoot      string
 	UserDataRoot    string
 	EnableDebugAPI  bool
@@ -27,9 +24,6 @@ func Load() Config {
 	return Config{
 		ListenAddr:      envOrDefault("BACKEND_ADDR", ":8080"),
 		DatabasePath:    envOrDefault("BACKEND_DB_PATH", "./data/app.db"),
-		WorkspaceRoot:   envOrDefault("WORKSPACE_ROOT", "./data/workspace"),
-		UploadsRoot:     envOrDefault("UPLOADS_ROOT", "./data/uploads"),
-		SkillsRoot:      envOrDefault("SKILLS_ROOT", "./data/skills"),
 		StaticRoot:      envOrDefault("FRONTEND_DIST", "../dist"),
 		UserDataRoot:    envOrDefault("USER_DATA_ROOT", "./data/users"),
 		EnableDebugAPI:  envBoolOrDefault("ENABLE_DEBUG_API", false),
