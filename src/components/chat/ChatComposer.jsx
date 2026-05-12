@@ -111,7 +111,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
         }}
       />
       <div
-        className={`motion-soft-focus pointer-events-auto relative overflow-visible rounded-[24px] border bg-white/88 px-4 py-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:bg-[#171719]/92 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.07)] max-[640px]:px-3 ${ide.getInputGlowStyle()}`}
+        className={`motion-soft-focus pointer-events-auto relative overflow-visible rounded-[28px] border bg-white/88 px-4 py-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:bg-[#171719]/92 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.07)] max-[640px]:px-3 ${ide.getInputGlowStyle()}`}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onClick={(e) => {
@@ -217,14 +217,14 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
               ))}
             </div>
           )}
-          <div className="pointer-events-none absolute bottom-2.5 right-2.5 z-30 flex h-9 items-center gap-0.5 rounded-[15px] bg-gray-950/[0.07] p-[3px] backdrop-blur-xl dark:bg-white/[0.105]">
+          <div className="pointer-events-none absolute bottom-2.5 right-2.5 z-30 flex h-9 items-center gap-0.5 rounded-[17px] bg-gray-950/[0.07] p-[3px] backdrop-blur-xl dark:bg-white/[0.105]">
             <button
               data-testid="chat-attachment-button"
               onClick={(e) => {
                 e.stopPropagation();
                 attachmentInputRef.current?.click();
               }}
-              className="motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[11px] text-gray-500 hover:bg-white/75 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-white/[0.13] dark:hover:text-blue-200"
+              className="motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[13px] text-gray-500 hover:bg-white/75 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-white/[0.13] dark:hover:text-blue-200"
               title="上传文件"
             >
               <Paperclip size={16} />
@@ -240,7 +240,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
                 submitChatMessage();
               }}
               disabled={isSendDisabled}
-              className={`motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[11px] ${
+              className={`motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[13px] ${
                 ide.isChatSending
                   ? 'bg-red-500 text-white shadow-[0_8px_18px_rgba(239,68,68,0.24)] hover:bg-red-600 active:scale-95'
                   : isSendDisabled
