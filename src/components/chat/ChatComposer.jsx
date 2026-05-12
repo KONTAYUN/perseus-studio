@@ -224,7 +224,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
                 e.stopPropagation();
                 attachmentInputRef.current?.click();
               }}
-              className="motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[13px] text-gray-500 hover:bg-blue-500/20 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-400/25 dark:hover:text-blue-100"
+              className="motion-button composer-icon-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[13px] text-gray-500 hover:bg-blue-500/20 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-400/25 dark:hover:text-blue-100"
               title="上传文件"
             >
               <Paperclip size={16} />
@@ -240,7 +240,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
                 submitChatMessage();
               }}
               disabled={isSendDisabled}
-              className={`motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[13px] ${
+              className={`motion-button composer-icon-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[13px] ${
                 ide.isChatSending
                   ? 'bg-red-500 text-white shadow-[0_8px_18px_rgba(239,68,68,0.24)] hover:bg-red-600 active:scale-95'
                   : isSendDisabled

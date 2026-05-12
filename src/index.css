@@ -141,6 +141,14 @@ body {
   transform: translateY(0) scale(0.97);
 }
 
+.composer-icon-button:hover {
+  transform: scale(1.04);
+}
+
+.composer-icon-button:active {
+  transform: scale(0.96);
+}
+
 .motion-soft-focus {
   transition:
     border-color 260ms var(--ease-apple),
