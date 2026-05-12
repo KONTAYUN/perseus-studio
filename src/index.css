@@ -194,7 +194,7 @@ body {
 .file-tree-label {
   display: block;
   min-width: 0;
-  padding-right: 8px;
+  padding-right: 12px;
   transition: padding-right 180ms var(--ease-apple), color 180ms var(--ease-apple);
 }
 
@@ -218,7 +218,7 @@ body {
 
 .file-tree-row:hover .file-tree-label,
 .file-tree-row:focus-within .file-tree-label {
-  padding-right: calc(var(--file-tree-action-width) + 8px);
+  padding-right: calc(var(--file-tree-action-width) + 12px);
 }
 
 .file-tree-row:hover .file-tree-actions,
