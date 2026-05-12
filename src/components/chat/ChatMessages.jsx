@@ -67,14 +67,14 @@ function MessageBubble({ message, ide, canRegenerate }) {
     <div className={`group/message flex min-w-0 max-w-full overflow-hidden ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div className={`flex min-w-0 max-w-[88%] overflow-hidden flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
         <div
-          className={`motion-message min-w-0 max-w-full overflow-hidden rounded-2xl px-4 py-3 text-[14px] leading-relaxed shadow-sm ${
+          className={`message-bubble motion-message min-w-0 max-w-full overflow-hidden px-4 py-3 text-[14px] leading-relaxed shadow-sm ${
             message.role === 'user'
-              ? 'rounded-tr-sm bg-blue-500 text-white shadow-blue-500/20'
+              ? 'message-bubble-user bg-blue-500 text-white shadow-blue-500/20'
               : message.error
-              ? 'rounded-tl-sm border border-red-500/20 bg-red-500/10 text-red-300'
+              ? 'message-bubble-assistant border border-red-500/20 bg-red-500/10 text-red-300'
               : message.pending
-              ? 'rounded-tl-sm border border-gray-100 bg-white text-gray-500 dark:border-white/5 dark:bg-[#2C2C2E] dark:text-gray-400'
-              : 'rounded-tl-sm border border-gray-100 bg-white text-gray-800 dark:border-white/5 dark:bg-[#2C2C2E] dark:text-gray-200'
+              ? 'message-bubble-assistant border border-gray-100 bg-white text-gray-500 dark:border-white/5 dark:bg-[#2C2C2E] dark:text-gray-400'
+              : 'message-bubble-assistant border border-gray-100 bg-white text-gray-800 dark:border-white/5 dark:bg-[#2C2C2E] dark:text-gray-200'
           }`}
         >
           {attachments.length > 0 && <MessageAttachmentBadges attachments={attachments} message={message} ide={ide} />}

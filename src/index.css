@@ -27,6 +27,160 @@ body {
 :root {
   --ease-apple: cubic-bezier(0.19, 1, 0.22, 1);
   --ease-apple-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --radius-micro: 7px;
+  --radius-control-sm: 10px;
+  --radius-control: 12px;
+  --radius-card: 16px;
+  --radius-panel: 20px;
+  --radius-shell: 24px;
+  --radius-composer: 28px;
+  --radius-cluster: 16px;
+  --radius-icon: 11px;
+  --radius-pill: 999px;
+  --surface-line: rgb(15 23 42 / 0.08);
+  --surface-highlight: rgb(255 255 255 / 0.72);
+  --surface-shadow-soft: 0 18px 46px rgb(15 23 42 / 0.08);
+  --surface-shadow-panel: 0 18px 48px rgb(15 23 42 / 0.11);
+}
+
+.app-shell {
+  background:
+    linear-gradient(135deg, #f6f7f9 0%, #eef2f6 48%, #fafbfc 100%);
+}
+
+.app-shell.dark {
+  --surface-line: rgb(255 255 255 / 0.1);
+  --surface-highlight: rgb(255 255 255 / 0.08);
+  --surface-shadow-soft: 0 22px 56px rgb(0 0 0 / 0.28);
+  --surface-shadow-panel: 0 22px 64px rgb(0 0 0 / 0.34);
+  background:
+    linear-gradient(135deg, #151517 0%, #1a1a1d 48%, #111214 100%);
+}
+
+.rounded {
+  border-radius: var(--radius-micro);
+}
+
+.rounded-md {
+  border-radius: var(--radius-micro);
+}
+
+.rounded-lg {
+  border-radius: var(--radius-control-sm);
+}
+
+.rounded-xl {
+  border-radius: var(--radius-control);
+}
+
+.rounded-2xl {
+  border-radius: var(--radius-card);
+}
+
+.rounded-3xl {
+  border-radius: var(--radius-panel);
+}
+
+.rounded-\[12px\] {
+  border-radius: var(--radius-icon);
+}
+
+.rounded-\[16px\] {
+  border-radius: var(--radius-cluster);
+}
+
+.rounded-\[18px\] {
+  border-radius: var(--radius-card);
+}
+
+.rounded-\[24px\] {
+  border-radius: var(--radius-panel);
+}
+
+.rounded-\[26px\],
+.rounded-\[28px\] {
+  border-radius: var(--radius-shell);
+}
+
+.ui-panel-surface {
+  border-radius: var(--radius-panel);
+  box-shadow:
+    var(--surface-shadow-panel),
+    inset 0 1px 0 var(--surface-highlight);
+}
+
+.ui-overlay-surface {
+  border-radius: var(--radius-shell);
+  box-shadow:
+    0 24px 70px rgb(15 23 42 / 0.2),
+    inset 0 1px 0 var(--surface-highlight);
+}
+
+.dark .ui-overlay-surface {
+  box-shadow:
+    0 28px 84px rgb(0 0 0 / 0.5),
+    inset 0 1px 0 var(--surface-highlight);
+}
+
+.composer-shell {
+  border-radius: var(--radius-composer);
+}
+
+.message-bubble {
+  border-radius: 17px;
+}
+
+.message-bubble-user {
+  border-top-right-radius: 8px;
+}
+
+.message-bubble-assistant {
+  border-top-left-radius: 8px;
+}
+
+.header-segmented {
+  border-radius: var(--radius-card);
+}
+
+.header-segmented button {
+  border-radius: var(--radius-control-sm);
+}
+
+.settings-modal-card {
+  border-radius: var(--radius-shell);
+}
+
+.settings-section-appear {
+  border-radius: var(--radius-panel);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.52),
+    0 10px 28px rgb(15 23 42 / 0.04);
+}
+
+.settings-card,
+.settings-nav-card {
+  border-radius: var(--radius-card);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    0 8px 22px rgb(15 23 42 / 0.04);
+}
+
+.dark .settings-section-appear,
+.dark .settings-card,
+.dark .settings-nav-card {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 12px 32px rgb(0 0 0 / 0.12);
+}
+
+.motion-popover,
+.motion-popover-right,
+.motion-modal {
+  border-radius: var(--radius-card);
+}
+
+.ui-overlay-surface.motion-modal {
+  border-radius: var(--radius-shell);
 }
 
 .ease-apple {
@@ -145,7 +299,7 @@ body {
   height: 40px;
   gap: 4px;
   padding: 6px;
-  border-radius: 16px;
+  border-radius: var(--radius-cluster);
   background: rgb(15 23 42 / 0.07);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.16),
@@ -162,7 +316,7 @@ body {
 .composer-icon-button {
   width: 28px;
   height: 28px;
-  border-radius: 11px;
+  border-radius: var(--radius-icon);
   transform-origin: center;
 }
 

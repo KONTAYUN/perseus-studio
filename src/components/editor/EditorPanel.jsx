@@ -15,7 +15,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
     <section
       id="panel-content-editor"
       data-testid="editor-panel"
-      className={`editor-panel-root h-full flex flex-col bg-white dark:bg-[#1E1E1E] rounded-2xl overflow-hidden transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.19,1,0.22,1)] border relative ${ide.getPanelGlowStyle(
+      className={`editor-panel-root ui-panel-surface h-full flex flex-col bg-white dark:bg-[#1E1E1E] overflow-hidden transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.19,1,0.22,1)] border relative ${ide.getPanelGlowStyle(
         panelId
       )}`}
       onClick={() => {

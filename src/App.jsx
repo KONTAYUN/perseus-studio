@@ -131,7 +131,7 @@ export default function App() {
 
   return (
     <div
-      className={`h-screen w-screen flex flex-col overflow-hidden transition-colors duration-500 font-sans selection:bg-blue-200 dark:selection:bg-blue-900 ${
+      className={`app-shell h-screen w-screen flex flex-col overflow-hidden transition-colors duration-500 font-sans selection:bg-blue-200 dark:selection:bg-blue-900 ${
         ide.isDarkMode ? 'dark bg-[#121212] text-gray-200' : 'bg-[#F5F5F7] text-gray-800'
       }`}
     >

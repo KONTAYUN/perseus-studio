@@ -90,7 +90,7 @@ export default function AppDialog({ dialog, onClose }) {
     >
       <form
         onSubmit={submit}
-        className="motion-modal w-full max-w-md rounded-[28px] border border-white/50 bg-white/95 p-5 shadow-2xl backdrop-blur-3xl dark:border-white/10 dark:bg-[#252527]/95"
+        className="ui-overlay-surface motion-modal w-full max-w-md border border-white/50 bg-white/95 p-5 backdrop-blur-3xl dark:border-white/10 dark:bg-[#252527]/95"
       >
         <div className="flex items-start gap-4">
           <div

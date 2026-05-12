@@ -113,7 +113,7 @@ export default function AppHeader({
       </div>
 
       <div
-        className={`relative flex h-9 w-1/3 items-center justify-center gap-1.5 rounded-xl p-1.5 shadow-inner transition-[background-color,color,box-shadow,ring-color,transform] duration-150 ease-out ${
+        className={`header-segmented relative flex h-9 w-1/3 items-center justify-center gap-1.5 p-1.5 shadow-inner transition-[background-color,color,box-shadow,ring-color,transform] duration-150 ease-out ${
           isPanelDragging
             ? isPanelTrashOver
               ? 'bg-red-500/95 text-white ring-2 ring-red-300/60'

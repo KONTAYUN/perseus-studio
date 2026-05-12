@@ -111,7 +111,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
         }}
       />
       <div
-        className={`motion-soft-focus pointer-events-auto relative overflow-visible rounded-[28px] border bg-white/88 px-4 py-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:bg-[#171719]/92 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.07)] max-[640px]:px-3 ${ide.getInputGlowStyle()}`}
+        className={`composer-shell motion-soft-focus pointer-events-auto relative overflow-visible border bg-white/88 px-4 py-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:bg-[#171719]/92 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.07)] max-[640px]:px-3 ${ide.getInputGlowStyle()}`}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onClick={(e) => {

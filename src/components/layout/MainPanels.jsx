@@ -278,7 +278,7 @@ export default function MainPanels({ ide }) {
           >
             {ide.dragType === 'reorder' && ide.draggingPanelId !== id && (
               <div
-                className={`absolute inset-0 z-[90] rounded-2xl transition-colors ${
+                className={`ui-panel-surface absolute inset-0 z-[90] transition-colors ${
                   ide.dragOverId === id ? 'bg-blue-500/10 ring-2 ring-blue-400/60' : ''
                 }`}
                 onDragOver={(e) => ide.handlePanelDragOver(e, id)}
