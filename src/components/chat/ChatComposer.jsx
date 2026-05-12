@@ -111,7 +111,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
         }}
       />
       <div
-        className={`motion-soft-focus pointer-events-auto relative overflow-visible rounded-[30px] border bg-white/94 px-4 py-2.5 backdrop-blur-2xl dark:bg-[#252527]/92 max-[640px]:px-3 ${ide.getInputGlowStyle()}`}
+        className={`motion-soft-focus pointer-events-auto relative overflow-visible rounded-[32px] border bg-white/88 px-4 py-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:bg-[#171719]/92 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.07)] max-[640px]:px-3 ${ide.getInputGlowStyle()}`}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onClick={(e) => {
@@ -195,7 +195,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
                 requestAnimationFrame(resizeChatInput);
               });
             }}
-            className="w-full min-h-[56px] bg-transparent border-none focus:ring-0 resize-none pb-3.5 pt-3.5 pl-4 pr-4 text-sm leading-[24px] text-gray-800 outline-none placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500 font-medium custom-scrollbar scrollbar-rounded-clip transition-[height] duration-200 ease-apple max-[640px]:pl-3 max-[640px]:pr-3"
+            className="w-full min-h-[56px] bg-transparent border-none focus:ring-0 resize-none pb-3.5 pt-3.5 pl-4 pr-[92px] text-sm leading-[24px] text-gray-800 outline-none placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500 font-medium custom-scrollbar scrollbar-rounded-clip transition-[height] duration-200 ease-apple max-[640px]:pl-3 max-[640px]:pr-[86px]"
           />
           {isSkillMenuOpen && filteredSkills.length > 0 && (
             <div className="motion-popover absolute bottom-[64px] left-2 z-30 max-h-56 w-[min(360px,calc(100%-24px))] overflow-auto rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl dark:border-white/10 dark:bg-[#252527] custom-scrollbar">
@@ -217,14 +217,14 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
               ))}
             </div>
           )}
-          <div className="pointer-events-none absolute bottom-2.5 right-3 z-30 flex h-9 items-center gap-1 rounded-[20px] border border-black/[0.03] bg-gray-950/[0.07] p-[3px] shadow-[0_14px_32px_rgba(15,23,42,0.14),inset_0_1px_0_rgba(255,255,255,0.24)] backdrop-blur-2xl dark:border-white/[0.06] dark:bg-white/[0.075] dark:shadow-[0_16px_36px_rgba(0,0,0,0.30),inset_0_1px_0_rgba(255,255,255,0.09)]">
+          <div className="pointer-events-none absolute bottom-2.5 right-2.5 z-30 flex h-9 items-center gap-1 rounded-[20px] bg-gray-950/[0.065] p-[3px] backdrop-blur-xl dark:bg-white/[0.105]">
             <button
               data-testid="chat-attachment-button"
               onClick={(e) => {
                 e.stopPropagation();
                 attachmentInputRef.current?.click();
               }}
-              className="motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[16px] text-gray-500 hover:bg-white/70 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-white/[0.12] dark:hover:text-blue-200"
+              className="motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[16px] text-gray-500 hover:bg-white/75 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-white/[0.13] dark:hover:text-blue-200"
               title="上传文件"
             >
               <Paperclip size={16} />
@@ -242,10 +242,10 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
               disabled={isSendDisabled}
               className={`motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[16px] ${
                 ide.isChatSending
-                  ? 'bg-red-500 text-white shadow-[0_10px_22px_rgba(239,68,68,0.24)] hover:scale-105 hover:bg-red-600 active:scale-95'
+                  ? 'bg-red-500 text-white shadow-[0_8px_18px_rgba(239,68,68,0.24)] hover:bg-red-600 active:scale-95'
                   : isSendDisabled
-                  ? 'cursor-not-allowed bg-gray-950/[0.12] text-gray-400 dark:bg-white/[0.1] dark:text-gray-500'
-                  : 'bg-blue-500 text-white shadow-[0_12px_26px_rgba(37,99,235,0.30)] hover:scale-105 hover:bg-blue-600 active:scale-95'
+                  ? 'cursor-not-allowed bg-gray-950/[0.10] text-gray-400 dark:bg-white/[0.10] dark:text-gray-500'
+                  : 'bg-gray-700 text-white shadow-[0_8px_18px_rgba(15,23,42,0.22)] hover:bg-blue-500 active:scale-95 dark:bg-white/[0.16] dark:hover:bg-blue-500'
               }`}
               title={ide.isChatSending ? '停止生成' : '发送'}
             >
