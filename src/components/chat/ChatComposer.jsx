@@ -195,7 +195,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
                 requestAnimationFrame(resizeChatInput);
               });
             }}
-            className="w-full min-h-[56px] bg-transparent border-none focus:ring-0 resize-none pb-3.5 pt-3.5 pl-4 pr-[108px] text-sm leading-[24px] text-gray-800 outline-none placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500 font-medium custom-scrollbar scrollbar-rounded-clip transition-[height] duration-200 ease-apple max-[640px]:pl-3 max-[640px]:pr-[104px]"
+            className="w-full min-h-[56px] bg-transparent border-none focus:ring-0 resize-none pb-3.5 pt-3.5 pl-4 pr-[88px] text-sm leading-[24px] text-gray-800 outline-none placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500 font-medium custom-scrollbar scrollbar-rounded-clip transition-[height] duration-200 ease-apple max-[640px]:pl-3 max-[640px]:pr-[84px]"
           />
           {isSkillMenuOpen && filteredSkills.length > 0 && (
             <div className="motion-popover absolute bottom-[64px] left-2 z-30 max-h-56 w-[min(360px,calc(100%-24px))] overflow-auto rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl dark:border-white/10 dark:bg-[#252527] custom-scrollbar">
@@ -217,7 +217,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
               ))}
             </div>
           )}
-          <div className="composer-tool-cluster pointer-events-none absolute bottom-2.5 right-2.5 z-30 flex items-center backdrop-blur-xl">
+          <div className="composer-tool-cluster pointer-events-none absolute right-[-4px] top-1/2 z-30 flex -translate-y-1/2 items-center backdrop-blur-xl max-[640px]:right-0">
             <button
               data-testid="chat-attachment-button"
               onClick={(e) => {
