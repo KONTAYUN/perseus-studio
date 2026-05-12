@@ -224,7 +224,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
                 e.stopPropagation();
                 attachmentInputRef.current?.click();
               }}
-              className="motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[13px] text-gray-500 hover:bg-blue-500/16 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-400/22 dark:hover:text-blue-100"
+              className="motion-button pointer-events-auto flex h-[30px] w-[30px] items-center justify-center rounded-[13px] text-gray-500 hover:bg-blue-500/20 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-400/25 dark:hover:text-blue-100"
               title="上传文件"
             >
               <Paperclip size={16} />
