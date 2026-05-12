@@ -57,10 +57,11 @@ type DiagnosticLogInput struct {
 }
 
 type DiagnosticLogQuery struct {
-	UserID string
-	Limit  int
-	Level  string
-	Since  *time.Time
+	UserID   string
+	AllUsers bool
+	Limit    int
+	Level    string
+	Since    *time.Time
 }
 
 type DiagnosticStore struct {
@@ -162,15 +163,27 @@ func newDiagnosticID(now time.Time) string {
 func (s *DiagnosticStore) List(ctx context.Context, query DiagnosticLogQuery) ([]DiagnosticLog, error) {
 	limit := normalizeDiagnosticLimit(query.Limit, 50)
 	level := strings.TrimSpace(strings.ToLower(query.Level))
-	args := []any{query.UserID}
-	where := "WHERE user_id = ?"
+	var args []any
+	var filters []string
+	if !query.AllUsers {
+		userID := strings.TrimSpace(query.UserID)
+		if userID == "" {
+			return nil, fmt.Errorf("user_id is required")
+		}
+		filters = append(filters, "user_id = ?")
+		args = append(args, userID)
+	}
 	if level == "info" || level == "warn" || level == "error" {
-		where += " AND level = ?"
+		filters = append(filters, "level = ?")
 		args = append(args, level)
 	}
 	if query.Since != nil {
-		where += " AND created_at >= ?"
+		filters = append(filters, "created_at >= ?")
 		args = append(args, query.Since.UTC())
+	}
+	where := ""
+	if len(filters) > 0 {
+		where = "WHERE " + strings.Join(filters, " AND ")
 	}
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, `

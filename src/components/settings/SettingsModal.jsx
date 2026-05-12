@@ -75,7 +75,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
           )}
 
           {settingsView === 'diagnostics' && (
-            <DiagnosticLogsView dialog={dialog} onBack={() => setSettingsView('main')} />
+            <DiagnosticLogsView dialog={dialog} onBack={() => setSettingsView('main')} currentUser={currentUser} />
           )}
 
           {settingsView === 'main' && (
@@ -121,7 +121,11 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
           <SearchProviderSettings ide={ide} />
 
           <section className="settings-section-appear rounded-[24px] border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]">
-            <SectionTitle icon={<FileWarning size={15} />} title="诊断日志" description="查看最近模型调用和工具执行错误，导出后发给管理员排查。" />
+            <SectionTitle
+              icon={<FileWarning size={15} />}
+              title="诊断日志"
+              description={currentUser?.role === 'admin' ? '汇总查看用户报错摘要，定位模型调用和工具执行问题。' : '查看最近模型调用和工具执行错误，导出后发给管理员排查。'}
+            />
             <button
               data-testid="open-diagnostics-settings"
               type="button"
@@ -131,7 +135,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
               <div>
                 <div className="font-bold text-gray-800 dark:text-gray-100">查看诊断日志</div>
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  仅包含最近错误摘要，不包含 API Key、完整提示词或文件内容
+                  {currentUser?.role === 'admin' ? '管理员可查看全部用户最近报错，不包含 API Key、完整提示词或文件内容' : '仅包含最近错误摘要，不包含 API Key、完整提示词或文件内容'}
                 </div>
               </div>
               <FileWarning size={18} className="text-blue-500" />

@@ -66,6 +66,47 @@ func TestDiagnosticStoreUserIsolationAndLimits(t *testing.T) {
 	}
 }
 
+func TestDiagnosticStoreCanListAllUsersForAdmin(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	store := NewDiagnosticStore(db)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+
+	if _, err := store.Append(ctx, DiagnosticLogInput{UserID: "user-a", Stage: "a", Level: "error"}); err != nil {
+		t.Fatalf("Append user-a returned error: %v", err)
+	}
+	if _, err := store.Append(ctx, DiagnosticLogInput{UserID: "user-b", Stage: "b", Level: "warn"}); err != nil {
+		t.Fatalf("Append user-b returned error: %v", err)
+	}
+
+	logs, err := store.List(ctx, DiagnosticLogQuery{AllUsers: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("List all users returned error: %v", err)
+	}
+	seen := make(map[string]bool)
+	for _, item := range logs {
+		seen[item.UserID] = true
+	}
+	if len(logs) != 2 || !seen["user-a"] || !seen["user-b"] {
+		t.Fatalf("expected logs from both users, got %#v", logs)
+	}
+
+	warnLogs, err := store.List(ctx, DiagnosticLogQuery{AllUsers: true, Level: "warn", Limit: 10})
+	if err != nil {
+		t.Fatalf("List all warn logs returned error: %v", err)
+	}
+	if len(warnLogs) != 1 || warnLogs[0].UserID != "user-b" {
+		t.Fatalf("expected only user-b warn log, got %#v", warnLogs)
+	}
+}
+
 func TestDiagnosticStoreKeepsLatest200PerUser(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))

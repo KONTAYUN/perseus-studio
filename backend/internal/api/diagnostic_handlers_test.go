@@ -70,6 +70,99 @@ func TestDiagnosticLogsAPIUsesCurrentUser(t *testing.T) {
 	}
 }
 
+func TestAdminDiagnosticLogsAPIListsAllUsers(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+	users := store.NewUserStore(db)
+	if err := users.Migrate(t.Context()); err != nil {
+		t.Fatalf("users.Migrate returned error: %v", err)
+	}
+	admin, err := users.CreateUser(t.Context(), "admin", "password", "admin")
+	if err != nil {
+		t.Fatalf("CreateUser admin returned error: %v", err)
+	}
+	userA, err := users.CreateUser(t.Context(), "user-a", "password", "user")
+	if err != nil {
+		t.Fatalf("CreateUser user-a returned error: %v", err)
+	}
+	userB, err := users.CreateUser(t.Context(), "user-b", "password", "user")
+	if err != nil {
+		t.Fatalf("CreateUser user-b returned error: %v", err)
+	}
+	sessions := store.NewSessionStore(db)
+	if err := sessions.Migrate(t.Context()); err != nil {
+		t.Fatalf("sessions.Migrate returned error: %v", err)
+	}
+	diagnostics := store.NewDiagnosticStore(db)
+	if err := diagnostics.Migrate(t.Context()); err != nil {
+		t.Fatalf("diagnostics.Migrate returned error: %v", err)
+	}
+	if _, err := diagnostics.Append(t.Context(), store.DiagnosticLogInput{UserID: userA.ID, Stage: "a", Level: "error"}); err != nil {
+		t.Fatalf("Append user-a returned error: %v", err)
+	}
+	if _, err := diagnostics.Append(t.Context(), store.DiagnosticLogInput{UserID: userB.ID, Stage: "b", Level: "warn"}); err != nil {
+		t.Fatalf("Append user-b returned error: %v", err)
+	}
+
+	server := &Server{
+		users:       users,
+		diagnostics: diagnostics,
+		mux:         http.NewServeMux(),
+		sessions:    sessions,
+	}
+	server.register()
+
+	forbiddenReq := httptest.NewRequest(http.MethodGet, "/api/admin/diagnostics/logs?limit=10", nil)
+	attachTestSession(t, server, forbiddenReq, "user-token", userA)
+	forbiddenRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(forbiddenRec, forbiddenReq)
+	if forbiddenRec.Code != http.StatusForbidden {
+		t.Fatalf("expected non-admin 403, got %d: %s", forbiddenRec.Code, forbiddenRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/diagnostics/logs?limit=10", nil)
+	attachTestSession(t, server, req, "admin-token", admin)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Logs  []store.DiagnosticLog            `json:"logs"`
+		Users map[string]diagnosticUserSummary `json:"users"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	seen := make(map[string]bool)
+	for _, item := range payload.Logs {
+		seen[item.UserID] = true
+	}
+	if len(payload.Logs) != 2 || !seen[userA.ID] || !seen[userB.ID] {
+		t.Fatalf("expected logs from both users, got %#v", payload.Logs)
+	}
+	if payload.Users[userA.ID].Username != "user-a" || payload.Users[userB.ID].Username != "user-b" {
+		t.Fatalf("expected user summaries, got %#v", payload.Users)
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/api/admin/diagnostics/export?limit=10", nil)
+	attachTestSession(t, server, exportReq, "admin-export-token", admin)
+	exportRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(exportRec, exportReq)
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected export 200, got %d: %s", exportRec.Code, exportRec.Body.String())
+	}
+	exportText := exportRec.Body.String()
+	for _, expected := range []string{"scope: all_users", "username: user-a", "username: user-b"} {
+		if !strings.Contains(exportText, expected) {
+			t.Fatalf("export missing %q: %s", expected, exportText)
+		}
+	}
+}
+
 func TestDiagnosticExportDoesNotIncludeSecrets(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

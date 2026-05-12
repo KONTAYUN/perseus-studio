@@ -146,6 +146,8 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/admin/users", s.handleAdminUsers)
 	s.mux.HandleFunc("/api/admin/users/", s.handleAdminUserRoutes)
 	s.mux.HandleFunc("/api/admin/settings", s.handleAdminSettings)
+	s.mux.HandleFunc("/api/admin/diagnostics/logs", s.handleAdminDiagnosticLogs)
+	s.mux.HandleFunc("/api/admin/diagnostics/export", s.handleAdminDiagnosticExport)
 	s.mux.HandleFunc("/api/files/tree", s.handleFilesTree)
 	s.mux.HandleFunc("/api/files/read", s.handleFilesRead)
 	s.mux.HandleFunc("/api/files/upload", s.handleFilesUpload)
