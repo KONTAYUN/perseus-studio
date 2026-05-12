@@ -7,6 +7,10 @@ export default function FileTree({ items, depth = 0, ide }) {
     const indicator = ide.fileDropIndicator?.targetPath === item.path ? ide.fileDropIndicator : null;
     const showInsertBefore = indicator?.position === 'before';
     const showInsertAfter = indicator?.position === 'after';
+    const isInlineRenaming = ide.inlineRenamePath === item.path;
+    const isTextFile = item.type === 'file' && ide.isTextPath(item.path);
+    const actionCount = item.type === 'folder' ? 5 : isTextFile ? 3 : 2;
+    const actionWidth = actionCount * 20 + Math.max(0, actionCount - 1) * 4 + 2;
 
     const setInsertionIndicator = (position) => {
       const sourcePath = ide.draggingFilePath || '';
@@ -148,8 +152,11 @@ export default function FileTree({ items, depth = 0, ide }) {
           if (e.shiftKey || e.ctrlKey || e.metaKey) return;
           if (item.type === 'file') ide.openFile(item.path);
         }}
-        style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        className={`motion-row flex items-center py-1.5 pr-2 rounded-lg cursor-pointer group text-[13px] 
+        style={{
+          paddingLeft: `${depth * 12 + 8}px`,
+          '--file-tree-action-width': `${actionWidth}px`,
+        }}
+        className={`file-tree-row motion-row relative min-w-0 overflow-hidden py-1.5 pr-2 rounded-lg cursor-pointer group text-[13px]
             ${
               ide.fileDragOverId === item.id
                 ? 'bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-400'
@@ -170,7 +177,7 @@ export default function FileTree({ items, depth = 0, ide }) {
             e.stopPropagation();
             if (item.type === 'folder') ide.toggleFolder(item.path);
           }}
-          className={`motion-button mr-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-blue-500 dark:text-gray-500 dark:hover:bg-white/10 ${
+          className={`motion-button file-tree-toggle flex h-5 w-5 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-blue-500 dark:text-gray-500 dark:hover:bg-white/10 ${
             item.type === 'folder' ? 'visible' : 'invisible'
           }`}
           title={item.isOpen ? '收起文件夹' : '展开文件夹'}
@@ -178,7 +185,7 @@ export default function FileTree({ items, depth = 0, ide }) {
         >
           {item.isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
-        <span className="mr-1.5 text-gray-400 dark:text-gray-500 group-hover:text-blue-500 transition-colors">
+        <span className="file-tree-icon flex h-5 w-4 items-center justify-center text-gray-400 transition-colors group-hover:text-blue-500 dark:text-gray-500">
           {item.type === 'folder' ? (
             item.isOpen ? (
               <FolderOpen size={15} className="text-blue-400" />
@@ -189,45 +196,73 @@ export default function FileTree({ items, depth = 0, ide }) {
             <FileCode2 size={15} />
           )}
         </span>
-        {ide.inlineRenamePath === item.path ? (
+        {isInlineRenaming ? (
           <InlineRenameInput item={item} ide={ide} />
         ) : (
-          <span className="truncate select-none flex-1">{item.name}</span>
+          <FileTreeLabel item={item} />
         )}
-        <div className="ml-2 flex items-center space-x-1 opacity-0 translate-x-1 transition-[opacity,transform] duration-200 ease-apple group-hover:translate-x-0 group-hover:opacity-100">
-          {item.type === 'folder' && (
-            <>
-              <button
-                data-testid={`create-file-${item.path}`}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  ide.selectItem(item.path, item.type);
-                  ide.openCreateFileModal(item.path).catch((error) => console.error(error));
-                }}
-                className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
-                title="新建文件"
-              >
-                <FileCode2 size={12} />
-              </button>
-              <label
-                data-testid={`upload-${item.path}`}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-                className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500 cursor-pointer"
-                title="上传到此文件夹"
-              >
-                <Upload size={12} />
-                <input
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    ide.uploadFiles(e.target.files, item.path).catch((error) => console.error(error));
-                    e.target.value = '';
+        {!isInlineRenaming && (
+          <div className="file-tree-actions flex items-center gap-1">
+            {item.type === 'folder' && (
+              <>
+                <button
+                  data-testid={`create-file-${item.path}`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ide.selectItem(item.path, item.type);
+                    ide.openCreateFileModal(item.path).catch((error) => console.error(error));
                   }}
-                />
-              </label>
+                  className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
+                  title="新建文件"
+                >
+                  <FileCode2 size={12} />
+                </button>
+                <label
+                  data-testid={`upload-${item.path}`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500 cursor-pointer"
+                  title="上传到此文件夹"
+                >
+                  <Upload size={12} />
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      ide.uploadFiles(e.target.files, item.path).catch((error) => console.error(error));
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <button
+                  data-testid={`download-${item.path}`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ide.downloadFromTreeAction(item.path, item.type).catch((error) => console.error(error));
+                  }}
+                  className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-500 hover:text-blue-500"
+                  title="下载文件夹"
+                >
+                  <Download size={12} />
+                </button>
+              </>
+            )}
+            <button
+              data-testid={`rename-${item.path}`}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                ide.openRenameModal(item.path, item.type).catch((error) => console.error(error));
+              }}
+              className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
+              title="重命名"
+            >
+              <Pencil size={12} />
+            </button>
+            {isTextFile && (
               <button
                 data-testid={`download-${item.path}`}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -235,56 +270,30 @@ export default function FileTree({ items, depth = 0, ide }) {
                   e.stopPropagation();
                   ide.downloadFromTreeAction(item.path, item.type).catch((error) => console.error(error));
                 }}
-                className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-500 hover:text-blue-500"
-                title="下载文件夹"
+                className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
+                title="下载"
               >
                 <Download size={12} />
               </button>
-            </>
-          )}
-          <button
-            data-testid={`rename-${item.path}`}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              ide.openRenameModal(item.path, item.type).catch((error) => console.error(error));
-            }}
-            className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
-            title="重命名"
-          >
-            <Pencil size={12} />
-          </button>
-          {item.type === 'file' && ide.isTextPath(item.path) && (
+            )}
             <button
-              data-testid={`download-${item.path}`}
+              data-testid={`delete-${item.path}`}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                ide.downloadFromTreeAction(item.path, item.type).catch((error) => console.error(error));
+                if (ide.selectedPaths?.has(item.path) && ide.selectedItems?.length > 1) {
+                  ide.deleteSelectedItems().catch((error) => console.error(error));
+                  return;
+                }
+                ide.openDeleteModal(item.path, item.type).catch((error) => console.error(error));
               }}
-              className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
-              title="下载"
+              className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-red-500"
+              title="删除"
             >
-              <Download size={12} />
+              <Trash2 size={12} />
             </button>
-          )}
-          <button
-            data-testid={`delete-${item.path}`}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (ide.selectedPaths?.has(item.path) && ide.selectedItems?.length > 1) {
-                ide.deleteSelectedItems().catch((error) => console.error(error));
-                return;
-              }
-              ide.openDeleteModal(item.path, item.type).catch((error) => console.error(error));
-            }}
-            className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-red-500"
-            title="删除"
-          >
-            <Trash2 size={12} />
-          </button>
-        </div>
+          </div>
+        )}
       </div>
       {showInsertAfter && <DropInsertionLine depth={depth} />}
 
@@ -316,6 +325,14 @@ function DropInsertionLine({ depth }) {
     >
       <div className="-translate-y-1/2 rounded-full border-t-2 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.35)] dark:border-blue-300 dark:shadow-[0_0_12px_rgba(147,197,253,0.35)]" />
     </div>
+  );
+}
+
+function FileTreeLabel({ item }) {
+  return (
+    <span className="file-tree-label min-w-0 select-none" title={item.name}>
+      <span className="file-tree-label-text">{item.name}</span>
+    </span>
   );
 }
 

@@ -253,6 +253,7 @@ test('file tree supports manual drag ordering and self-drop hint', async ({ page
     await page.reload();
     await expect(page.getByTestId('chat-send-button')).toBeVisible();
     await page.getByTestId('layout-3').click();
+    await expect(page.getByTestId(`file-row-${fileA}`)).toBeVisible();
     const orderedPaths = await page
       .locator('[data-file-path]')
       .evaluateAll((elements, prefix) => elements.map((element) => element.dataset.filePath).filter((path) => path?.startsWith(`${prefix}/`)), folderPath);
