@@ -217,14 +217,14 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
               ))}
             </div>
           )}
-          <div className="pointer-events-none absolute bottom-2.5 right-2.5 z-30 flex h-10 items-center gap-1 rounded-[18px] bg-gray-950/[0.07] py-1 pl-1 pr-1.5 backdrop-blur-xl dark:bg-white/[0.105]">
+          <div className="composer-tool-cluster pointer-events-none absolute bottom-2.5 right-2.5 z-30 flex items-center backdrop-blur-xl">
             <button
               data-testid="chat-attachment-button"
               onClick={(e) => {
                 e.stopPropagation();
                 attachmentInputRef.current?.click();
               }}
-              className="motion-button composer-icon-button pointer-events-auto flex h-7 w-8 items-center justify-center rounded-[12px] text-gray-500 hover:bg-blue-500/20 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-400/25 dark:hover:text-blue-100"
+              className="motion-button composer-icon-button composer-attach-button pointer-events-auto flex items-center justify-center"
               title="上传文件"
             >
               <Paperclip size={16} />
@@ -240,19 +240,19 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
                 submitChatMessage();
               }}
               disabled={isSendDisabled}
-              className={`motion-button composer-icon-button pointer-events-auto flex h-7 w-8 items-center justify-center rounded-[12px] ${
+              className={`motion-button composer-icon-button pointer-events-auto flex items-center justify-center ${
                 ide.isChatSending
-                  ? 'bg-red-500 text-white shadow-[0_8px_18px_rgba(239,68,68,0.24)] hover:bg-red-600 active:scale-95'
+                  ? 'composer-stop-button'
                   : isSendDisabled
-                  ? 'cursor-not-allowed bg-gray-950/[0.10] text-gray-400 dark:bg-white/[0.10] dark:text-gray-500'
-                  : 'bg-gray-700 text-white shadow-[0_8px_18px_rgba(15,23,42,0.22)] hover:bg-blue-500 active:scale-95 dark:bg-white/[0.16] dark:hover:bg-blue-500'
+                  ? 'composer-send-button-disabled'
+                  : 'composer-send-button'
               }`}
               title={ide.isChatSending ? '停止生成' : '发送'}
             >
               {ide.isChatSending ? (
                 <Square size={13} fill="currentColor" strokeWidth={2.5} />
               ) : (
-                <Send size={15} className="-translate-x-[1px] translate-y-[1px]" strokeWidth={2.5} />
+                <Send size={15} className="composer-send-icon" strokeWidth={2.5} />
               )}
             </button>
           </div>

@@ -141,12 +141,112 @@ body {
   transform: translateY(0) scale(0.97);
 }
 
-.composer-icon-button:hover {
-  transform: scale(1.04);
+.composer-tool-cluster {
+  height: 42px;
+  gap: 5px;
+  padding: 7px;
+  border-radius: 21px;
+  background: rgb(15 23 42 / 0.07);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    0 8px 22px rgb(15 23 42 / 0.08);
 }
 
-.composer-icon-button:active {
-  transform: scale(0.96);
+.dark .composer-tool-cluster {
+  background: rgb(255 255 255 / 0.105);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 10px 28px rgb(0 0 0 / 0.18);
+}
+
+.composer-icon-button {
+  width: 30px;
+  height: 28px;
+  border-radius: 13px;
+  transform-origin: center;
+}
+
+.motion-button.composer-icon-button:hover {
+  transform: scale(1.035);
+}
+
+.motion-button.composer-icon-button:active {
+  transform: scale(0.965);
+}
+
+.motion-button.composer-icon-button:disabled,
+.motion-button.composer-icon-button:disabled:hover,
+.motion-button.composer-icon-button:disabled:active {
+  transform: none;
+}
+
+.composer-icon-button svg {
+  display: block;
+  flex-shrink: 0;
+  transform: none;
+}
+
+.composer-attach-button {
+  color: rgb(107 114 128);
+}
+
+.composer-attach-button:hover {
+  background: rgb(59 130 246 / 0.18);
+  color: rgb(37 99 235);
+}
+
+.dark .composer-attach-button {
+  color: rgb(209 213 219);
+}
+
+.dark .composer-attach-button:hover {
+  background: rgb(96 165 250 / 0.22);
+  color: rgb(219 234 254);
+}
+
+.composer-send-button {
+  color: white;
+  background: rgb(55 65 81 / 0.96);
+  box-shadow: 0 8px 18px rgb(15 23 42 / 0.22);
+}
+
+.composer-send-button:hover {
+  background: rgb(59 130 246);
+  box-shadow: 0 9px 20px rgb(37 99 235 / 0.26);
+}
+
+.dark .composer-send-button {
+  background: rgb(255 255 255 / 0.16);
+}
+
+.dark .composer-send-button:hover {
+  background: rgb(59 130 246);
+}
+
+.composer-stop-button {
+  color: white;
+  background: rgb(239 68 68);
+  box-shadow: 0 8px 18px rgb(239 68 68 / 0.24);
+}
+
+.composer-stop-button:hover {
+  background: rgb(220 38 38);
+}
+
+.composer-send-button-disabled {
+  cursor: not-allowed;
+  color: rgb(156 163 175);
+  background: rgb(15 23 42 / 0.1);
+}
+
+.dark .composer-send-button-disabled {
+  color: rgb(107 114 128);
+  background: rgb(255 255 255 / 0.1);
+}
+
+.composer-send-icon {
+  margin-left: -1px;
+  margin-top: 1px;
 }
 
 .motion-soft-focus {
