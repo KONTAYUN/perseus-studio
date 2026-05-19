@@ -12,11 +12,27 @@ import (
 
 const (
 	conversationSummaryKeepRecent      = 16
-	conversationSummaryTriggerMessages = 34
 	conversationSummaryMinNewMessages  = 8
 	conversationSummaryMaxRunes        = 2600
 	conversationSummaryTranscriptRunes = 32000
 )
+
+type ConversationCompactionResult struct {
+	ConversationID        string    `json:"conversation_id"`
+	SummaryUntilMessageID string    `json:"summary_until_message_id"`
+	CompactedMessageCount int       `json:"compacted_message_count"`
+	EstimatedTokensBefore int       `json:"estimated_tokens_before"`
+	EstimatedTokensAfter  int       `json:"estimated_tokens_after"`
+	ContextWindowTokens   int       `json:"context_window_tokens"`
+	ThresholdPercent      int       `json:"threshold_percent"`
+	CompactReservedTokens int       `json:"compact_reserved_tokens"`
+	SummaryUpdatedAt      time.Time `json:"summary_updated_at"`
+	Reason                string    `json:"reason"`
+	Error                 string    `json:"error,omitempty"`
+	Updated               bool      `json:"updated"`
+	Skipped               bool      `json:"skipped"`
+	Summary               string    `json:"-"`
+}
 
 func (s *Service) prepareMessagesWithConversationSummary(ctx context.Context, conversationID string, provider store.ModelProvider, messages []store.Message, opts RunOptions) []store.Message {
 	if s.calls == nil || opts.UserID == "" || conversationID == "" || len(messages) == 0 {
@@ -29,27 +45,72 @@ func (s *Service) prepareMessagesWithConversationSummary(ctx context.Context, co
 	}
 
 	if opts.TaskID == "" {
-		if nextSummary, untilID, ok := s.maybeRefreshConversationSummary(ctx, provider, messages, summary, opts); ok {
-			summary.Summary = nextSummary
-			summary.UntilMessageID = untilID
-			if err := s.calls.UpdateConversationSummary(ctx, opts.UserID, conversationID, nextSummary, untilID); err != nil {
-				log.Printf("[ai] conversation summary update failed conversation=%s error=%v", conversationID, err)
-			} else {
-				log.Printf("[ai] conversation summary updated conversation=%s until_message=%s chars=%d", conversationID, untilID, len([]rune(nextSummary)))
-			}
+		result := s.maybeRefreshConversationSummary(ctx, conversationID, provider, messages, summary, opts, runtimeProfileForProvider(provider), "auto_threshold", "")
+		if result.Updated {
+			summary.Summary = result.Summary
+			summary.UntilMessageID = result.SummaryUntilMessageID
 		}
 	}
 
 	return injectConversationSummary(messages, summary.Summary, summary.UntilMessageID)
 }
 
-func (s *Service) maybeRefreshConversationSummary(ctx context.Context, provider store.ModelProvider, messages []store.Message, current store.ConversationSummary, opts RunOptions) (string, string, bool) {
-	if len(messages) < conversationSummaryTriggerMessages {
-		return "", "", false
+func (s *Service) CompactConversation(ctx context.Context, userID, conversationID, modelProviderID, reason, instructions string) (ConversationCompactionResult, error) {
+	if s.calls == nil || s.configs == nil {
+		return ConversationCompactionResult{}, fmt.Errorf("conversation compaction is not available")
 	}
-	cutoff := len(messages) - conversationSummaryKeepRecent
+	provider, err := s.configs.GetModelProvider(ctx, userID, modelProviderID)
+	if err != nil {
+		return ConversationCompactionResult{}, err
+	}
+	messages, err := s.calls.ListMessages(ctx, userID, conversationID)
+	if err != nil {
+		return ConversationCompactionResult{}, err
+	}
+	current, err := s.calls.GetConversationSummary(ctx, userID, conversationID)
+	if err != nil {
+		return ConversationCompactionResult{}, err
+	}
+	result := s.maybeRefreshConversationSummary(ctx, conversationID, provider, messages, current, RunOptions{UserID: userID}, runtimeProfileForProvider(provider), firstNonEmpty(reason, "manual"), instructions)
+	if result.Reason == "manual" && result.Error != "" {
+		return result, fmt.Errorf("%s", result.Error)
+	}
+	return result, nil
+}
+
+func (s *Service) maybeRefreshConversationSummary(ctx context.Context, conversationID string, provider store.ModelProvider, messages []store.Message, current store.ConversationSummary, opts RunOptions, profile providerRuntimeProfile, reason, instructions string) ConversationCompactionResult {
+	reason = firstNonEmpty(reason, "auto_threshold")
+	result := ConversationCompactionResult{
+		ConversationID:        conversationID,
+		EstimatedTokensBefore: estimateMessagesTokens(messages),
+		ContextWindowTokens:   profile.ContextWindowTokens,
+		ThresholdPercent:      profile.CompactThresholdPercent,
+		CompactReservedTokens: profile.CompactReservedTokens,
+		Reason:                reason,
+	}
+	if result.ContextWindowTokens <= 0 {
+		result.ContextWindowTokens = defaultContextWindowTokens
+	}
+	if reason != "manual" && !profile.AutoCompactEnabled {
+		result.Skipped = true
+		return result
+	}
+	if reason != "manual" && reason != "overflow_retry" && result.EstimatedTokensBefore < contextBudgetTokens(profile) {
+		result.Skipped = true
+		return result
+	}
+	keepRecent := conversationSummaryKeepRecent
+	isPressureCompaction := reason == "manual" || reason == "overflow_retry" || result.EstimatedTokensBefore >= contextBudgetTokens(profile)
+	if len(messages)-keepRecent <= 0 && isPressureCompaction {
+		keepRecent = 4
+		if len(messages) > 12 {
+			keepRecent = 8
+		}
+	}
+	cutoff := len(messages) - keepRecent
 	if cutoff <= 0 {
-		return "", "", false
+		result.Skipped = true
+		return result
 	}
 
 	start := 0
@@ -61,25 +122,51 @@ func (s *Service) maybeRefreshConversationSummary(ctx context.Context, provider 
 			}
 		}
 	}
-	if cutoff-start < conversationSummaryMinNewMessages {
-		return "", "", false
+	minNewMessages := conversationSummaryMinNewMessages
+	if isPressureCompaction {
+		minNewMessages = 2
+	}
+	if cutoff-start < minNewMessages {
+		result.Skipped = true
+		return result
 	}
 
 	chunk := messages[start:cutoff]
 	untilID := chunk[len(chunk)-1].ID
-	nextSummary, err := s.summarizeConversationChunk(ctx, provider, current.Summary, chunk, opts)
+	result.CompactedMessageCount = len(chunk)
+	result.SummaryUntilMessageID = untilID
+	emitContextCompactionEvent(opts, "context_compaction_started", "info", result, nil)
+	nextSummary, err := s.summarizeConversationChunk(ctx, provider, current.Summary, chunk, opts, instructions)
 	if err != nil {
 		if !isContextCanceledError(err) {
 			log.Printf("[ai] conversation summary skipped provider=%s model=%s error=%v", provider.Name, provider.ModelID, err)
 		}
-		return "", "", false
+		result.Error = err.Error()
+		emitContextCompactionEvent(opts, "context_compaction_failed", "warn", result, err)
+		result.Skipped = true
+		return result
 	}
 	nextSummary = strings.TrimSpace(nextSummary)
 	if nextSummary == "" {
-		return "", "", false
+		result.Skipped = true
+		return result
 	}
 	nextSummary, _ = truncatePlainForModel(nextSummary, conversationSummaryMaxRunes)
-	return nextSummary, untilID, true
+	if err := s.calls.UpdateConversationSummary(ctx, opts.UserID, conversationID, nextSummary, untilID); err != nil {
+		log.Printf("[ai] conversation summary update failed conversation=%s error=%v", conversationID, err)
+		result.Error = err.Error()
+		emitContextCompactionEvent(opts, "context_compaction_failed", "warn", result, err)
+		result.Skipped = true
+		return result
+	}
+	result.Summary = nextSummary
+	result.Updated = true
+	result.SummaryUpdatedAt = time.Now().UTC()
+	result.EstimatedTokensAfter = estimateMessagesTokens(injectConversationSummary(messages, nextSummary, untilID))
+	emitContextCompactionEvent(opts, "context_compaction_completed", "info", result, nil)
+	log.Printf("[ai] conversation summary updated conversation=%s until_message=%s chars=%d tokens_before=%d tokens_after=%d",
+		conversationID, untilID, len([]rune(nextSummary)), result.EstimatedTokensBefore, result.EstimatedTokensAfter)
+	return result
 }
 
 func injectConversationSummary(messages []store.Message, summary, untilMessageID string) []store.Message {
@@ -107,9 +194,9 @@ func injectConversationSummary(messages []store.Message, summary, untilMessageID
 	return next
 }
 
-func (s *Service) summarizeConversationChunk(ctx context.Context, provider store.ModelProvider, previousSummary string, messages []store.Message, opts RunOptions) (string, error) {
+func (s *Service) summarizeConversationChunk(ctx context.Context, provider store.ModelProvider, previousSummary string, messages []store.Message, opts RunOptions, instructions string) (string, error) {
 	instruction := "You are compressing Perseus Studio conversation history for a coding/agent workspace. Produce a concise, factual memory summary in the user's language when clear. Keep durable facts only: user goals, preferences, constraints, important file paths, model/tool issues already discovered, completed changes, unresolved tasks, and warnings. Do not include full prompts, API keys, full file contents, or long command outputs. Do not invent facts. Maximum 1800 Chinese characters or comparable length."
-	prompt := buildConversationSummaryPrompt(previousSummary, messages)
+	prompt := buildConversationSummaryPrompt(previousSummary, messages, instructions)
 	switch strings.ToLower(strings.TrimSpace(provider.Protocol)) {
 	case "openai":
 		return s.summarizeOpenAI(ctx, provider, instruction, prompt, opts)
@@ -120,8 +207,13 @@ func (s *Service) summarizeConversationChunk(ctx context.Context, provider store
 	}
 }
 
-func buildConversationSummaryPrompt(previousSummary string, messages []store.Message) string {
+func buildConversationSummaryPrompt(previousSummary string, messages []store.Message, instructions string) string {
 	var b strings.Builder
+	if strings.TrimSpace(instructions) != "" {
+		b.WriteString("User compaction instructions:\n")
+		b.WriteString(truncateWithContextNote(instructions, 1200, "compaction instructions"))
+		b.WriteString("\n\n")
+	}
 	if strings.TrimSpace(previousSummary) != "" {
 		b.WriteString("Existing memory summary:\n")
 		b.WriteString(truncateWithContextNote(previousSummary, conversationSummaryMaxRunes, "previous summary"))
@@ -147,6 +239,27 @@ func buildConversationSummaryPrompt(previousSummary string, messages []store.Mes
 		b.WriteString(content)
 	}
 	return truncateWithContextNote(b.String(), conversationSummaryTranscriptRunes, "summary transcript")
+}
+
+func emitContextCompactionEvent(opts RunOptions, eventType, level string, result ConversationCompactionResult, err error) {
+	if opts.Event == nil {
+		return
+	}
+	payload := map[string]any{
+		"conversation_id":          result.ConversationID,
+		"reason":                   result.Reason,
+		"summary_until_message_id": result.SummaryUntilMessageID,
+		"compacted_message_count":  result.CompactedMessageCount,
+		"estimated_tokens_before":  result.EstimatedTokensBefore,
+		"estimated_tokens_after":   result.EstimatedTokensAfter,
+		"context_window_tokens":    result.ContextWindowTokens,
+		"threshold_percent":        result.ThresholdPercent,
+		"compact_reserved_tokens":  result.CompactReservedTokens,
+	}
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	opts.Event(eventType, level, payload)
 }
 
 func (s *Service) summarizeOpenAI(ctx context.Context, provider store.ModelProvider, instruction, prompt string, opts RunOptions) (string, error) {

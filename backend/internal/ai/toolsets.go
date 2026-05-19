@@ -10,8 +10,12 @@ func toolsForToolset(toolset string) ([]string, bool) {
 	case "workspace":
 		return []string{
 			"attempt_completion",
+			"find_workspace_files",
+			"search_workspace_text",
 			"inspect_workspace",
 			"read_workspace_text",
+			"read_workspace_files",
+			"edit_workspace_text",
 			"save_workspace_file",
 			"manage_workspace_path",
 			"organize_workspace_matches",

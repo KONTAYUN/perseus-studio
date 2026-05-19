@@ -1,0 +1,54 @@
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Perseus Studio">
+  <defs>
+    <linearGradient id="leftWingGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+
+    <linearGradient id="rightWingGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6" />
+      <stop offset="100%" stop-color="#EC4899" />
+    </linearGradient>
+
+    <linearGradient id="sparkleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FCD34D" />
+      <stop offset="100%" stop-color="#F59E0B" />
+    </linearGradient>
+
+    <g id="ai-star">
+      <path d="M 0 -1 Q 0 0 -1 0 Q 0 0 0 1 Q 0 0 1 0 Q 0 0 0 -1 Z" />
+    </g>
+
+    <mask id="nib-cutout">
+      <rect x="-50" y="-50" width="200" height="200" fill="white" />
+      <line x1="50" y1="5" x2="50" y2="40" stroke="black" stroke-width="2" stroke-linecap="butt" />
+      <use href="#ai-star" transform="translate(50, 55) scale(15)" fill="black" />
+    </mask>
+
+    <filter id="premium-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#4C1D95" flood-opacity="0.2" />
+    </filter>
+
+    <filter id="glow-blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" />
+    </filter>
+  </defs>
+
+  <g transform="translate(60, 60) rotate(45) scale(0.94) translate(-50, -50)">
+    <g mask="url(#nib-cutout)" filter="url(#premium-shadow)">
+      <path d="M 50 5 C 35 30, 25 60, 30 80 C 35 88, 42 90, 50 90 Z" fill="url(#leftWingGrad)" />
+      <path d="M 50 5 C 65 30, 75 60, 70 80 C 65 88, 58 90, 50 90 Z" fill="url(#rightWingGrad)" />
+    </g>
+
+    <g fill="url(#sparkleGrad)">
+      <g filter="url(#glow-blur)" opacity="0.6">
+        <use href="#ai-star" transform="translate(50, -22) scale(12)" />
+        <use href="#ai-star" transform="translate(30, -5) scale(6)" />
+        <use href="#ai-star" transform="translate(72, 8) scale(4)" />
+      </g>
+      <use href="#ai-star" transform="translate(50, -22) scale(12)" />
+      <use href="#ai-star" transform="translate(30, -5) scale(6)" />
+      <use href="#ai-star" transform="translate(72, 8) scale(4)" />
+    </g>
+  </g>
+</svg>

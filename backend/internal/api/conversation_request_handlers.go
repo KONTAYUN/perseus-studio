@@ -111,7 +111,6 @@ func (s *Server) parseChatReferences(r *http.Request) ([]ai.AttachmentPayload, [
 		}
 		if files != nil && isTextWorkspaceReference(cleanPath) {
 			if result, readErr := files.ReadTextFile(cleanPath, 6000); readErr == nil {
-				payload.Kind = "text"
 				payload.Text = result.Content
 				payload.IncludedInContext = true
 				payload.Truncated = result.Truncated

@@ -1,0 +1,209 @@
+export const PLAYFUL_PENDING_STATUSES = ['正在烹饪', '正在裁剪', '正在编写大纲', '正在绘制图纸', '正在打磨细节', '正在铺开画布'];
+export const EXTRA_PENDING_STATUSES = ['正在翻阅底稿', '正在装订成册', '正在检查火候', '正在归档素材', '正在搜罗线索', '正在摘录资料', '正在准备工具箱', '正在重新调味'];
+
+const LOADING_DISPLAY_MIN_MS = 3000;
+const LOADING_BACKSPACE_MS = 28;
+const LOADING_TYPE_MS = 32;
+const DISPLAY_STATUS_POOL = [...PLAYFUL_PENDING_STATUSES, ...EXTRA_PENDING_STATUSES];
+
+export function nextLoadingStatus(seed = 0) {
+  return DISPLAY_STATUS_POOL[seed % DISPLAY_STATUS_POOL.length] || DISPLAY_STATUS_POOL[0];
+}
+
+export function updateLoadingState(message, now = Date.now()) {
+  const current = message?.loadingState || {
+    text: nextLoadingStatus(0),
+    visibleText: nextLoadingStatus(0),
+    stage: 'holding',
+    activeSince: now,
+  };
+
+  if (!message?.pending) return message;
+  if (current.stage === 'holding' && now - current.activeSince >= LOADING_DISPLAY_MIN_MS) {
+    return {
+      ...message,
+      loadingState: {
+        ...current,
+        stage: 'deleting',
+        activeSince: now,
+      },
+    };
+  }
+
+  if (current.stage === 'deleting' && now - current.activeSince >= LOADING_BACKSPACE_MS) {
+    const nextVisible = current.visibleText.slice(0, -1);
+    if (nextVisible) {
+      return {
+        ...message,
+        loadingState: {
+          ...current,
+          visibleText: nextVisible,
+          activeSince: now,
+        },
+      };
+    }
+    const nextText = nextLoadingStatus((DISPLAY_STATUS_POOL.indexOf(current.text) + 1 + DISPLAY_STATUS_POOL.length) % DISPLAY_STATUS_POOL.length);
+    return {
+      ...message,
+      loadingState: {
+        text: nextText,
+        visibleText: '',
+        stage: 'typing',
+        activeSince: now,
+      },
+    };
+  }
+
+  if (current.stage === 'typing' && now - current.activeSince >= LOADING_TYPE_MS) {
+    const nextVisible = current.text.slice(0, current.visibleText.length + 1);
+    if (nextVisible.length < current.text.length) {
+      return {
+        ...message,
+        loadingState: {
+          ...current,
+          visibleText: nextVisible,
+          activeSince: now,
+        },
+      };
+    }
+    return {
+      ...message,
+      loadingState: {
+        ...current,
+        visibleText: current.text,
+        stage: 'holding',
+        activeSince: now,
+      },
+    };
+  }
+
+  return message;
+}
+
+export function agentEventText(type, payload = {}) {
+  switch (type) {
+    case 'model_call_started':
+      return playfulPendingStatus(type);
+    case 'model_call_attempt_started':
+      return playfulPendingStatus(type);
+    case 'model_call_retrying':
+      return playfulPendingStatus(type);
+    case 'model_call_attempt_completed':
+      return playfulPendingStatus(type);
+    case 'model_call_attempt_failed':
+      return playfulPendingStatus(type);
+    case 'model_stream_recovering':
+      return playfulPendingStatus(type);
+    case 'tool_call_started':
+      return pendingToolStatus(payload.tool_name);
+    case 'tool_call_completed':
+      return completedToolStatus(payload.tool_name);
+    case 'user_question_requested':
+      return '';
+    case 'tool_call_failed':
+      return '正在重新调味';
+    case 'tool_result_returned':
+      return payload.is_error ? '正在重新调味' : '';
+    case 'completion_rejected':
+      return '正在检查火候';
+    case 'model_message_started':
+      return playfulPendingStatus(type);
+    case 'context_compaction_started':
+      return payload.reason === 'auto_threshold' ? '正在自动压缩上下文' : '正在压缩上下文';
+    case 'context_compaction_completed':
+      if (payload.reason === 'auto_threshold') return '上下文已自动压缩';
+      if (payload.reason === 'overflow_retry') return '上下文已压缩并重试';
+      return '上下文已压缩';
+    case 'context_compaction_failed':
+      return '上下文压缩已跳过';
+    case 'agent_recovery_started':
+    case 'agent_recovery_retrying': {
+      const attempt = Number(payload.attempt) || 1;
+      const maxAttempts = Number(payload.max_attempts) || 2;
+      const delaySeconds = Math.ceil((Number(payload.delay_ms) || 0) / 1000);
+      if (delaySeconds > 0) {
+        return `连接中断，${delaySeconds} 秒后从断点继续 ${attempt}/${maxAttempts}`;
+      }
+      return `连接中断，正在从断点继续 ${attempt}/${maxAttempts}`;
+    }
+    case 'agent_recovery_completed':
+      return '已从断点继续';
+    case 'agent_recovery_failed':
+      return '断点继续失败';
+    case 'agent_budget_exhausted':
+      return '达到轮次上限，正在总结当前进度';
+    case 'agent_budget_summary_started':
+      return '正在总结当前进度';
+    case 'agent_budget_summary_completed':
+      return '已总结当前进度，可继续本轮';
+    case 'agent_budget_summary_failed':
+      return '总结生成失败，已保留断点';
+    case 'agent_steer_received':
+      return '已收到引导，会在下一次安全边界应用';
+    case 'agent_steer_applied':
+      return '引导已应用到当前任务';
+    case 'agent_steer_rejected':
+      return payload.message || '引导未应用';
+    case 'local_persistence_failed':
+      return '本地状态保存失败，本轮已暂停，可继续本轮';
+    case 'model_delta':
+      return '';
+    case 'model_message_completed':
+      return '';
+    case 'diagnostic_created':
+      return playfulPendingStatus(type);
+    case 'run_started':
+      return playfulPendingStatus(type);
+    case 'run_completed':
+      return '执行完成';
+    default:
+      return '';
+  }
+}
+
+export function pendingToolStatus(toolName) {
+  if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return '正在查看工作区';
+  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return '正在读取文件';
+  if (toolName === 'edit_workspace_text') return '正在编辑文件';
+  if (toolName === 'save_workspace_file') return '正在保存文件';
+  if (toolName === 'manage_workspace_path') return '正在管理路径';
+  if (toolName === 'organize_workspace_matches') return '正在整理文件';
+  if (toolName === 'run_workspace_command') return '正在运行命令';
+  if (toolName === 'perseus_search_web' || toolName === 'web_search') return '正在搜索资料';
+  if (toolName === 'web_extract') return '正在读取网页';
+  if (toolName === 'list_skills' || toolName === 'read_skill' || toolName === 'install_skill_from_attachment' || toolName === 'delete_skill') return '正在处理技能';
+  return playfulPendingStatus(toolName || 'default');
+}
+
+export function completedToolStatus(toolName) {
+  if (toolName === 'ask_followup_question') return '';
+  if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return '已查看工作区';
+  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return '已读取文件';
+  if (toolName === 'edit_workspace_text') return '已编辑文件';
+  if (toolName === 'save_workspace_file') return '已保存文件';
+  if (toolName === 'manage_workspace_path') return '已管理路径';
+  if (toolName === 'organize_workspace_matches') return '已整理文件';
+  if (toolName === 'run_workspace_command') return '已运行命令';
+  if (toolName === 'perseus_search_web' || toolName === 'web_search') return '已搜索资料';
+  if (toolName === 'web_extract') return '已读取网页';
+  if (toolName === 'list_skills' || toolName === 'read_skill' || toolName === 'install_skill_from_attachment' || toolName === 'delete_skill') return '已处理技能';
+  return '已处理';
+}
+
+export function playfulPendingStatus(seed = '') {
+  const text = String(seed || '');
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) % PLAYFUL_PENDING_STATUSES.length;
+  }
+  return PLAYFUL_PENDING_STATUSES[hash] || PLAYFUL_PENDING_STATUSES[0];
+}
+
+export function isPendingStatusText(text = '') {
+  const value = text.trim();
+  if (!value) return true;
+  if (value === '已开始执行') return true;
+  if (PLAYFUL_PENDING_STATUSES.includes(value) || EXTRA_PENDING_STATUSES.includes(value)) return true;
+  if (value.startsWith('正在') && value.length <= 12) return true;
+  return false;
+}

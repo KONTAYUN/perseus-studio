@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -39,28 +40,74 @@ func (s *Server) handleDiagnosticLogs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleDiagnosticLogRoutes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.NotFound(w, r)
+		return
+	}
+	user := MustUserFromContext(r.Context())
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/diagnostics/logs/"), "/")
+	if id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if err := s.diagnostics.Delete(r.Context(), user.UserID, id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *Server) handleAdminDiagnosticLogs(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(r) {
 		writeError(w, http.StatusForbidden, "admin required")
 		return
 	}
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		query := diagnosticQueryFromRequest(r, "", 200)
+		query.AllUsers = true
+		logs, err := s.diagnostics.List(r.Context(), query)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		users, err := s.diagnosticUserSummaries(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"logs": logs, "users": users})
+	case http.MethodDelete:
+		if err := s.diagnostics.ClearAll(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleAdminDiagnosticLogRoutes(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(r) {
+		writeError(w, http.StatusForbidden, "admin required")
+		return
+	}
+	if r.Method != http.MethodDelete {
 		http.NotFound(w, r)
 		return
 	}
-	query := diagnosticQueryFromRequest(r, "", 200)
-	query.AllUsers = true
-	logs, err := s.diagnostics.List(r.Context(), query)
-	if err != nil {
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/admin/diagnostics/logs/"), "/")
+	if id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if err := s.diagnostics.DeleteAny(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	users, err := s.diagnosticUserSummaries(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"logs": logs, "users": users})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleDiagnosticExport(w http.ResponseWriter, r *http.Request) {
@@ -215,10 +262,26 @@ func writeDiagnosticExportItem(b *strings.Builder, item store.DiagnosticLog, use
 	}
 	if item.RequestSummary != "" {
 		b.WriteString("request_summary:\n")
-		b.WriteString(item.RequestSummary)
+		b.WriteString(formatDiagnosticJSON(item.RequestSummary))
 		b.WriteString("\n")
 	}
 	b.WriteString("\n---\n\n")
+}
+
+func formatDiagnosticJSON(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		return value
+	}
+	formatted, err := json.MarshalIndent(decoded, "", "  ")
+	if err != nil {
+		return value
+	}
+	return string(formatted)
 }
 
 func writeExportField(b *strings.Builder, key, value string) {

@@ -1,7 +1,8 @@
 import React from 'react';
-import { ArrowLeft, Clipboard, Download, RefreshCw, Trash2, Users } from 'lucide-react';
+import { ArrowLeft, Clipboard, Download, RefreshCw, Trash2, Users, X } from 'lucide-react';
 import { API_BASE_URL, apiDelete, apiGet } from '../../api/client';
-import { Badge, EmptyCard, formatDate } from './SettingsUI';
+import { Button, EmptyCard, SegmentedControl, SettingsSection, formatDate } from './SettingsUI';
+import { diagnosticShortJudgement, formatRequestSummary } from './diagnosticLogUtils';
 
 export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
@@ -74,19 +75,42 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
   };
 
   const clearLogs = async () => {
-    if (isAllUsersScope) return;
     const ok = await dialog?.confirm?.({
-      title: '清空诊断日志',
-      message: '确认清空自己的诊断日志？',
-      confirmLabel: '清空日志',
+      title: isAllUsersScope ? '清空全部诊断日志' : '清空诊断日志',
+      message: isAllUsersScope
+        ? '确认清空所有用户的诊断日志？此操作不可恢复，但不会影响会话、消息、workspace 文件或 run checkpoint。'
+        : '确认清空自己的诊断日志？',
+      confirmLabel: isAllUsersScope ? '清空全部日志' : '清空日志',
       tone: 'red',
     });
     if (!ok) return;
     try {
-      await apiDelete('/api/diagnostics/logs');
+      await apiDelete(isAllUsersScope ? '/api/admin/diagnostics/logs' : '/api/diagnostics/logs');
       setLogs([]);
       setExpandedIds(new Set());
-      setMessage('诊断日志已清空。');
+      setMessage(isAllUsersScope ? '全部用户诊断日志已清空。' : '诊断日志已清空。');
+    } catch (error) {
+      setMessage(error.message);
+    }
+  };
+
+  const deleteLog = async (item) => {
+    const ok = await dialog?.confirm?.({
+      title: '删除这条诊断日志',
+      message: `确认删除 ${item.id}？此操作不可恢复。`,
+      confirmLabel: '删除',
+      tone: 'red',
+    });
+    if (!ok) return;
+    try {
+      await apiDelete(`${isAllUsersScope ? '/api/admin/diagnostics/logs' : '/api/diagnostics/logs'}/${encodeURIComponent(item.id)}`);
+      setLogs((current) => current.filter((entry) => entry.id !== item.id));
+      setExpandedIds((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
+      setMessage('已删除该条诊断日志。');
     } catch (error) {
       setMessage(error.message);
     }
@@ -102,36 +126,36 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
   };
 
   return (
-    <section data-testid="diagnostics-view" className="settings-view-enter rounded-[24px] border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]">
+    <SettingsSection data-testid="diagnostics-view" className="settings-view-enter">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <button type="button" onClick={onBack} className="flex items-center gap-2 text-sm font-bold text-gray-500 hover:text-blue-500">
-          <ArrowLeft size={16} /> 诊断日志
-        </button>
-        {isAdmin && (
-          <div className="inline-flex rounded-[16px] border border-white/60 bg-white/55 p-1 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06]">
-            <ScopeButton active={isAllUsersScope} onClick={() => setScope('all')}>
-              全部用户
-            </ScopeButton>
-            <ScopeButton active={!isAllUsersScope} onClick={() => setScope('mine')}>
-              我的日志
-            </ScopeButton>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={loadLogs} className="flex items-center gap-2 rounded-xl bg-gray-100 px-3 py-2 text-xs font-bold text-gray-600 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/15">
-            <RefreshCw size={14} /> 刷新
-          </button>
-          <button type="button" onClick={copyLogs} className="flex items-center gap-2 rounded-xl bg-blue-500 px-3 py-2 text-xs font-bold text-white hover:bg-blue-600">
-            <Clipboard size={14} /> {isAllUsersScope ? '复制汇总' : '复制最近日志'}
-          </button>
-          <button type="button" onClick={exportLogs} className="flex items-center gap-2 rounded-xl bg-blue-500 px-3 py-2 text-xs font-bold text-white hover:bg-blue-600">
-            <Download size={14} /> 导出日志
-          </button>
-          {!isAllUsersScope && (
-            <button type="button" onClick={clearLogs} className="flex items-center gap-2 rounded-xl bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600">
-              <Trash2 size={14} /> 清空日志
-            </button>
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+            <ArrowLeft size={16} /> 诊断日志
+          </Button>
+          {isAdmin && (
+            <SegmentedControl
+              value={scope}
+              onChange={setScope}
+              options={[
+                { value: 'all', label: '全部用户' },
+                { value: 'mine', label: '我的日志' },
+              ]}
+            />
           )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={loadLogs}>
+            <RefreshCw size={14} /> 刷新
+          </Button>
+          <Button type="button" size="sm" onClick={copyLogs}>
+            <Clipboard size={14} /> {isAllUsersScope ? '复制汇总' : '复制最近日志'}
+          </Button>
+          <Button type="button" size="sm" onClick={exportLogs}>
+            <Download size={14} /> 导出日志
+          </Button>
+          <Button type="button" variant="danger" size="sm" onClick={clearLogs}>
+            <Trash2 size={14} /> {isAllUsersScope ? '清空全部' : '清空日志'}
+          </Button>
         </div>
       </div>
 
@@ -154,11 +178,12 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
             const user = usersById[item.user_id];
             return (
               <div key={item.id} className="settings-card rounded-2xl border border-gray-100 bg-white/80 p-4 dark:border-white/10 dark:bg-[#252526]/80">
-                <button type="button" onClick={() => toggleExpanded(item.id)} className="block w-full text-left">
+                <button type="button" onClick={() => toggleExpanded(item.id)} className="motion-row block w-full text-left">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge tone={item.level === 'error' ? 'red' : item.level === 'warn' ? 'yellow' : 'blue'}>{item.level}</Badge>
+                        <DiagnosticLevelPill level={item.level} />
+                        <DiagnosticSummaryPill item={item} />
                         <span className="truncate text-sm font-bold text-gray-800 dark:text-gray-100">{item.stage || 'unknown'}</span>
                       </div>
                       <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
@@ -191,20 +216,29 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
                 </button>
 
                 {expanded && (
-                  <div className="settings-expand-enter mt-4 grid gap-3 border-t border-gray-100 pt-4 text-xs dark:border-white/10 md:grid-cols-2">
-                    {isAllUsersScope && <DiagnosticField label="user_id" value={item.user_id} />}
-                    {isAllUsersScope && <DiagnosticField label="username" value={user?.username} />}
-                    <DiagnosticField label="id" value={item.id} />
-                    <DiagnosticField label="conversation_id" value={item.conversation_id} />
-                    <DiagnosticField label="message_id" value={item.message_id} />
-                    <DiagnosticField label="task_id" value={item.task_id} />
-                    <DiagnosticField label="model_provider_id" value={item.model_provider_id} />
-                    <DiagnosticField label="base_url_host" value={item.base_url_host} />
-                    <DiagnosticField label="final_url_path" value={item.final_url_path} />
-                    <DiagnosticField label="content_type" value={item.content_type} />
-                    <DiagnosticField label="duration_ms" value={item.duration_ms ? String(item.duration_ms) : ''} />
-                    <DiagnosticField label="error_message" value={item.error_message} wide />
-                    <DiagnosticField label="response_snippet" value={item.response_snippet} wide mono />
+                  <div className="settings-expand-enter mt-4 border-t border-gray-100 pt-4 text-xs dark:border-white/10">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-bold text-gray-500 dark:text-gray-300">{diagnosticShortJudgement(item)}</div>
+                      <Button type="button" variant="danger" size="xs" onClick={() => deleteLog(item)}>
+                        <X size={13} /> 删除单条
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {isAllUsersScope && <DiagnosticField label="user_id" value={item.user_id} />}
+                      {isAllUsersScope && <DiagnosticField label="username" value={user?.username} />}
+                      <DiagnosticField label="id" value={item.id} />
+                      <DiagnosticField label="conversation_id" value={item.conversation_id} />
+                      <DiagnosticField label="message_id" value={item.message_id} />
+                      <DiagnosticField label="task_id" value={item.task_id} />
+                      <DiagnosticField label="model_provider_id" value={item.model_provider_id} />
+                      <DiagnosticField label="base_url_host" value={item.base_url_host} />
+                      <DiagnosticField label="final_url_path" value={item.final_url_path} />
+                      <DiagnosticField label="content_type" value={item.content_type} />
+                      <DiagnosticField label="duration_ms" value={item.duration_ms ? String(item.duration_ms) : ''} />
+                      <DiagnosticField label="error_message" value={item.error_message} wide />
+                      <DiagnosticField label="response_snippet" value={item.response_snippet} wide mono />
+                      <DiagnosticField label="request_summary" value={formatRequestSummary(item.request_summary)} wide mono />
+                    </div>
                   </div>
                 )}
               </div>
@@ -212,23 +246,48 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
           })}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
-function ScopeButton({ active, onClick, children }) {
+function DiagnosticLevelPill({ level }) {
+  const normalized = String(level || 'info').toLowerCase();
+  const styles = {
+    error: {
+      label: '错误',
+      dot: 'bg-red-500',
+      text: 'text-red-600 dark:text-red-300',
+      bg: 'bg-red-50 dark:bg-red-500/10',
+    },
+    warn: {
+      label: '警告',
+      dot: 'bg-amber-500',
+      text: 'text-amber-600 dark:text-amber-300',
+      bg: 'bg-amber-50 dark:bg-amber-500/10',
+    },
+    info: {
+      label: '信息',
+      dot: 'bg-blue-500',
+      text: 'text-blue-600 dark:text-blue-300',
+      bg: 'bg-blue-50 dark:bg-blue-500/10',
+    },
+  };
+  const tone = styles[normalized] || styles.info;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-[12px] px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
-        active
-          ? 'bg-white text-blue-600 shadow-sm dark:bg-white/15 dark:text-blue-200'
-          : 'text-gray-500 hover:text-blue-500 dark:text-gray-400 dark:hover:text-blue-200'
-      }`}
-    >
-      {children}
-    </button>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${tone.bg} ${tone.text}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+      {tone.label}
+    </span>
+  );
+}
+
+function DiagnosticSummaryPill({ item }) {
+  const label = diagnosticShortJudgement(item);
+  if (!label) return null;
+  return (
+    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500 dark:bg-white/10 dark:text-gray-300">
+      {label}
+    </span>
   );
 }
 
@@ -237,7 +296,7 @@ function DiagnosticField({ label, value, wide = false, mono = false }) {
   return (
     <div className={wide ? 'md:col-span-2' : ''}>
       <div className="mb-1 font-bold text-gray-400">{label}</div>
-      <div className={`whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-3 text-gray-700 dark:bg-black/20 dark:text-gray-300 ${mono ? 'font-mono' : ''}`}>
+      <div className={`whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-xl bg-gray-50 p-3 text-gray-700 dark:bg-black/20 dark:text-gray-300 ${mono ? 'font-mono' : ''}`}>
         {value}
       </div>
     </div>

@@ -27,6 +27,52 @@ func isRecoverableFinalProviderError(err error) bool {
 	return isTimeoutError(err) || isTransientTransportError(err)
 }
 
+func isCheckpointRecoverableProviderError(err error) bool {
+	if err == nil || isContextCanceledError(err) || isContextOverflowError(err) {
+		return false
+	}
+	var providerErr *ProviderResponseError
+	if errors.As(err, &providerErr) {
+		return isRetriableProviderStatus(providerErr.StatusCode) || providerErr.StatusCode == 529
+	}
+	if isRecoverableFinalProviderError(err) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	markers := []string{
+		"empty model response",
+		"empty stream",
+		"empty provider",
+		"unexpected eof",
+		"http 408",
+		"http 409",
+		"http 429",
+		"http 500",
+		"http 502",
+		"http 503",
+		"http 504",
+		"http 529",
+		"status 408",
+		"status 409",
+		"status 429",
+		"status 500",
+		"status 502",
+		"status 503",
+		"status 504",
+		"status 529",
+		"too many requests",
+		"rate limit",
+		"overloaded",
+		"capacity",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func isContextCanceledError(err error) bool {
 	if err == nil {
 		return false
@@ -78,7 +124,11 @@ func (s *Service) tryFallbackTextReplacement(ctx context.Context, conversationID
 		"content": nextContent,
 		"mode":    "overwrite",
 	})
-	_, event := s.executeAndRecordTool(ctx, conversationID, messageID, "save_workspace_file", string(payload), opts, providerRuntimeProfile{})
+	operationHash := mutationOperationHash("save_workspace_file", string(payload))
+	_, event, execErr := s.executeAndRecordTool(ctx, conversationID, messageID, "save_workspace_file", string(payload), operationHash, opts, providerRuntimeProfile{})
+	if execErr != nil {
+		return Reply{}, false
+	}
 	nextEvents := append(append([]ToolEvent{}, events...), event)
 	if event.Status != "success" {
 		return Reply{}, false
@@ -93,7 +143,7 @@ func (s *Service) tryFallbackTextReplacement(ctx context.Context, conversationID
 func lastSuccessfulReadPath(events []ToolEvent) string {
 	for index := len(events) - 1; index >= 0; index-- {
 		event := events[index]
-		if event.ToolName == "read_workspace_text" && event.Status == "success" && event.Path != "" {
+		if (event.ToolName == "read_workspace_text" || event.ToolName == "read_workspace_files") && event.Status == "success" && event.Path != "" {
 			return event.Path
 		}
 	}

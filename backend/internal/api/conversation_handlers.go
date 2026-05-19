@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -124,6 +125,67 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "compact" {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var req compactConversationRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+			writeError(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		conversation, err := s.conversations.GetConversation(r.Context(), user.UserID, conversationID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if conversation.SelectedModelProviderID == "" {
+			writeError(w, http.StatusBadRequest, "model_provider_id is required")
+			return
+		}
+		result, err := s.ai.CompactConversation(r.Context(), user.UserID, conversationID, conversation.SelectedModelProviderID, "manual", req.Instructions)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "context-usage" {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		if _, err := s.conversations.GetConversation(r.Context(), user.UserID, conversationID); err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		event, err := s.runs.LatestConversationEventByType(r.Context(), user.UserID, conversationID, "model_request_summary")
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusOK, map[string]any{"usage": nil})
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var payload any
+		if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil {
+			payload = map[string]any{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"usage": map[string]any{
+				"event_id":   event.ID,
+				"run_id":     event.RunID,
+				"created_at": event.CreatedAt,
+				"payload":    payload,
+			},
+		})
+		return
+	}
+
 	if len(parts) != 2 || parts[1] != "messages" {
 		http.NotFound(w, r)
 		return
@@ -191,7 +253,7 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		s.appendRunEvent(r.Context(), store.AgentEventInput{
+		if _, err := s.appendRunEventStrict(r.Context(), store.AgentEventInput{
 			RunID:          run.ID,
 			UserID:         user.UserID,
 			ConversationID: conversationID,
@@ -201,7 +263,10 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			Payload: map[string]any{
 				"message": "run queued",
 			},
-		})
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 
 		updatedConversation, _ := s.conversations.GetConversation(r.Context(), user.UserID, conversationID)
 		go s.executeConversationRun(user.UserID, conversationID, userMessage.ID, modelProviderID, strings.TrimSpace(content), string(attachmentsJSON), attachmentPayloads, thinkingMode, run.ID)

@@ -1,0 +1,122 @@
+.settings-modal-card {
+  border-radius: var(--radius-shell);
+  transform-origin: center 46%;
+}
+
+.settings-section-appear {
+  border-radius: var(--radius-panel);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.32);
+}
+
+.settings-card,
+.settings-nav-card {
+  border-radius: var(--radius-card);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.22);
+}
+
+.dark .settings-section-appear,
+.dark .settings-card,
+.dark .settings-nav-card {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.045);
+}
+
+.settings-view-enter {
+  animation: perseus-settings-view-enter 520ms var(--ease-apple) both;
+}
+
+.settings-section-appear,
+.settings-card {
+  animation: perseus-settings-card-enter 540ms var(--ease-apple) both;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(1),
+.settings-view-enter > .settings-card:nth-child(1) {
+  animation-delay: 30ms;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(2),
+.settings-view-enter > .settings-card:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(3),
+.settings-view-enter > .settings-card:nth-child(3) {
+  animation-delay: 110ms;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(4),
+.settings-view-enter > .settings-card:nth-child(4) {
+  animation-delay: 150ms;
+}
+
+.settings-view-enter > .settings-section-appear:nth-child(5),
+.settings-view-enter > .settings-card:nth-child(5) {
+  animation-delay: 190ms;
+}
+
+.settings-popover-enter {
+  transform-origin: top center;
+  animation: perseus-settings-popover-enter 260ms var(--ease-apple) both;
+}
+
+.settings-expand-enter {
+  transform-origin: top center;
+  animation: perseus-settings-expand-enter 340ms var(--ease-apple) both;
+}
+
+@keyframes perseus-settings-view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.992);
+    filter: blur(2px);
+  }
+  55% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes perseus-settings-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.986);
+    filter: blur(1.5px);
+  }
+  70% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes perseus-settings-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes perseus-settings-expand-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scaleY(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}

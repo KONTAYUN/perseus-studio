@@ -49,6 +49,11 @@ type pathRequest struct {
 	Path string `json:"path"`
 }
 
+type searchFilesRequest struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit"`
+}
+
 type writeFileRequest struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
@@ -94,6 +99,10 @@ type branchConversationRequest struct {
 type regenerateConversationRequest struct {
 	MessageID    string `json:"message_id"`
 	ThinkingMode string `json:"thinking_mode"`
+}
+
+type compactConversationRequest struct {
+	Instructions string `json:"instructions"`
 }
 
 type chatAttachmentMetadata struct {
@@ -147,8 +156,10 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/admin/users/", s.handleAdminUserRoutes)
 	s.mux.HandleFunc("/api/admin/settings", s.handleAdminSettings)
 	s.mux.HandleFunc("/api/admin/diagnostics/logs", s.handleAdminDiagnosticLogs)
+	s.mux.HandleFunc("/api/admin/diagnostics/logs/", s.handleAdminDiagnosticLogRoutes)
 	s.mux.HandleFunc("/api/admin/diagnostics/export", s.handleAdminDiagnosticExport)
 	s.mux.HandleFunc("/api/files/tree", s.handleFilesTree)
+	s.mux.HandleFunc("/api/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("/api/files/read", s.handleFilesRead)
 	s.mux.HandleFunc("/api/files/upload", s.handleFilesUpload)
 	s.mux.HandleFunc("/api/files/write", s.handleFilesWrite)
@@ -173,6 +184,7 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/conversations/", s.handleConversationRoutes)
 	s.mux.HandleFunc("/api/agent-runs/", s.handleAgentRunRoutes)
 	s.mux.HandleFunc("/api/diagnostics/logs", s.handleDiagnosticLogs)
+	s.mux.HandleFunc("/api/diagnostics/logs/", s.handleDiagnosticLogRoutes)
 	s.mux.HandleFunc("/api/diagnostics/export", s.handleDiagnosticExport)
 	s.mux.HandleFunc("/api/tasks", s.handleTasks)
 	s.mux.HandleFunc("/api/tasks/", s.handleTaskRoutes)

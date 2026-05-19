@@ -23,24 +23,26 @@ func buildUserTextWithAttachments(content string, attachments []AttachmentPayloa
 			}
 			textParts = append(textParts, text)
 		case "workspace_file":
+			note := fmt.Sprintf("workspace file reference: path=%s, name=%s, file_type=%s。这是用户明确引用的工作区路径；需要最新或完整内容时调用 read_workspace_text 或 read_workspace_files，不要只凭预览猜。", attachment.Path, attachment.Name, attachment.FileType)
 			if attachment.Text != "" {
-				text := fmt.Sprintf("用户明确引用了 workspace 文件：%s\n内容：\n%s", attachment.Name, attachment.Text)
+				text := fmt.Sprintf("%s\noptional preview:\n%s", note, attachment.Text)
 				if attachment.Truncated {
-					text += "\n[该文件内容已截断]"
+					text += "\n[该文件预览已截断；需要完整内容请调用 read_workspace_text 或 read_workspace_files]"
 				}
 				textParts = append(textParts, text)
 			} else {
-				notes = append(notes, fmt.Sprintf("用户引用了 workspace 文件：path=%s, name=%s, file_type=%s。需要内容时请调用 read_workspace_text；图片或二进制文件默认只作为 metadata。", attachment.Path, attachment.Name, attachment.FileType))
+				notes = append(notes, note+" 图片或二进制文件默认只作为 metadata。")
 			}
 		case "current_file":
+			note := fmt.Sprintf("current workspace file reference: path=%s, name=%s, file_type=%s。用户说“当前文件/这个文件/这里”时优先理解为此路径；需要最新或完整内容时调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
 			if attachment.Text != "" {
-				text := fmt.Sprintf("当前编辑器打开文件：%s\n内容：\n%s", attachment.Name, attachment.Text)
+				text := fmt.Sprintf("%s\noptional preview:\n%s", note, attachment.Text)
 				if attachment.Truncated {
-					text += "\n[该文件内容已截断]"
+					text += "\n[该文件预览已截断；需要完整内容请调用 read_workspace_text 或 read_workspace_files]"
 				}
 				textParts = append(textParts, text)
 			} else {
-				notes = append(notes, fmt.Sprintf("当前编辑器打开文件：path=%s, name=%s, file_type=%s。用户说“当前文件/这个文件/这里”时，优先理解为此文件；需要内容时请调用 read_workspace_text。", attachment.Path, attachment.Name, attachment.FileType))
+				notes = append(notes, note)
 			}
 		case "editor_panels_context":
 			var lines []string
@@ -52,7 +54,7 @@ func buildUserTextWithAttachments(content string, attachments []AttachmentPayloa
 				lines = append(lines, fmt.Sprintf("%s: panel_id=%s, active_file=%s, open_tabs=[%s]", panel.PositionLabel, panel.PanelID, panel.ActiveFilePath, tabs))
 			}
 			if len(lines) > 0 {
-				notes = append(notes, "当前打开的编辑器面板如下。用户提到左边/右边/中间编辑栏时按 position_label 定位；这里只提供路径和标签页，不包含文件全文；需要内容时请调用 read_workspace_text。\n  "+strings.Join(lines, "\n  "))
+				notes = append(notes, "当前打开的编辑器面板如下。用户提到左边/右边/中间编辑栏时按 position_label 定位；这里只提供路径和标签页，不包含文件全文；需要内容时请调用 read_workspace_text 或 read_workspace_files。\n  "+strings.Join(lines, "\n  "))
 			}
 		case "selected_skill":
 			if attachment.Text != "" {
@@ -84,7 +86,7 @@ func buildUserTextWithAttachments(content string, attachments []AttachmentPayloa
 	}
 
 	if len(textParts) > 0 {
-		builder.WriteString("\n\n以下是用户上传的文本文件：\n\n")
+		builder.WriteString("\n\n以下是用户上传文本或工作区文件预览：\n\n")
 		builder.WriteString(strings.Join(textParts, "\n\n---\n\n"))
 	}
 	if len(notes) > 0 {

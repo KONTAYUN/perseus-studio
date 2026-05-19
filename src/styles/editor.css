@@ -1,0 +1,48 @@
+.editor-tabs-strip {
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.editor-tabs-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.editor-tab-item {
+  position: relative;
+  flex: 0 0 min(176px, calc(100% - 4px));
+  width: min(176px, calc(100% - 4px));
+  cursor: default;
+}
+
+.editor-tab-drop-line {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  z-index: 3;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: rgb(59 130 246 / 0.86);
+  box-shadow:
+    0 0 0 1px rgb(147 197 253 / 0.3),
+    0 0 10px rgb(59 130 246 / 0.34);
+}
+
+.editor-tab-drop-line-before {
+  left: -4px;
+}
+
+.editor-tab-drop-line-after {
+  right: -4px;
+}
+
+.editor-textarea {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+@container (max-width: 520px) {
+  .editor-tab-item {
+    flex-basis: min(152px, calc(100% - 4px));
+    width: min(152px, calc(100% - 4px));
+  }
+}

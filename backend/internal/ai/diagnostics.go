@@ -122,6 +122,25 @@ func (s *Service) recordToolDiagnostic(ctx context.Context, opts RunOptions, con
 	})
 }
 
+func (s *Service) recordLocalPersistenceDiagnostic(ctx context.Context, opts RunOptions, conversationID, messageID, stage string, err error) string {
+	if s.diag == nil || opts.UserID == "" || err == nil {
+		return ""
+	}
+	item, appendErr := s.diag.Append(ctx, store.DiagnosticLogInput{
+		UserID:         opts.UserID,
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		TaskID:         opts.TaskID,
+		Stage:          stage,
+		Level:          "error",
+		ErrorMessage:   err.Error(),
+	})
+	if appendErr != nil {
+		return ""
+	}
+	return item.ID
+}
+
 func diagnosticErrorMessage(err error) string {
 	if err == nil {
 		return ""
@@ -136,6 +155,8 @@ func sanitizeUserFacingAIError(message string) string {
 	text := strings.TrimSpace(message)
 	lower := strings.ToLower(text)
 	switch {
+	case strings.Contains(lower, "tool_ledger") || strings.Contains(lower, "run checkpoint") || strings.Contains(lower, "local") && strings.Contains(lower, "persistence"):
+		return "本地状态保存失败，本轮已暂停；可以检查磁盘/数据库状态后继续本轮"
 	case strings.Contains(lower, "malformed http response"):
 		return "模型供应商连接协议异常，本轮请求没有拿到有效响应"
 	case strings.Contains(lower, "tls: bad record mac"):

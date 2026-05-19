@@ -1,0 +1,76 @@
+package ai
+
+import (
+	"context"
+
+	"webide-backend/internal/store"
+)
+
+func (s *Service) runOpenAIAgent(ctx context.Context, conversationID, messageID string, provider store.ModelProvider, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {
+	profile := runtimeProfileForProvider(provider)
+	messages = sanitizeConversationMessages(messages, profile)
+	attachments = sanitizeAttachmentPayloads(attachments, profile)
+	runtime := &agentRuntime{
+		service:            s,
+		protocol:           agentProtocolOpenAI,
+		conversationID:     conversationID,
+		messageID:          messageID,
+		provider:           provider,
+		messages:           messages,
+		attachments:        attachments,
+		opts:               opts,
+		profile:            profile,
+		allowTask:          opts.TaskID == "",
+		loadedToolsets:     allAgentToolsets(opts.TaskID == ""),
+		appliedMutations:   map[string]ToolEvent{},
+		requiresCompletion: opts.ForceTool != "" || opts.TaskID != "",
+		toolLoopActive:     opts.ForceTool != "" || opts.TaskID != "" || attachmentsRequireToolLoop(attachments),
+		transcript:         newAgentTranscript(),
+		contextManager:     newAgentContextManager(),
+	}
+	if checkpoint, ok := s.loadRunCheckpoint(ctx, opts); ok {
+		runtime.restoreCheckpoint(checkpoint)
+	}
+	return runtime.run(ctx)
+}
+
+func (s *Service) runAnthropicAgent(ctx context.Context, conversationID, messageID string, provider store.ModelProvider, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {
+	profile := runtimeProfileForProvider(provider)
+	messages = sanitizeConversationMessages(messages, profile)
+	attachments = sanitizeAttachmentPayloads(attachments, profile)
+	runtime := &agentRuntime{
+		service:            s,
+		protocol:           agentProtocolAnthropic,
+		conversationID:     conversationID,
+		messageID:          messageID,
+		provider:           provider,
+		messages:           messages,
+		attachments:        attachments,
+		opts:               opts,
+		profile:            profile,
+		allowTask:          opts.TaskID == "",
+		loadedToolsets:     allAgentToolsets(opts.TaskID == ""),
+		appliedMutations:   map[string]ToolEvent{},
+		requiresCompletion: opts.ForceTool != "" || opts.TaskID != "",
+		toolLoopActive:     opts.ForceTool != "" || opts.TaskID != "" || attachmentsRequireToolLoop(attachments),
+		transcript:         newAgentTranscript(),
+		contextManager:     newAgentContextManager(),
+	}
+	if checkpoint, ok := s.loadRunCheckpoint(ctx, opts); ok {
+		runtime.restoreCheckpoint(checkpoint)
+	}
+	return runtime.run(ctx)
+}
+
+func allAgentToolsets(allowTask bool) map[string]bool {
+	loaded := map[string]bool{
+		"workspace": true,
+		"command":   true,
+		"search":    true,
+		"skills":    true,
+	}
+	if allowTask {
+		loaded["task"] = true
+	}
+	return loaded
+}

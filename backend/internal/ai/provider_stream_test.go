@@ -118,6 +118,60 @@ func TestParseAnthropicStreamAccumulatesTextAndToolUse(t *testing.T) {
 	}
 }
 
+func TestParseAnthropicStreamReturnsProviderErrorEvent(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: error`,
+		`data: {"type":"error","error":{"type":"new_api_error","message":"No available channel for model demo-thinking"}}`,
+		``,
+	}, "\n")
+	_, err := parseAnthropicStream(strings.NewReader(stream), nil)
+	if err == nil {
+		t.Fatal("expected provider stream error")
+	}
+	if !strings.Contains(err.Error(), "No available channel") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseAnthropicStreamIgnoresThinkingDeltasForVisibleText(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0}}}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"internal notes"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":0}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":8}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	turn, err := parseAnthropicStream(strings.NewReader(stream), nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if turn.Content != "" || len(turn.ToolCalls) != 0 {
+		t.Fatalf("expected no visible content/tool calls, got %#v", turn)
+	}
+	if turn.FinishReason != "end_turn" {
+		t.Fatalf("unexpected finish reason: %q", turn.FinishReason)
+	}
+	if turn.Usage.InputTokens != 10 || turn.Usage.OutputTokens != 8 {
+		t.Fatalf("unexpected usage: %#v", turn.Usage)
+	}
+}
+
 type errAfterReader struct {
 	data string
 	err  error

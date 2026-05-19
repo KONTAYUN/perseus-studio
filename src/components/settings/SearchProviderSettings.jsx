@@ -2,6 +2,7 @@ import React from 'react';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import {
   Badge,
+  Button,
   CardActions,
   Checkbox,
   EmptyCard,
@@ -12,6 +13,7 @@ import {
   ProviderCard,
   SectionTitle,
   Select,
+  SettingsSection,
 } from './SettingsUI';
 
 const emptySearch = {
@@ -47,7 +49,7 @@ export default function SearchProviderSettings({ ide }) {
   };
 
   return (
-    <section className="settings-section-appear rounded-[24px] border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]">
+    <SettingsSection>
       <SectionTitle icon={<Search size={15} />} title="搜索工具" description="联网工具只作为后端 Agent tools 配置预留。" />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-3">
@@ -107,14 +109,17 @@ export default function SearchProviderSettings({ ide }) {
             />
           </Field>
           <Checkbox label="启用" checked={draft.enabled} onChange={(value) => setDraft({ ...draft, enabled: value })} />
-          <button
+          <Button
             data-testid="search-save-button"
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition-all hover:bg-blue-600 active:scale-[0.98]"
+            type="submit"
+            size="lg"
+            fullWidth
+            className="mt-5"
           >
             <Plus size={15} /> {editingId ? '保存搜索工具' : '添加搜索工具'}
-          </button>
+          </Button>
         </form>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

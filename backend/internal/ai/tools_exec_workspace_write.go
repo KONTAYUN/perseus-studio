@@ -1,0 +1,126 @@
+package ai
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+func (s *Service) execCreateWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", "正在创建文件...", "", err
+	}
+	var args struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", "", "正在创建文件...", "", fmt.Errorf("invalid tool arguments")
+	}
+	result, err := files.CreateTextFile(ctx, args.Path, args.Content, "ai_create")
+	if err != nil {
+		return "", "", "正在创建文件...", args.Path, err
+	}
+	summary := fmt.Sprintf("created file %s", result.Path)
+	return mustJSON(result), summary, "正在创建文件...", result.Path, nil
+}
+
+func (s *Service) execWriteWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", "正在写入文件...", "", err
+	}
+	var args struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", "", "正在写入文件...", "", fmt.Errorf("invalid tool arguments")
+	}
+	result, err := files.WriteExistingTextFile(ctx, args.Path, args.Content, "ai_write")
+	if err != nil {
+		return "", "", "正在写入文件...", args.Path, err
+	}
+	summary := fmt.Sprintf("wrote file %s", result.Path)
+	return mustJSON(result), summary, "正在写入文件...", result.Path, nil
+}
+
+func (s *Service) execSaveWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", "正在保存文件...", "", err
+	}
+	var args struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+		Mode    string `json:"mode"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", "", "正在保存文件...", "", fmt.Errorf("invalid tool arguments")
+	}
+	switch strings.ToLower(strings.TrimSpace(args.Mode)) {
+	case "create":
+		result, err := files.CreateTextFile(ctx, args.Path, args.Content, "ai_create")
+		if err != nil {
+			return "", "", "正在保存文件...", args.Path, err
+		}
+		payload := map[string]any{
+			"operation":     "create",
+			"path":          result.Path,
+			"hash":          result.Hash,
+			"version_id":    result.VersionID,
+			"size":          result.Size,
+			"changed_paths": result.ChangedPaths,
+		}
+		return mustJSON(workspaceToolPayload("save_workspace_file", result.Path, payload)), fmt.Sprintf("created file %s", result.Path), "正在保存文件...", result.Path, nil
+	case "overwrite":
+		result, err := files.WriteExistingTextFile(ctx, args.Path, args.Content, "ai_write")
+		if err != nil {
+			return "", "", "正在保存文件...", args.Path, err
+		}
+		payload := map[string]any{
+			"operation":     "overwrite",
+			"path":          result.Path,
+			"hash":          result.Hash,
+			"version_id":    result.VersionID,
+			"size":          result.Size,
+			"changed_paths": result.ChangedPaths,
+		}
+		return mustJSON(workspaceToolPayload("save_workspace_file", result.Path, payload)), fmt.Sprintf("overwrote file %s", result.Path), "正在保存文件...", result.Path, nil
+	default:
+		return "", "", "正在保存文件...", args.Path, fmt.Errorf("mode must be create or overwrite")
+	}
+}
+
+func (s *Service) execEditWorkspaceText(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", "正在编辑文件...", "", err
+	}
+	var args struct {
+		Path       string `json:"path"`
+		OldText    string `json:"old_text"`
+		NewText    string `json:"new_text"`
+		ReplaceAll bool   `json:"replace_all"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", "", "正在编辑文件...", "", fmt.Errorf("invalid tool arguments")
+	}
+	result, replacements, err := files.EditTextFile(ctx, args.Path, args.OldText, args.NewText, "ai_edit", args.ReplaceAll)
+	if err != nil {
+		return "", "", "正在编辑文件...", args.Path, err
+	}
+	payload := workspaceToolPayload("edit_workspace_text", result.Path, map[string]any{
+		"operation":     "edit",
+		"path":          result.Path,
+		"hash":          result.Hash,
+		"version_id":    result.VersionID,
+		"size":          result.Size,
+		"replacements":  replacements,
+		"changed_paths": result.ChangedPaths,
+		"next_hint":     "The edit was applied and verified. Continue with another precise edit if needed, otherwise call attempt_completion.",
+	})
+	return mustJSON(payload), fmt.Sprintf("edited %s (%d replacement(s))", result.Path, replacements), "正在编辑文件...", result.Path, nil
+}

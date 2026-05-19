@@ -11,6 +11,8 @@ services:
     environment:
       BACKEND_ADDR: ":8080"
       BACKEND_DB_PATH: "/data/app.db"
+      SQLITE_JOURNAL_MODE: "${SQLITE_JOURNAL_MODE:-DELETE}"
+      SQLITE_SYNCHRONOUS: "${SQLITE_SYNCHRONOUS:-FULL}"
       FRONTEND_DIST: "/app/dist"
       USER_DATA_ROOT: "/data/users"
       ENABLE_DEBUG_API: "${ENABLE_DEBUG_API:-false}"

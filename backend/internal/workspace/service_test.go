@@ -129,6 +129,137 @@ func TestReorderPathRejectsMovingFolderIntoItself(t *testing.T) {
 	}
 }
 
+func TestSearchFindsPathsAndSkipsTrash(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.MkdirNew("docs"); err != nil {
+		t.Fatalf("MkdirNew docs returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "docs/Alpha Note.md", "hello"); err != nil {
+		t.Fatalf("CreateFile alpha returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "docs/beta.txt", "hello"); err != nil {
+		t.Fatalf("CreateFile beta returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "trashed-alpha.txt", "gone"); err != nil {
+		t.Fatalf("CreateFile trash target returned error: %v", err)
+	}
+	if _, err := files.MoveToTrash("trashed-alpha.txt"); err != nil {
+		t.Fatalf("MoveToTrash returned error: %v", err)
+	}
+
+	results, err := files.Search("alpha", 20)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if got, want := searchPaths(results), []string{"docs/Alpha Note.md"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected search results: got %#v want %#v", got, want)
+	}
+	if results[0].ParentPath != "docs" || results[0].Type != "file" {
+		t.Fatalf("unexpected result metadata: %#v", results[0])
+	}
+
+	results, err = files.Search("docs", 20)
+	if err != nil {
+		t.Fatalf("Search docs returned error: %v", err)
+	}
+	if got := searchPaths(results); !reflect.DeepEqual(got, []string{"docs", "docs/Alpha Note.md", "docs/beta.txt"}) {
+		t.Fatalf("unexpected path search results: %#v", got)
+	}
+
+	results, err = files.Search("", 20)
+	if err != nil {
+		t.Fatalf("Search empty returned error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected empty query to return no results, got %#v", results)
+	}
+}
+
+func TestFindFilesSupportsQueryGlobAndSkipsIgnoredDirs(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.MkdirNew("src"); err != nil {
+		t.Fatalf("MkdirNew src returned error: %v", err)
+	}
+	if _, err := files.MkdirNew("node_modules"); err != nil {
+		t.Fatalf("MkdirNew node_modules returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "src/App.jsx", "export default function App() {}"); err != nil {
+		t.Fatalf("CreateFile App returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "node_modules/App.jsx", "ignored"); err != nil {
+		t.Fatalf("CreateFile ignored returned error: %v", err)
+	}
+
+	results, err := files.FindFiles("app", "*.jsx", 20)
+	if err != nil {
+		t.Fatalf("FindFiles returned error: %v", err)
+	}
+	if got, want := searchPaths(results), []string{"src/App.jsx"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected find results: got %#v want %#v", got, want)
+	}
+}
+
+func TestSearchTextReturnsLineMetadata(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.MkdirNew("src"); err != nil {
+		t.Fatalf("MkdirNew src returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "src/App.jsx", "one\nconst needle = true;\nthree\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	results, limited, err := files.SearchText("needle", false, 20, 1)
+	if err != nil {
+		t.Fatalf("SearchText returned error: %v", err)
+	}
+	if limited {
+		t.Fatal("did not expect limited search")
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one match, got %#v", results)
+	}
+	if results[0].Path != "src/App.jsx" || results[0].Line != 2 || results[0].Column != 7 || results[0].Before != "one" || results[0].After != "three" {
+		t.Fatalf("unexpected search result metadata: %#v", results[0])
+	}
+}
+
+func TestReadTextFileRangeAndEditTextFile(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.CreateFile(ctx, "draft.txt", "one\ntwo\nthree\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	read, err := files.ReadTextFileRange("draft.txt", 2, 2, 20000)
+	if err != nil {
+		t.Fatalf("ReadTextFileRange returned error: %v", err)
+	}
+	if read.Content != "two\n" || read.StartLine != 2 || read.EndLine != 2 || read.TotalLines != 4 {
+		t.Fatalf("unexpected ranged read: %#v", read)
+	}
+
+	result, replacements, err := files.EditTextFile(ctx, "draft.txt", "two", "TWO", "test_edit", false)
+	if err != nil {
+		t.Fatalf("EditTextFile returned error: %v", err)
+	}
+	if replacements != 1 || result.Path != "draft.txt" {
+		t.Fatalf("unexpected edit result: result=%#v replacements=%d", result, replacements)
+	}
+	after, err := files.ReadFile("draft.txt")
+	if err != nil {
+		t.Fatalf("ReadFile after edit returned error: %v", err)
+	}
+	if after.Content != "one\nTWO\nthree\n" {
+		t.Fatalf("unexpected edited content: %q", after.Content)
+	}
+}
+
 func TestTrashItemsRestoreAndConflict(t *testing.T) {
 	ctx := context.Background()
 	files := newTestService(t)
@@ -256,6 +387,14 @@ func treeNames(nodes []TreeNode) []string {
 		names = append(names, node.Name)
 	}
 	return names
+}
+
+func searchPaths(nodes []SearchResult) []string {
+	paths := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		paths = append(paths, node.Path)
+	}
+	return paths
 }
 
 func findTreeNode(nodes []TreeNode, path string) *TreeNode {

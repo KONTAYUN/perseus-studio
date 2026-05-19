@@ -40,7 +40,7 @@ func TestBuildUserTextWithEditorPanelsContextDoesNotIncludeFileContent(t *testin
 		"当前打开的编辑器面板如下",
 		"left: panel_id=editor_1, active_file=notes/plan.md, open_tabs=[notes/plan.md, draft.txt]",
 		"right: panel_id=editor_2, active_file=src/app.js, open_tabs=[src/app.js]",
-		"需要内容时请调用 read_workspace_text",
+		"需要内容时请调用 read_workspace_text 或 read_workspace_files",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected context to contain %q, got:\n%s", expected, text)
@@ -76,11 +76,11 @@ func TestBuildUserTextWithTextAttachmentIncludesOnlyExplicitTextFiles(t *testing
 
 	for _, expected := range []string{
 		"总结这个附件",
-		"以下是用户上传的文本文件",
+		"以下是用户上传文本或工作区文件预览",
 		"文件名：uploaded.txt",
 		"explicit uploaded text",
 		"[该文件内容已截断]",
-		"用户引用了 workspace 文件：path=workspace/private.md",
+		"workspace file reference: path=workspace/private.md",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected attachment text to contain %q, got:\n%s", expected, text)
@@ -112,11 +112,11 @@ func TestBuildUserTextWithExplicitWorkspaceAndCurrentFileContent(t *testing.T) {
 	})
 
 	for _, expected := range []string{
-		"用户明确引用了 workspace 文件：chapter.txt",
+		"workspace file reference: path=draft/chapter.txt",
 		"chapter body",
-		"当前编辑器打开文件：current.txt",
+		"current workspace file reference: path=draft/current.txt",
 		"current body",
-		"[该文件内容已截断]",
+		"[该文件预览已截断；需要完整内容请调用 read_workspace_text 或 read_workspace_files]",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected attachment text to contain %q, got:\n%s", expected, text)

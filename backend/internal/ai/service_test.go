@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -23,6 +25,7 @@ type testAIEnv struct {
 	configs       *store.ConfigStore
 	conversations *store.ConversationStore
 	diagnostics   *store.DiagnosticStore
+	runs          *store.AgentRunStore
 	files         *workspace.Service
 }
 
@@ -46,7 +49,11 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 		assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), legacy)
 	}
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "inspect_workspace")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "find_workspace_files")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "search_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_text")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_files")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "save_workspace_file")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "organize_workspace_matches")
@@ -56,8 +63,13 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_skill")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "install_skill_from_attachment")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "delete_skill")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "ask_followup_question")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "inspect_workspace")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "find_workspace_files")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "search_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_text")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_files")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "save_workspace_file")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "organize_workspace_matches")
@@ -67,6 +79,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_skill")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "install_skill_from_attachment")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "delete_skill")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "ask_followup_question")
 }
 
 func TestWorkspacePromptsDoNotExposeLegacyWorkspaceToolNames(t *testing.T) {
@@ -86,10 +99,125 @@ func TestWorkspacePromptsDoNotExposeLegacyWorkspaceToolNames(t *testing.T) {
 
 	for _, prompt := range prompts {
 		for _, legacyName := range legacyNames {
-			if strings.Contains(prompt, legacyName) {
+			pattern := regexp.MustCompile(`(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(legacyName) + `([^A-Za-z0-9_]|$)`)
+			if pattern.MatchString(prompt) {
 				t.Fatalf("prompt exposed legacy workspace tool %q: %s", legacyName, prompt)
 			}
 		}
+	}
+}
+
+func TestToolEventLabelsUseCompletedVoice(t *testing.T) {
+	if label := userFriendlyToolLabel("read_workspace_text"); label != "已读取文件" {
+		t.Fatalf("expected completed read label, got %q", label)
+	}
+	if label := userFriendlyToolLabel("read_workspace_files"); label != "已读取文件" {
+		t.Fatalf("expected completed batch read label, got %q", label)
+	}
+	if label := userFriendlyToolLabel("save_workspace_file"); label != "已保存文件" {
+		t.Fatalf("expected completed save label, got %q", label)
+	}
+	if label := userFriendlyToolLabel("ask_followup_question"); label != "已询问用户" {
+		t.Fatalf("expected completed question label, got %q", label)
+	}
+
+	runtime := &agentRuntime{}
+	_, event := runtime.alreadyAppliedToolResult(agentToolCall{ID: "call_1", Name: "save_workspace_file"}, ToolEvent{
+		ToolName: "save_workspace_file",
+		Status:   "success",
+	})
+	if event.Label != "已保存文件" {
+		t.Fatalf("expected repeated mutation to use completed label, got %q", event.Label)
+	}
+}
+
+func TestLedgerToolArgumentsJSONKeepsValidJSONForLargeArguments(t *testing.T) {
+	raw := mustJSON(map[string]any{
+		"path":    "白凌传·造化篇（续）/第三十集.txt",
+		"mode":    "overwrite",
+		"content": strings.Repeat("很长的正文", 800),
+	})
+	ledger := ledgerToolArgumentsJSON(raw)
+	if len([]rune(ledger)) > 2000 {
+		t.Fatalf("expected ledger arguments under 2000 chars, got %d", len([]rune(ledger)))
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(ledger), &decoded); err != nil {
+		t.Fatalf("ledger arguments should remain valid JSON: %v\n%s", err, ledger)
+	}
+	if decoded["path"] != "白凌传·造化篇（续）/第三十集.txt" || decoded["mode"] != "overwrite" {
+		t.Fatalf("expected path and mode preserved, got %#v", decoded)
+	}
+	if decoded["arguments_truncated_for_ledger"] != true {
+		t.Fatalf("expected truncation marker, got %#v", decoded)
+	}
+	content, _ := decoded["content"].(string)
+	if !strings.Contains(content, "truncated for ledger") {
+		t.Fatalf("expected content to be summarized, got %q", content)
+	}
+}
+
+func TestHandleFollowupQuestionCompletesRun(t *testing.T) {
+	allowFreeform := false
+	runtime := &agentRuntime{}
+	result, isError, completed := runtime.handleFollowupQuestion("call_question_1", mustJSON(map[string]any{
+		"question":       "这篇文章面向谁？",
+		"options":        []string{"普通读者", "专业编辑", "普通读者", "  "},
+		"allow_freeform": allowFreeform,
+	}))
+	if isError || !completed {
+		t.Fatalf("expected follow-up question to complete successfully, isError=%v completed=%v result=%s", isError, completed, result)
+	}
+	if runtime.completedContent != "这篇文章面向谁？" {
+		t.Fatalf("unexpected completed content: %q", runtime.completedContent)
+	}
+	if len(runtime.events) != 1 {
+		t.Fatalf("expected one event, got %#v", runtime.events)
+	}
+	event := runtime.events[0]
+	if event.ToolName != "ask_followup_question" || event.Status != "success" || event.Question != "这篇文章面向谁？" {
+		t.Fatalf("unexpected question event: %#v", event)
+	}
+	if event.AllowFreeform == nil || *event.AllowFreeform {
+		t.Fatalf("expected allow_freeform=false, got %#v", event.AllowFreeform)
+	}
+	if len(event.Options) != 2 || event.Options[0] != "普通读者" || event.Options[1] != "专业编辑" {
+		t.Fatalf("unexpected options: %#v", event.Options)
+	}
+
+}
+
+func TestHandleFollowupQuestionRejectsEmptyQuestion(t *testing.T) {
+	runtime := &agentRuntime{}
+	_, isError, completed := runtime.handleFollowupQuestion("call_question_1", `{"question":"   "}`)
+	if !isError || completed {
+		t.Fatalf("expected empty question to be rejected, isError=%v completed=%v", isError, completed)
+	}
+}
+
+func TestAgentRecoveryDefaultsFollowMatureRetryPolicy(t *testing.T) {
+	t.Setenv("PERSEUS_AGENT_MAX_CHECKPOINT_RESUMES", "")
+	if got := agentMaxCheckpointResumes(); got != 2 {
+		t.Fatalf("expected default checkpoint resume attempts to be 2, got %d", got)
+	}
+	t.Setenv("PERSEUS_AGENT_MAX_CHECKPOINT_RESUMES", "6")
+	if got := agentMaxCheckpointResumes(); got != 6 {
+		t.Fatalf("expected configured checkpoint resume attempts to be 6, got %d", got)
+	}
+	t.Setenv("PERSEUS_AGENT_MAX_CHECKPOINT_RESUMES", "99")
+	if got := agentMaxCheckpointResumes(); got != 20 {
+		t.Fatalf("expected checkpoint resume attempts to be capped at 20, got %d", got)
+	}
+}
+
+func TestAgentRecoveryDelayBackoffCanBeDisabledForTests(t *testing.T) {
+	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
+	if delay := agentRecoveryDelay(3); delay != 0 {
+		t.Fatalf("expected disabled recovery delay, got %s", delay)
+	}
+	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "100")
+	if delay := agentRecoveryDelay(3); delay != 400*time.Millisecond {
+		t.Fatalf("expected exponential recovery delay, got %s", delay)
 	}
 }
 
@@ -202,6 +330,23 @@ func TestExecuteToolWriteWorkspaceFileMarkdown(t *testing.T) {
 	}
 	if payload["content"] != "hello markdown" {
 		t.Fatalf("unexpected markdown read payload: %#v", payload["content"])
+	}
+
+	batchResult, _, _, _, err := service.executeTool(context.Background(), "read_workspace_files", `{"paths":["notes/readme.markdown","notes/test.md","missing.md"],"max_chars_per_file":5000}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("batch read executeTool returned error: %v", err)
+	}
+	var batchPayload struct {
+		Items       []struct{ Path, Content string }
+		Failed      []struct{ Path, Error string }
+		Count       int `json:"count"`
+		FailedCount int `json:"failed_count"`
+	}
+	if err := json.Unmarshal([]byte(batchResult), &batchPayload); err != nil {
+		t.Fatalf("invalid batch result json: %v", err)
+	}
+	if batchPayload.Count != 2 || batchPayload.FailedCount != 1 || len(batchPayload.Items) != 2 || len(batchPayload.Failed) != 1 {
+		t.Fatalf("unexpected batch payload: %#v", batchPayload)
 	}
 }
 
@@ -577,6 +722,89 @@ func TestInjectConversationSummaryDropsSummarizedPrefix(t *testing.T) {
 	}
 }
 
+func TestMaybeRefreshConversationSummaryUsesTokenWatermark(t *testing.T) {
+	service, _, _, _ := newTestAIService(t)
+	ctx := context.Background()
+	provider := store.ModelProvider{
+		Name:                        "test",
+		Protocol:                    "openai",
+		BaseURL:                     "http://127.0.0.1",
+		ModelID:                     "gpt-test",
+		AutoCompactEnabled:          true,
+		AutoCompactThresholdPercent: 85,
+		CompactReservedTokens:       100,
+		PruneToolOutputsEnabled:     true,
+	}
+	messages := make([]store.Message, 0, 30)
+	for index := 0; index < 30; index++ {
+		messages = append(messages, store.Message{
+			ID:      fmt.Sprintf("m%d", index),
+			Role:    "user",
+			Content: strings.Repeat("长上下文", 200),
+		})
+	}
+	var events []string
+	result := service.maybeRefreshConversationSummary(ctx, "conv-test", provider, messages, store.ConversationSummary{}, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			events = append(events, eventType)
+		},
+	}, providerRuntimeProfile{
+		ContextWindowTokens:     1000,
+		AutoCompactEnabled:      true,
+		CompactThresholdPercent: 80,
+		CompactReservedTokens:   100,
+	}, "auto_threshold", "")
+
+	if !result.Skipped {
+		t.Fatalf("expected summary to skip because test provider is unreachable, got %#v", result)
+	}
+	if len(events) == 0 || events[0] != "context_compaction_started" {
+		t.Fatalf("expected compaction start event, got %#v", events)
+	}
+}
+
+func TestPressureCompactionCanSummarizeShortButLargeConversation(t *testing.T) {
+	service, _, _, _ := newTestAIService(t)
+	ctx := context.Background()
+	provider := store.ModelProvider{
+		Name:                        "test",
+		Protocol:                    "openai",
+		BaseURL:                     "http://127.0.0.1",
+		ModelID:                     "gpt-test",
+		AutoCompactEnabled:          true,
+		AutoCompactThresholdPercent: 85,
+		CompactReservedTokens:       100,
+	}
+	messages := make([]store.Message, 0, 10)
+	for index := 0; index < 10; index++ {
+		messages = append(messages, store.Message{
+			ID:      fmt.Sprintf("big%d", index),
+			Role:    "user",
+			Content: strings.Repeat("single huge message ", 600),
+		})
+	}
+	var events []string
+	result := service.maybeRefreshConversationSummary(ctx, "conv-short-big", provider, messages, store.ConversationSummary{}, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			events = append(events, eventType)
+		},
+	}, providerRuntimeProfile{
+		ContextWindowTokens:     1000,
+		AutoCompactEnabled:      true,
+		CompactThresholdPercent: 80,
+		CompactReservedTokens:   100,
+	}, "auto_threshold", "")
+
+	if result.CompactedMessageCount == 0 {
+		t.Fatalf("expected pressure compaction to select a chunk, got %#v", result)
+	}
+	if len(events) == 0 || events[0] != "context_compaction_started" {
+		t.Fatalf("expected compaction start event, got %#v", events)
+	}
+}
+
 func TestPickSearchProviderUsesPriority(t *testing.T) {
 	service, _, _, _ := newTestAIService(t)
 	ctx := context.Background()
@@ -641,6 +869,9 @@ func TestAttachmentsRequireToolLoop(t *testing.T) {
 	if !attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "workspace_file", Path: "draft.txt"}}) {
 		t.Fatal("expected workspace file reference to activate tool loop")
 	}
+	if !attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "workspace_file", Path: "draft.txt", Text: "preview"}}) {
+		t.Fatal("expected workspace file reference with preview to activate tool loop")
+	}
 	if !attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}}) {
 		t.Fatal("expected current file reference to activate tool loop")
 	}
@@ -649,6 +880,68 @@ func TestAttachmentsRequireToolLoop(t *testing.T) {
 	}
 	if attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "text", Name: "note.txt"}}) {
 		t.Fatal("did not expect plain text attachment to activate tool loop")
+	}
+}
+
+func TestSelectedWorkspaceReferencesConstrainReadAndMutationScope(t *testing.T) {
+	runtime := &agentRuntime{
+		attachments: []AttachmentPayload{
+			{Kind: "workspace_file", Path: "白凌传·造化篇（续）/第三十一集.txt", Name: "第三十一集.txt"},
+			{Kind: "workspace_file", Path: "白凌传·造化篇（续）/第三十二集.txt", Name: "第三十二集.txt"},
+			{Kind: "workspace_file", Path: "白凌传·造化篇（续）/第三十三集.txt", Name: "第三十三集.txt"},
+			{Kind: "workspace_file", Path: "白凌传·造化篇（续）/第三十七集.txt", Name: "第三十七集.txt"},
+		},
+	}
+
+	if got := runtime.validateSelectedReferenceScope(agentToolCall{
+		Name:          "read_workspace_files",
+		ArgumentsJSON: `{"paths":["白凌传·造化篇（续）/第三十集.txt","白凌传·造化篇（续）/第三十一集.txt"]}`,
+	}); !strings.Contains(got, "outside") {
+		t.Fatalf("expected outside-scope read to be rejected, got %q", got)
+	}
+	if got := runtime.validateSelectedReferenceScope(agentToolCall{
+		Name:          "save_workspace_file",
+		ArgumentsJSON: `{"path":"白凌传·造化篇（续）/第三十一集.txt","content":"x","mode":"overwrite"}`,
+	}); got != "" {
+		t.Fatalf("expected selected overwrite to be allowed, got %q", got)
+	}
+	if got := runtime.validateSelectedReferenceScope(agentToolCall{
+		Name:          "manage_workspace_path",
+		ArgumentsJSON: `{"action":"move","path":"二十九集.txt","new_parent_path":"白凌传·造化篇（续）"}`,
+	}); !strings.Contains(got, "outside") {
+		t.Fatalf("expected unreferenced extra episode to be rejected, got %q", got)
+	}
+	if got := runtime.validateSelectedReferenceScope(agentToolCall{
+		Name:          "read_workspace_text",
+		ArgumentsJSON: `{"path":"另一个文件夹/第三十一集.txt"}`,
+	}); !strings.Contains(got, "outside") {
+		t.Fatalf("expected same-basename file in another folder to be rejected, got %q", got)
+	}
+	if got := runtime.validateSelectedReferenceScope(agentToolCall{
+		Name:          "save_workspace_file",
+		ArgumentsJSON: `{"path":"白凌传·造化篇（续）/优化说明.txt","content":"x","mode":"create"}`,
+	}); got != "" {
+		t.Fatalf("expected new output file creation to be allowed, got %q", got)
+	}
+}
+
+func TestWorkspaceToolNamesAndGroups(t *testing.T) {
+	loaded := map[string]bool{"workspace": true}
+	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "edit_workspace_text"} {
+		assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
+		assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
+	}
+	if group := toolGroup("find_workspace_files"); group != ToolGroupSearch {
+		t.Fatalf("expected find_workspace_files search group, got %q", group)
+	}
+	if group := toolGroup("edit_workspace_text"); group != ToolGroupEdit {
+		t.Fatalf("expected edit_workspace_text edit group, got %q", group)
+	}
+	if group := toolGroup("read_workspace_files"); group != ToolGroupRead {
+		t.Fatalf("expected read_workspace_files read group, got %q", group)
+	}
+	if !isWorkspaceMutationTool("edit_workspace_text") {
+		t.Fatal("expected edit_workspace_text to be a workspace mutation")
 	}
 }
 
@@ -676,7 +969,35 @@ func TestHandleNoToolTurnRejectsPlainTextWhenToolLoopActive(t *testing.T) {
 	}
 }
 
-func TestRecoverableFinalResponseErrorFinishesFromVerifiedMutation(t *testing.T) {
+func TestRuntimeToolChoiceRequiresToolsForActiveToolLoop(t *testing.T) {
+	runtime := &agentRuntime{toolLoopActive: true}
+	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceRequired {
+		t.Fatalf("expected required tool choice, got %#v", choice)
+	}
+	if got := openAIProviderToolChoice(runtime.toolChoice()); got != "required" {
+		t.Fatalf("expected OpenAI required tool choice, got %#v", got)
+	}
+	anthropic := anthropicProviderToolChoice(runtime.toolChoice())
+	if anthropic["type"] != "any" || anthropic["disable_parallel_tool_use"] != true {
+		t.Fatalf("expected Anthropic any tool choice with serial tools, got %#v", anthropic)
+	}
+}
+
+func TestRuntimeForceToolOnlyBeforeFirstToolAttempt(t *testing.T) {
+	runtime := &agentRuntime{opts: RunOptions{ForceTool: "save_workspace_file"}}
+	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceForced || choice.ToolName != "save_workspace_file" {
+		t.Fatalf("expected forced save tool choice before tool attempt, got %#v", choice)
+	}
+	if got := openAIProviderToolChoice(runtime.toolChoice()); fmt.Sprint(got) == "required" {
+		t.Fatalf("expected specific OpenAI tool choice before first attempt, got %#v", got)
+	}
+	runtime.toolCalls = 1
+	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceRequired {
+		t.Fatalf("expected required-any after first forced tool attempt, got %#v", choice)
+	}
+}
+
+func TestRecoverableFinalResponseErrorFailsInsteadOfFakeSuccess(t *testing.T) {
 	runtime := &agentRuntime{
 		performedMutation: true,
 		events: []ToolEvent{{
@@ -689,11 +1010,11 @@ func TestRecoverableFinalResponseErrorFinishesFromVerifiedMutation(t *testing.T)
 	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
 		FinishReason: "recoverable_final_response_error",
 	})
-	if err != nil || !ok {
-		t.Fatalf("expected verified fallback reply, ok=%v err=%v", ok, err)
+	if err == nil || !ok {
+		t.Fatalf("expected recoverable final response error, ok=%v err=%v reply=%#v", ok, err, reply)
 	}
-	if !strings.Contains(reply.Content, "demo.txt") {
-		t.Fatalf("expected changed path in reply, got %q", reply.Content)
+	if !strings.Contains(err.Error(), "可继续本轮") {
+		t.Fatalf("expected continue hint in error, got %v", err)
 	}
 }
 
@@ -937,6 +1258,7 @@ func newTestAIEnv(t *testing.T) *testAIEnv {
 		configs:       configs,
 		conversations: conversations,
 		diagnostics:   diagnostics,
+		runs:          runs,
 		files:         files,
 	}
 }

@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
-
-	"webide-backend/internal/workspace"
 )
 
 func (s *Service) execListWorkspaceFiles(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
@@ -26,9 +23,72 @@ func (s *Service) execListWorkspaceFiles(ctx context.Context, userID, argumentsJ
 	if err != nil {
 		return "", "", "正在查看工作区文件...", args.Path, err
 	}
-	payload := map[string]any{"path": args.Path, "items": nodes, "limited": limited}
+	payload := workspaceToolPayload("inspect_workspace", args.Path, map[string]any{
+		"path":      args.Path,
+		"items":     nodes,
+		"limited":   limited,
+		"next_hint": "Use find_workspace_files/search_workspace_text for targeted discovery, then read_workspace_text before editing.",
+	})
 	summary := fmt.Sprintf("listed %d workspace items", countTreeNodes(nodes))
 	return mustJSON(payload), summary, "正在查看工作区文件...", args.Path, nil
+}
+
+func (s *Service) execFindWorkspaceFiles(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", "正在查找文件...", "", err
+	}
+	var args struct {
+		Query      string `json:"query"`
+		Pattern    string `json:"pattern"`
+		MaxResults int    `json:"max_results"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", "", "正在查找文件...", "", fmt.Errorf("invalid tool arguments")
+	}
+	results, err := files.FindFiles(args.Query, args.Pattern, args.MaxResults)
+	if err != nil {
+		return "", "", "正在查找文件...", "", err
+	}
+	payload := workspaceToolPayload("find_workspace_files", "", map[string]any{
+		"query":     args.Query,
+		"pattern":   args.Pattern,
+		"items":     results,
+		"count":     len(results),
+		"next_hint": "Use read_workspace_text for file contents or search_workspace_text to find text within these paths.",
+	})
+	summary := fmt.Sprintf("found %d workspace item(s)", len(results))
+	return mustJSON(payload), summary, "正在查找文件...", "", nil
+}
+
+func (s *Service) execSearchWorkspaceText(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", "正在搜索文件内容...", "", err
+	}
+	var args struct {
+		Query        string `json:"query"`
+		Regex        bool   `json:"regex"`
+		ContextLines int    `json:"context_lines"`
+		MaxResults   int    `json:"max_results"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", "", "正在搜索文件内容...", "", fmt.Errorf("invalid tool arguments")
+	}
+	results, limited, err := files.SearchText(args.Query, args.Regex, args.MaxResults, args.ContextLines)
+	if err != nil {
+		return "", "", "正在搜索文件内容...", "", err
+	}
+	payload := workspaceToolPayload("search_workspace_text", "", map[string]any{
+		"query":     args.Query,
+		"regex":     args.Regex,
+		"matches":   results,
+		"count":     len(results),
+		"limited":   limited,
+		"next_hint": "Read the relevant path/range with read_workspace_text before editing, unless the exact replacement is already known.",
+	})
+	summary := fmt.Sprintf("found %d text match(es)", len(results))
+	return mustJSON(payload), summary, "正在搜索文件内容...", "", nil
 }
 
 func (s *Service) execReadWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
@@ -37,397 +97,133 @@ func (s *Service) execReadWorkspaceFile(ctx context.Context, userID, argumentsJS
 		return "", "", "正在读取工作区文件...", "", err
 	}
 	var args struct {
-		Path string `json:"path"`
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line"`
+		EndLine   int    `json:"end_line"`
+		MaxChars  int    `json:"max_chars"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在读取工作区文件...", "", fmt.Errorf("invalid tool arguments")
 	}
-	result, err := files.ReadTextFile(args.Path, 20000)
+	maxChars := args.MaxChars
+	if maxChars <= 0 || maxChars > 50000 {
+		maxChars = 20000
+	}
+	result, err := files.ReadTextFileRange(args.Path, args.StartLine, args.EndLine, maxChars)
 	label := "正在读取工作区文件..."
 	if err != nil {
 		return "", "", label, args.Path, err
 	}
 	summary := fmt.Sprintf("read %s (%d chars, truncated=%t)", result.Path, len([]rune(result.Content)), result.Truncated)
-	return mustJSON(result), summary, label, result.Path, nil
+	payload := workspaceToolPayload("read_workspace_text", result.Path, map[string]any{
+		"path":        result.Path,
+		"content":     result.Content,
+		"truncated":   result.Truncated,
+		"start_line":  result.StartLine,
+		"end_line":    result.EndLine,
+		"total_lines": result.TotalLines,
+		"next_hint":   "Use edit_workspace_text for a precise existing-file edit, or save_workspace_file only for full overwrite/new file.",
+	})
+	return mustJSON(payload), summary, label, result.Path, nil
 }
 
-func (s *Service) execCreateWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+const maxBatchReadFiles = 30
+
+func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
 	files, err := s.factory.Workspace(userID)
 	if err != nil {
-		return "", "", "正在创建文件...", "", err
+		return "", "", "正在批量读取文件...", "", err
 	}
 	var args struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
+		Paths           []string `json:"paths"`
+		StartLine       int      `json:"start_line"`
+		EndLine         int      `json:"end_line"`
+		MaxCharsPerFile int      `json:"max_chars_per_file"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在创建文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在批量读取文件...", "", fmt.Errorf("invalid tool arguments")
 	}
-	result, err := files.CreateTextFile(ctx, args.Path, args.Content, "ai_create")
-	if err != nil {
-		return "", "", "正在创建文件...", args.Path, err
+	paths := normalizeBatchReadPaths(args.Paths)
+	if len(paths) == 0 {
+		return "", "", "正在批量读取文件...", "", fmt.Errorf("paths is required")
 	}
-	summary := fmt.Sprintf("created file %s", result.Path)
-	return mustJSON(result), summary, "正在创建文件...", result.Path, nil
-}
-
-func (s *Service) execWriteWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在写入文件...", "", err
+	limitedByCount := false
+	if len(paths) > maxBatchReadFiles {
+		paths = paths[:maxBatchReadFiles]
+		limitedByCount = true
 	}
-	var args struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在写入文件...", "", fmt.Errorf("invalid tool arguments")
-	}
-	result, err := files.WriteExistingTextFile(ctx, args.Path, args.Content, "ai_write")
-	if err != nil {
-		return "", "", "正在写入文件...", args.Path, err
-	}
-	summary := fmt.Sprintf("wrote file %s", result.Path)
-	return mustJSON(result), summary, "正在写入文件...", result.Path, nil
-}
-
-func (s *Service) execSaveWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在保存文件...", "", err
-	}
-	var args struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-		Mode    string `json:"mode"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在保存文件...", "", fmt.Errorf("invalid tool arguments")
-	}
-	switch strings.ToLower(strings.TrimSpace(args.Mode)) {
-	case "create":
-		result, err := files.CreateTextFile(ctx, args.Path, args.Content, "ai_create")
-		if err != nil {
-			return "", "", "正在保存文件...", args.Path, err
-		}
-		payload := map[string]any{
-			"operation":     "create",
-			"path":          result.Path,
-			"hash":          result.Hash,
-			"version_id":    result.VersionID,
-			"size":          result.Size,
-			"changed_paths": result.ChangedPaths,
-		}
-		return mustJSON(payload), fmt.Sprintf("created file %s", result.Path), "正在保存文件...", result.Path, nil
-	case "overwrite":
-		result, err := files.WriteExistingTextFile(ctx, args.Path, args.Content, "ai_write")
-		if err != nil {
-			return "", "", "正在保存文件...", args.Path, err
-		}
-		payload := map[string]any{
-			"operation":     "overwrite",
-			"path":          result.Path,
-			"hash":          result.Hash,
-			"version_id":    result.VersionID,
-			"size":          result.Size,
-			"changed_paths": result.ChangedPaths,
-		}
-		return mustJSON(payload), fmt.Sprintf("overwrote file %s", result.Path), "正在保存文件...", result.Path, nil
-	default:
-		return "", "", "正在保存文件...", args.Path, fmt.Errorf("mode must be create or overwrite")
-	}
-}
-
-func (s *Service) execMkdirWorkspace(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在创建文件夹...", "", err
-	}
-	var args struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在创建文件夹...", "", fmt.Errorf("invalid tool arguments")
-	}
-	result, err := files.MkdirNew(args.Path)
-	if err != nil {
-		return "", "", "正在创建文件夹...", args.Path, err
-	}
-	summary := fmt.Sprintf("created folder %s", result.Path)
-	return mustJSON(result), summary, "正在创建文件夹...", result.Path, nil
-}
-
-func (s *Service) execRenameWorkspacePath(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在重命名...", "", err
-	}
-	var args struct {
-		OldPath string `json:"old_path"`
-		NewName string `json:"new_name"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在重命名...", "", fmt.Errorf("invalid tool arguments")
-	}
-	result, err := files.RenameWithNewName(args.OldPath, args.NewName)
-	if err != nil {
-		return "", "", "正在重命名...", args.OldPath, err
-	}
-	summary := fmt.Sprintf("renamed %s to %s", result.OldPath, result.NewPath)
-	return mustJSON(result), summary, "正在重命名...", result.NewPath, nil
-}
-
-func (s *Service) execMoveWorkspacePath(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在移动...", "", err
-	}
-	var args struct {
-		OldPath       string `json:"old_path"`
-		NewParentPath string `json:"new_parent_path"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在移动...", "", fmt.Errorf("invalid tool arguments")
-	}
-	result, err := files.MovePath(args.OldPath, args.NewParentPath)
-	if err != nil {
-		return "", "", "正在移动...", args.OldPath, err
-	}
-	summary := fmt.Sprintf("moved %s to %s", result.OldPath, result.NewPath)
-	return mustJSON(result), summary, "正在移动...", result.NewPath, nil
-}
-
-func (s *Service) execManageWorkspacePath(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在管理路径...", "", err
-	}
-	var args struct {
-		Action        string `json:"action"`
-		Path          string `json:"path"`
-		NewName       string `json:"new_name"`
-		NewParentPath string `json:"new_parent_path"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在管理路径...", "", fmt.Errorf("invalid tool arguments")
-	}
-	switch strings.ToLower(strings.TrimSpace(args.Action)) {
-	case "mkdir":
-		result, err := files.MkdirNew(args.Path)
-		if err != nil {
-			return "", "", "正在管理路径...", args.Path, err
-		}
-		payload := map[string]any{
-			"operation":     "mkdir",
-			"path":          result.Path,
-			"changed_paths": result.ChangedPaths,
-		}
-		return mustJSON(payload), fmt.Sprintf("created folder %s", result.Path), "正在管理路径...", result.Path, nil
-	case "rename":
-		result, err := files.RenameWithNewName(args.Path, args.NewName)
-		if err != nil {
-			return "", "", "正在管理路径...", args.Path, err
-		}
-		payload := map[string]any{
-			"operation":     "rename",
-			"path":          result.Path,
-			"old_path":      result.OldPath,
-			"new_path":      result.NewPath,
-			"changed_paths": result.ChangedPaths,
-		}
-		return mustJSON(payload), fmt.Sprintf("renamed %s to %s", result.OldPath, result.NewPath), "正在管理路径...", result.NewPath, nil
-	case "move":
-		result, err := files.MovePath(args.Path, args.NewParentPath)
-		if err != nil {
-			return "", "", "正在管理路径...", args.Path, err
-		}
-		payload := map[string]any{
-			"operation":     "move",
-			"path":          result.Path,
-			"old_path":      result.OldPath,
-			"new_path":      result.NewPath,
-			"changed_paths": result.ChangedPaths,
-		}
-		return mustJSON(payload), fmt.Sprintf("moved %s to %s", result.OldPath, result.NewPath), "正在管理路径...", result.NewPath, nil
-	case "trash":
-		result, err := files.MoveToTrash(args.Path)
-		if err != nil {
-			return "", "", "正在管理路径...", args.Path, err
-		}
-		payload := map[string]any{
-			"operation":     "trash",
-			"path":          result.Path,
-			"old_path":      result.OldPath,
-			"new_path":      result.NewPath,
-			"changed_paths": result.ChangedPaths,
-		}
-		return mustJSON(payload), fmt.Sprintf("moved %s to trash %s", result.OldPath, result.NewPath), "正在管理路径...", result.NewPath, nil
-	default:
-		return "", "", "正在管理路径...", args.Path, fmt.Errorf("action must be mkdir, rename, move, or trash")
-	}
-}
-
-func (s *Service) execOrganizeWorkspaceMatches(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在整理文件...", "", err
-	}
-	var args struct {
-		SourcePath     string `json:"source_path"`
-		MatchText      string `json:"match_text"`
-		TargetFolder   string `json:"target_folder"`
-		IncludeFolders bool   `json:"include_folders"`
-		MaxItems       int    `json:"max_items"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在整理文件...", "", fmt.Errorf("invalid tool arguments")
-	}
-	args.MatchText = strings.TrimSpace(args.MatchText)
-	args.TargetFolder = strings.Trim(strings.TrimSpace(strings.ReplaceAll(args.TargetFolder, "\\", "/")), "/")
-	if args.MatchText == "" {
-		return "", "", "正在整理文件...", "", fmt.Errorf("match_text is required")
-	}
-	if args.TargetFolder == "" {
-		return "", "", "正在整理文件...", "", fmt.Errorf("target_folder is required")
-	}
-	if args.MaxItems <= 0 {
-		args.MaxItems = 200
-	}
-	if args.MaxItems > 500 {
-		args.MaxItems = 500
+	maxChars := args.MaxCharsPerFile
+	if maxChars <= 0 || maxChars > 50000 {
+		maxChars = 20000
 	}
 
-	if _, _, err := files.List(args.TargetFolder, 1, 1); err != nil {
-		if _, mkdirErr := files.MkdirNew(args.TargetFolder); mkdirErr != nil {
-			return "", "", "正在整理文件...", args.TargetFolder, fmt.Errorf("create target folder: %w", mkdirErr)
-		}
+	type readItem struct {
+		Path       string `json:"path"`
+		Content    string `json:"content"`
+		Truncated  bool   `json:"truncated"`
+		StartLine  int    `json:"start_line"`
+		EndLine    int    `json:"end_line"`
+		TotalLines int    `json:"total_lines"`
 	}
-
-	nodes, limited, err := files.List(args.SourcePath, 20, 2000)
-	if err != nil {
-		return "", "", "正在整理文件...", args.SourcePath, err
+	type failedItem struct {
+		Path  string `json:"path"`
+		Error string `json:"error"`
 	}
-	matches := collectOrganizeMatches(nodes, args.MatchText, args.TargetFolder, args.IncludeFolders, args.MaxItems)
-	if len(matches) == 0 {
-		return "", "", "正在整理文件...", args.TargetFolder, fmt.Errorf("no workspace items matched %q", args.MatchText)
-	}
-
-	type moveResult struct {
-		OldPath string `json:"old_path"`
-		NewPath string `json:"new_path"`
-		Status  string `json:"status"`
-		Error   string `json:"error,omitempty"`
-	}
-	var moved []moveResult
-	var changed []string
-	for _, match := range matches {
-		result, err := files.MovePath(match.Path, args.TargetFolder)
-		if err != nil {
-			moved = append(moved, moveResult{OldPath: match.Path, Status: "failed", Error: err.Error()})
+	items := make([]readItem, 0, len(paths))
+	failed := make([]failedItem, 0)
+	truncated := limitedByCount
+	for _, path := range paths {
+		result, readErr := files.ReadTextFileRange(path, args.StartLine, args.EndLine, maxChars)
+		if readErr != nil {
+			failed = append(failed, failedItem{Path: path, Error: readErr.Error()})
 			continue
 		}
-		moved = append(moved, moveResult{OldPath: result.OldPath, NewPath: result.NewPath, Status: "success"})
-		changed = append(changed, result.OldPath, result.NewPath)
-	}
-	successCount := 0
-	failedCount := 0
-	for _, item := range moved {
-		if item.Status == "success" {
-			successCount++
-		} else {
-			failedCount++
+		if result.Truncated {
+			truncated = true
 		}
+		items = append(items, readItem{
+			Path:       result.Path,
+			Content:    result.Content,
+			Truncated:  result.Truncated,
+			StartLine:  result.StartLine,
+			EndLine:    result.EndLine,
+			TotalLines: result.TotalLines,
+		})
 	}
-	if successCount == 0 {
-		return "", "", "正在整理文件...", args.TargetFolder, fmt.Errorf("failed to move all matched items")
+	if len(items) == 0 {
+		return "", "", "正在批量读取文件...", "", fmt.Errorf("all requested files failed to read")
 	}
-	payload := map[string]any{
-		"path":            args.TargetFolder,
-		"target_folder":   args.TargetFolder,
-		"match_text":      args.MatchText,
-		"source_path":     args.SourcePath,
-		"moved":           moved,
-		"moved_count":     successCount,
-		"failed_count":    failedCount,
-		"limited":         limited,
-		"changed_paths":   changed,
-		"include_folders": args.IncludeFolders,
+	readPaths := make([]string, 0, len(items))
+	for _, item := range items {
+		readPaths = append(readPaths, item.Path)
 	}
-	summary := fmt.Sprintf("organized %d matched item(s) into %s", successCount, args.TargetFolder)
-	if failedCount > 0 {
-		summary = fmt.Sprintf("%s; %d item(s) failed", summary, failedCount)
-	}
-	return mustJSON(payload), summary, "正在整理文件...", args.TargetFolder, nil
+	payload := workspaceToolPayload("read_workspace_files", "", map[string]any{
+		"items":            items,
+		"failed":           failed,
+		"paths":            readPaths,
+		"count":            len(items),
+		"failed_count":     len(failed),
+		"truncated":        truncated,
+		"limited_by_count": limitedByCount,
+		"start_line":       args.StartLine,
+		"end_line":         args.EndLine,
+		"next_hint":        "Use edit_workspace_text for precise existing-file edits, or save_workspace_file only for full overwrite/new files.",
+	})
+	summary := fmt.Sprintf("read %d workspace file(s), %d failed", len(items), len(failed))
+	return mustJSON(payload), summary, "正在批量读取文件...", strings.Join(readPaths, ","), nil
 }
 
-func collectOrganizeMatches(nodes []workspace.TreeNode, matchText, targetFolder string, includeFolders bool, maxItems int) []workspace.TreeNode {
-	var matches []workspace.TreeNode
-	needle := strings.ToLower(matchText)
-	target := strings.Trim(targetFolder, "/")
-	var walk func([]workspace.TreeNode)
-	walk = func(items []workspace.TreeNode) {
-		for _, item := range items {
-			if len(matches) >= maxItems {
-				return
-			}
-			path := strings.Trim(item.Path, "/")
-			if workspace.IsTrashPath(path) || workspace.IsLegacyTrashPath(path) {
-				continue
-			}
-			if path == "" || path == target || strings.HasPrefix(path, target+"/") {
-				if item.Type == "folder" && path != target && !strings.HasPrefix(path, target+"/") {
-					walk(item.Children)
-				}
-				continue
-			}
-			if item.Type == "folder" {
-				if includeFolders && organizeNodeMatches(item, needle) {
-					matches = append(matches, item)
-					continue
-				}
-				walk(item.Children)
-				continue
-			}
-			if organizeNodeMatches(item, needle) {
-				matches = append(matches, item)
-			}
+func normalizeBatchReadPaths(paths []string) []string {
+	seen := map[string]bool{}
+	next := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
+		path = strings.Trim(path, "/")
+		if path == "" || seen[path] {
+			continue
 		}
+		seen[path] = true
+		next = append(next, path)
 	}
-	walk(nodes)
-	return matches
-}
-
-func organizeNodeMatches(node workspace.TreeNode, needle string) bool {
-	name := strings.ToLower(node.Name)
-	path := strings.ToLower(node.Path)
-	base := strings.ToLower(filepath.Base(node.Path))
-	return strings.Contains(name, needle) || strings.Contains(path, needle) || strings.Contains(base, needle)
-}
-
-func (s *Service) execDeleteWorkspacePath(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在删除到回收站...", "", err
-	}
-	var args struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在删除到回收站...", "", fmt.Errorf("invalid tool arguments")
-	}
-	result, err := files.MoveToTrash(args.Path)
-	if err != nil {
-		return "", "", "正在删除到回收站...", args.Path, err
-	}
-	summary := fmt.Sprintf("moved %s to trash %s", result.OldPath, result.NewPath)
-	return mustJSON(result), summary, "正在删除到回收站...", result.NewPath, nil
-}
-
-func countTreeNodes(nodes []workspace.TreeNode) int {
-	count := 0
-	for _, node := range nodes {
-		count++
-		count += countTreeNodes(node.Children)
-	}
-	return count
+	return next
 }

@@ -214,6 +214,33 @@ func (s *DiagnosticStore) ClearUser(ctx context.Context, userID string) error {
 	return err
 }
 
+func (s *DiagnosticStore) Delete(ctx context.Context, userID, id string) error {
+	userID = strings.TrimSpace(userID)
+	id = strings.TrimSpace(id)
+	if userID == "" {
+		return fmt.Errorf("user_id is required")
+	}
+	if id == "" {
+		return fmt.Errorf("id is required")
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM diagnostic_logs WHERE user_id = ? AND id = ?`, userID, id)
+	return err
+}
+
+func (s *DiagnosticStore) DeleteAny(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("id is required")
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM diagnostic_logs WHERE id = ?`, id)
+	return err
+}
+
+func (s *DiagnosticStore) ClearAll(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM diagnostic_logs`)
+	return err
+}
+
 func (s *DiagnosticStore) CleanupUser(ctx context.Context, userID string) error {
 	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM diagnostic_logs WHERE user_id = ? AND created_at < ?`, userID, cutoff); err != nil {

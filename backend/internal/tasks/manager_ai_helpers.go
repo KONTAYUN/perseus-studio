@@ -1,0 +1,236 @@
+package tasks
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"webide-backend/internal/ai"
+	"webide-backend/internal/store"
+	"webide-backend/internal/workspace"
+)
+
+func (m *Manager) failAIAgentTask(ctx context.Context, userID, taskID, conversationID, errText string) {
+	m.logAndPublish(ctx, userID, taskID, "error", errText)
+	if m.diagnostics != nil {
+		_, _ = m.diagnostics.Append(ctx, store.DiagnosticLogInput{
+			UserID:         userID,
+			ConversationID: conversationID,
+			TaskID:         taskID,
+			Stage:          "background_task_failed",
+			Level:          "error",
+			ErrorMessage:   errText,
+		})
+	}
+	if conversationID != "" {
+		_, _ = m.conversations.AppendMessage(ctx, userID, conversationID, "assistant", "后台任务失败："+errText, "[]")
+	}
+	m.finishTask(ctx, taskID, store.TaskFailed, "failed", errText, nil, &errText)
+}
+
+type validationResult struct {
+	OK      bool
+	Missing []string
+}
+
+func (m *Manager) logPlan(ctx context.Context, userID, taskID string, payload AIAgentPayload) {
+	goal := strings.TrimSpace(payload.Goal)
+	if goal == "" {
+		goal = strings.TrimSpace(payload.UserMessage)
+	}
+	m.logAndPublish(ctx, userID, taskID, "info", "plan goal: "+goal)
+	for index, step := range payload.SuggestedSteps {
+		if strings.TrimSpace(step) != "" {
+			m.logAndPublish(ctx, userID, taskID, "info", fmt.Sprintf("plan step %d: %s", index+1, step))
+		}
+	}
+	for index, output := range payload.ExpectedOutputs {
+		m.logAndPublish(ctx, userID, taskID, "info", fmt.Sprintf("expected output %d: %s %s %s", index+1, output.Type, output.Path, output.Description))
+	}
+}
+
+func (m *Manager) runAIAgentOnce(ctx context.Context, userID, taskID string, payload AIAgentPayload, prompt string, forceTool string) (ai.Reply, error) {
+	messages := []store.Message{{
+		ID:             payload.UserMessageID,
+		ConversationID: payload.ConversationID,
+		Role:           "user",
+		Content:        prompt,
+	}}
+	return m.ai.GenerateTaskReply(ctx, payload.ConversationID, payload.UserMessageID, payload.ModelProviderID, messages, nil, ai.RunOptions{
+		UserID:    userID,
+		TaskID:    taskID,
+		ForceTool: forceTool,
+		Log: func(level, message string) {
+			m.logAndPublish(ctx, userID, taskID, level, message)
+			if strings.HasPrefix(message, "tool call started") {
+				m.updateAndPublish(ctx, taskID, store.TaskRunning, "tool_call", message)
+			}
+		},
+		Event: func(eventType, level string, payload map[string]any) {
+			message := taskAgentEventMessage(eventType, payload)
+			if message == "" {
+				return
+			}
+			m.logAndPublish(ctx, userID, taskID, level, message)
+			switch eventType {
+			case "tool_call_started":
+				m.updateAndPublish(ctx, taskID, store.TaskRunning, "tool_call", message)
+			case "completion_rejected":
+				m.updateAndPublish(ctx, taskID, store.TaskRunning, "repair", message)
+			case "model_message_started":
+				m.updateAndPublish(ctx, taskID, store.TaskRunning, "calling_model", message)
+			}
+		},
+	})
+}
+
+func taskAgentEventMessage(eventType string, payload map[string]any) string {
+	toolName, _ := payload["tool_name"].(string)
+	switch eventType {
+	case "model_message_started":
+		return "model turn started"
+	case "tool_call_started":
+		if toolName != "" {
+			return "tool call started: " + toolName
+		}
+		return "tool call started"
+	case "tool_call_completed":
+		if toolName != "" {
+			return "tool call completed: " + toolName
+		}
+		return "tool call completed"
+	case "tool_call_failed":
+		if errText, _ := payload["error"].(string); errText != "" {
+			return "tool call failed: " + errText
+		}
+		return "tool call failed"
+	case "tool_result_returned":
+		if isError, _ := payload["is_error"].(bool); isError {
+			return "tool result returned with error"
+		}
+	case "completion_rejected":
+		if reason, _ := payload["reason"].(string); reason != "" {
+			return "completion rejected: " + reason
+		}
+		return "completion rejected"
+	}
+	return ""
+}
+
+func (m *Manager) executionPrompt(payload AIAgentPayload) string {
+	goal := strings.TrimSpace(payload.Goal)
+	if goal == "" {
+		goal = strings.TrimSpace(payload.UserMessage)
+	}
+	rawOutputs, _ := json.MarshalIndent(payload.ExpectedOutputs, "", "  ")
+	rawSteps, _ := json.MarshalIndent(payload.SuggestedSteps, "", "  ")
+	return fmt.Sprintf(`你正在执行 Perseus Studio 后台任务。请按目标和计划完成真实操作，必要时使用 perseus_search_web、web_extract、workspace 文件工具、命令工具或 Skill 工具。
+
+目标：
+%s
+
+原始用户请求：
+%s
+
+预期产物 JSON：
+%s
+
+建议步骤 JSON：
+%s
+
+要求：
+- 如果预期产物包含 file，必须实际创建或写入该 workspace 相对路径；不要只口头说明。
+- 如果没有明确文件路径，请为报告/Markdown 选择一个简洁中文或英文文件名，放在 workspace 根目录。
+- 修改已有文件前优先 read_workspace_text；需要项目结构时先 inspect_workspace。
+- 命令只在构建、测试、检查、批处理或脚本执行需要时使用；命令失败要说明关键错误。
+- 使用联网资料时，最终内容里保留来源 URL。
+- 完成前确保预期文件真实存在且非空；完成后调用 attempt_completion，用中文简短总结实际产物。`, goal, payload.UserMessage, string(rawOutputs), string(rawSteps))
+}
+
+func (m *Manager) repairPrompt(payload AIAgentPayload, missing []string, round int) string {
+	rawOutputs, _ := json.MarshalIndent(payload.ExpectedOutputs, "", "  ")
+	return fmt.Sprintf(`后台任务产物校验失败，需要补做第 %d 轮。
+
+缺失或不合格的产物：
+%s
+
+预期产物 JSON：
+%s
+
+请只补做缺失项。若缺少文件，必须实际调用 save_workspace_file 写入 workspace；如果写入失败，要基于工具错误继续修复或明确失败，不要只回复说明。`, round, strings.Join(missing, "\n"), string(rawOutputs))
+}
+
+func (m *Manager) validateOutputs(ctx context.Context, payload AIAgentPayload, reply ai.Reply, files *workspace.Service) validationResult {
+	_ = ctx
+	var missing []string
+	outputs := payload.ExpectedOutputs
+	if len(outputs) == 0 {
+		outputs = []ai.ExpectedOutput{{Type: "message", Description: "任务完成说明"}}
+	}
+	for _, output := range outputs {
+		switch output.Type {
+		case "file":
+			path := strings.TrimSpace(output.Path)
+			if path == "" {
+				path = firstChangedFile(reply.ToolEvents)
+				if path == "" {
+					missing = append(missing, "file output has no path and no created/modified file was recorded")
+					continue
+				}
+			}
+			file, err := files.ReadFile(path)
+			if err != nil {
+				missing = append(missing, "missing file: "+path)
+				continue
+			}
+			if file.Size <= 0 || strings.TrimSpace(file.Content) == "" {
+				missing = append(missing, "empty file: "+path)
+			}
+		case "message":
+			if strings.TrimSpace(reply.Content) == "" {
+				missing = append(missing, "missing assistant message: "+output.Description)
+			}
+		case "command_result":
+			if !hasCommandResult(reply.ToolEvents) {
+				missing = append(missing, "missing command result: "+output.Description)
+			}
+		}
+	}
+	return validationResult{OK: len(missing) == 0, Missing: missing}
+}
+
+func firstChangedFile(events []ai.ToolEvent) string {
+	for _, event := range events {
+		if event.Status != "success" {
+			continue
+		}
+		if event.ToolName == "save_workspace_file" {
+			if event.Path != "" {
+				return event.Path
+			}
+			if len(event.ChangedPaths) > 0 {
+				return event.ChangedPaths[0]
+			}
+		}
+	}
+	return ""
+}
+
+func hasCommandResult(events []ai.ToolEvent) bool {
+	for _, event := range events {
+		if event.ToolName == "run_workspace_command" && event.ExitCode != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func repairForceTool(missing []string) string {
+	for _, item := range missing {
+		if strings.Contains(item, "file") || strings.Contains(item, "文件") {
+			return "save_workspace_file"
+		}
+	}
+	return ""
+}

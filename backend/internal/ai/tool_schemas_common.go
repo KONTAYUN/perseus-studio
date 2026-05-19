@@ -5,7 +5,7 @@ func openAITools() []map[string]any {
 }
 
 func openAIToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool) []map[string]any {
-	tools := []map[string]any{openAICompletionTool()}
+	tools := []map[string]any{openAICompletionTool(), openAIQuestionTool()}
 	if includeLoader {
 		tools = append(tools, openAIToolsetLoaderTool())
 	}
@@ -32,7 +32,7 @@ func anthropicTools() []map[string]any {
 }
 
 func anthropicToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool) []map[string]any {
-	tools := []map[string]any{anthropicCompletionTool()}
+	tools := []map[string]any{anthropicCompletionTool(), anthropicQuestionTool()}
 	if includeLoader {
 		tools = append(tools, anthropicToolsetLoaderTool())
 	}

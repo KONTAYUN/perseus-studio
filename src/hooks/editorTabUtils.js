@@ -14,6 +14,21 @@ export function nextActiveTabAfterClose(tabs, closedPath) {
   return nextTabs[nextTabs.length - 1] || null;
 }
 
+export function reorderTabsByPath(tabs, sourcePath, targetPath, position = 'before') {
+  if (!sourcePath || !targetPath || sourcePath === targetPath) return tabs || [];
+  const current = tabs || [];
+  const sourceIndex = current.findIndex((tab) => tab.path === sourcePath);
+  const targetIndex = current.findIndex((tab) => tab.path === targetPath);
+  if (sourceIndex === -1 || targetIndex === -1) return current;
+
+  const next = current.filter((tab) => tab.path !== sourcePath);
+  const targetIndexAfterRemove = next.findIndex((tab) => tab.path === targetPath);
+  if (targetIndexAfterRemove === -1) return current;
+  const insertIndex = position === 'after' ? targetIndexAfterRemove + 1 : targetIndexAfterRemove;
+  next.splice(insertIndex, 0, current[sourceIndex]);
+  return next;
+}
+
 export function remapEditorTabs(tabs, oldPath, newPath) {
   return (tabs || []).map((tab) => {
     if (!pathMatches(tab.path, oldPath)) return tab;
@@ -39,6 +54,7 @@ export function isSuccessfulEditorToolEvent(item) {
   return (
     item?.status === 'success' &&
     [
+      'edit_workspace_text',
       'save_workspace_file',
       'manage_workspace_path',
       'organize_workspace_matches',
@@ -93,7 +109,7 @@ export function buildActiveFileToolPlan(events, { activePath = '', dirty = false
       continue;
     }
 
-    if (event.tool_name === 'save_workspace_file') {
+    if (event.tool_name === 'edit_workspace_text' || event.tool_name === 'save_workspace_file') {
       if (event.path === nextActivePath) {
         if (dirty) {
           conflictPlan = {

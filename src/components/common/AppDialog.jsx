@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Edit3, X } from 'lucide-react';
+import { Button, IconButton, Input } from '../ui';
 
 export function useAppDialog() {
   const [dialog, setDialog] = React.useState(null);
@@ -68,10 +69,6 @@ export default function AppDialog({ dialog, onClose }) {
   if (!dialog) return null;
 
   const isDanger = dialog.tone === 'red' || dialog.tone === 'danger';
-  const confirmClass = isDanger
-    ? 'bg-red-500 shadow-red-500/25 hover:bg-red-600'
-    : 'bg-blue-500 shadow-blue-500/25 hover:bg-blue-600';
-
   const submit = (event) => {
     event.preventDefault();
     if (dialog.type === 'prompt') {
@@ -83,7 +80,7 @@ export default function AppDialog({ dialog, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-[500] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md animate-in fade-in duration-300"
+      className="modal-backdrop fixed inset-0 z-[500] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md animate-in fade-in duration-300"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose(dialog.type === 'prompt' ? null : false);
       }}
@@ -94,7 +91,7 @@ export default function AppDialog({ dialog, onClose }) {
       >
         <div className="flex items-start gap-4">
           <div
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+            className={`dialog-tone-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
               isDanger
                 ? 'bg-red-500/10 text-red-500 dark:bg-red-500/15 dark:text-red-300'
                 : 'bg-blue-500/10 text-blue-500 dark:bg-blue-500/15 dark:text-blue-300'
@@ -110,40 +107,39 @@ export default function AppDialog({ dialog, onClose }) {
               </div>
             )}
           </div>
-          <button
+          <IconButton
             type="button"
             onClick={() => onClose(dialog.type === 'prompt' ? null : false)}
-            className="motion-button rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-gray-100"
             title="关闭"
           >
             <X size={16} />
-          </button>
+          </IconButton>
         </div>
 
         {dialog.type === 'prompt' && (
-          <input
+          <Input
             ref={inputRef}
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder={dialog.placeholder}
-            className="mt-5 h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-800 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-[#1C1C1E] dark:text-white"
+            className="mt-5 h-11 px-4 font-semibold"
           />
         )}
 
         <div className="mt-6 flex justify-end gap-2">
-          <button
+          <Button
             type="button"
             onClick={() => onClose(dialog.type === 'prompt' ? null : false)}
-            className="motion-button rounded-2xl bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/15"
+            variant="secondary"
           >
             {dialog.cancelLabel}
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            className={`motion-button rounded-2xl px-4 py-2 text-sm font-bold text-white shadow-lg ${confirmClass}`}
+            variant={isDanger ? 'danger' : 'primary'}
           >
             {dialog.confirmLabel}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

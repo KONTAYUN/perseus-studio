@@ -7,20 +7,39 @@ Single-container web IDE: React frontend + Go backend, served from one binary. M
 ```
 src/                        React frontend (Vite + Tailwind)
   components/
+    ui/                     Shared UI primitives and control standards
     layout/                 AppHeader, MainPanels
+      mainPanels/           Panel width math, active glow, FLIP/appear motion helpers
     sidebar/                SidebarPanel, FileTree
     editor/                 EditorPanel
     chat/                   ChatPanel
+      composer/             Autosize textarea, fixed action dock, attachments/references, skill menu
+      panel/                Chat header menus, context usage badge, scroll controller, rename dialog
     tasks/                  TaskPanel
     settings/
       SettingsModal.jsx     Main settings panel (model/search providers, skills)
-      SettingsUI.jsx        Shared UI primitives (Badge, Card, Field, etc.)
+      SettingsUI.jsx        Settings aliases for shared UI primitives
       UserManagement.jsx    Admin user management panel
   hooks/                    All state management (no Redux)
     useIdeState.js          Top-level orchestrator, composes sub-hooks
-    useEditorTabs.js        Tab open/close/switch, dirty tracking
-    useFileTree.js          File CRUD, drag-drop, upload, 回收站
-    useChatState.js         Conversations, messages, SSE streaming
+    useEditorTabs.js        Editor tab facade: open/close/switch, dirty tracking
+    createEditorFileLoader.js Editor file read/open loader
+    editorToolRefreshActions.js Refresh open tabs after agent workspace tools
+    useFileTree.js          File tree facade: state composition and public API
+    useFileSearchState.js   File search state and debounced query API
+    useFileSelectionState.js File selection and range/multi-select state
+    useFileDragState.js     File drag/drop state
+    useFileTreeTrashActions.js File trash panel and restore/delete actions
+    fileTreeMutationActions.js File CRUD/upload/reorder action group
+    fileTreeDownloadActions.js File download action group
+    fileTreeDownloadUtils.js File download and zip helpers
+    useChatState.js         Chat state facade: send queue and public API
+    chatConversationActions.js Conversation CRUD and context usage loading
+    useChatReferenceActions.js Chat attachments, workspace refs, and Skill refs
+    chatCompactionActions.js Context compaction workflow
+    chatRegenerateResumeActions.js Regenerate and checkpoint-resume actions
+    useChatLifecycleEffects.js Chat message/ref notice lifecycle effects
+    chatRunStream.js        Agent run SSE/poll fallback merge logic
     useTasks.js             Background task polling
     useLayoutState.js       Panel sizing, drag ordering
     useSettingsData.js      Model/search provider config
@@ -28,6 +47,16 @@ src/                        React frontend (Vite + Tailwind)
     ideUtils.js             Shared utility functions
   api/
     client.js               Fetch wrapper for all /api/* calls
+  styles/                   Ordered CSS sections imported by index.css
+    tokens.css              Reset, app shell, variables, radius overrides
+    surfaces.css            Reusable surfaces and low-depth material classes
+    motion.css              Shared animation and interaction primitives
+    controls.css            Shared button/icon/segmented/switch rules
+    chat.css                Chat messages, composer, follow-up panel
+    editor.css              Editor tabs/drop/textarea rules
+    file-tree.css           File tree rows, labels, drag indicators
+    settings.css            Settings modal/card/view animation rules
+    utilities.css           Narrow global utility overrides
 
 backend/
   cmd/server/               Entrypoint (main.go)
@@ -36,9 +65,12 @@ backend/
     store/                  SQLite persistence
       db.go                 Schema init, connection, migration helpers
       users.go              User CRUD, role management, registration toggle
-      configs.go            Model & search provider CRUD (per-user)
-      conversations.go      Conversation + message storage (per-user)
-      tasks.go              Task state machine (per-user)
+      configs.go            Config store types/schema facade
+      config_*              Model/search provider CRUD, validation, scanners
+      conversations.go      Conversation store types/schema/facade
+      conversation_*        Message CRUD, tool-call ledger, scanners
+      tasks.go              Task store types/schema/facade
+      task_*                Task CRUD, logs, JSON/scanner helpers
       skills.go             Skill metadata (per-user)
     usersvc/                Per-user service factory
       factory.go            Caches workspace/skills services per user, manages user data dirs
@@ -50,20 +82,35 @@ backend/
       conversation_handlers.go  Conversation API, agent run creation, SSE lifecycle
       task_handlers.go      Task CRUD + SSE streaming
       skill_handlers.go     Skill install/upload/CRUD
-      config_handlers.go    Model & search provider management
+      config_handlers.go    Config request/response types
+      config_*              Model provider CRUD, discovery/test, search provider CRUD
       debug_handlers.go     Admin-only debug endpoint, disabled by default
       api_utils.go          Attachment processing helpers
+      conversation_run_*    Run execution, assistant segments, task completion, failure handling
     ai/                     LLM integration (OpenAI & Anthropic protocols)
       service.go            Entry point, generateReply routing
       provider_openai.go    OpenAI chat completion
       provider_anthropic.go Anthropic messages API
+      provider_stream_*     SSE reader, OpenAI/Anthropic stream parsers, usage/fallback helpers
       provider_types.go     Shared response types
       messages.go           Message format conversion
       message_attachments.go  Attachment -> prompt assembly
       tool_schemas_*.go     Tool definitions per category
       tool_choice.go        Automatic tool selection logic
-      tools_executor.go     Tool call dispatcher
-      tools_exec_*.go       Tool implementations per category
+      agent_entrypoints.go  OpenAI/Anthropic agent runtime setup
+      agent_model_turn.go   Provider turn request, context overflow retry
+      agent_recovery.go     Checkpoint resume retry after transient provider failures
+      agent_tool_loop.go    Tool loop, mutation de-dupe, tool validation
+      agent_completion.go   attempt_completion validation and verified paths
+      agent_followup.go     ask_followup_question workflow tool
+      agent_no_tool.go      Missing-tool/empty-response correction loop
+      tools_executor.go     Durable tool execution ledger and event emission
+      tool_registry.go      Tool name -> implementation registry
+      tool_arguments.go     Tool argument summaries and ledger truncation
+      tool_recovery_hints.go Tool failure recovery hints
+      tool_events.go        Tool/run event helpers
+      context_*             Context build, pruning, transcript conversion, summary/estimation
+      tools_exec_*.go       Tool implementations per category and workspace operation family
       workspace_intent.go   Intent classification for tool routing
       web_http.go           HTTP client for web search/extract
       web_tavily.go         Tavily provider
@@ -73,9 +120,9 @@ backend/
       debug.go              Debug test orchestration
       debug_openai.go       OpenAI debug path
       debug_anthropic.go    Anthropic debug path
-    workspace/              File system operations, tree ordering, trash, command execution
-    tasks/                  Background task broker & worker
-    skills/                 Skill zip install, SKILL.md parsing
+    workspace/              File read/write/path operations, search, tree ordering, trash, command execution
+    tasks/                  Background task broker, worker lifecycle, AI/mock execution, validation
+    skills/                 Skill CRUD, zip install, safe extraction, SKILL.md parsing
     version/                Build-time version metadata
 ```
 
@@ -137,3 +184,23 @@ All state lives in `/data/` (Docker volume mount):
 ## Project Hygiene
 
 Runtime data belongs in `data/`. Local exports, binary builds, and deployment packages belong in `_local_artifacts/` and are ignored by Git and Docker build context.
+
+## Frontend UI Governance
+
+Frontend UI changes should follow [docs/UI_DESIGN_SYSTEM.md](docs/UI_DESIGN_SYSTEM.md). That document is the source of truth for UI tokens, button/input/menu/dialog standards, panel headers, chat composer behavior, file tree interaction, animation rules, dark-mode parity, and future component extraction.
+
+Do not add new one-off Tailwind styling for common controls when an existing shared utility or primitive can be used.
+
+`npm run test:ui` enforces the lightweight UI governance rules in `scripts/check-ui-standards.mjs` and is part of CI. `npm run test:structure` enforces file budgets, CSS section shape, and structure anti-regressions.
+
+## Project Health Governance
+
+The stable structure standard is [docs/STRUCTURE_STANDARDS.md](docs/STRUCTURE_STANDARDS.md). The active score and remaining risks are tracked in [docs/PROJECT_HEALTH_SCORECARD.md](docs/PROJECT_HEALTH_SCORECARD.md).
+
+Key rules:
+
+- Refactors are zero-behavior unless a task explicitly asks for behavior changes.
+- Ordinary business files target fewer than 450 lines. Exceptions must be documented in the scorecard.
+- Frontend state machines and algorithms belong in hooks/utilities, not large render components.
+- Backend agent runtime follows mature agent boundaries: provider turn, recovery, tool loop, registry, ledger/events, completion, and follow-up question are separate modules.
+- Do not periodically re-split the project by taste. Continue within the boundaries in `docs/STRUCTURE_STANDARDS.md`; changing a boundary requires updating the standard and scorecard first.

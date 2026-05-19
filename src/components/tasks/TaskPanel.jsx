@@ -1,5 +1,6 @@
 import React from 'react';
 import { Activity, Trash2, X } from 'lucide-react';
+import { Badge, Button, IconButton } from '../ui';
 
 export default function TaskPanel({ tasks }) {
   if (!tasks.isTaskPanelOpen) return null;
@@ -22,12 +23,12 @@ export default function TaskPanel({ tasks }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <IconButton
               onClick={() => tasks.setIsTaskPanelOpen(false)}
-              className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-gray-100"
+              title="关闭任务面板"
             >
               <X size={16} />
-            </button>
+            </IconButton>
           </div>
         </div>
 
@@ -56,7 +57,7 @@ export default function TaskPanel({ tasks }) {
                       tasks.setSelectedTaskId(task.id);
                     }
                   }}
-                  className={`motion-row group/task relative mb-2 grid w-full grid-cols-[minmax(0,1fr)_64px] gap-2 overflow-hidden rounded-xl border px-3 py-2 text-left ${
+                  className={`motion-row task-item-row group/task relative mb-2 grid w-full grid-cols-[minmax(0,1fr)_64px] gap-2 overflow-hidden rounded-xl border px-3 py-2 text-left ${
                     tasks.selectedTaskId === task.id
                       ? 'border-blue-300 bg-blue-50 dark:border-blue-500/40 dark:bg-blue-500/10'
                       : 'border-gray-100 bg-gray-50/70 hover:bg-gray-100 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]'
@@ -74,16 +75,18 @@ export default function TaskPanel({ tasks }) {
                   <div className="flex h-full min-w-0 flex-col items-end justify-between gap-2 overflow-hidden">
                     <StatusBadge status={task.status} />
                     {canDelete ? (
-                      <button
+                      <IconButton
                         onClick={(e) => {
                           e.stopPropagation();
                           tasks.deleteTask(task.id);
                         }}
-                        className="motion-button flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-white/95 text-gray-400 opacity-0 shadow-sm hover:border-red-200 hover:text-red-500 group-hover/task:opacity-100 focus:opacity-100 dark:border-white/10 dark:bg-[#252527] dark:text-gray-500 dark:hover:text-red-300"
+                        variant="danger"
+                        size="xs"
+                        className="h-7 w-7 opacity-0 group-hover/task:opacity-100 focus:opacity-100"
                         title="删除任务记录"
                       >
                         <Trash2 size={13} />
-                      </button>
+                      </IconButton>
                     ) : (
                       <span className="h-7 w-7" />
                     )}
@@ -127,21 +130,23 @@ function TaskDetail({ tasks }) {
         <div className="flex min-w-0 flex-col items-end gap-2 overflow-hidden">
           <StatusBadge status={task.status} />
           {canCancel && (
-            <button
+            <Button
               onClick={() => tasks.cancelTask(task.id)}
-              className="w-full rounded-lg border border-red-200 px-2 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50 dark:border-red-500/20 dark:hover:bg-red-500/10"
+              variant="dangerSubtle"
+              size="xs"
+              fullWidth
             >
               取消
-            </button>
+            </Button>
           )}
           {!canCancel && (
-            <button
+            <IconButton
               onClick={() => tasks.deleteTask(task.id)}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-red-500 dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-red-300"
+              variant="danger"
               title="删除任务记录"
             >
               <Trash2 size={13} />
-            </button>
+            </IconButton>
           )}
         </div>
       </div>
@@ -170,13 +175,13 @@ function TaskDetail({ tasks }) {
 function StatusBadge({ status }) {
   const tone =
     status === 'done'
-      ? 'bg-emerald-500/10 text-emerald-500'
+      ? 'green'
       : status === 'failed'
-      ? 'bg-red-500/10 text-red-500'
+      ? 'red'
       : status === 'canceled'
-      ? 'bg-gray-500/10 text-gray-500'
-      : 'bg-blue-500/10 text-blue-500';
-  return <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${tone}`}>{status}</span>;
+      ? 'gray'
+      : 'blue';
+  return <Badge tone={tone}>{status}</Badge>;
 }
 
 function formatDate(value) {

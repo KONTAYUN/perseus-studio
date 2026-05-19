@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import useChatState from './useChatState';
 import useEditorTabs from './useEditorTabs';
 import useFileTree from './useFileTree';
 import useLayoutState from './useLayoutState';
 import useSettingsData from './useSettingsData';
 import useSkills from './useSkills';
-import { detectFileType, isAnyTrashPath, isTextPath, shouldReloadWorkspaceForToolEvents } from './ideUtils';
+import { detectFileType, filterFreshEditorToolEvents, isAnyTrashPath, isTextPath, shouldReloadWorkspaceForToolEvents } from './ideUtils';
 import { buildEditorContextFromEntries } from './ideContextUtils';
+import useIdeLifecycleEffects from './useIdeLifecycleEffects';
 
 export default function useIdeState(options = {}) {
   const isEnabled = options.enabled !== false;
@@ -17,6 +18,7 @@ export default function useIdeState(options = {}) {
   const settings = useSettingsData({ enabled: isEnabled });
   const skillsState = useSkills({ enabled: isEnabled, setSettingsError: settings.setSettingsError });
   const editorRef = useRef(null);
+  const processedEditorToolEventKeysRef = useRef(new Set());
 
   const fileTree = useFileTree({
     applyEditorPathUpdate: (...args) => editorRef.current?.applyPathUpdate?.(...args),
@@ -30,12 +32,14 @@ export default function useIdeState(options = {}) {
     confirm: dialog.confirm,
     setEditorStatusMessage: (...args) => editorRef.current?.setEditorStatusMessage?.(...args),
     setIsAddMenuOpen,
+    userId: options.currentUser?.id || options.currentUser?.user_id || '',
   });
 
   const {
     applyPathUpdate,
     cancelFileDialog,
     cancelInlineRename,
+    closeFileSearch,
     clearPathState,
     clearSelection,
     closeTrashPanel,
@@ -57,6 +61,9 @@ export default function useIdeState(options = {}) {
     fileDialog,
     fileDropIndicator,
     fileDragOverId,
+    fileSearchError,
+    fileSearchQuery,
+    fileSearchResults,
     files,
     flatFiles,
     getDefaultCreateBasePath,
@@ -65,6 +72,8 @@ export default function useIdeState(options = {}) {
     handleFileDrop,
     inlineRenameDraft,
     inlineRenamePath,
+    isFileSearchLoading,
+    isFileSearchOpen,
     isTrashLoading,
     isTrashPanelOpen,
     isTreeLoading,
@@ -74,7 +83,9 @@ export default function useIdeState(options = {}) {
     openCreateFileModal,
     openCreateFolderModal,
     openDeleteModal,
+    openFileSearch,
     openRenameModal,
+    openSearchResult,
     openTrashPanel,
     renamePath,
     reorderPath,
@@ -87,6 +98,7 @@ export default function useIdeState(options = {}) {
     setErrorMessage,
     setFileDropIndicator,
     setFileDragOverId,
+    setFileSearchQuery,
     setInlineRenameDraft,
     setSelectedItemPath,
     setSelectedItemType,
@@ -202,22 +214,14 @@ export default function useIdeState(options = {}) {
     confirm: dialog.confirm,
   });
 
-  useEffect(() => {
-    if (layout.isDarkMode) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-  }, [layout.isDarkMode]);
-
-  useEffect(() => {
-    if (!isEnabled) return;
-    loadTree();
-    chat.loadConversations();
-  }, [isEnabled]);
-
-  useEffect(() => {
-    if (!layout.layoutNotice) return undefined;
-    const timer = window.setTimeout(() => layout.setLayoutNotice(''), 1800);
-    return () => window.clearTimeout(timer);
-  }, [layout.layoutNotice]);
+  useIdeLifecycleEffects({
+    isDarkMode: layout.isDarkMode,
+    isEnabled,
+    layoutNotice: layout.layoutNotice,
+    loadConversations: chat.loadConversations,
+    loadTree,
+    setLayoutNotice: layout.setLayoutNotice,
+  });
 
   function buildCurrentFileContext() {
     return buildEditorContextFromEntries(visibleEditorEntries());
@@ -233,18 +237,23 @@ export default function useIdeState(options = {}) {
       (item) =>
         item?.status === 'success' &&
         [
+          'edit_workspace_text',
           'save_workspace_file',
           'manage_workspace_path',
           'organize_workspace_matches',
           'run_workspace_command',
         ].includes(item?.tool_name)
     );
-    if (successfulEvents.length === 0) return;
+    const freshSuccessfulEvents = filterFreshEditorToolEvents(successfulEvents, processedEditorToolEventKeysRef.current);
+    if (processedEditorToolEventKeysRef.current.size > 500) {
+      processedEditorToolEventKeysRef.current = new Set([...processedEditorToolEventKeysRef.current].slice(-250));
+    }
+    if (freshSuccessfulEvents.length === 0) return;
 
-    if (shouldReloadWorkspaceForToolEvents(successfulEvents)) {
+    if (shouldReloadWorkspaceForToolEvents(freshSuccessfulEvents)) {
       await loadTree();
     }
-    for (const event of successfulEvents) {
+    for (const event of freshSuccessfulEvents) {
       if (
         event.tool_name === 'manage_workspace_path' &&
         event.old_path &&
@@ -257,7 +266,7 @@ export default function useIdeState(options = {}) {
       }
     }
     for (const item of Object.values(editorPanels)) {
-      await item.refreshWorkspaceAfterAssistantTools(successfulEvents);
+      await item.refreshWorkspaceAfterAssistantTools(freshSuccessfulEvents);
     }
   }
 
@@ -315,6 +324,7 @@ export default function useIdeState(options = {}) {
     addWorkspaceFileReferences: chat.addWorkspaceFileReferences,
     cancelFileDialog,
     cancelInlineRename,
+    closeFileSearch,
     chatAttachments: chat.chatAttachments,
     chatError: chat.chatError,
     chatFileReferences: chat.chatFileReferences,
@@ -358,6 +368,9 @@ export default function useIdeState(options = {}) {
     fileDialog,
     fileDropIndicator,
     fileDragOverId,
+    fileSearchError,
+    fileSearchQuery,
+    fileSearchResults,
     files,
     flatFiles,
     getDefaultCreateBasePath,
@@ -371,6 +384,8 @@ export default function useIdeState(options = {}) {
     isConversationMenuOpen: chat.isConversationMenuOpen,
     isDirty: activeEditor.isDirty,
     isEditorLoading: activeEditor.isEditorLoading,
+    isFileSearchLoading,
+    isFileSearchOpen,
     isSavingFile: activeEditor.isSavingFile,
     isSettingsOpen,
     isTextFile: activeEditor.isTextFile,
@@ -388,8 +403,10 @@ export default function useIdeState(options = {}) {
     openCreateFolderModal,
     openDeleteModal,
     openFile,
+    openFileSearch,
     openFileInEditorPanel,
     openRenameModal,
+    openSearchResult,
     openTrashPanel,
     openTabs: activeEditor.openTabs,
     refreshWorkspaceAfterAssistantTools,
@@ -410,12 +427,14 @@ export default function useIdeState(options = {}) {
     selectedItems,
     selectedPaths,
     sendChatMessage: chat.sendChatMessage,
+    compactCurrentConversation: chat.compactCurrentConversation,
     stopChatGeneration: chat.stopChatGeneration,
     setChatInput: chat.setChatInput,
     setCurrentConversationId: chat.setCurrentConversationId,
     setCurrentFileContent: activeEditor.setCurrentFileContent,
     setFileDropIndicator,
     setFileDragOverId,
+    setFileSearchQuery,
     setInlineRenameDraft,
     setIsAddMenuOpen,
     setIsConversationMenuOpen: chat.setIsConversationMenuOpen,

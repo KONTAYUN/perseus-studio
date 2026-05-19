@@ -67,9 +67,33 @@ func providerErrorMessage(raw any) string {
 	return text
 }
 
+func isContextOverflowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	markers := []string{
+		"context length exceeded",
+		"maximum context",
+		"context window",
+		"input too long",
+		"prompt is too long",
+		"token limit",
+		"too many tokens",
+		"exceeds the context",
+		"reduce the length",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func isWorkspaceMutationTool(name string) bool {
 	switch name {
-	case "save_workspace_file", "manage_workspace_path", "organize_workspace_matches":
+	case "edit_workspace_text", "save_workspace_file", "manage_workspace_path", "organize_workspace_matches":
 		return true
 	default:
 		return false

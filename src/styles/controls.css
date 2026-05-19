@@ -1,0 +1,286 @@
+.ui-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-icon);
+  color: rgb(107 114 128);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0);
+}
+
+.ui-icon-button:hover {
+  color: rgb(37 99 235);
+  background: rgb(15 23 42 / 0.055);
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.035);
+}
+
+.ui-icon-button:active {
+  background: rgb(15 23 42 / 0.075);
+  box-shadow: inset 0 1px 1px rgb(15 23 42 / 0.08);
+}
+
+.ui-icon-button:disabled,
+.ui-icon-button:disabled:hover,
+.ui-icon-button:disabled:active {
+  cursor: not-allowed;
+  color: rgb(156 163 175);
+  opacity: 0.45;
+  background: transparent;
+  box-shadow: none;
+}
+
+.motion-button.ui-icon-button:hover,
+.motion-button.ui-icon-button:active {
+  transform: none;
+}
+
+.dark .ui-icon-button {
+  color: rgb(156 163 175);
+}
+
+.dark .ui-icon-button:hover {
+  color: rgb(147 197 253);
+  background: rgb(255 255 255 / 0.085);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.035);
+}
+
+.dark .ui-icon-button:active {
+  background: rgb(255 255 255 / 0.115);
+  box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.24);
+}
+
+.dark .ui-icon-button:disabled,
+.dark .ui-icon-button:disabled:hover,
+.dark .ui-icon-button:disabled:active {
+  color: rgb(107 114 128);
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-icon-button-active {
+  color: rgb(37 99 235);
+  background: rgb(59 130 246 / 0.12);
+}
+
+.ui-icon-button-active:hover {
+  color: rgb(29 78 216);
+  background: rgb(59 130 246 / 0.16);
+}
+
+.dark .ui-icon-button-active {
+  color: rgb(147 197 253);
+  background: rgb(96 165 250 / 0.15);
+}
+
+.dark .ui-icon-button-active:hover {
+  color: rgb(191 219 254);
+  background: rgb(96 165 250 / 0.2);
+}
+
+.ui-icon-button-danger:hover {
+  color: rgb(220 38 38);
+  background: rgb(239 68 68 / 0.105);
+}
+
+.dark .ui-icon-button-danger:hover {
+  color: rgb(252 165 165);
+  background: rgb(239 68 68 / 0.15);
+}
+
+.ui-icon-button-warning-state {
+  color: rgb(217 119 6);
+  background: rgb(245 158 11 / 0.1);
+}
+
+.ui-icon-button-warning-state:hover {
+  color: rgb(180 83 9);
+  background: rgb(245 158 11 / 0.12);
+}
+
+.dark .ui-icon-button-warning-state {
+  color: rgb(252 211 77);
+  background: rgb(245 158 11 / 0.13);
+}
+
+.dark .ui-icon-button-warning-state:hover {
+  color: rgb(254 243 199);
+  background: rgb(245 158 11 / 0.16);
+}
+
+.ui-icon-button-danger-state {
+  color: rgb(220 38 38);
+  background: rgb(239 68 68 / 0.1);
+}
+
+.ui-icon-button-danger-state:hover {
+  color: rgb(185 28 28);
+  background: rgb(239 68 68 / 0.12);
+}
+
+.dark .ui-icon-button-danger-state {
+  color: rgb(252 165 165);
+  background: rgb(239 68 68 / 0.13);
+}
+
+.dark .ui-icon-button-danger-state:hover {
+  color: rgb(254 202 202);
+  background: rgb(239 68 68 / 0.16);
+}
+
+.ui-icon-button-compact {
+  border-radius: var(--radius-micro);
+}
+
+.ui-panel-drag-handle {
+  cursor: grab;
+  opacity: 0.78;
+}
+
+.ui-panel-drag-handle:hover {
+  opacity: 1;
+}
+
+.ui-panel-drag-handle:active {
+  cursor: grabbing;
+}
+
+.ui-panel-drag-handle svg,
+.ui-icon-button svg {
+  display: block;
+  flex-shrink: 0;
+  transform-origin: center;
+  transition: transform 180ms var(--ease-apple);
+}
+
+.ui-icon-button:hover svg {
+  transform: scale(1.07);
+}
+
+.ui-icon-button:active svg {
+  transform: scale(0.94);
+}
+
+.ui-icon-button:disabled svg,
+.ui-icon-button:disabled:hover svg,
+.ui-icon-button:disabled:active svg {
+  transform: none;
+}
+
+.ui-button svg {
+  display: block;
+  flex-shrink: 0;
+  transform-origin: center;
+  transition: transform 180ms var(--ease-apple);
+}
+
+.ui-button:not(:disabled):active svg {
+  transform: scale(0.96);
+}
+
+.ui-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 4px;
+  border: 1px solid rgb(255 255 255 / 0.11);
+  border-radius: var(--radius-segmented);
+  background: rgb(255 255 255 / 0.045);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    inset 0 -1px 0 rgb(0 0 0 / 0.18);
+}
+
+.ui-segmented-option {
+  min-height: 32px;
+  border-radius: var(--radius-segmented-option);
+  padding: 0 16px;
+  color: rgb(156 163 175);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ui-segmented-option:hover {
+  color: rgb(229 231 235);
+  background: rgb(255 255 255 / 0.055);
+}
+
+.ui-segmented-option[data-active="true"] {
+  color: rgb(243 244 246);
+  background: rgb(255 255 255 / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.04);
+}
+
+.app-shell:not(.dark) .ui-segmented-control {
+  border-color: rgb(15 23 42 / 0.1);
+  background: rgb(255 255 255 / 0.72);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.72),
+    inset 0 -1px 0 rgb(15 23 42 / 0.04);
+}
+
+.app-shell:not(.dark) .ui-segmented-option {
+  color: rgb(107 114 128);
+}
+
+.app-shell:not(.dark) .ui-segmented-option:hover {
+  color: rgb(37 99 235);
+  background: rgb(59 130 246 / 0.08);
+}
+
+.app-shell:not(.dark) .ui-segmented-option[data-active="true"] {
+  color: rgb(31 41 55);
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.035);
+}
+
+.ui-switch {
+  --switch-width: 46px;
+  --switch-height: 26px;
+  --switch-padding: 3px;
+  position: relative;
+  width: var(--switch-width);
+  height: var(--switch-height);
+  border-radius: var(--radius-switch);
+  background: rgb(148 163 184 / 0.34);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    inset 0 1px 2px rgb(0 0 0 / 0.16);
+  transition:
+    background-color 180ms var(--ease-apple),
+    box-shadow 200ms var(--ease-apple);
+}
+
+.ui-switch[data-checked="true"] {
+  background: rgb(59 130 246);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+.ui-switch-thumb {
+  position: absolute;
+  left: var(--switch-padding);
+  top: var(--switch-padding);
+  width: calc(var(--switch-height) - var(--switch-padding) * 2);
+  height: calc(var(--switch-height) - var(--switch-padding) * 2);
+  border-radius: 50%;
+  background: white;
+  box-shadow:
+    0 2px 5px rgb(0 0 0 / 0.22),
+    inset 0 1px 0 rgb(255 255 255 / 0.88);
+  transform: translateX(0);
+  transition:
+    transform 200ms var(--ease-apple),
+    box-shadow 200ms var(--ease-apple);
+}
+
+.ui-switch[data-checked="true"] .ui-switch-thumb {
+  transform: translateX(calc(var(--switch-width) - var(--switch-height)));
+}
+
+.ui-switch:hover .ui-switch-thumb {
+  box-shadow:
+    0 3px 7px rgb(0 0 0 / 0.24),
+    inset 0 1px 0 rgb(255 255 255 / 0.92);
+}

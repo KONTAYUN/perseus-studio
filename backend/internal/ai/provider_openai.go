@@ -21,13 +21,29 @@ type openAIProviderV2 struct {
 
 func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (agentModelTurn, error) {
 	toolNames := openAIToolNames(req.Tools)
+	toolsEnabled := !req.DisableTools && len(req.Tools) > 0
+	req.Snapshot.Summary.RequestKind = "chat_completions"
+	req.Snapshot.Summary.Stream = boolPtr(true)
+	req.Snapshot.Summary.ToolChoice = "none"
+	req.Snapshot.Summary.RequiresTool = false
+	req.Snapshot.Summary.ToolsCount = 0
+	req.Snapshot.Summary.ToolNames = nil
+	if toolsEnabled {
+		req.Snapshot.Summary.ToolChoice = providerToolChoiceSummary(req.ToolChoice)
+		req.Snapshot.Summary.RequiresTool = normalizeProviderToolChoice(req.ToolChoice).requiresTool()
+		req.Snapshot.Summary.ToolsCount = len(toolNames)
+		req.Snapshot.Summary.ToolNames = toolNames
+		req.Snapshot.Summary.ParallelToolCalls = boolPtr(false)
+	}
 	payload := map[string]any{
-		"model":               req.Provider.ModelID,
-		"messages":            req.Snapshot.OpenAIMessages,
-		"tools":               req.Tools,
-		"tool_choice":         "auto",
-		"parallel_tool_calls": false,
-		"stream":              true,
+		"model":    req.Provider.ModelID,
+		"messages": req.Snapshot.OpenAIMessages,
+		"stream":   true,
+	}
+	if toolsEnabled {
+		payload["tools"] = req.Tools
+		payload["tool_choice"] = openAIProviderToolChoice(req.ToolChoice)
+		payload["parallel_tool_calls"] = false
 	}
 	log.Printf("[ai] request conversation=%s provider=%s protocol=%s base_url=%s model=%s tools_count=%d tools=%s tool_choice=%v round=%d",
 		req.ConversationID, req.Provider.Name, req.Provider.Protocol, req.Provider.BaseURL, req.Provider.ModelID, len(toolNames), strings.Join(toolNames, ","), payload["tool_choice"], req.Snapshot.Summary.Round,
@@ -55,6 +71,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 				"diagnostic_id": diagID,
 				"recovery":      "retry_non_stream",
 			})
+			req.Snapshot.Summary.StreamFallbackUsed = true
 			return p.callNonStream(ctx, req, payload, endpoint, "provider_stream_transport_fallback")
 		}
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
@@ -71,11 +88,22 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 			}
 		}
 		defer closeStream()
-		turn, err := parseOpenAIStream(streamBody, func(text string) {
-			emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
-		})
+		emitPublicText := !normalizeProviderToolChoice(req.ToolChoice).requiresTool()
+		var emitText func(string)
+		if emitPublicText {
+			emitText = func(text string) {
+				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
+			}
+		}
+		turn, err := parseOpenAIStream(streamBody, emitText)
+		if emitPublicText && strings.TrimSpace(turn.Content) != "" {
+			turn.PublicTextStreamed = true
+		}
 		if err != nil {
 			if partial, ok := partialTurnFromStreamError(err); ok {
+				if emitPublicText && strings.TrimSpace(partial.Content) != "" {
+					partial.PublicTextStreamed = true
+				}
 				log.Printf("[ai] openai stream_partial_tool_recovered conversation=%s endpoint=%s tool_calls=%d error=%v", req.ConversationID, endpoint, len(partial.ToolCalls), err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_partial_tool_recovered", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 				emitToolLifecycleEvent(req.Opts, "model_stream_recovering", "warn", map[string]any{
@@ -91,7 +119,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 				closeStream()
 				return partial, nil
 			}
-			if shouldFallbackAfterStreamError(ctx, err) {
+			if shouldFallbackAfterStreamError(ctx, err, req.CanCheckpointResume) {
 				log.Printf("[ai] openai stream_parse_error_fallback conversation=%s endpoint=%s error=%v", req.ConversationID, endpoint, err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 				emitToolLifecycleEvent(req.Opts, "model_stream_recovering", "warn", map[string]any{
@@ -105,6 +133,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 					"recovery":      "retry_non_stream",
 				})
 				closeStream()
+				req.Snapshot.Summary.StreamFallbackUsed = true
 				return p.callNonStream(ctx, req, payload, endpoint, "provider_stream_fallback")
 			}
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
@@ -119,41 +148,30 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 
 func (s *Service) callOpenAIAgentTurn(ctx context.Context, runtime *agentRuntime, round int) (agentModelTurn, error) {
 	return s.providerV2(agentProtocolOpenAI).Turn(ctx, providerTurnRequest{
-		ConversationID:                runtime.conversationID,
-		MessageID:                     runtime.messageID,
-		Provider:                      runtime.provider,
-		Protocol:                      runtime.protocol,
-		Tools:                         runtime.tools(),
-		Snapshot:                      runtime.lastContextSnapshot,
-		PerformedMutation:             runtime.performedMutation,
-		HasToolEvents:                 len(runtime.events) > 0,
-		HasVerifiedCompletionEvidence: runtime.hasVerifiedCompletionEvidence(),
-		Opts:                          runtime.opts,
+		ConversationID:      runtime.conversationID,
+		MessageID:           runtime.messageID,
+		Provider:            runtime.provider,
+		Protocol:            runtime.protocol,
+		Tools:               runtime.tools(),
+		ToolChoice:          runtime.toolChoice(),
+		Snapshot:            runtime.lastContextSnapshot,
+		PerformedMutation:   runtime.performedMutation,
+		HasToolEvents:       len(runtime.events) > 0,
+		CanCheckpointResume: runtime.hasRecoverableCheckpoint(ctx),
+		Opts:                runtime.opts,
 	})
 }
 
 func (p openAIProviderV2) callNonStream(ctx context.Context, reqState providerTurnRequest, payload map[string]any, endpoint, stage string) (agentModelTurn, error) {
 	fallbackPayload := clonePayloadWithStream(payload, false)
+	reqState.Snapshot.Summary.Stream = boolPtr(false)
+	reqState.Snapshot.Summary.StreamFallbackUsed = true
 	startedAt := time.Now()
 	resp, err := p.service.openAISDKPostRaw(ctx, reqState.Provider, openAIChatPath(), fallbackPayload, reqState.Opts, stage)
 	duration := time.Since(startedAt)
 	if err != nil {
 		if isContextCanceledError(err) {
 			return agentModelTurn{}, err
-		}
-		if reqState.HasVerifiedCompletionEvidence && isRecoverableFinalProviderError(err) {
-			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, reqState.Opts, reqState.Provider, reqState.ConversationID, reqState.MessageID, stage, "warn", duration.Milliseconds(), err, reqState.Snapshot.Summary)
-			emitToolLifecycleEvent(reqState.Opts, "model_stream_recovering", "warn", map[string]any{
-				"stage":         "final_response_recoverable_transport",
-				"provider_id":   reqState.Provider.ID,
-				"provider_name": reqState.Provider.Name,
-				"protocol":      reqState.Provider.Protocol,
-				"model_id":      reqState.Provider.ModelID,
-				"error":         err.Error(),
-				"diagnostic_id": diagID,
-				"recovery":      "verified_tool_result_completion",
-			})
-			return agentModelTurn{Content: "已完成并检查结果。", FinishReason: "recoverable_final_response_error"}, nil
 		}
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, reqState.Opts, reqState.Provider, reqState.ConversationID, reqState.MessageID, stage, "error", duration.Milliseconds(), err, reqState.Snapshot.Summary)
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)

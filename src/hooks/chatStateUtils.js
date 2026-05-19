@@ -1,9 +1,14 @@
-const PLAYFUL_PENDING_STATUSES = ['正在烹饪', '正在裁剪', '正在编写大纲', '正在绘制图纸', '正在打磨细节', '正在铺开画布'];
-const EXTRA_PENDING_STATUSES = ['正在翻阅底稿', '正在装订成册', '正在检查火候', '正在归档素材', '正在搜罗线索', '正在摘录资料', '正在准备工具箱', '正在重新调味'];
-const LOADING_DISPLAY_MIN_MS = 3000;
-const LOADING_BACKSPACE_MS = 28;
-const LOADING_TYPE_MS = 32;
-const DISPLAY_STATUS_POOL = [...PLAYFUL_PENDING_STATUSES, ...EXTRA_PENDING_STATUSES];
+import { PLAYFUL_PENDING_STATUSES, agentEventText, nextLoadingStatus } from './chatStatusTextUtils.js';
+
+export {
+  agentEventText,
+  completedToolStatus,
+  isPendingStatusText,
+  nextLoadingStatus,
+  pendingToolStatus,
+  playfulPendingStatus,
+  updateLoadingState,
+} from './chatStatusTextUtils.js';
 
 export function buildAssistantRunShell({ id, conversationId, createdAt, content = '', attachments = [] } = {}) {
   return {
@@ -31,8 +36,68 @@ export function appendUniqueProgressItem(items, nextItem) {
   return [...(items || []), nextItem];
 }
 
-export function nextLoadingStatus(seed = 0) {
-  return DISPLAY_STATUS_POOL[seed % DISPLAY_STATUS_POOL.length] || DISPLAY_STATUS_POOL[0];
+export function appendRunProgressItem(messages, thinkingId, nextItem) {
+  if (!thinkingId || !nextItem?.id) return messages;
+  let changed = false;
+  const nextMessages = (messages || []).map((item) => {
+    if (item.id !== thinkingId || item.activeMessageId) return item;
+    changed = true;
+    return {
+      ...item,
+      progressItems: appendUniqueProgressItem(item.progressItems, nextItem),
+    };
+  });
+  return changed ? nextMessages : messages;
+}
+
+export function mergeAssistantMessageStarted(messages, thinkingId, assistantMessage) {
+  const assistant = normalizeConversationMessage(assistantMessage);
+  if (!assistant) return messages;
+  const nextAssistant = {
+    ...assistant,
+    pending: true,
+    activeMessageId: assistant.id,
+    progressItems: [],
+  };
+  let inserted = false;
+  const nextMessages = [];
+  for (const item of messages || []) {
+    if (item.id !== thinkingId && item.id !== assistant.id) {
+      nextMessages.push(item);
+      continue;
+    }
+    if (inserted) continue;
+    inserted = true;
+    nextMessages.push({
+      ...nextAssistant,
+      loadingState: item.loadingState || nextAssistant.loadingState,
+    });
+  }
+  return inserted ? nextMessages : [...(messages || []), nextAssistant];
+}
+
+export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMessage) {
+  const assistant = normalizeConversationMessage(assistantMessage);
+  if (!assistant) return messages;
+  const nextAssistant = {
+    ...assistant,
+    pending: false,
+    activeMessageId: '',
+    progressItems: [],
+  };
+  let inserted = false;
+  const nextMessages = [];
+  for (const item of messages || []) {
+    const isActiveShell = item.id === thinkingId && (!item.activeMessageId || item.activeMessageId === assistant.id);
+    if (!isActiveShell && item.id !== assistant.id) {
+      nextMessages.push(item);
+      continue;
+    }
+    if (inserted) continue;
+    inserted = true;
+    nextMessages.push(nextAssistant);
+  }
+  return inserted ? nextMessages : [...(messages || []), nextAssistant];
 }
 
 export function buildProgressItem(type, payload = {}, fallbackText = '') {
@@ -47,74 +112,135 @@ export function buildProgressItem(type, payload = {}, fallbackText = '') {
   };
 }
 
-export function updateLoadingState(message, now = Date.now()) {
-  const current = message?.loadingState || {
-    text: nextLoadingStatus(0),
-    visibleText: nextLoadingStatus(0),
-    stage: 'holding',
-    activeSince: now,
+export function formatContextTokenCount(value) {
+  const tokens = Math.max(0, Math.round(Number(value) || 0));
+  if (tokens >= 1000000) {
+    const valueM = tokens / 1000000;
+    return `${Number.isInteger(valueM) ? valueM : valueM.toFixed(1)}M`;
+  }
+  if (tokens >= 1000) {
+    return `${Math.round(tokens / 1000)}K`;
+  }
+  return `${tokens}`;
+}
+
+function clampPercent(value) {
+  const percent = Math.round(Number(value) || 0);
+  if (percent < 0) return 0;
+  if (percent > 100) return 100;
+  return percent;
+}
+
+export function normalizeContextUsageSummary(payload = {}, selectedModel = {}) {
+  const estimatedTokens = Math.max(0, Math.round(Number(
+    payload.estimated_tokens ??
+    payload.estimated_tokens_after ??
+    payload.estimated_tokens_before ??
+    0
+  ) || 0));
+  const contextWindowTokens = Math.max(0, Math.round(Number(
+    payload.context_window_tokens ||
+    selectedModel?.context_window_tokens ||
+    0
+  ) || 0));
+  const usedPercent = contextWindowTokens > 0
+    ? clampPercent((estimatedTokens * 100) / contextWindowTokens)
+    : clampPercent(payload.context_watermark_percent);
+  const remainingTokens = contextWindowTokens > 0 ? Math.max(0, contextWindowTokens - estimatedTokens) : 0;
+  return {
+    round: Number(payload.round) || 0,
+    protocol: payload.protocol || selectedModel?.protocol || '',
+    messageCount: Number(payload.message_count) || 0,
+    transcriptEntries: Number(payload.transcript_entries) || 0,
+    toolResultCount: Number(payload.tool_result_count) || 0,
+    toolLoopActive: Boolean(payload.tool_loop_active),
+    estimatedTokens,
+    contextWindowTokens,
+    usedPercent,
+    remainingPercent: Math.max(0, 100 - usedPercent),
+    remainingTokens,
+    compactReservedTokens: Math.max(0, Math.round(Number(payload.compact_reserved_tokens) || 0)),
+    compactionBudgetTokens: Math.max(0, Math.round(Number(payload.compaction_budget_tokens) || 0)),
+    autoCompactEnabled: payload.auto_compact_enabled !== false,
+    estimatedToolResultTokens: Math.max(0, Math.round(Number(payload.estimated_tool_result_tokens) || 0)),
+    estimatedChars: Math.max(0, Math.round(Number(payload.estimated_chars) || 0)),
+    estimatedToolResultChars: Math.max(0, Math.round(Number(payload.estimated_tool_result_chars) || 0)),
+    compactionActions: Array.isArray(payload.compaction_actions) ? payload.compaction_actions : [],
+    updatedAt: Date.now(),
+    source: payload.source || 'live',
+    eventId: payload.event_id || '',
+    runId: payload.run_id || '',
+    createdAt: payload.created_at || '',
   };
+}
 
-  if (!message?.pending) return message;
-  if (current.stage === 'holding' && now - current.activeSince >= LOADING_DISPLAY_MIN_MS) {
-    return {
-      ...message,
-      loadingState: {
-        ...current,
-        stage: 'deleting',
-        activeSince: now,
-      },
-    };
-  }
+export function normalizeStoredContextUsage(response = {}, selectedModel = {}) {
+  const usage = response?.usage;
+  if (!usage?.payload) return null;
+  return normalizeContextUsageSummary(
+    {
+      ...usage.payload,
+      source: 'stored',
+      event_id: usage.event_id || usage.payload.event_id || '',
+      run_id: usage.run_id || usage.payload.run_id || '',
+      created_at: usage.created_at || usage.payload.created_at || '',
+    },
+    selectedModel
+  );
+}
 
-  if (current.stage === 'deleting' && now - current.activeSince >= LOADING_BACKSPACE_MS) {
-    const nextVisible = current.visibleText.slice(0, -1);
-    if (nextVisible) {
-      return {
-        ...message,
-        loadingState: {
-          ...current,
-          visibleText: nextVisible,
-          activeSince: now,
-        },
-      };
-    }
-    const nextText = nextLoadingStatus((DISPLAY_STATUS_POOL.indexOf(current.text) + 1 + DISPLAY_STATUS_POOL.length) % DISPLAY_STATUS_POOL.length);
-    return {
-      ...message,
-      loadingState: {
-        text: nextText,
-        visibleText: '',
-        stage: 'typing',
-        activeSince: now,
-      },
-    };
-  }
+export function buildContextUsageLabel(usage, notice) {
+  if (notice?.status === 'started') return '正在压缩';
+  if (notice?.status === 'completed') return notice.reason === 'auto_threshold' ? '已自动压缩' : '已压缩';
+  if (notice?.status === 'failed') return '压缩跳过';
+  if (!usage) return '';
+  return `${usage.usedPercent || 0}%`;
+}
 
-  if (current.stage === 'typing' && now - current.activeSince >= LOADING_TYPE_MS) {
-    const nextVisible = current.text.slice(0, current.visibleText.length + 1);
-    if (nextVisible.length < current.text.length) {
-      return {
-        ...message,
-        loadingState: {
-          ...current,
-          visibleText: nextVisible,
-          activeSince: now,
-        },
-      };
-    }
-    return {
-      ...message,
-      loadingState: {
-        ...current,
-        visibleText: current.text,
-        stage: 'holding',
-        activeSince: now,
-      },
-    };
-  }
+export function buildContextUsageTitle(usage) {
+  if (!usage) return '上下文状态';
+  return usage.source === 'stored' ? '上次请求的上下文窗口' : '背景信息窗口';
+}
 
-  return message;
+export function buildContextCompactionNotice(type, payload = {}) {
+  const status = type === 'context_compaction_started'
+    ? 'started'
+    : type === 'context_compaction_completed'
+      ? 'completed'
+      : 'failed';
+  return {
+    id: `${type}:${payload.event_id || payload.reason || payload.summary_until_message_id || Date.now()}`,
+    type,
+    status,
+    reason: payload.reason || '',
+    text: agentEventText(type, payload),
+    compactedMessageCount: Number(payload.compacted_message_count) || 0,
+    estimatedTokensBefore: Number(payload.estimated_tokens_before) || 0,
+    estimatedTokensAfter: Number(payload.estimated_tokens_after) || 0,
+    createdAt: Date.now(),
+  };
+}
+
+export function buildAgentRecoveryNotice(type, payload = {}) {
+  const status = type === 'agent_recovery_started'
+    ? 'started'
+    : type === 'agent_recovery_retrying'
+      ? 'retrying'
+      : type === 'agent_recovery_completed'
+        ? 'completed'
+        : 'failed';
+  return {
+    id: `${type}:${payload.event_id || payload.diagnostic_id || payload.checkpoint_seq || Date.now()}`,
+    type,
+    status,
+    reason: payload.reason || '',
+    attempt: Number(payload.attempt) || 0,
+    maxAttempts: Number(payload.max_attempts) || 0,
+    checkpointSeq: Number(payload.checkpoint_seq) || 0,
+    diagnosticId: payload.diagnostic_id || '',
+    text: agentEventText(type, payload),
+    createdAt: Date.now(),
+  };
 }
 
 export function normalizeConversationMessage(message) {
@@ -155,76 +281,4 @@ export function mapPendingAssistant(current, thinkingId, transform) {
     return transform(item);
   });
   return next;
-}
-
-export function agentEventText(type, payload = {}) {
-  switch (type) {
-    case 'model_call_started':
-      return playfulPendingStatus(type);
-    case 'model_call_attempt_started':
-      return playfulPendingStatus(type);
-    case 'model_call_retrying':
-      return playfulPendingStatus(type);
-    case 'model_call_attempt_completed':
-      return playfulPendingStatus(type);
-    case 'model_call_attempt_failed':
-      return playfulPendingStatus(type);
-    case 'model_stream_recovering':
-      return playfulPendingStatus(type);
-    case 'tool_call_started':
-      return friendlyToolStatus(payload.tool_name, 'started');
-    case 'tool_call_completed':
-      return friendlyToolStatus(payload.tool_name, 'completed');
-    case 'tool_call_failed':
-      return '正在重新调味';
-    case 'tool_result_returned':
-      return payload.is_error ? '正在重新调味' : '';
-    case 'completion_rejected':
-      return '正在检查火候';
-    case 'model_message_started':
-      return playfulPendingStatus(type);
-    case 'model_delta':
-      return '';
-    case 'model_message_completed':
-      return '';
-    case 'diagnostic_created':
-      return playfulPendingStatus(type);
-    case 'run_started':
-      return playfulPendingStatus(type);
-    case 'run_completed':
-      return '执行完成';
-    default:
-      return '';
-  }
-}
-
-export function friendlyToolStatus(toolName, phase) {
-  if (toolName === 'inspect_workspace') return '正在铺开画布';
-  if (toolName === 'read_workspace_text') return '正在翻阅底稿';
-  if (toolName === 'save_workspace_file') return phase === 'completed' ? '正在检查火候' : '正在装订成册';
-  if (toolName === 'manage_workspace_path') return phase === 'completed' ? '正在检查火候' : '正在裁剪';
-  if (toolName === 'organize_workspace_matches') return phase === 'completed' ? '正在检查火候' : '正在归档素材';
-  if (toolName === 'run_workspace_command') return '正在测算';
-  if (toolName === 'perseus_search_web' || toolName === 'web_search') return '正在搜罗线索';
-  if (toolName === 'web_extract') return '正在摘录资料';
-  if (toolName === 'list_skills' || toolName === 'read_skill' || toolName === 'install_skill_from_attachment') return '正在准备工具箱';
-  return playfulPendingStatus(toolName || 'default');
-}
-
-export function playfulPendingStatus(seed = '') {
-  const text = String(seed || '');
-  let hash = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) % PLAYFUL_PENDING_STATUSES.length;
-  }
-  return PLAYFUL_PENDING_STATUSES[hash] || PLAYFUL_PENDING_STATUSES[0];
-}
-
-export function isPendingStatusText(text = '') {
-  const value = text.trim();
-  if (!value) return true;
-  if (value === '已开始执行') return true;
-  if (PLAYFUL_PENDING_STATUSES.includes(value) || EXTRA_PENDING_STATUSES.includes(value)) return true;
-  if (value.startsWith('正在') && value.length <= 12) return true;
-  return false;
 }

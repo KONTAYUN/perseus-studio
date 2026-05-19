@@ -47,6 +47,32 @@ The agent must not claim it has read, written, moved, deleted, searched, or exec
 - Disabled Skills must not be read.
 - `delete_skill` is permanent and should only be used for explicit Skill deletion requests.
 
+## Frontend UI Rules
+
+For any frontend UI work, read and follow `docs/UI_DESIGN_SYSTEM.md` before changing visual styling, controls, panel headers, file tree UI, chat UI, settings UI, dialogs, popovers, animation, color, spacing, or border radius. For any structural work, read and follow `docs/STRUCTURE_STANDARDS.md` before moving code or creating new modules.
+
+- For structural frontend/backend work, also read `docs/STRUCTURE_STANDARDS.md` and `docs/PROJECT_HEALTH_SCORECARD.md` before editing. Keep refactors zero-behavior unless the user explicitly asks for a behavior change.
+- Treat `docs/UI_DESIGN_SYSTEM.md` as the source of truth for frontend UI standards.
+- Prefer shared utilities/components over one-off Tailwind class strings.
+- Keep icon buttons, text buttons, inputs, menus, dialogs, and panel headers visually consistent.
+- Do not add hover/active motion that shifts layout, makes icons jump, or combines parent and child transforms.
+- Keep light and dark mode behavior aligned.
+- If a UI change needs a new exception, document the exception in `docs/UI_DESIGN_SYSTEM.md`.
+- UI changes must pass `npm run test:ui` before handoff, in addition to relevant unit/build checks.
+
+## Project Structure Rules
+
+- `docs/STRUCTURE_STANDARDS.md` is the stable source of truth for structure boundaries. Do not re-split by a new personal taxonomy unless that document, `ARCHITECTURE.md`, and the scorecard are updated first with a reason.
+- Ordinary business files target fewer than 450 lines. If a file stays above that, the reason and next split must be listed in `docs/PROJECT_HEALTH_SCORECARD.md`.
+- React components should render and handle local interaction. Put SSE merging, layout math, file-tree algorithms, and agent event processing in hooks or utilities.
+- Chat composer work belongs under `src/components/chat/composer/`; do not expand the wrapper with input logic.
+- Chat panel work belongs under `src/components/chat/panel/`; menus, scroll control, and dialogs should stay split.
+- Main panel layout math and animation belong under `src/components/layout/mainPanels/`.
+- Chat state changes should preserve the split between `useChatState`, `chatConversationActions`, `useChatReferenceActions`, `chatCompactionActions`, `chatRegenerateResumeActions`, and `chatRunStream`.
+- File tree changes should preserve the split between `useFileTree`, `useFileSearchState`, `useFileSelectionState`, `useFileDragState`, `useFileTreeTrashActions`, `fileTreeMutationActions`, and `fileTreeDownloadActions`.
+- Backend agent changes should preserve these boundaries: runtime loop, model turn, checkpoint recovery, tool loop, completion/follow-up, tool registry, tool arguments/ledger, and tool events.
+- Prefer mature agent boundaries over local patch logic: read/search/edit tools, workflow completion, follow-up question, checkpoint recovery, and durable tool ledger remain separate concepts.
+
 ## Background Task Rules
 
 Use `start_background_task` for long-running or multi-step work, including:

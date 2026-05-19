@@ -165,6 +165,7 @@ type AgentRuntimeCheckpoint struct {
 	LastProviderEmptyResponse bool                 `json:"last_provider_empty_response"`
 	CompletedContent          string               `json:"completed_content"`
 	CurrentRound              int                  `json:"current_round"`
+	Seq                       int64                `json:"seq,omitempty"`
 }
 
 func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {

@@ -1,0 +1,59 @@
+.empty-chat-card {
+  box-shadow:
+    0 8px 20px rgb(15 23 42 / 0.038),
+    inset 0 0 0 1px rgb(255 255 255 / 0.16);
+}
+
+.dark .empty-chat-card {
+  box-shadow:
+    0 10px 26px rgb(0 0 0 / 0.18),
+    inset 0 0 0 1px rgb(255 255 255 / 0.05);
+}
+
+.message-bubble {
+  border-radius: 17px;
+}
+
+.loading-status-line {
+  display: inline-flex;
+  min-height: 1.5em;
+  align-items: center;
+  gap: 0.5rem;
+  line-height: 1.5;
+}
+
+.loading-status-text {
+  display: inline-flex;
+  min-height: 1.5em;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.message-bubble-user {
+  border-top-right-radius: 8px;
+}
+
+.message-bubble-assistant {
+  border-top-left-radius: 8px;
+}
+
+.agent-recovery-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid rgb(59 130 246 / 0.15);
+  border-radius: var(--radius-card);
+  background: rgb(239 246 255 / 0.75);
+  padding: 0.75rem 1rem;
+  color: rgb(37 99 235);
+  font-size: 0.875rem;
+  font-weight: 600;
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+
+.dark .agent-recovery-card {
+  border-color: rgb(147 197 253 / 0.15);
+  background: rgb(59 130 246 / 0.1);
+  color: rgb(191 219 254);
+}

@@ -70,6 +70,456 @@ func TestGenerateReplyOpenAICreateFileAfterReminder(t *testing.T) {
 	}
 }
 
+func TestGenerateReplyOpenAIAskFollowupQuestionCompletesRun(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		names := openAIToolNamesFromPayload(t, payload)
+		if !names["ask_followup_question"] {
+			t.Fatalf("ask_followup_question missing from payload: %#v", names)
+		}
+		if requestCount.Add(1) != 1 {
+			t.Fatal("unexpected extra model request after follow-up question")
+		}
+		writeOpenAIToolCall(t, w, "call_question_1", "ask_followup_question", `{"question":"这篇文章主要面向谁？","options":["普通读者","专业编辑"],"allow_freeform":true}`)
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "帮我润色这篇文章")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if reply.Content != "这篇文章主要面向谁？" {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if len(reply.ToolEvents) != 1 || reply.ToolEvents[0].ToolName != "ask_followup_question" || len(reply.ToolEvents[0].Options) != 2 {
+		t.Fatalf("unexpected tool events: %#v", reply.ToolEvents)
+	}
+	assertToolCallRecord(t, env, "ask_followup_question", "success")
+}
+
+func TestGenerateReplyOpenAIToolLoopUpgradesFromChatToWorkspaceRoundLimit(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+
+		count := requestCount.Add(1)
+		if count <= agentChatMaxRounds+1 {
+			writeOpenAIToolCall(t, w, fmt.Sprintf("call_inspect_%d", count), "inspect_workspace", `{"path":"","max_depth":1}`)
+			return
+		}
+		writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已完成长工具任务。"}`)
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "请连续检查工作区并完成")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error after workspace tool loop exceeded chat rounds: %v", err)
+	}
+	if !strings.Contains(reply.Content, "已完成长工具任务") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if requestCount.Load() <= agentChatMaxRounds {
+		t.Fatalf("expected more than chat max rounds, got %d", requestCount.Load())
+	}
+}
+
+func TestAgentLimitsAreDoubledForChatWorkspaceAndTask(t *testing.T) {
+	if agentChatMaxRounds != 48 || agentChatMaxToolCalls != 60 {
+		t.Fatalf("unexpected chat limits: rounds=%d tools=%d", agentChatMaxRounds, agentChatMaxToolCalls)
+	}
+	if agentWorkspaceMaxRounds != 96 || agentWorkspaceMaxToolCalls != 160 {
+		t.Fatalf("unexpected workspace limits: rounds=%d tools=%d", agentWorkspaceMaxRounds, agentWorkspaceMaxToolCalls)
+	}
+	if agentTaskMaxRounds != 240 || agentTaskMaxToolCalls != 240 {
+		t.Fatalf("unexpected task limits: rounds=%d tools=%d", agentTaskMaxRounds, agentTaskMaxToolCalls)
+	}
+}
+
+func TestAgentBudgetExhaustionRequestsNoToolSummaryAndResetsCheckpointBudget(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if _, ok := payload["tools"]; ok {
+			t.Fatalf("budget summary request must not include tools: %s", raw)
+		}
+		if _, ok := payload["tool_choice"]; ok {
+			t.Fatalf("budget summary request must not include tool_choice: %s", raw)
+		}
+		if requestCount.Add(1) != 1 {
+			t.Fatal("unexpected extra model request")
+		}
+		writeJSON(t, w, map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "已达到上限：已检查工作区，下一步继续整理剩余文件。",
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
+		ID:              "run_budget_test",
+		UserID:          testUserID,
+		ConversationID:  "conv_budget_test",
+		UserMessageID:   "msg_budget_test",
+		ModelProviderID: "provider_budget_test",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	provider := store.ModelProvider{
+		ID:       "provider_budget_test",
+		Name:     "Budget Test",
+		Protocol: "openai",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+		ModelID:  "gpt-test",
+		Enabled:  true,
+	}
+	runtime := &agentRuntime{
+		service:          env.service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   "conv_budget_test",
+		messageID:        "msg_budget_test",
+		provider:         provider,
+		messages:         []store.Message{{ID: "msg_budget_test", Role: "user", Content: "继续处理"}},
+		opts:             RunOptions{UserID: testUserID, RunID: run.ID},
+		profile:          runtimeProfileForProvider(provider),
+		allowTask:        true,
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{"hash-1": {ToolName: "save_workspace_file", Status: "success", Path: "draft.txt"}},
+		toolLoopActive:   true,
+		events: []ToolEvent{{
+			ToolName:     "save_workspace_file",
+			Status:       "success",
+			Path:         "draft.txt",
+			ChangedPaths: []string{"draft.txt"},
+		}},
+		transcript:        newAgentTranscript(),
+		contextManager:    newAgentContextManager(),
+		currentRound:      agentWorkspaceMaxRounds,
+		toolCalls:         agentWorkspaceMaxToolCalls,
+		performedMutation: true,
+	}
+	reply, err := runtime.run(ctx)
+	if err != nil {
+		t.Fatalf("runtime.run returned error: %v", err)
+	}
+	if reply.IncompleteReason != IncompleteReasonBudgetExhausted || !reply.Recoverable || reply.Budget == nil {
+		t.Fatalf("expected recoverable budget reply, got %#v", reply)
+	}
+	if !strings.Contains(reply.Content, "已达到上限") {
+		t.Fatalf("unexpected summary content: %q", reply.Content)
+	}
+	checkpoint, ok := env.service.loadRunCheckpoint(ctx, RunOptions{UserID: testUserID, RunID: run.ID})
+	if !ok {
+		t.Fatal("expected budget resume checkpoint")
+	}
+	if checkpoint.CurrentRound != 0 || checkpoint.ToolCalls != 0 {
+		t.Fatalf("expected reset checkpoint budget, got round=%d tools=%d", checkpoint.CurrentRound, checkpoint.ToolCalls)
+	}
+	if len(checkpoint.AppliedMutations) != 1 {
+		t.Fatalf("expected applied mutation ledger to be preserved, got %#v", checkpoint.AppliedMutations)
+	}
+}
+
+func TestAgentBudgetExhaustionCanTriggerOnToolCallLimit(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if _, ok := payload["tools"]; ok {
+			t.Fatalf("budget summary request must not include tools: %s", raw)
+		}
+		if _, ok := payload["tool_choice"]; ok {
+			t.Fatalf("budget summary request must not include tool_choice: %s", raw)
+		}
+		writeJSON(t, w, map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "工具预算已用完，下一步继续处理剩余文件。",
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
+		ID:              "run_budget_tools_test",
+		UserID:          testUserID,
+		ConversationID:  "conv_budget_tools_test",
+		UserMessageID:   "msg_budget_tools_test",
+		ModelProviderID: "provider_budget_tools_test",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	provider := store.ModelProvider{
+		ID:       "provider_budget_tools_test",
+		Name:     "Budget Tool Test",
+		Protocol: "openai",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+		ModelID:  "gpt-test",
+		Enabled:  true,
+	}
+	runtime := &agentRuntime{
+		service:          env.service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   "conv_budget_tools_test",
+		messageID:        "msg_budget_tools_test",
+		provider:         provider,
+		messages:         []store.Message{{ID: "msg_budget_tools_test", Role: "user", Content: "继续处理"}},
+		opts:             RunOptions{UserID: testUserID, RunID: run.ID},
+		profile:          runtimeProfileForProvider(provider),
+		allowTask:        true,
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		toolLoopActive:   true,
+		transcript:       newAgentTranscript(),
+		contextManager:   newAgentContextManager(),
+		currentRound:     1,
+		toolCalls:        agentWorkspaceMaxToolCalls,
+	}
+
+	reply, err := runtime.run(ctx)
+	if err != nil {
+		t.Fatalf("runtime.run returned error: %v", err)
+	}
+	if reply.IncompleteReason != IncompleteReasonBudgetExhausted || reply.Budget == nil {
+		t.Fatalf("expected recoverable budget reply, got %#v", reply)
+	}
+	if reply.Budget.Reason != "max_tool_calls" {
+		t.Fatalf("expected max_tool_calls reason, got %q", reply.Budget.Reason)
+	}
+	if reply.Budget.ToolCalls != agentWorkspaceMaxToolCalls {
+		t.Fatalf("expected capped tool count %d, got %d", agentWorkspaceMaxToolCalls, reply.Budget.ToolCalls)
+	}
+}
+
+func TestAgentAppliesPendingSteerBeforeNextModelTurn(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var capturedMessages []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if items, ok := payload["messages"].([]any); ok {
+			for _, item := range items {
+				if message, ok := item.(map[string]any); ok {
+					capturedMessages = append(capturedMessages, message)
+				}
+			}
+		}
+		writeJSON(t, w, map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "收到引导，我会只处理用户指定的几集。",
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
+		ID:              "run_steer_test",
+		UserID:          testUserID,
+		ConversationID:  "conv_steer_test",
+		UserMessageID:   "msg_steer_test",
+		ModelProviderID: "provider_steer_test",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	if _, err := env.runs.UpdateRun(ctx, testUserID, run.ID, store.UpdateAgentRunInput{Status: store.AgentRunRunning, Stage: "calling_model"}); err != nil {
+		t.Fatalf("UpdateRun returned error: %v", err)
+	}
+	if _, err := env.runs.AppendEvent(ctx, store.AgentEventInput{
+		RunID:          run.ID,
+		UserID:         testUserID,
+		ConversationID: "conv_steer_test",
+		Type:           "agent_steer_received",
+		Level:          "info",
+		Payload: map[string]any{
+			"steer_id":        "steer-test",
+			"client_steer_id": "client-steer-test",
+			"content":         "不要重写全部，只处理我拖入的几集。",
+			"content_preview": "不要重写全部，只处理我拖入的几集。",
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent returned error: %v", err)
+	}
+
+	provider := store.ModelProvider{
+		ID:       "provider_steer_test",
+		Name:     "Steer Test",
+		Protocol: "openai",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+		ModelID:  "gpt-test",
+		Enabled:  true,
+	}
+	runtime := &agentRuntime{
+		service:          env.service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   "conv_steer_test",
+		messageID:        "msg_steer_test",
+		provider:         provider,
+		messages:         []store.Message{{ID: "msg_steer_test", Role: "user", Content: "继续处理"}},
+		opts:             RunOptions{UserID: testUserID, RunID: run.ID},
+		profile:          runtimeProfileForProvider(provider),
+		allowTask:        true,
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		transcript:       newAgentTranscript(),
+		contextManager:   newAgentContextManager(),
+	}
+	reply, err := runtime.run(ctx)
+	if err != nil {
+		t.Fatalf("runtime.run returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "收到引导") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if !messagesContainContent(capturedMessages, "用户在任务运行中补充了最新引导") ||
+		!messagesContainContent(capturedMessages, "不要重写全部，只处理我拖入的几集") {
+		t.Fatalf("steer guidance missing from provider messages: %#v", capturedMessages)
+	}
+	events, err := env.runs.ListEvents(ctx, testUserID, run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if !agentEventsContain(events, "agent_steer_applied", "steer-test") {
+		t.Fatalf("expected agent_steer_applied event, got %#v", events)
+	}
+	pending, err := pendingSteersForRun(ctx, env.runs, testUserID, run.ID)
+	if err != nil {
+		t.Fatalf("pendingSteersForRun returned error: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending steer after apply, got %#v", pending)
+	}
+}
+
+func TestGenerateReplyOpenAIToolLoopRequiresToolAndSuppressesInvalidText(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+
+		count := requestCount.Add(1)
+		assertOpenAIToolChoiceRequired(t, payload)
+		switch count {
+		case 1:
+			writeOpenAIStreamText(t, w, "好，我先看一下 workspace。")
+		case 2:
+			assertLastUserReminderContains(t, payload, "没有继续调用工具")
+			writeOpenAIToolCall(t, w, "call_inspect_1", "inspect_workspace", `{"path":"","max_depth":1}`)
+		case 3:
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已查看工作区。"} `)
+		default:
+			t.Fatalf("unexpected request count: %d", count)
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看当前文件")
+	var streamed strings.Builder
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "demo.txt"}}, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			if eventType == "model_delta" {
+				if text, _ := payload["text"].(string); text != "" {
+					streamed.WriteString(text)
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if requestCount.Load() != 3 {
+		t.Fatalf("expected corrective retry plus tool completion, got %d requests", requestCount.Load())
+	}
+	if strings.Contains(streamed.String(), "好，我先看一下") {
+		t.Fatalf("invalid no-tool assistant text was streamed to the user: %q", streamed.String())
+	}
+	if !strings.Contains(reply.Content, "已查看工作区") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+}
+
 func TestGenerateReplyOpenAIWriteExistingFile(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -123,7 +573,58 @@ func TestGenerateReplyOpenAIWriteExistingFile(t *testing.T) {
 	assertToolCallRecord(t, env, "save_workspace_file", "success")
 }
 
-func TestGenerateReplyOpenAIWriteSucceedsWhenFinalReplyTimesOut(t *testing.T) {
+func TestGenerateReplyOpenAIEditWorkspaceTextEmitsWorkspaceChanged(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	if _, err := env.files.CreateFile(ctx, "ai-test.txt", "before"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		switch requestCount.Add(1) {
+		case 1:
+			writeOpenAIToolCall(t, w, "call_edit_1", "edit_workspace_text", `{"path":"ai-test.txt","old_text":"before","new_text":"after"}`)
+		case 2:
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已编辑 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
+		default:
+			t.Fatalf("unexpected request count")
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "请把 ai-test.txt 里的 before 改成 after")
+	var changedPayload map[string]any
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			if eventType == "workspace_file_changed" && payload["tool_name"] == "edit_workspace_text" {
+				changedPayload = payload
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "ai-test.txt") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	result, err := env.files.ReadFile("ai-test.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if result.Content != "after" {
+		t.Fatalf("unexpected file content: %q", result.Content)
+	}
+	if changedPayload == nil || changedPayload["path"] != "ai-test.txt" || changedPayload["hash"] == "" || changedPayload["version_id"] == "" {
+		t.Fatalf("expected edit workspace change payload with path/hash/version, got %#v", changedPayload)
+	}
+	assertToolCallRecord(t, env, "edit_workspace_text", "success")
+}
+
+func TestGenerateReplyOpenAIWritePersistsCheckpointWhenFinalReplyTimesOut(t *testing.T) {
 	env := newTestAIEnv(t)
 	env.service.client.Timeout = 20 * time.Millisecond
 	ctx := context.Background()
@@ -165,14 +666,11 @@ func TestGenerateReplyOpenAIWriteSucceedsWhenFinalReplyTimesOut(t *testing.T) {
 
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "请把 notes/test.md 改成 version 2")
 	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
+	if err == nil {
+		t.Fatalf("expected GenerateReply error after final timeout, got reply %q", reply.Content)
 	}
-	if !strings.Contains(reply.Content, "notes/test.md") || !strings.Contains(reply.Content, "工具验证结果收尾") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
-	}
-	if len(reply.ToolEvents) != 1 || reply.ToolEvents[0].ToolName != "save_workspace_file" || reply.ToolEvents[0].Status != "success" {
-		t.Fatalf("unexpected tool events: %#v", reply.ToolEvents)
+	if !isCheckpointRecoverableProviderError(err) {
+		t.Fatalf("expected recoverable provider error, got %v", err)
 	}
 	readResult, err := env.files.ReadFile("notes/test.md")
 	if err != nil {
@@ -737,7 +1235,7 @@ func TestGenerateReplyOpenAIDeduplicatesRepeatedMutationToolCall(t *testing.T) {
 	}
 }
 
-func TestGenerateReplyOpenAIFinishesFromVerifiedMutationWhenModelNeverCompletes(t *testing.T) {
+func TestGenerateReplyOpenAIFailsWhenModelNeverCompletesAfterMutation(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 
@@ -765,11 +1263,11 @@ func TestGenerateReplyOpenAIFinishesFromVerifiedMutationWhenModelNeverCompletes(
 
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "请创建 verified-fallback.txt，内容写 done")
 	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
+	if err == nil {
+		t.Fatalf("expected GenerateReply error when model never completes, got reply %q", reply.Content)
 	}
-	if !strings.Contains(reply.Content, "verified-fallback.txt") || !strings.Contains(reply.Content, "已完成并验证") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
+	if !strings.Contains(err.Error(), "workspace 任务未执行完成") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 	result, err := env.files.ReadFile("verified-fallback.txt")
 	if err != nil {
@@ -780,6 +1278,53 @@ func TestGenerateReplyOpenAIFinishesFromVerifiedMutationWhenModelNeverCompletes(
 	}
 	if requestCount.Load() != 4 {
 		t.Fatalf("expected one tool round plus three no-tool rounds, got %d", requestCount.Load())
+	}
+}
+
+func TestGenerateReplyOpenAIResumesFromCheckpointWhenFinalStreamBreaks(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		switch requestCount.Add(1) {
+		case 1:
+			writeOpenAIToolCall(t, w, "write_1", "save_workspace_file", `{"path":"verified-stream-fallback.txt","content":"done","mode":"create"}`)
+		case 2:
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial final\"}}]}\n\n")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				panic(http.ErrAbortHandler)
+			}
+			conn, _, hijackErr := hijacker.Hijack()
+			if hijackErr != nil {
+				panic(http.ErrAbortHandler)
+			}
+			_ = conn.Close()
+		case 3:
+			writeOpenAIToolCall(t, w, "done_after_resume", "attempt_completion", `{"summary":"已从断点继续并完成。","changed_paths":["verified-stream-fallback.txt"]}`)
+		default:
+			t.Fatalf("unexpected request count: %d", requestCount.Load())
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "请创建 verified-stream-fallback.txt，内容写 done")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "已从断点继续并完成") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if requestCount.Load() != 3 {
+		t.Fatalf("expected write, broken final stream, and checkpoint resume, got %d", requestCount.Load())
 	}
 }
 
@@ -958,6 +1503,237 @@ func TestGenerateReplyRetriesHTTP429ThenSucceeds(t *testing.T) {
 	}
 }
 
+func TestGenerateReplyCheckpointResumeAfterTransientProviderError(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
+	if _, err := env.files.CreateFile(ctx, "draft.txt", "draft body"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		body := string(raw)
+		count := requestCount.Add(1)
+		if strings.Contains(body, "上一轮模型供应商连接中断") {
+			writeJSON(t, w, map[string]any{
+				"choices": []map[string]any{
+					{
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []map[string]any{
+								{
+									"id":   "done_after_resume",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "attempt_completion",
+										"arguments": `{"summary":"已从断点继续并完成。","notes":"没有重复读取已成功的文件。"}`,
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			return
+		}
+		if count == 1 {
+			writeJSON(t, w, map[string]any{
+				"choices": []map[string]any{
+					{
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []map[string]any{
+								{
+									"id":   "read_before_failure",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "read_workspace_text",
+										"arguments": `{"path":"draft.txt"}`,
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("errorcode:502"))
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "读取 draft 后继续总结")
+	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
+		UserID:          testUserID,
+		ConversationID:  conversation.ID,
+		UserMessageID:   userMessage.ID,
+		ModelProviderID: provider.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	var eventTypes []string
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+		RunID:  run.ID,
+		Event: func(eventType, level string, payload map[string]any) {
+			eventTypes = append(eventTypes, eventType)
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "已从断点继续并完成") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	for _, expected := range []string{"agent_recovery_started", "agent_recovery_retrying", "agent_recovery_completed"} {
+		if !containsString(eventTypes, expected) {
+			t.Fatalf("expected %s event, got %#v", expected, eventTypes)
+		}
+	}
+	var readCalls int
+	if err := env.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tool_calls WHERE user_id = ? AND conversation_id = ? AND tool_name = ?`, testUserID, conversation.ID, "read_workspace_text").Scan(&readCalls); err != nil {
+		t.Fatalf("count tool calls returned error: %v", err)
+	}
+	if readCalls != 1 {
+		t.Fatalf("expected exactly one read tool call, got %d", readCalls)
+	}
+	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("diagnostics.List returned error: %v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected transient provider warning diagnostic")
+	}
+	for _, item := range logs {
+		if item.Level == "error" {
+			t.Fatalf("recovered transient failure should not leave error diagnostic: %#v", item)
+		}
+	}
+}
+
+func TestGenerateReplyCheckpointResumeSkipsNonStreamFallbackWhenCheckpointExists(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
+	if _, err := env.files.CreateFile(ctx, "draft.txt", "draft body"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	var requestCount atomic.Int32
+	var fallbackRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		body := string(raw)
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if payload["stream"] == false {
+			fallbackRequests.Add(1)
+		}
+		switch requestCount.Add(1) {
+		case 1:
+			writeOpenAIToolCall(t, w, "read_before_failure", "read_workspace_text", `{"path":"draft.txt"}`)
+		case 2:
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Connection", "close")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				panic(http.ErrAbortHandler)
+			}
+			conn, _, hijackErr := hj.Hijack()
+			if hijackErr != nil {
+				panic(http.ErrAbortHandler)
+			}
+			_ = conn.Close()
+		default:
+			if !strings.Contains(body, "上一轮模型供应商连接中断") {
+				t.Fatalf("expected checkpoint recovery reminder in request %d: %s", requestCount.Load(), body)
+			}
+			writeOpenAIToolCall(t, w, "done_after_resume", "attempt_completion", `{"summary":"已从断点继续并完成。"}`)
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "读取 draft 后继续总结")
+	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
+		UserID:          testUserID,
+		ConversationID:  conversation.ID,
+		UserMessageID:   userMessage.ID,
+		ModelProviderID: provider.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+		RunID:  run.ID,
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "已从断点继续并完成") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if fallbackRequests.Load() != 0 {
+		t.Fatalf("expected checkpoint resume instead of non-stream fallback, got %d fallback requests", fallbackRequests.Load())
+	}
+}
+
+func TestReadWorkspaceTextDoesNotEmitWorkspaceChanged(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	if _, err := env.files.CreateFile(ctx, "draft.txt", "draft body"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		switch requestCount.Add(1) {
+		case 1:
+			writeOpenAIToolCall(t, w, "call_read_1", "read_workspace_text", `{"path":"draft.txt"}`)
+		case 2:
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已读取 draft.txt。"}`)
+		default:
+			t.Fatalf("unexpected request count")
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "读取 draft.txt")
+	var eventTypes []string
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			eventTypes = append(eventTypes, eventType)
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if containsString(eventTypes, "workspace_file_changed") {
+		t.Fatalf("read-only tool should not emit workspace_file_changed: %#v", eventTypes)
+	}
+}
+
 func TestGenerateReplyOpenAIStreamParseErrorFallsBackToNonStream(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -1025,6 +1801,148 @@ func TestGenerateReplyOpenAIStreamParseErrorFallsBackToNonStream(t *testing.T) {
 	}
 }
 
+func TestGenerateReplyAnthropicEmptyStreamFallsBackToNonStream(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+
+		count := requestCount.Add(1)
+		switch count {
+		case 1:
+			if payload["stream"] != true {
+				t.Fatalf("expected first request to stream, got %#v", payload["stream"])
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+		case 2:
+			if payload["stream"] != false {
+				t.Fatalf("expected fallback request to disable stream, got %#v", payload["stream"])
+			}
+			writeJSON(t, w, map[string]any{
+				"content": []map[string]any{
+					{"type": "text", "text": "非流式恢复成功。"},
+				},
+				"stop_reason": "end_turn",
+			})
+		default:
+			t.Fatalf("unexpected request count: %d", count)
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareAnthropicConversation(t, ctx, env, server.URL, "你好")
+	var eventTypes []string
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			eventTypes = append(eventTypes, eventType)
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if requestCount.Load() != 2 {
+		t.Fatalf("expected stream request plus non-stream fallback, got %d", requestCount.Load())
+	}
+	if !strings.Contains(reply.Content, "非流式恢复成功") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if !containsString(eventTypes, "model_stream_recovering") {
+		t.Fatalf("expected model_stream_recovering event, got %#v", eventTypes)
+	}
+	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("diagnostics.List returned error: %v", err)
+	}
+	if len(logs) == 0 || logs[0].Stage != "provider_empty_stream_response" {
+		t.Fatalf("expected provider_empty_stream_response diagnostic, got %#v", logs)
+	}
+	if !strings.Contains(logs[0].RequestSummary, `"protocol":"anthropic"`) {
+		t.Fatalf("expected request summary in diagnostic, got %q", logs[0].RequestSummary)
+	}
+}
+
+func TestGenerateReplyAnthropicResumesFromCheckpointWhenFinalStreamBreaks(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		switch requestCount.Add(1) {
+		case 1:
+			writeJSON(t, w, map[string]any{
+				"content": []map[string]any{{
+					"type": "tool_use",
+					"id":   "toolu_write_1",
+					"name": "save_workspace_file",
+					"input": map[string]any{
+						"path":    "anthropic-verified-stream-fallback.txt",
+						"content": "done",
+						"mode":    "create",
+					},
+				}},
+				"stop_reason": "tool_use",
+			})
+		case 2:
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: content_block_start\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"partial final\"}}\n\n")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				panic(http.ErrAbortHandler)
+			}
+			conn, _, hijackErr := hijacker.Hijack()
+			if hijackErr != nil {
+				panic(http.ErrAbortHandler)
+			}
+			_ = conn.Close()
+		case 3:
+			writeJSON(t, w, map[string]any{
+				"content": []map[string]any{{
+					"type": "tool_use",
+					"id":   "done_after_resume",
+					"name": "attempt_completion",
+					"input": map[string]any{
+						"summary":       "已从断点继续并完成。",
+						"changed_paths": []string{"anthropic-verified-stream-fallback.txt"},
+					},
+				}},
+				"stop_reason": "tool_use",
+			})
+		default:
+			t.Fatalf("unexpected request count: %d", requestCount.Load())
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareAnthropicConversation(t, ctx, env, server.URL, "请创建 anthropic-verified-stream-fallback.txt，内容写 done")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "已从断点继续并完成") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if requestCount.Load() != 3 {
+		t.Fatalf("expected write, broken final stream, and checkpoint resume, got %d", requestCount.Load())
+	}
+}
+
 func TestGenerateReplyRecordsDiagnosticForNonJSON(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -1056,12 +1974,128 @@ func TestGenerateReplyRecordsDiagnosticForNonJSON(t *testing.T) {
 	}
 }
 
+func TestGenerateReplyRecordsProvider400ToolRequestSummary(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if payload["stream"] != true {
+			t.Fatalf("expected stream=true on provider request, got %#v", payload["stream"])
+		}
+		if payload["tool_choice"] != "required" {
+			t.Fatalf("expected required tool_choice, got %#v", payload["tool_choice"])
+		}
+		names := openAIToolNamesFromPayload(t, payload)
+		if !names["attempt_completion"] || !names["ask_followup_question"] {
+			t.Fatalf("expected workflow tools in payload, got %#v", names)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"tool_choice required is not supported by this provider"}}`))
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看当前文件")
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "demo.txt"}}, RunOptions{UserID: testUserID})
+	if err == nil {
+		t.Fatal("expected GenerateReply error")
+	}
+	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("diagnostics.List returned error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 diagnostic log, got %#v", logs)
+	}
+	var summary map[string]any
+	if err := json.Unmarshal([]byte(logs[0].RequestSummary), &summary); err != nil {
+		t.Fatalf("request_summary should be JSON: %v\n%s", err, logs[0].RequestSummary)
+	}
+	expected := map[string]any{
+		"request_kind":  "chat_completions",
+		"stream":        true,
+		"tool_choice":   "required",
+		"requires_tool": true,
+		"failure_class": "provider_rejected_required_tool_choice",
+	}
+	for key, value := range expected {
+		if summary[key] != value {
+			t.Fatalf("expected summary[%s]=%#v, got %#v in %#v", key, value, summary[key], summary)
+		}
+	}
+	if got, _ := summary["tools_count"].(float64); got < 2 {
+		t.Fatalf("expected tools_count >= 2, got %#v in %#v", summary["tools_count"], summary)
+	}
+	toolNames, ok := summary["tool_names"].([]any)
+	if !ok || !containsAnyStringValue(toolNames, "attempt_completion") || !containsAnyStringValue(toolNames, "ask_followup_question") {
+		t.Fatalf("expected tool_names to include workflow tools, got %#v", summary["tool_names"])
+	}
+	if strings.Contains(logs[0].RequestSummary, "看看当前文件") || strings.Contains(logs[0].RequestSummary, "test-key") {
+		t.Fatalf("request_summary leaked prompt or API key: %s", logs[0].RequestSummary)
+	}
+}
+
 func prepareOpenAIConversation(t *testing.T, ctx context.Context, env *testAIEnv, baseURL, prompt string) (store.ModelProvider, store.Conversation, store.Message, []store.Message) {
 	t.Helper()
 
 	provider, err := env.configs.CreateModelProvider(ctx, testUserID, store.ModelProviderInput{
 		Name:      "Test OpenAI",
 		Protocol:  "openai",
+		BaseURL:   baseURL,
+		APIKey:    "test-key",
+		ModelID:   "test-model",
+		Enabled:   true,
+		IsDefault: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateModelProvider returned error: %v", err)
+	}
+
+	conversation, err := env.conversations.CreateConversation(ctx, store.CreateConversationInput{
+		UserID:                  testUserID,
+		Title:                   "测试会话",
+		SelectedModelProviderID: provider.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation returned error: %v", err)
+	}
+
+	userMessage, err := env.conversations.AppendMessage(ctx, testUserID, conversation.ID, "user", prompt, "[]")
+	if err != nil {
+		t.Fatalf("AppendMessage returned error: %v", err)
+	}
+
+	messages, err := env.conversations.ListMessages(ctx, testUserID, conversation.ID)
+	if err != nil {
+		t.Fatalf("ListMessages returned error: %v", err)
+	}
+	return provider, conversation, userMessage, messages
+}
+
+func containsAnyStringValue(items []any, expected string) bool {
+	for _, item := range items {
+		if text, ok := item.(string); ok && text == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func prepareAnthropicConversation(t *testing.T, ctx context.Context, env *testAIEnv, baseURL, prompt string) (store.ModelProvider, store.Conversation, store.Message, []store.Message) {
+	t.Helper()
+
+	provider, err := env.configs.CreateModelProvider(ctx, testUserID, store.ModelProviderInput{
+		Name:      "Test Anthropic",
+		Protocol:  "anthropic",
 		BaseURL:   baseURL,
 		APIKey:    "test-key",
 		ModelID:   "test-model",
@@ -1155,7 +2189,8 @@ func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any)
 	for _, fragment := range []string{
 		"标准 Agent Loop",
 		"最后调用 attempt_completion",
-		"save_workspace_file 创建或覆盖文本文件",
+		"find_workspace_files 按名称/路径/glob 找文件",
+		"save_workspace_file 创建或整文件覆盖文本文件",
 		"run_workspace_command 在 workspace 内运行命令",
 		"不可以永久删除文件",
 		"不可以访问 workspace 之外的路径",
@@ -1238,6 +2273,45 @@ func openAIToolNamesFromPayload(t *testing.T, payload map[string]any) map[string
 		}
 	}
 	return names
+}
+
+func assertOpenAIToolChoiceRequired(t *testing.T, payload map[string]any) {
+	t.Helper()
+	if payload["tool_choice"] != "required" {
+		t.Fatalf("expected tool_choice=required, got %#v", payload["tool_choice"])
+	}
+}
+
+func writeOpenAIText(t *testing.T, w http.ResponseWriter, content string) {
+	t.Helper()
+	writeJSON(t, w, map[string]any{
+		"choices": []map[string]any{
+			{
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": content,
+				},
+				"finish_reason": "stop",
+			},
+		},
+	})
+}
+
+func writeOpenAIStreamText(t *testing.T, w http.ResponseWriter, content string) {
+	t.Helper()
+	w.Header().Set("Content-Type", "text/event-stream")
+	chunks := []map[string]any{
+		{"choices": []map[string]any{{"delta": map[string]any{"content": content}}}},
+		{"choices": []map[string]any{{"delta": map[string]any{}, "finish_reason": "stop"}}},
+	}
+	for _, chunk := range chunks {
+		raw, err := json.Marshal(chunk)
+		if err != nil {
+			t.Fatalf("Marshal returned error: %v", err)
+		}
+		fmt.Fprintf(w, "data: %s\n\n", raw)
+	}
+	fmt.Fprint(w, "data: [DONE]\n\n")
 }
 
 func writeOpenAIToolCall(t *testing.T, w http.ResponseWriter, id, name, arguments string) {
@@ -1332,6 +2406,28 @@ func assertEqual(t *testing.T, actual, expected any) {
 func containsString(items []string, expected string) bool {
 	for _, item := range items {
 		if item == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func messagesContainContent(messages []map[string]any, expected string) bool {
+	for _, message := range messages {
+		if strings.Contains(fmt.Sprint(message["content"]), expected) {
+			return true
+		}
+	}
+	return false
+}
+
+func agentEventsContain(events []store.AgentEvent, eventType, steerID string) bool {
+	for _, event := range events {
+		if event.Type != eventType {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err == nil && fmt.Sprint(payload["steer_id"]) == steerID {
 			return true
 		}
 	}

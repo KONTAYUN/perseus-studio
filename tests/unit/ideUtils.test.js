@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getFileTreeDropZone } from '../../src/hooks/ideUtils.js';
+import { filterFreshEditorToolEvents, getAncestorFolderPaths, getFileTreeDropZone, shouldReloadWorkspaceForToolEvents } from '../../src/hooks/ideUtils.js';
 import { nextAvailablePathInTree, topLevelSelectedItems } from '../../src/hooks/fileTreeUtils.js';
 
 const rect = { top: 100, height: 40 };
@@ -31,4 +31,31 @@ test('topLevelSelectedItems removes descendants of selected folders', () => {
     { path: 'docs', type: 'folder' },
     { path: 'other.txt', type: 'file' },
   ]);
+});
+
+test('getAncestorFolderPaths returns every parent from root to leaf parent', () => {
+  assert.deepEqual(getAncestorFolderPaths('docs/guides/readme.md'), ['docs', 'docs/guides']);
+  assert.deepEqual(getAncestorFolderPaths('readme.md'), []);
+});
+
+test('filterFreshEditorToolEvents deduplicates repeated AI file refresh events', () => {
+  const seen = new Set();
+  const event = {
+    tool_call_id: 'tc1',
+    tool_name: 'save_workspace_file',
+    status: 'success',
+    path: 'docs/a.txt',
+    hash: 'h1',
+    version_id: 'v1',
+  };
+
+  assert.deepEqual(filterFreshEditorToolEvents([event], seen), [event]);
+  assert.deepEqual(filterFreshEditorToolEvents([{ ...event }], seen), []);
+  assert.deepEqual(filterFreshEditorToolEvents([{ ...event, hash: 'h2' }], seen), [{ ...event, hash: 'h2' }]);
+});
+
+test('shouldReloadWorkspaceForToolEvents includes precise AI edits', () => {
+  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'edit_workspace_text' }]), true);
+  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'failed', tool_name: 'edit_workspace_text' }]), false);
+  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'read_workspace_text' }]), false);
 });

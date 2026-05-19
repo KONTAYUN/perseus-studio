@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"webide-backend/internal/store"
 	"webide-backend/internal/usersvc"
@@ -52,6 +53,9 @@ type ToolEvent struct {
 	Label         string   `json:"label"`
 	Status        string   `json:"status"`
 	OperationHash string   `json:"operation_hash,omitempty"`
+	Question      string   `json:"question,omitempty"`
+	Options       []string `json:"options,omitempty"`
+	AllowFreeform *bool    `json:"allow_freeform,omitempty"`
 	SkillID       string   `json:"skill_id,omitempty"`
 	Path          string   `json:"path,omitempty"`
 	OldPath       string   `json:"old_path,omitempty"`
@@ -89,24 +93,28 @@ type WebExtractResult struct {
 }
 
 type Reply struct {
-	Content        string                 `json:"content"`
-	ToolEvents     []ToolEvent            `json:"tool_events,omitempty"`
-	BackgroundTask *BackgroundTaskRequest `json:"background_task,omitempty"`
+	Content          string                 `json:"content"`
+	ToolEvents       []ToolEvent            `json:"tool_events,omitempty"`
+	BackgroundTask   *BackgroundTaskRequest `json:"background_task,omitempty"`
+	IncompleteReason string                 `json:"incomplete_reason,omitempty"`
+	Recoverable      bool                   `json:"recoverable,omitempty"`
+	Budget           *BudgetExhaustionInfo  `json:"budget,omitempty"`
 }
 
 type RunOptions struct {
-	UserID       string
-	RunID        string
-	TaskID       string
-	ForceTool    string
-	ThinkingMode string
-	Attachments  []AttachmentPayload
-	Log          func(level, message string)
-	Event        func(eventType, level string, payload map[string]any)
-	OnAssistantMessageStarted func(messageID string, content string, segmentIndex int)
-	OnAssistantMessageDelta func(messageID string, delta string)
+	UserID                      string
+	RunID                       string
+	TaskID                      string
+	ForceTool                   string
+	ThinkingMode                string
+	Attachments                 []AttachmentPayload
+	Log                         func(level, message string)
+	Event                       func(eventType, level string, payload map[string]any)
+	OnAssistantMessageStarted   func(messageID string, content string, segmentIndex int)
+	OnAssistantMessageDelta     func(messageID string, delta string)
 	OnAssistantMessageCompleted func(messageID string, finalContent string, segmentIndex int)
-	OnAssistantToolBoundary func()
+	OnAssistantToolBoundary     func()
+	OnProviderAttempt           func()
 }
 
 type ExpectedOutput struct {
@@ -132,8 +140,29 @@ func NewService(configs *store.ConfigStore, factory *usersvc.Factory, calls *sto
 		factory: factory,
 		calls:   calls,
 		diag:    diag,
-		client:  http.DefaultClient,
+		client:  newProviderHTTPClient(),
 	}
+}
+
+func newProviderHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = 10
+	transport.IdleConnTimeout = 90 * time.Second
+	transport.ResponseHeaderTimeout = 0
+	transport.ExpectContinueTimeout = 1 * time.Second
+	return &http.Client{Transport: transport}
+}
+
+func (s *Service) closeIdleProviderConnections() {
+	if s == nil || s.client == nil {
+		return
+	}
+	if transport, ok := s.client.Transport.(interface{ CloseIdleConnections() }); ok {
+		transport.CloseIdleConnections()
+		return
+	}
+	s.client.CloseIdleConnections()
 }
 
 func (s *Service) AttachRunStore(runs *store.AgentRunStore) {

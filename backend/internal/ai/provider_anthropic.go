@@ -22,13 +22,29 @@ type anthropicProviderV2 struct {
 
 func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) (agentModelTurn, error) {
 	toolNames := anthropicToolNames(req.Tools)
+	toolsEnabled := !req.DisableTools && len(req.Tools) > 0
+	req.Snapshot.Summary.RequestKind = "messages"
+	req.Snapshot.Summary.Stream = boolPtr(true)
+	req.Snapshot.Summary.ToolChoice = "none"
+	req.Snapshot.Summary.RequiresTool = false
+	req.Snapshot.Summary.ToolsCount = 0
+	req.Snapshot.Summary.ToolNames = nil
+	if toolsEnabled {
+		req.Snapshot.Summary.ToolChoice = providerToolChoiceSummary(req.ToolChoice)
+		req.Snapshot.Summary.RequiresTool = normalizeProviderToolChoice(req.ToolChoice).requiresTool()
+		req.Snapshot.Summary.ToolsCount = len(toolNames)
+		req.Snapshot.Summary.ToolNames = toolNames
+		req.Snapshot.Summary.ParallelToolCalls = boolPtr(false)
+	}
 	payload := map[string]any{
-		"model":       req.Provider.ModelID,
-		"max_tokens":  1024,
-		"messages":    req.Snapshot.AnthropicMessages,
-		"tools":       req.Tools,
-		"tool_choice": map[string]any{"type": "auto", "disable_parallel_tool_use": true},
-		"stream":      true,
+		"model":      req.Provider.ModelID,
+		"max_tokens": 1024,
+		"messages":   req.Snapshot.AnthropicMessages,
+		"stream":     true,
+	}
+	if toolsEnabled {
+		payload["tools"] = req.Tools
+		payload["tool_choice"] = anthropicProviderToolChoice(req.ToolChoice)
 	}
 	if req.Snapshot.AnthropicSystem != "" {
 		payload["system"] = req.Snapshot.AnthropicSystem
@@ -59,6 +75,7 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 				"diagnostic_id": diagID,
 				"recovery":      "retry_non_stream",
 			})
+			req.Snapshot.Summary.StreamFallbackUsed = true
 			return p.callNonStream(ctx, req, payload, endpoint, "provider_stream_transport_fallback")
 		}
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
@@ -75,11 +92,22 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			}
 		}
 		defer closeStream()
-		turn, err := parseAnthropicStream(streamBody, func(text string) {
-			emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
-		})
+		emitPublicText := !normalizeProviderToolChoice(req.ToolChoice).requiresTool()
+		var emitText func(string)
+		if emitPublicText {
+			emitText = func(text string) {
+				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
+			}
+		}
+		turn, err := parseAnthropicStream(streamBody, emitText)
+		if emitPublicText && strings.TrimSpace(turn.Content) != "" {
+			turn.PublicTextStreamed = true
+		}
 		if err != nil {
 			if partial, ok := partialTurnFromStreamError(err); ok {
+				if emitPublicText && strings.TrimSpace(partial.Content) != "" {
+					partial.PublicTextStreamed = true
+				}
 				log.Printf("[ai] anthropic stream_partial_tool_recovered conversation=%s endpoint=%s tool_calls=%d error=%v", req.ConversationID, endpoint, len(partial.ToolCalls), err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_partial_tool_recovered", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 				emitToolLifecycleEvent(req.Opts, "model_stream_recovering", "warn", map[string]any{
@@ -95,7 +123,7 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 				closeStream()
 				return partial, nil
 			}
-			if shouldFallbackAfterStreamError(ctx, err) {
+			if shouldFallbackAfterStreamError(ctx, err, req.CanCheckpointResume) {
 				log.Printf("[ai] anthropic stream_parse_error_fallback conversation=%s endpoint=%s error=%v", req.ConversationID, endpoint, err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 				emitToolLifecycleEvent(req.Opts, "model_stream_recovering", "warn", map[string]any{
@@ -109,12 +137,29 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 					"recovery":      "retry_non_stream",
 				})
 				closeStream()
+				req.Snapshot.Summary.StreamFallbackUsed = true
 				return p.callNonStream(ctx, req, payload, endpoint, "provider_stream_fallback")
 			}
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
 		closeStream()
+		if isEmptyModelTurn(turn) {
+			err := fmt.Errorf("empty Anthropic stream response")
+			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_empty_stream_response", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
+			emitToolLifecycleEvent(req.Opts, "model_stream_recovering", "warn", map[string]any{
+				"stage":         "provider_empty_stream_response",
+				"provider_id":   req.Provider.ID,
+				"provider_name": req.Provider.Name,
+				"protocol":      req.Provider.Protocol,
+				"model_id":      req.Provider.ModelID,
+				"error":         err.Error(),
+				"diagnostic_id": diagID,
+				"recovery":      "retry_non_stream",
+			})
+			req.Snapshot.Summary.StreamFallbackUsed = true
+			return p.callNonStream(ctx, req, payload, endpoint, "provider_empty_stream_fallback")
+		}
 		return turn, nil
 	}
 
@@ -123,41 +168,30 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 
 func (s *Service) callAnthropicAgentTurn(ctx context.Context, runtime *agentRuntime, round int) (agentModelTurn, error) {
 	return s.providerV2(agentProtocolAnthropic).Turn(ctx, providerTurnRequest{
-		ConversationID:                runtime.conversationID,
-		MessageID:                     runtime.messageID,
-		Provider:                      runtime.provider,
-		Protocol:                      runtime.protocol,
-		Tools:                         runtime.tools(),
-		Snapshot:                      runtime.lastContextSnapshot,
-		PerformedMutation:             runtime.performedMutation,
-		HasToolEvents:                 len(runtime.events) > 0,
-		HasVerifiedCompletionEvidence: runtime.hasVerifiedCompletionEvidence(),
-		Opts:                          runtime.opts,
+		ConversationID:      runtime.conversationID,
+		MessageID:           runtime.messageID,
+		Provider:            runtime.provider,
+		Protocol:            runtime.protocol,
+		Tools:               runtime.tools(),
+		ToolChoice:          runtime.toolChoice(),
+		Snapshot:            runtime.lastContextSnapshot,
+		PerformedMutation:   runtime.performedMutation,
+		HasToolEvents:       len(runtime.events) > 0,
+		CanCheckpointResume: runtime.hasRecoverableCheckpoint(ctx),
+		Opts:                runtime.opts,
 	})
 }
 
 func (p anthropicProviderV2) callNonStream(ctx context.Context, reqState providerTurnRequest, payload map[string]any, endpoint, stage string) (agentModelTurn, error) {
 	fallbackPayload := clonePayloadWithStream(payload, false)
+	reqState.Snapshot.Summary.Stream = boolPtr(false)
+	reqState.Snapshot.Summary.StreamFallbackUsed = true
 	startedAt := time.Now()
 	resp, err := p.service.anthropicSDKPostRaw(ctx, reqState.Provider, anthropicMessagesPath(reqState.Provider), fallbackPayload, reqState.Opts, stage)
 	duration := time.Since(startedAt)
 	if err != nil {
 		if isContextCanceledError(err) {
 			return agentModelTurn{}, err
-		}
-		if reqState.HasVerifiedCompletionEvidence && isRecoverableFinalProviderError(err) {
-			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, reqState.Opts, reqState.Provider, reqState.ConversationID, reqState.MessageID, stage, "warn", duration.Milliseconds(), err, reqState.Snapshot.Summary)
-			emitToolLifecycleEvent(reqState.Opts, "model_stream_recovering", "warn", map[string]any{
-				"stage":         "final_response_recoverable_transport",
-				"provider_id":   reqState.Provider.ID,
-				"provider_name": reqState.Provider.Name,
-				"protocol":      reqState.Provider.Protocol,
-				"model_id":      reqState.Provider.ModelID,
-				"error":         err.Error(),
-				"diagnostic_id": diagID,
-				"recovery":      "verified_tool_result_completion",
-			})
-			return agentModelTurn{Content: "已完成并检查结果。", FinishReason: "recoverable_final_response_error"}, nil
 		}
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, reqState.Opts, reqState.Provider, reqState.ConversationID, reqState.MessageID, stage, "error", duration.Milliseconds(), err, reqState.Snapshot.Summary)
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
@@ -203,4 +237,8 @@ func (p anthropicProviderV2) parseNonStream(ctx context.Context, req providerTur
 		})
 	}
 	return turn, nil
+}
+
+func isEmptyModelTurn(turn agentModelTurn) bool {
+	return strings.TrimSpace(turn.Content) == "" && len(turn.ToolCalls) == 0
 }

@@ -7,6 +7,7 @@ import TaskPanel from './components/tasks/TaskPanel';
 import { apiGet, apiPost } from './api/client';
 import useIdeState from './hooks/useIdeState';
 import useTasks from './hooks/useTasks';
+import { Button, Input } from './components/ui';
 
 export default function App() {
   const tasksRef = React.useRef(null);
@@ -147,9 +148,6 @@ export default function App() {
           scrollbar-gutter: stable;
         }
         .editor-panel-root { container-type: inline-size; }
-        @container (max-width: 360px) {
-          .editor-tab-close { display: none; }
-        }
       `}</style>
 
       <AppHeader
@@ -195,45 +193,47 @@ function LoginScreen({ username, password, error, isLoggingIn, isRegisterMode, r
     <div className="h-screen w-screen bg-[#121212] text-gray-100 flex items-center justify-center px-6">
       <form
         onSubmit={onSubmit}
-        className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#1C1C1E] p-6 shadow-2xl shadow-black/40"
+        className="login-card-surface w-full max-w-sm border border-white/10 bg-[#1C1C1E] p-6"
       >
         <div className="mb-6">
           <div className="text-xl font-bold">Perseus Studio</div>
           <div className="mt-1 text-sm text-gray-400">{subtitle}</div>
         </div>
-        <input
+        <Input
           autoFocus
           type="text"
           value={username}
           onChange={(event) => onUsernameChange(event.target.value)}
-          className="h-11 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+          className="login-input h-11"
           placeholder="用户名"
           autoComplete="username"
         />
-        <input
+        <Input
           type="password"
           value={password}
           onChange={(event) => onPasswordChange(event.target.value)}
-          className="mt-3 h-11 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+          className="login-input mt-3 h-11"
           placeholder="密码"
           autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
         />
         {error && <div className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</div>}
-        <button
+        <Button
           type="submit"
           disabled={isLoggingIn || !username || !password}
-          className="mt-5 h-10 w-full rounded-xl bg-blue-500 text-sm font-semibold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
+          className="mt-5 h-10 w-full bg-blue-500 text-sm font-semibold text-white hover:bg-blue-600 disabled:bg-gray-700 disabled:text-gray-400"
         >
           {buttonText}
-        </button>
+        </Button>
         {!isFirstUser && registrationOpen && (
-          <button
+          <Button
             type="button"
             onClick={onToggleMode}
-            className="mt-3 w-full text-center text-xs text-gray-500 hover:text-gray-300 transition"
+            variant="ghost"
+            size="xs"
+            className="mt-3 w-full justify-center text-gray-500 hover:text-gray-300 dark:text-gray-400 dark:hover:text-gray-200"
           >
             {isRegisterMode ? '已有账号？去登录' : '没有账号？注册一个'}
-          </button>
+          </Button>
         )}
       </form>
     </div>

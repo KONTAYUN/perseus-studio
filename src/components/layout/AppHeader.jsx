@@ -1,8 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
 import {
   ClipboardList,
   MessageSquare,
-  Monitor,
   Moon,
   PanelLeft,
   PanelRight,
@@ -13,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { MAX_EDITOR_PANELS, MAX_TOTAL_PANELS } from '../../hooks/useLayoutState';
+import { AnchoredPopover } from '../ui';
 
 export default function AppHeader({
   isDarkMode,
@@ -33,7 +33,7 @@ export default function AppHeader({
   panelAddMenuOpen = false,
   setPanelAddMenuOpen,
 }) {
-  const addPanelMenuRef = useRef(null);
+  const addPanelButtonRef = useRef(null);
   const hasChatPanel = panels.some((panel) => panel.type === 'chat');
   const hasFileTreePanel = panels.some((panel) => panel.type === 'fileTree');
   const editorPanelCount = panels.filter((panel) => panel.type === 'editor').length;
@@ -84,29 +84,10 @@ export default function AppHeader({
     onCloseDraggedPanel?.();
   };
 
-  useEffect(() => {
-    if (!panelAddMenuOpen) return undefined;
-    const handlePointerDown = (event) => {
-      if (addPanelMenuRef.current?.contains(event.target)) return;
-      setPanelAddMenuOpen?.(false);
-    };
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') setPanelAddMenuOpen?.(false);
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [panelAddMenuOpen, setPanelAddMenuOpen]);
-
   return (
-    <header className="h-14 flex-none bg-white/60 dark:bg-[#1C1C1E]/60 backdrop-blur-2xl border-b border-gray-200/50 dark:border-white/5 flex items-center justify-between px-5 z-30 transition-colors duration-200">
+    <header className="app-header h-14 flex-none bg-white/60 dark:bg-[#1C1C1E]/60 backdrop-blur-2xl border-b border-gray-200/50 dark:border-white/5 flex items-center justify-between px-5 z-30 transition-colors duration-200">
       <div className="flex h-full w-1/3 items-center gap-3">
-        <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 text-white shadow-md shadow-blue-500/20">
-          <Monitor size={16} />
-        </div>
+        <img src="/perseus-mark.svg?v=6" alt="" className="h-7 w-7 rounded-xl" draggable="false" />
         <span className="font-bold text-[15px] leading-none tracking-tight text-gray-800 dark:text-gray-100">
           Perseus Studio
         </span>
@@ -142,27 +123,37 @@ export default function AppHeader({
                 key={btn.mode}
                 data-testid={`layout-${btn.mode}`}
                 onClick={() => onLayoutChange(btn.mode)}
-                className={`motion-button p-1.5 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-blue-400/35 ${
+                className={`motion-button ui-icon-button h-7 w-7 outline-none focus-visible:ring-2 focus-visible:ring-blue-400/35 ${
                   layoutColumns === btn.mode
-                    ? 'bg-white dark:bg-[#2C2C2E] shadow-sm text-blue-500 scale-105'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-200/50 dark:hover:bg-white/5'
+                    ? 'ui-icon-button-active'
+                    : ''
                 }`}
                 title={btn.tooltip}
               >
                 {btn.icon}
               </button>
             ))}
-            <div ref={addPanelMenuRef} className="relative">
+            <div className="relative">
               <button
+                ref={addPanelButtonRef}
                 data-testid="add-panel-button"
                 onClick={handleAddClick}
-                className="motion-button p-1.5 rounded-lg text-gray-500 outline-none hover:text-blue-500 hover:bg-gray-200/50 focus-visible:ring-2 focus-visible:ring-blue-400/35 dark:text-gray-400 dark:hover:bg-white/5"
+                className="motion-button ui-icon-button h-7 w-7 outline-none focus-visible:ring-2 focus-visible:ring-blue-400/35"
                 title={panelLimitReached ? '当前最多支持 5 个面板' : hasChatPanel && hasFileTreePanel ? '添加编辑器' : '添加面板'}
               >
                 <Plus size={16} />
               </button>
-          {panelAddMenuOpen && !isPanelDragging && addPanelOptions.length > 0 && (
-            <div data-testid="add-panel-menu" className="motion-popover absolute left-1/2 top-9 z-[80] w-32 -translate-x-1/2 overflow-hidden rounded-xl border border-gray-100 bg-white py-1 shadow-xl dark:border-white/10 dark:bg-[#2C2C2E]">
+          <AnchoredPopover
+            anchorRef={addPanelButtonRef}
+            align="center"
+            width={128}
+            minWidth={128}
+            maxHeight={220}
+            open={panelAddMenuOpen && !isPanelDragging && addPanelOptions.length > 0}
+            onClose={() => setPanelAddMenuOpen?.(false)}
+            testId="add-panel-menu"
+            className="py-1"
+          >
               {addPanelOptions.map(([type, label]) => (
                 <button
                   key={type}
@@ -174,8 +165,7 @@ export default function AppHeader({
                   {label}
                 </button>
               ))}
-            </div>
-          )}
+          </AnchoredPopover>
             </div>
           </>
         )}
@@ -184,7 +174,7 @@ export default function AppHeader({
       <div className="flex h-full w-1/3 items-center justify-end gap-3">
         <button
           onClick={onOpenTasks}
-          className={`motion-button relative flex h-9 items-center gap-2 rounded-xl border px-2.5 text-xs font-semibold leading-none shadow-sm ${
+          className={`motion-button relative flex h-9 items-center gap-2 rounded-xl border px-2.5 text-xs font-semibold leading-none ${
             taskCount > 0
               ? 'border-blue-100/50 bg-blue-50/80 text-blue-600 hover:bg-blue-100/80 dark:border-blue-500/20 dark:bg-blue-500/15 dark:text-blue-400 dark:hover:bg-blue-500/20'
               : 'border-transparent text-gray-500 hover:bg-white hover:text-blue-500 dark:text-gray-400 dark:hover:bg-[#2C2C2E] dark:hover:text-blue-400'
@@ -192,7 +182,7 @@ export default function AppHeader({
           title={taskCount > 0 ? `${taskCount} 个任务进行中` : '打开任务面板'}
         >
           {taskDoneUnread && taskCount === 0 && (
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_0_3px_rgba(244,63,94,0.18)]" />
+            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-rose-500/20" />
           )}
           <ClipboardList size={18} />
           <span className="hidden max-w-[120px] truncate sm:inline">
@@ -203,7 +193,7 @@ export default function AppHeader({
 
         <button
           onClick={onToggleDarkMode}
-          className="motion-button flex h-9 w-9 items-center justify-center rounded-xl text-gray-500 shadow-sm hover:bg-white hover:text-blue-500 dark:text-gray-400 dark:hover:bg-[#2C2C2E] dark:hover:text-blue-400"
+          className="motion-button ui-icon-button h-9 w-9"
         >
           {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
         </button>
@@ -211,13 +201,13 @@ export default function AppHeader({
         <button
           data-testid="settings-button"
           onClick={onOpenSettings}
-          className="motion-button flex h-9 w-9 items-center justify-center rounded-xl text-gray-500 shadow-sm hover:bg-white hover:text-gray-800 dark:text-gray-400 dark:hover:bg-[#2C2C2E] dark:hover:text-gray-200"
+          className="motion-button ui-icon-button h-9 w-9"
         >
           <Settings size={18} />
         </button>
         <button
           onClick={onLogout}
-          className="motion-button flex h-9 w-9 items-center justify-center rounded-xl text-gray-500 shadow-sm hover:bg-white hover:text-red-500 dark:text-gray-400 dark:hover:bg-[#2C2C2E] dark:hover:text-red-300"
+          className="motion-button ui-icon-button ui-icon-button-danger h-9 w-9"
           title="退出登录"
         >
           <LogOut size={18} />

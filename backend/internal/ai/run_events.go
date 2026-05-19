@@ -12,6 +12,9 @@ func providerAttemptObserver(opts RunOptions, provider store.ModelProvider, stag
 		return nil
 	}
 	return func(event RequestAttemptEvent) {
+		if event.Type == "attempt_started" && opts.OnProviderAttempt != nil {
+			opts.OnProviderAttempt()
+		}
 		eventType := "model_call_attempt_started"
 		level := "info"
 		switch event.Type {

@@ -11,6 +11,25 @@ type TreeNode struct {
 	Children   []TreeNode `json:"children,omitempty"`
 }
 
+type SearchResult struct {
+	Name       string    `json:"name"`
+	Path       string    `json:"path"`
+	ParentPath string    `json:"parent_path"`
+	Type       string    `json:"type"`
+	Size       int64     `json:"size,omitempty"`
+	ModifiedAt time.Time `json:"modified_at"`
+}
+
+type TextSearchResult struct {
+	Path      string `json:"path"`
+	Line      int    `json:"line"`
+	Column    int    `json:"column"`
+	Match     string `json:"match"`
+	Before    string `json:"before,omitempty"`
+	After     string `json:"after,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
 type FileReadResult struct {
 	Path       string    `json:"path"`
 	Content    string    `json:"content"`
@@ -28,9 +47,12 @@ type FileWriteResult struct {
 }
 
 type TextReadResult struct {
-	Path      string `json:"path"`
-	Content   string `json:"content"`
-	Truncated bool   `json:"truncated"`
+	Path       string `json:"path"`
+	Content    string `json:"content"`
+	Truncated  bool   `json:"truncated"`
+	StartLine  int    `json:"start_line,omitempty"`
+	EndLine    int    `json:"end_line,omitempty"`
+	TotalLines int    `json:"total_lines,omitempty"`
 }
 
 type PathChangeResult struct {

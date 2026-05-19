@@ -251,6 +251,79 @@ func TestAgentRunResumeClearsTerminalStateAndListsEventsAfterSeq(t *testing.T) {
 	}
 }
 
+func TestLatestConversationEventByTypeIsUserScoped(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	runs := NewAgentRunStore(db)
+	if err := runs.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+	runA, err := runs.CreateRun(ctx, CreateAgentRunInput{
+		UserID:          "user-a",
+		ConversationID:  "conv-a",
+		UserMessageID:   "msg-a",
+		ModelProviderID: "mp-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun user-a returned error: %v", err)
+	}
+	runB, err := runs.CreateRun(ctx, CreateAgentRunInput{
+		UserID:          "user-b",
+		ConversationID:  "conv-a",
+		UserMessageID:   "msg-b",
+		ModelProviderID: "mp-b",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun user-b returned error: %v", err)
+	}
+	if _, err := runs.AppendEvent(ctx, AgentEventInput{
+		RunID:          runA.ID,
+		UserID:         "user-a",
+		ConversationID: "conv-a",
+		Type:           "model_request_summary",
+		Level:          "info",
+		Payload:        map[string]any{"estimated_tokens": 100},
+	}); err != nil {
+		t.Fatalf("AppendEvent first summary returned error: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	latest, err := runs.AppendEvent(ctx, AgentEventInput{
+		RunID:          runA.ID,
+		UserID:         "user-a",
+		ConversationID: "conv-a",
+		Type:           "model_request_summary",
+		Level:          "info",
+		Payload:        map[string]any{"estimated_tokens": 200},
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent latest summary returned error: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := runs.AppendEvent(ctx, AgentEventInput{
+		RunID:          runB.ID,
+		UserID:         "user-b",
+		ConversationID: "conv-a",
+		Type:           "model_request_summary",
+		Level:          "info",
+		Payload:        map[string]any{"estimated_tokens": 999},
+	}); err != nil {
+		t.Fatalf("AppendEvent other user summary returned error: %v", err)
+	}
+
+	got, err := runs.LatestConversationEventByType(ctx, "user-a", "conv-a", "model_request_summary")
+	if err != nil {
+		t.Fatalf("LatestConversationEventByType returned error: %v", err)
+	}
+	if got.ID != latest.ID {
+		t.Fatalf("expected latest user-a event %s, got %#v", latest.ID, got)
+	}
+}
+
 func TestAgentRunCheckpointLifecycle(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))

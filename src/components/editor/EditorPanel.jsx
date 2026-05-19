@@ -1,15 +1,30 @@
-import React, { useRef, useLayoutEffect } from 'react';
-import { Download, FileCode2, GripHorizontal, X } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Download, FileCode2, PanelTop, X } from 'lucide-react';
+import { Button } from '../ui';
 
 export default function EditorPanel({ ide, editor, panelId }) {
-  const textareaRef = useRef(null);
+  const tabsStripRef = useRef(null);
+  const [tabDropIndicator, setTabDropIndicator] = useState(null);
 
-  useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = '0';
-    el.style.height = Math.max(el.scrollHeight, el.parentElement?.clientHeight || 0) + 'px';
-  }, [editor.currentFileContent]);
+  const scrollTabsWithWheel = (event) => {
+    const strip = tabsStripRef.current;
+    if (!strip || strip.scrollWidth <= strip.clientWidth + 1) return;
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (!delta) return;
+    event.preventDefault();
+    strip.scrollLeft += delta;
+  };
+
+  const getTabDropPosition = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+  };
+
+  const isSamePanelTabDrag = (event) =>
+    event.dataTransfer?.types?.includes('editor_tab_path') &&
+    event.dataTransfer?.getData('editor_tab_source_panel_id') === panelId;
+
+  const clearTabDropIndicator = () => setTabDropIndicator(null);
 
   return (
     <section
@@ -46,15 +61,22 @@ export default function EditorPanel({ ide, editor, panelId }) {
           draggable
           onDragStart={(e) => ide.handlePanelDragStart(e, panelId)}
           onDragEnd={ide.handlePanelDragEnd}
-          className="cursor-grab active:cursor-grabbing"
+          className="motion-button ui-icon-button ui-panel-drag-handle h-7 w-7"
           title="拖动面板"
         >
-          <GripHorizontal size={14} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400" />
+          <PanelTop size={15} strokeWidth={1.9} className="shrink-0" />
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <div className="editor-tabs-strip flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+          <div
+            ref={tabsStripRef}
+            className="editor-tabs-strip custom-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden"
+            onWheel={scrollTabsWithWheel}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) clearTabDropIndicator();
+            }}
+          >
             {editor.openTabs.length === 0 ? (
-              <div className="flex min-w-0 max-w-[220px] items-center bg-white dark:bg-[#1C1C1E] px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700/60 shadow-sm gap-2 text-sm text-gray-500 dark:text-gray-400">
+              <div className="editor-empty-tab flex min-w-0 items-center bg-white dark:bg-[#1C1C1E] px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700/60 gap-2 text-sm text-gray-500 dark:text-gray-400">
                 <FileCode2 size={14} className="shrink-0 text-blue-500" />
                 <span className="truncate">未打开文件</span>
               </div>
@@ -63,8 +85,10 @@ export default function EditorPanel({ ide, editor, panelId }) {
                 const active = tab.path === editor.currentFilePath;
                 const dirty = (tab.content || '') !== (tab.savedContent || '');
                 return (
-                  <button
+                  <div
                     key={tab.path}
+                    role="button"
+                    tabIndex={0}
                     data-testid={`editor-tab-${tab.path}`}
                     draggable
                     onDragStart={(e) => {
@@ -86,19 +110,71 @@ export default function EditorPanel({ ide, editor, panelId }) {
                       e.dataTransfer.setData('workspace_path', tab.path);
                       e.dataTransfer.setData('workspace_type', 'file');
                     }}
+                    onDragOver={(e) => {
+                      if (!isSamePanelTabDrag(e)) return;
+                      const sourcePath = e.dataTransfer.getData('editor_tab_path');
+                      if (!sourcePath || sourcePath === tab.path) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearTabDropIndicator();
+                        return;
+                      }
+                      e.preventDefault();
+                      e.stopPropagation();
+                      e.dataTransfer.dropEffect = 'move';
+                      const position = getTabDropPosition(e);
+                      setTabDropIndicator((current) =>
+                        current?.targetPath === tab.path && current?.position === position
+                          ? current
+                          : { targetPath: tab.path, position }
+                      );
+                    }}
+                    onDrop={(e) => {
+                      if (!isSamePanelTabDrag(e)) return;
+                      const sourcePath = e.dataTransfer.getData('editor_tab_path');
+                      if (!sourcePath || sourcePath === tab.path) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearTabDropIndicator();
+                        return;
+                      }
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const position = tabDropIndicator?.targetPath === tab.path
+                        ? tabDropIndicator.position
+                        : getTabDropPosition(e);
+                      editor.reorderTab?.(sourcePath, tab.path, position);
+                      clearTabDropIndicator();
+                    }}
+                    onDragEnd={clearTabDropIndicator}
                     onClick={(e) => {
                       e.stopPropagation();
                       editor.activateTab(tab.path);
                     }}
-                    className={`motion-chip group/tab flex h-8 min-w-0 max-w-[220px] shrink-0 items-center gap-2 rounded-lg border px-2.5 text-sm shadow-sm transition ${
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        editor.activateTab(tab.path);
+                      }
+                    }}
+                    className={`motion-chip editor-tab-item group/tab flex h-8 min-w-0 items-center gap-2 rounded-lg border px-2.5 text-sm transition-[background-color,border-color,color,opacity] duration-180 ease-apple ${
                       active
                         ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-100'
                         : 'border-gray-200 bg-white text-gray-600 hover:border-blue-200 dark:border-gray-700/60 dark:bg-[#1C1C1E] dark:text-gray-300'
                     }`}
                     title={tab.path}
                   >
+                    {tabDropIndicator?.targetPath === tab.path && (
+                      <span
+                        aria-hidden="true"
+                        className={`editor-tab-drop-line ${
+                          tabDropIndicator.position === 'after' ? 'editor-tab-drop-line-after' : 'editor-tab-drop-line-before'
+                        }`}
+                      />
+                    )}
                     <FileCode2 size={14} className="shrink-0 text-blue-500" />
-                    <span className="min-w-0 truncate font-medium">{tab.path.split('/').pop() || tab.path}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium">{tab.path.split('/').pop() || tab.path}</span>
                     {dirty && <span className="shrink-0 text-[10px] text-orange-500">●</span>}
                     <button
                       type="button"
@@ -107,20 +183,23 @@ export default function EditorPanel({ ide, editor, panelId }) {
                         e.stopPropagation();
                         editor.closeTab(tab.path);
                       }}
-                      className="motion-button editor-tab-close flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-gray-100"
+                      className="motion-button ui-icon-button ui-icon-button-compact editor-tab-close h-5 w-5"
                       title="关闭文件"
                     >
                       <X size={12} />
                     </button>
-                  </button>
+                  </div>
                 );
               })
             )}
           </div>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <button
+          <Button
             data-testid="editor-download"
+            type="button"
+            variant="subtle"
+            size="xs"
             draggable={Boolean(editor.currentFilePath && editor.isTextFile)}
             onDragStart={(e) => {
               e.stopPropagation();
@@ -131,20 +210,16 @@ export default function EditorPanel({ ide, editor, panelId }) {
               ide.downloadFile(editor.currentFilePath).catch((error) => console.error(error));
             }}
             disabled={!editor.currentFilePath || !editor.isTextFile}
-            className={`motion-button flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold ${
-              !editor.currentFilePath || !editor.isTextFile
-                ? 'bg-gray-200/70 dark:bg-white/5 text-gray-400 cursor-not-allowed'
-                : 'bg-white dark:bg-[#1C1C1E] text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-400 hover:text-blue-500'
-            }`}
+            className="h-8 px-2"
           >
             <Download size={13} />
             <span className="hidden xl:inline">下载</span>
-          </button>
+          </Button>
         </div>
       </div>
 
       <div
-        className="relative flex-1 min-h-0 overflow-auto px-12 py-7 pb-36 font-mono text-[14px] leading-7 tracking-[0.012em] text-gray-800 dark:text-gray-300 bg-[#FAFAFA] dark:bg-[#1E1E1E] custom-scrollbar max-[900px]:px-8 max-[640px]:px-5"
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#FAFAFA] font-mono text-[14px] leading-7 tracking-[0.012em] text-gray-800 dark:bg-[#1E1E1E] dark:text-gray-300"
         onDragOver={(e) => {
           const hasPath = e.dataTransfer?.types?.includes('workspace_path') || e.dataTransfer?.types?.includes('editor_tab_path');
           if (!hasPath) return;
@@ -172,68 +247,78 @@ export default function EditorPanel({ ide, editor, panelId }) {
         <div
           className="editor-drop-overlay pointer-events-none absolute inset-x-10 bottom-4 top-16 z-10 rounded-2xl border-2 border-dashed border-transparent transition-colors max-[900px]:inset-x-6 max-[640px]:inset-x-3"
         />
-        <div className="relative z-20">
-        {ide.errorMessage && (
-          <div className="settings-expand-enter mb-4 rounded-xl border border-red-200/80 bg-red-50/80 px-3 py-2 text-[12px] text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-            {ide.errorMessage}
-          </div>
-        )}
+        <div className="relative z-20 flex min-h-0 flex-1 flex-col">
+          {(ide.errorMessage || editor.externalFileConflict || (editor.editorStatusMessage && editor.currentFilePath)) && (
+            <div className="flex-none px-12 pt-7 max-[900px]:px-8 max-[640px]:px-5">
+              {ide.errorMessage && (
+                <div className="settings-expand-enter mb-4 rounded-xl border border-red-200/80 bg-red-50/80 px-3 py-2 text-[12px] text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                  {ide.errorMessage}
+                </div>
+              )}
 
-        {editor.externalFileConflict && (
-          <div className="settings-expand-enter mb-4 rounded-xl border border-amber-200/80 bg-amber-50/90 px-3 py-3 text-[12px] text-amber-700 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
-            <div>{editor.externalFileConflict.message}</div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  editor.keepLocalFileChanges();
-                }}
-                className="rounded-lg border border-amber-300/80 px-3 py-1.5 text-[12px] font-semibold text-amber-700 transition hover:bg-amber-100/80 dark:border-amber-300/20 dark:text-amber-100 dark:hover:bg-amber-400/10"
-              >
-                保留本地修改
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  editor.reloadCurrentFileFromConflict();
-                }}
-                className="rounded-lg bg-amber-500 px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-amber-600"
-              >
-                重新加载文件
-              </button>
+              {editor.externalFileConflict && (
+                <div className="editor-conflict-notice settings-expand-enter mb-4 rounded-xl border border-amber-200/80 bg-amber-50/90 px-3 py-3 text-[12px] text-amber-700 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
+                  <div>{editor.externalFileConflict.message}</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      size="xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        editor.keepLocalFileChanges();
+                      }}
+                      className="border-amber-300/80 text-amber-700 hover:bg-amber-100/80 dark:border-amber-300/20 dark:text-amber-100 dark:hover:bg-amber-400/10"
+                    >
+                      保留本地修改
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="warning"
+                      size="xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        editor.reloadCurrentFileFromConflict();
+                      }}
+                    >
+                      重新加载文件
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {editor.editorStatusMessage && !editor.externalFileConflict && editor.currentFilePath && (
+                <div className="settings-expand-enter mb-4 rounded-xl border border-blue-200/80 bg-blue-50/80 px-3 py-2 text-[12px] text-blue-600 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
+                  {editor.editorStatusMessage}
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
 
-        {editor.editorStatusMessage && !editor.externalFileConflict && editor.currentFilePath && (
-          <div className="settings-expand-enter mb-4 rounded-xl border border-blue-200/80 bg-blue-50/80 px-3 py-2 text-[12px] text-blue-600 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
-            {editor.editorStatusMessage}
+          <div className="min-h-0 flex-1">
+            {!editor.currentFilePath ? (
+              <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
+                {editor.editorStatusMessage || '从左侧文件树选择一个文件开始编辑'}
+              </div>
+            ) : editor.isEditorLoading ? (
+              <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
+                正在加载文件...
+              </div>
+            ) : !editor.isTextFile ? (
+              <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
+                {editor.currentFileNotice}
+              </div>
+            ) : (
+              <textarea
+                data-testid="editor-textarea"
+                value={editor.currentFileContent}
+                onChange={(e) => editor.setCurrentFileContent(e.target.value)}
+                className="editor-textarea custom-scrollbar block h-full min-h-0 w-full resize-none overflow-y-auto overflow-x-hidden bg-transparent px-12 py-7 pb-36 leading-7 tracking-[0.012em] text-gray-800 outline-none placeholder-gray-400 dark:text-gray-300 dark:placeholder-gray-500 max-[900px]:px-8 max-[640px]:px-5"
+                spellCheck={false}
+              />
+            )}
           </div>
-        )}
         </div>
-
-        {!editor.currentFilePath ? (
-          <div className="relative z-20 h-full flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
-            {editor.editorStatusMessage || '从左侧文件树选择一个文件开始编辑'}
-          </div>
-        ) : editor.isEditorLoading ? (
-          <div className="relative z-20 h-full flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
-            正在加载文件...
-          </div>
-        ) : !editor.isTextFile ? (
-          <div className="relative z-20 h-full flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
-            {editor.currentFileNotice}
-          </div>
-        ) : (
-          <textarea
-            ref={textareaRef}
-            data-testid="editor-textarea"
-            value={editor.currentFileContent}
-            onChange={(e) => editor.setCurrentFileContent(e.target.value)}
-            className="relative z-20 block w-full min-h-full resize-none overflow-hidden bg-transparent p-0 pb-40 leading-7 tracking-[0.012em] outline-none text-gray-800 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500"
-            spellCheck={false}
-          />
-        )}
       </div>
     </section>
   );

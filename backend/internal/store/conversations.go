@@ -60,30 +60,48 @@ type MessageDraftInput struct {
 }
 
 type ToolCall struct {
-	ID             string    `json:"id"`
-	UserID         string    `json:"user_id"`
-	ConversationID string    `json:"conversation_id"`
-	MessageID      string    `json:"message_id,omitempty"`
-	TaskID         string    `json:"task_id,omitempty"`
-	ToolName       string    `json:"tool_name"`
-	ArgumentsJSON  string    `json:"arguments_json"`
-	ResultSummary  string    `json:"result_summary"`
-	Status         string    `json:"status"`
-	Error          string    `json:"error,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID               string       `json:"id"`
+	UserID           string       `json:"user_id"`
+	RunID            string       `json:"run_id,omitempty"`
+	ConversationID   string       `json:"conversation_id"`
+	MessageID        string       `json:"message_id,omitempty"`
+	TaskID           string       `json:"task_id,omitempty"`
+	ToolName         string       `json:"tool_name"`
+	OperationHash    string       `json:"operation_hash,omitempty"`
+	ArgumentsJSON    string       `json:"arguments_json"`
+	ResultSummary    string       `json:"result_summary"`
+	Status           string       `json:"status"`
+	Error            string       `json:"error,omitempty"`
+	StartedAt        sql.NullTime `json:"-"`
+	CompletedAt      sql.NullTime `json:"-"`
+	DurationMS       int64        `json:"duration_ms,omitempty"`
+	ResultJSON       string       `json:"result_json,omitempty"`
+	ChangedPathsJSON string       `json:"changed_paths_json,omitempty"`
+	VersionID        string       `json:"version_id,omitempty"`
+	ContentHash      string       `json:"content_hash,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
 }
 
 type ToolCallInput struct {
-	ID             string
-	UserID         string
-	ConversationID string
-	MessageID      string
-	TaskID         string
-	ToolName       string
-	ArgumentsJSON  string
-	ResultSummary  string
-	Status         string
-	Error          string
+	ID               string
+	UserID           string
+	RunID            string
+	ConversationID   string
+	MessageID        string
+	TaskID           string
+	ToolName         string
+	OperationHash    string
+	ArgumentsJSON    string
+	ResultSummary    string
+	Status           string
+	Error            string
+	StartedAt        time.Time
+	CompletedAt      time.Time
+	DurationMS       int64
+	ResultJSON       string
+	ChangedPathsJSON string
+	VersionID        string
+	ContentHash      string
 }
 
 type ConversationStore struct {
@@ -123,14 +141,23 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS tool_calls (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL DEFAULT '',
+  run_id TEXT NOT NULL DEFAULT '',
   conversation_id TEXT,
   message_id TEXT,
   task_id TEXT,
   tool_name TEXT NOT NULL,
+  operation_hash TEXT NOT NULL DEFAULT '',
   arguments_json TEXT NOT NULL,
   result_summary TEXT NOT NULL,
   status TEXT NOT NULL,
   error TEXT NOT NULL,
+  started_at DATETIME,
+  completed_at DATETIME,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  result_json TEXT NOT NULL DEFAULT '',
+  changed_paths_json TEXT NOT NULL DEFAULT '',
+  version_id TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL DEFAULT '',
   created_at DATETIME NOT NULL
 );
 `
@@ -163,6 +190,24 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 	if err := AddColumnIfNotExists(ctx, s.db, "conversations", "summary_updated_at", "DATETIME"); err != nil {
 		return err
 	}
+	for _, migration := range []struct {
+		column string
+		def    string
+	}{
+		{"run_id", "TEXT NOT NULL DEFAULT ''"},
+		{"operation_hash", "TEXT NOT NULL DEFAULT ''"},
+		{"started_at", "DATETIME"},
+		{"completed_at", "DATETIME"},
+		{"duration_ms", "INTEGER NOT NULL DEFAULT 0"},
+		{"result_json", "TEXT NOT NULL DEFAULT ''"},
+		{"changed_paths_json", "TEXT NOT NULL DEFAULT ''"},
+		{"version_id", "TEXT NOT NULL DEFAULT ''"},
+		{"content_hash", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := AddColumnIfNotExists(ctx, s.db, "tool_calls", migration.column, migration.def); err != nil {
+			return err
+		}
+	}
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
@@ -171,6 +216,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_segment ON messages(convers
 CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_conversation_created_at ON tool_calls(conversation_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_user_id ON tool_calls(user_id);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_run_created_at ON tool_calls(run_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_operation_hash ON tool_calls(user_id, run_id, operation_hash);
 `
 	_, err := s.db.ExecContext(ctx, indexes)
 	return err
@@ -317,238 +364,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	return created, createdMessages, nil
 }
 
-func (s *ConversationStore) ListMessages(ctx context.Context, userID, conversationID string) ([]Message, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at
-FROM messages
-WHERE conversation_id = ? AND user_id = ?
-ORDER BY created_at ASC
-`, conversationID, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var items []Message
-	for rows.Next() {
-		item, err := scanMessage(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (s *ConversationStore) AppendMessage(ctx context.Context, userID, conversationID, role, content, attachmentsJSON string) (Message, error) {
-	if attachmentsJSON == "" {
-		attachmentsJSON = "[]"
-	}
-	now := time.Now().UTC()
-	id := nextStoreID("msg", now)
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Message{}, err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.ExecContext(ctx, `
-INSERT INTO messages (id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, 'final', 0, '', ?, ?)
-`, id, userID, conversationID, role, content, attachmentsJSON, now, now)
-	if err != nil {
-		return Message{}, err
-	}
-	_, err = tx.ExecContext(ctx, `
-UPDATE conversations
-SET updated_at = ?
-WHERE id = ? AND user_id = ?
-`, now, conversationID, userID)
-	if err != nil {
-		return Message{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Message{}, err
-	}
-	return s.GetMessage(ctx, userID, id)
-}
-
-func (s *ConversationStore) GetMessage(ctx context.Context, userID, id string) (Message, error) {
-	row := s.db.QueryRowContext(ctx, `
-SELECT id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at
-FROM messages
-WHERE id = ? AND user_id = ?
-`, id, userID)
-	return scanMessage(row)
-}
-
-func (s *ConversationStore) CreateMessageDraft(ctx context.Context, input MessageDraftInput) (Message, error) {
-	if input.AttachmentsJSON == "" {
-		input.AttachmentsJSON = "[]"
-	}
-	status := strings.TrimSpace(input.Status)
-	if status == "" {
-		status = "streaming"
-	}
-	now := time.Now().UTC()
-	id := nextStoreID("msg", now)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Message{}, err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `
-INSERT INTO messages (id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, id, input.UserID, input.ConversationID, input.Role, input.Content, input.AttachmentsJSON, status, input.SegmentIndex, input.MetaJSON, now, now)
-	if err != nil {
-		return Message{}, err
-	}
-	_, err = tx.ExecContext(ctx, `
-UPDATE conversations
-SET updated_at = ?
-WHERE id = ? AND user_id = ?
-`, now, input.ConversationID, input.UserID)
-	if err != nil {
-		return Message{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Message{}, err
-	}
-	return s.GetMessage(ctx, input.UserID, id)
-}
-
-func (s *ConversationStore) AppendMessageContent(ctx context.Context, userID, messageID, delta string) (Message, error) {
-	_, err := s.db.ExecContext(ctx, `
-UPDATE messages
-SET content = content || ?, updated_at = ?
-WHERE id = ? AND user_id = ?
-`, delta, time.Now().UTC(), messageID, userID)
-	if err != nil {
-		return Message{}, err
-	}
-	return s.GetMessage(ctx, userID, messageID)
-}
-
-func (s *ConversationStore) PatchMessageMeta(ctx context.Context, userID, messageID, metaJSON, status string) (Message, error) {
-	_, err := s.db.ExecContext(ctx, `
-UPDATE messages
-SET meta_json = COALESCE(NULLIF(?, ''), meta_json),
-    status = COALESCE(NULLIF(?, ''), status),
-    updated_at = ?
-WHERE id = ? AND user_id = ?
-`, metaJSON, status, time.Now().UTC(), messageID, userID)
-	if err != nil {
-		return Message{}, err
-	}
-	return s.GetMessage(ctx, userID, messageID)
-}
-
-func (s *ConversationStore) FinalizeMessage(ctx context.Context, userID, messageID, finalContent, metaJSON string) (Message, error) {
-	_, err := s.db.ExecContext(ctx, `
-UPDATE messages
-SET content = ?,
-    meta_json = COALESCE(NULLIF(?, ''), meta_json),
-    status = 'final',
-    updated_at = ?
-WHERE id = ? AND user_id = ?
-`, finalContent, metaJSON, time.Now().UTC(), messageID, userID)
-	if err != nil {
-		return Message{}, err
-	}
-	return s.GetMessage(ctx, userID, messageID)
-}
-
-func (s *ConversationStore) UpdateMessageAttachments(ctx context.Context, userID, messageID, attachmentsJSON string) (Message, error) {
-	if attachmentsJSON == "" {
-		attachmentsJSON = "[]"
-	}
-	_, err := s.db.ExecContext(ctx, `
-UPDATE messages
-SET attachments_json = ?,
-    updated_at = ?
-WHERE id = ? AND user_id = ?
-`, attachmentsJSON, time.Now().UTC(), messageID, userID)
-	if err != nil {
-		return Message{}, err
-	}
-	return s.GetMessage(ctx, userID, messageID)
-}
-
-func (s *ConversationStore) DeleteMessage(ctx context.Context, userID, conversationID, messageID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `
-DELETE FROM messages
-WHERE id = ? AND conversation_id = ? AND user_id = ?
-`, messageID, conversationID, userID)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return sql.ErrNoRows
-	}
-	_, err = tx.ExecContext(ctx, `
-UPDATE conversations
-SET updated_at = ?
-WHERE id = ? AND user_id = ?
-`, time.Now().UTC(), conversationID, userID)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *ConversationStore) DeleteMessagesAfter(ctx context.Context, userID, conversationID, afterMessageID string) error {
-	messages, err := s.ListMessages(ctx, userID, conversationID)
-	if err != nil {
-		return err
-	}
-	cutIndex := -1
-	for index, item := range messages {
-		if item.ID == afterMessageID {
-			cutIndex = index
-			break
-		}
-	}
-	if cutIndex == -1 {
-		return sql.ErrNoRows
-	}
-	if cutIndex == len(messages)-1 {
-		return nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, item := range messages[cutIndex+1:] {
-		if _, err := tx.ExecContext(ctx, `
-DELETE FROM messages
-WHERE id = ? AND conversation_id = ? AND user_id = ?
-`, item.ID, conversationID, userID); err != nil {
-			return err
-		}
-	}
-	_, err = tx.ExecContext(ctx, `
-UPDATE conversations
-SET updated_at = ?
-WHERE id = ? AND user_id = ?
-`, time.Now().UTC(), conversationID, userID)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func (s *ConversationStore) UpdateConversationModel(ctx context.Context, userID, id, modelProviderID string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE conversations
@@ -565,70 +380,4 @@ SET title = ?
 WHERE id = ? AND user_id = ?
 `, strings.TrimSpace(title), id, userID)
 	return err
-}
-
-func (s *ConversationStore) RecordToolCall(ctx context.Context, input ToolCallInput) (ToolCall, error) {
-	now := time.Now().UTC()
-	id := strings.TrimSpace(input.ID)
-	if id == "" {
-		id = nextStoreID("tc", now)
-	}
-	if input.Status == "" {
-		input.Status = "success"
-	}
-	if input.ArgumentsJSON == "" {
-		input.ArgumentsJSON = "{}"
-	}
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO tool_calls (id, user_id, conversation_id, message_id, task_id, tool_name, arguments_json, result_summary, status, error, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, id, input.UserID, input.ConversationID, input.MessageID, input.TaskID, input.ToolName, input.ArgumentsJSON, input.ResultSummary, input.Status, input.Error, now)
-	if err != nil {
-		return ToolCall{}, err
-	}
-	return ToolCall{
-		ID:             id,
-		UserID:         input.UserID,
-		ConversationID: input.ConversationID,
-		MessageID:      input.MessageID,
-		TaskID:         input.TaskID,
-		ToolName:       input.ToolName,
-		ArgumentsJSON:  input.ArgumentsJSON,
-		ResultSummary:  input.ResultSummary,
-		Status:         input.Status,
-		Error:          input.Error,
-		CreatedAt:      now,
-	}, nil
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func scanConversation(s scanner) (Conversation, error) {
-	var item Conversation
-	err := s.Scan(&item.ID, &item.UserID, &item.Title, &item.SelectedModelProviderID, &item.CreatedAt, &item.UpdatedAt)
-	return item, err
-}
-
-func scanMessage(s scanner) (Message, error) {
-	var item Message
-	err := s.Scan(&item.ID, &item.UserID, &item.ConversationID, &item.Role, &item.Content, &item.AttachmentsJSON, &item.Status, &item.SegmentIndex, &item.MetaJSON, &item.CreatedAt, &item.UpdatedAt)
-	item.Attachments = json.RawMessage(item.AttachmentsJSON)
-	if len(item.Attachments) == 0 {
-		item.Attachments = json.RawMessage("[]")
-	}
-	item.Meta = json.RawMessage(item.MetaJSON)
-	if len(item.Meta) == 0 {
-		item.Meta = json.RawMessage("{}")
-	}
-	if item.Status == "" {
-		item.Status = "final"
-	}
-	return item, err
 }

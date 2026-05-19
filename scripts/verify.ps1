@@ -8,6 +8,8 @@ $root = Split-Path -Parent $PSScriptRoot
 
 Push-Location $root
 try {
+  npm run test:ui
+  npm run test:structure
   npm run test:unit
   npm run build
 

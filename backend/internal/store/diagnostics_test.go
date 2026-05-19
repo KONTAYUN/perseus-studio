@@ -132,3 +132,75 @@ func TestDiagnosticStoreKeepsLatest200PerUser(t *testing.T) {
 		t.Fatalf("expected 200 retained logs, got %d", len(logs))
 	}
 }
+
+func TestDiagnosticStoreDeleteSingleAndClearAll(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	store := NewDiagnosticStore(db)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+	userA, err := store.Append(ctx, DiagnosticLogInput{UserID: "user-a", Stage: "a", Level: "error"})
+	if err != nil {
+		t.Fatalf("Append user-a returned error: %v", err)
+	}
+	userB, err := store.Append(ctx, DiagnosticLogInput{UserID: "user-b", Stage: "b", Level: "error"})
+	if err != nil {
+		t.Fatalf("Append user-b returned error: %v", err)
+	}
+
+	if err := store.Delete(ctx, "user-a", userB.ID); err != nil {
+		t.Fatalf("Delete wrong owner returned error: %v", err)
+	}
+	logs, err := store.List(ctx, DiagnosticLogQuery{UserID: "user-b", Limit: 10})
+	if err != nil {
+		t.Fatalf("List user-b returned error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("user-a delete should not remove user-b log, got %#v", logs)
+	}
+
+	if err := store.Delete(ctx, "user-a", userA.ID); err != nil {
+		t.Fatalf("Delete own log returned error: %v", err)
+	}
+	logs, err = store.List(ctx, DiagnosticLogQuery{UserID: "user-a", Limit: 10})
+	if err != nil {
+		t.Fatalf("List user-a returned error: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("expected user-a log deleted, got %#v", logs)
+	}
+
+	if err := store.DeleteAny(ctx, userB.ID); err != nil {
+		t.Fatalf("DeleteAny returned error: %v", err)
+	}
+	logs, err = store.List(ctx, DiagnosticLogQuery{AllUsers: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("List all returned error: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("expected all logs deleted, got %#v", logs)
+	}
+
+	if _, err := store.Append(ctx, DiagnosticLogInput{UserID: "user-a", Stage: "a", Level: "error"}); err != nil {
+		t.Fatalf("Append user-a again returned error: %v", err)
+	}
+	if _, err := store.Append(ctx, DiagnosticLogInput{UserID: "user-b", Stage: "b", Level: "error"}); err != nil {
+		t.Fatalf("Append user-b again returned error: %v", err)
+	}
+	if err := store.ClearAll(ctx); err != nil {
+		t.Fatalf("ClearAll returned error: %v", err)
+	}
+	logs, err = store.List(ctx, DiagnosticLogQuery{AllUsers: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("List after ClearAll returned error: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("expected ClearAll to delete all logs, got %#v", logs)
+	}
+}

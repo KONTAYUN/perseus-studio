@@ -140,6 +140,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_conversation ON agent_runs(user_id, co
 CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_events_run_seq ON agent_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_agent_events_user_created ON agent_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_events_conversation_type ON agent_events(user_id, conversation_id, type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_run_checkpoints_run_seq ON agent_run_checkpoints(run_id, seq);
 `
 	_, err := s.db.ExecContext(ctx, indexes)
@@ -221,6 +222,31 @@ WHERE id = ? AND user_id = ? AND status IN (?, ?)
 	return s.GetRun(ctx, userID, id)
 }
 
+func (s *AgentRunStore) FailStaleRunningRuns(ctx context.Context, olderThan time.Duration, message string) (int64, error) {
+	if olderThan <= 0 {
+		olderThan = 2 * time.Minute
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "上次服务停止或本地状态保存中断，本轮已暂停，可点击继续本轮。"
+	}
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `
+UPDATE agent_runs
+SET status = ?,
+    stage = ?,
+    error_message = ?,
+    completed_at = ?,
+    updated_at = ?
+WHERE status IN (?, ?)
+  AND updated_at < ?
+`, AgentRunFailed, "recoverable", message, now, now, AgentRunRunning, AgentRunQueued, now.Add(-olderThan))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (s *AgentRunStore) AppendEvent(ctx context.Context, input AgentEventInput) (AgentEvent, error) {
 	now := time.Now().UTC()
 	level := strings.TrimSpace(strings.ToLower(input.Level))
@@ -273,6 +299,17 @@ ORDER BY seq ASC
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *AgentRunStore) LatestConversationEventByType(ctx context.Context, userID, conversationID, eventType string) (AgentEvent, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+FROM agent_events
+WHERE user_id = ? AND conversation_id = ? AND type = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`, userID, conversationID, eventType)
+	return scanAgentEvent(row)
 }
 
 func scanAgentRun(s scanner) (AgentRun, error) {

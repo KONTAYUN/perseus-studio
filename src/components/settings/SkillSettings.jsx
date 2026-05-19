@@ -2,10 +2,12 @@ import React from 'react';
 import { ArrowLeft, Check, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import {
   Badge,
+  Button,
   CardActions,
   EmptyCard,
   IconButton,
   ProviderCard,
+  SettingsSection,
   SectionTitle,
   formatDate,
 } from './SettingsUI';
@@ -139,12 +141,12 @@ function SkillsListView({
   onDelete,
 }) {
   return (
-    <section className="settings-view-enter rounded-[24px] border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]">
+    <SettingsSection className="settings-view-enter">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <button type="button" onClick={onBack} className="flex items-center gap-2 text-sm font-bold text-gray-500 hover:text-blue-500">
+        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft size={16} /> Skills
-        </button>
-        <label className="flex cursor-pointer items-center gap-2 rounded-2xl bg-blue-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-600">
+        </Button>
+        <Button as="label" variant="primary" size="md" className="cursor-pointer">
           <input
             type="file"
             accept=".zip"
@@ -152,7 +154,7 @@ function SkillsListView({
             onChange={(e) => onUpload(e.target.files?.[0])}
           />
           <Upload size={15} /> 上传 skill.zip
-        </label>
+        </Button>
       </div>
 
       {uploadMessage && (
@@ -175,9 +177,9 @@ function SkillsListView({
                   else next.add(item.id);
                   setSelectedCandidateIds(next);
                 }}
-                className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3 text-left dark:border-white/10 dark:bg-white/5"
+                className="motion-row flex w-full min-w-0 items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3 text-left dark:border-white/10 dark:bg-white/5"
               >
-                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-md border ${selectedCandidateIds.has(item.id) ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-300 dark:border-gray-600'}`}>
+                <span className={`candidate-check flex h-4 w-4 shrink-0 items-center justify-center rounded-md border ${selectedCandidateIds.has(item.id) ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-300 dark:border-gray-600'}`}>
                   {selectedCandidateIds.has(item.id) && <Check size={12} />}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -187,14 +189,14 @@ function SkillsListView({
               </button>
             ))}
           </div>
-          <button
+          <Button
             type="button"
             onClick={onInstallCandidates}
             disabled={selectedCandidateIds.size === 0}
-            className="mt-4 rounded-xl bg-blue-500 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+            className="mt-4"
           >
             安装选中项
-          </button>
+          </Button>
         </div>
       )}
 
@@ -204,7 +206,7 @@ function SkillsListView({
         ) : (
           ide.skills.map((item) => (
             <ProviderCard key={item.id}>
-              <button type="button" onClick={() => onOpenDetail(item)} className="min-w-0 flex-1 text-left">
+              <button type="button" onClick={() => onOpenDetail(item)} className="motion-row min-w-0 flex-1 rounded-xl text-left">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-bold text-gray-800 dark:text-gray-100">{item.name}</span>
                   <Badge tone={item.enabled ? 'green' : 'gray'}>{item.enabled ? '启用' : '禁用'}</Badge>
@@ -227,27 +229,27 @@ function SkillsListView({
           ))
         )}
       </div>
-    </section>
+    </SettingsSection>
   );
 }
 
 function SkillDetailView({ skill, tree, preview, onBack, onToggle, onRename, onDelete }) {
   if (!skill) {
     return (
-      <section className="settings-view-enter rounded-[24px] border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]">
-        <button type="button" onClick={onBack} className="flex items-center gap-2 text-sm font-bold text-gray-500 hover:text-blue-500">
+      <SettingsSection className="settings-view-enter">
+        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft size={16} /> 返回
-        </button>
+        </Button>
         <div className="mt-6 text-sm text-gray-400">未选择 Skill</div>
-      </section>
+      </SettingsSection>
     );
   }
   return (
-    <section className="settings-view-enter rounded-[24px] border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]">
+    <SettingsSection className="settings-view-enter">
       <div className="mb-5 flex items-start justify-between gap-4">
-        <button type="button" onClick={onBack} className="flex items-center gap-2 text-sm font-bold text-gray-500 hover:text-blue-500">
+        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft size={16} /> 返回 Skills
-        </button>
+        </Button>
         <CardActions>
           <IconButton title={skill.enabled ? '禁用' : '启用'} onClick={() => onToggle(skill)}>
             <Check size={14} />
@@ -284,6 +286,6 @@ function SkillDetailView({ skill, tree, preview, onBack, onToggle, onRename, onD
           </div>
         </div>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

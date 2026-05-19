@@ -8,6 +8,12 @@ import (
 
 type providerRuntimeProfile struct {
 	Name                     string
+	ContextWindowTokens      int
+	AutoCompactEnabled       bool
+	CompactThresholdPercent  int
+	CompactReservedTokens    int
+	PruneToolOutputsEnabled  bool
+	AggressiveContextPruning bool
 	MaxHistoryMessages       int
 	MaxRecentMessageRunes    int
 	MaxOlderMessageRunes     int
@@ -23,6 +29,11 @@ type providerRuntimeProfile struct {
 func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProfile {
 	profile := providerRuntimeProfile{
 		Name:                     "standard",
+		ContextWindowTokens:      providerContextWindowTokens(provider),
+		AutoCompactEnabled:       provider.AutoCompactEnabled,
+		CompactThresholdPercent:  provider.AutoCompactThresholdPercent,
+		CompactReservedTokens:    provider.CompactReservedTokens,
+		PruneToolOutputsEnabled:  provider.PruneToolOutputsEnabled,
 		MaxHistoryMessages:       60,
 		MaxRecentMessageRunes:    12000,
 		MaxOlderMessageRunes:     3000,
@@ -63,5 +74,56 @@ func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProf
 		profile.MaxWebSearchSnippetRunes = 450
 		profile.MaxWebExtractRunes = 7000
 	}
+	if profile.CompactThresholdPercent == 0 {
+		profile.CompactThresholdPercent = 80
+	}
+	if profile.ContextWindowTokens <= 0 {
+		profile.ContextWindowTokens = defaultContextWindowTokens
+	}
+	if profile.CompactReservedTokens == 0 {
+		profile.CompactReservedTokens = defaultCompactReservedTokens(profile.ContextWindowTokens)
+	}
 	return profile
+}
+
+const defaultContextWindowTokens = 128000
+
+func defaultCompactReservedTokens(windowTokens int) int {
+	switch {
+	case windowTokens >= 900000:
+		return 128000
+	case windowTokens >= 500000:
+		return 80000
+	case windowTokens >= 200000:
+		return 48000
+	case windowTokens >= 100000:
+		return 24000
+	case windowTokens >= 64000:
+		return 16000
+	default:
+		reserved := windowTokens / 4
+		if reserved < 4000 {
+			return 4000
+		}
+		return reserved
+	}
+}
+
+func providerContextWindowTokens(provider store.ModelProvider) int {
+	if provider.ContextWindowTokens > 0 {
+		return provider.ContextWindowTokens
+	}
+	modelText := strings.ToLower(provider.Name + " " + provider.ModelID + " " + provider.BaseURL)
+	switch {
+	case strings.Contains(modelText, "gpt-4.1") || strings.Contains(modelText, "gpt-5"):
+		return 1000000
+	case strings.Contains(modelText, "gemini-1.5") || strings.Contains(modelText, "gemini-2"):
+		return 1000000
+	case strings.Contains(modelText, "claude"):
+		return 200000
+	case strings.Contains(modelText, "gpt-4o") || strings.Contains(modelText, "o3") || strings.Contains(modelText, "o4"):
+		return 128000
+	default:
+		return defaultContextWindowTokens
+	}
 }

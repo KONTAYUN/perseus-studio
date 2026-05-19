@@ -52,6 +52,7 @@ Set `FRONTEND_DIST=../dist` and configure other env vars per `.env.example`.
 ### Tests
 
 ```bash
+npm run test:ui
 npm run test:unit
 npm run build
 cd backend && go test ./...
@@ -77,4 +78,6 @@ Legacy paths (`data/workspace/`, `data/uploads/`, `data/skills/`) are no longer 
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Module layout, key flows, data model
 - [DEPLOY.md](DEPLOY.md) — Docker deployment, configuration, reverse proxy, security
+- [HARNESS.md](HARNESS.md) — Agent behavior rules for workspace, tools, context, tasks, diagnostics, and frontend UI governance
+- [docs/UI_DESIGN_SYSTEM.md](docs/UI_DESIGN_SYSTEM.md) — Frontend UI standards for buttons, inputs, panels, motion, color, and reusable components
 - [docs/BACKUP.md](docs/BACKUP.md) — Backup and restore checklist

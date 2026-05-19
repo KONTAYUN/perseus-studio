@@ -1,6 +1,72 @@
 package api
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"webide-backend/internal/store"
+)
+
+func TestModelProviderContextSettingsRoundTrip(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+	configs := store.NewConfigStore(db)
+	ctx := context.Background()
+	if err := configs.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+	autoCompact := false
+	pruneOutputs := false
+	item, err := configs.CreateModelProvider(ctx, "u1", store.ModelProviderInput{
+		Name:                        "Local",
+		Protocol:                    "openai",
+		BaseURL:                     "http://127.0.0.1",
+		APIKey:                      "key",
+		ModelID:                     "model",
+		Enabled:                     true,
+		ContextWindowTokens:         4096,
+		AutoCompactEnabled:          &autoCompact,
+		AutoCompactThresholdPercent: 75,
+		CompactReservedTokens:       512,
+		PruneToolOutputsEnabled:     &pruneOutputs,
+	})
+	if err != nil {
+		t.Fatalf("CreateModelProvider returned error: %v", err)
+	}
+	if item.ContextWindowTokens != 4096 || item.AutoCompactEnabled || item.AutoCompactThresholdPercent != 75 || item.CompactReservedTokens != 512 || item.PruneToolOutputsEnabled {
+		t.Fatalf("unexpected context settings: %#v", item)
+	}
+}
+
+func TestModelProviderContextSettingsDefaults(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+	configs := store.NewConfigStore(db)
+	ctx := context.Background()
+	if err := configs.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+	item, err := configs.CreateModelProvider(ctx, "u1", store.ModelProviderInput{
+		Name:     "Default",
+		Protocol: "openai",
+		BaseURL:  "http://127.0.0.1",
+		APIKey:   "key",
+		ModelID:  "model",
+		Enabled:  true,
+	})
+	if err != nil {
+		t.Fatalf("CreateModelProvider returned error: %v", err)
+	}
+	if item.ContextWindowTokens != 0 || !item.AutoCompactEnabled || item.AutoCompactThresholdPercent != 80 || item.CompactReservedTokens != 0 || !item.PruneToolOutputsEnabled {
+		t.Fatalf("unexpected default context settings: %#v", item)
+	}
+}
 
 func TestParseDiscoveredModelsSupportsAnthropicDisplayName(t *testing.T) {
 	models, err := parseDiscoveredModels([]byte(`{

@@ -41,6 +41,19 @@ async function apiGet(page, path) {
   }, path);
 }
 
+async function setStoredOpenFolders(page, paths) {
+  await page.evaluate(async (nextPaths) => {
+    const response = await fetch('/api/auth/me', {
+      credentials: 'include',
+    });
+    const data = await response.json();
+    const userId = data?.user?.id || data?.user?.user_id;
+    if (!userId) throw new Error('missing user id for file tree state');
+    const key = `perseus:file-tree:open-folders:${userId}`;
+    localStorage.setItem(key, JSON.stringify(nextPaths));
+  }, paths);
+}
+
 test('health endpoint is available', async ({ request }) => {
   const response = await request.get('/api/health');
   expect(response.ok()).toBeTruthy();
@@ -99,6 +112,7 @@ test('workspace file can be created through API and opened from file tree', asyn
     await page.reload();
     await expect(page.getByTestId('chat-send-button')).toBeVisible();
     await page.getByTestId('layout-3').click();
+    await page.getByTestId(`toggle-folder-${folderPath}`).click();
 
     const row = page.getByTestId(`file-row-${filePath}`);
     await expect(row).toBeVisible();
@@ -112,6 +126,57 @@ test('workspace file can be created through API and opened from file tree', asyn
     await expect(page.getByTestId('search-provider-select')).toBeVisible();
   } finally {
     await apiPost(page, '/api/files/delete', { path: folderPath }).catch(() => {});
+  }
+});
+
+test('editor tabs can be reordered by dragging within the tab strip', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 820 });
+  const stamp = Date.now();
+  const folderPath = `tab-reorder-e2e-${stamp}`;
+  const fileA = `${folderPath}/a.txt`;
+  const fileB = `${folderPath}/b.txt`;
+  const fileC = `${folderPath}/c.txt`;
+  const files = [fileA, fileB, fileC];
+
+  await login(page);
+
+  try {
+    await apiPost(page, '/api/files/mkdir', { path: folderPath });
+    for (const file of files) {
+      await apiPost(page, '/api/files/create', { path: file, content: file });
+    }
+
+    await page.reload();
+    await expect(page.getByTestId('chat-send-button')).toBeVisible();
+    await page.getByTestId('layout-3').click();
+    await page.getByTestId(`toggle-folder-${folderPath}`).click();
+    for (const file of files) {
+      await page.getByTestId(`file-row-${file}`).click();
+      await expect(page.getByTestId(`editor-tab-${file}`)).toBeVisible();
+    }
+    await page.getByTestId('layout-2').click();
+
+    const sourceBox = await page.getByTestId(`editor-tab-${fileC}`).boundingBox();
+    const targetBox = await page.getByTestId(`editor-tab-${fileA}`).boundingBox();
+    if (!sourceBox || !targetBox) throw new Error('missing tab bounds for reorder');
+
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(targetBox.x + 4, targetBox.y + targetBox.height / 2, { steps: 12 });
+    await page.mouse.up();
+
+    const orderedTabs = await page
+      .locator('.editor-tab-item')
+      .evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('title')));
+    expect(orderedTabs.slice(0, 3)).toEqual([fileC, fileA, fileB]);
+  } finally {
+    await apiPost(page, '/api/files/delete', { path: folderPath }).catch(() => {});
+    const trash = await apiGet(page, '/api/files/trash').catch(() => ({ items: [] }));
+    for (const item of trash.items || []) {
+      if (item.original_path === folderPath || item.original_path?.startsWith(`${folderPath}/`)) {
+        await apiPost(page, '/api/files/trash/delete', { path: item.path }).catch(() => {});
+      }
+    }
   }
 });
 
@@ -193,6 +258,7 @@ test('row delete action respects multi-selection', async ({ page }) => {
     await page.reload();
     await expect(page.getByTestId('chat-send-button')).toBeVisible();
     await page.getByTestId('layout-3').click();
+    await page.getByTestId(`toggle-folder-${folderPath}`).click();
 
     await page.getByTestId(`file-row-${fileA}`).click({ modifiers: ['Control'] });
     await page.getByTestId(`file-row-${fileB}`).click({ modifiers: ['Control'] });
@@ -242,6 +308,7 @@ test('file tree supports manual drag ordering and self-drop hint', async ({ page
     await page.reload();
     await expect(page.getByTestId('chat-send-button')).toBeVisible();
     await page.getByTestId('layout-3').click();
+    await page.getByTestId(`toggle-folder-${folderPath}`).click();
 
     const rowB = page.getByTestId(`file-row-${fileB}`);
     const rowC = page.getByTestId(`file-row-${fileC}`);
@@ -259,11 +326,97 @@ test('file tree supports manual drag ordering and self-drop hint', async ({ page
       .evaluateAll((elements, prefix) => elements.map((element) => element.dataset.filePath).filter((path) => path?.startsWith(`${prefix}/`)), folderPath);
     expect(orderedPaths.filter((path) => path.endsWith('.txt')).slice(0, 3)).toEqual([fileA, fileC, fileB]);
 
+    await page.getByTestId(`toggle-folder-${folderA}`).click();
     const folderRow = page.getByTestId(`file-row-${folderA}`);
     const childFolderRow = page.getByTestId(`file-row-${folderChild}`);
     await expect(childFolderRow).toBeVisible();
     await folderRow.dragTo(childFolderRow, { targetPosition: { x: 36, y: 12 } });
     await expect(page.getByText('不能移动到自身文件夹内部')).toBeVisible();
+  } finally {
+    await apiPost(page, '/api/files/delete', { path: folderPath }).catch(() => {});
+    const trash = await apiGet(page, '/api/files/trash').catch(() => ({ items: [] }));
+    for (const item of trash.items || []) {
+      if (item.original_path === folderPath || item.original_path?.startsWith(`${folderPath}/`)) {
+        await apiPost(page, '/api/files/trash/delete', { path: item.path }).catch(() => {});
+      }
+    }
+  }
+});
+
+test('file tree remembers folder expansion state across reloads', async ({ page }) => {
+  const stamp = Date.now();
+  const rootFolder = `tree-state-e2e-${stamp}`;
+  const childFolder = `${rootFolder}/nested`;
+  const leafFile = `${childFolder}/note.txt`;
+
+  await login(page);
+
+  try {
+    await apiPost(page, '/api/files/mkdir', { path: rootFolder });
+    await apiPost(page, '/api/files/mkdir', { path: childFolder });
+    await apiPost(page, '/api/files/create', { path: leafFile, content: 'persist me' });
+    await setStoredOpenFolders(page, []);
+
+    await page.reload();
+    await expect(page.getByTestId('chat-send-button')).toBeVisible();
+    await page.getByTestId('layout-3').click();
+
+    await expect(page.getByTestId(`file-row-${rootFolder}`)).toBeVisible();
+    await expect(page.getByTestId(`file-row-${childFolder}`)).toHaveCount(0);
+    await page.getByTestId(`toggle-folder-${rootFolder}`).click();
+    await expect(page.getByTestId(`file-row-${childFolder}`)).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByTestId('chat-send-button')).toBeVisible();
+    await page.getByTestId('layout-3').click();
+    await expect(page.getByTestId(`file-row-${childFolder}`)).toBeVisible();
+    await page.getByTestId(`toggle-folder-${rootFolder}`).click();
+    await expect(page.getByTestId(`file-row-${childFolder}`)).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.getByTestId('chat-send-button')).toBeVisible();
+    await page.getByTestId('layout-3').click();
+    await expect(page.getByTestId(`file-row-${childFolder}`)).toHaveCount(0);
+  } finally {
+    await apiPost(page, '/api/files/delete', { path: rootFolder }).catch(() => {});
+    const trash = await apiGet(page, '/api/files/trash').catch(() => ({ items: [] }));
+    for (const item of trash.items || []) {
+      if (item.original_path === rootFolder || item.original_path?.startsWith(`${rootFolder}/`)) {
+        await apiPost(page, '/api/files/trash/delete', { path: item.path }).catch(() => {});
+      }
+    }
+  }
+});
+
+test('workspace file search opens files inside collapsed folders', async ({ page }) => {
+  const stamp = Date.now();
+  const folderPath = `search-e2e-${stamp}`;
+  const nestedFolder = `${folderPath}/nested`;
+  const fileName = `find-me-${stamp}.txt`;
+  const filePath = `${nestedFolder}/${fileName}`;
+  const fileContent = `search result ${stamp}`;
+
+  await login(page);
+
+  try {
+    await apiPost(page, '/api/files/mkdir', { path: folderPath });
+    await apiPost(page, '/api/files/mkdir', { path: nestedFolder });
+    await apiPost(page, '/api/files/create', { path: filePath, content: fileContent });
+    await setStoredOpenFolders(page, []);
+
+    await page.reload();
+    await expect(page.getByTestId('chat-send-button')).toBeVisible();
+    await page.getByTestId('layout-3').click();
+
+    await expect(page.getByTestId(`file-row-${nestedFolder}`)).toHaveCount(0);
+    await page.getByTestId('workspace-search-button').click();
+    await expect(page.getByTestId('workspace-search-popover')).toBeVisible();
+    await page.getByTestId('workspace-search-input').fill(fileName);
+    await page.getByTestId(`workspace-search-result-${filePath}`).click();
+
+    await expect(page.getByTestId(`file-row-${nestedFolder}`)).toBeVisible();
+    await expect(page.getByTestId(`editor-tab-${filePath}`)).toBeVisible();
+    await expect(page.getByTestId('editor-textarea')).toHaveValue(fileContent);
   } finally {
     await apiPost(page, '/api/files/delete', { path: folderPath }).catch(() => {});
     const trash = await apiGet(page, '/api/files/trash').catch(() => ({ items: [] }));

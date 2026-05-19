@@ -1,7 +1,22 @@
 import React from 'react';
-import { ArrowLeft, Ban, CheckCircle, KeyRound, Plus, ShieldCheck, Trash2, User, Users } from 'lucide-react';
+import { ArrowLeft, Ban, CheckCircle, KeyRound, Plus, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../../api/client';
-import { SectionTitle, ProviderCard, CardActions, IconButton, Badge, EmptyCard, FormHeader, Field, Input, Select, formatDate } from './SettingsUI';
+import {
+  Badge,
+  Button,
+  CardActions,
+  EmptyCard,
+  Field,
+  FormHeader,
+  IconButton,
+  Input,
+  ProviderCard,
+  SectionTitle,
+  Select,
+  SettingsSection,
+  Switch,
+  formatDate,
+} from './SettingsUI';
 
 export default function UserManagement({ dialog, onBack, currentUser }) {
   const [users, setUsers] = React.useState([]);
@@ -126,21 +141,23 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
 
   if (loading) {
     return (
-      <section className="settings-view-enter rounded-[24px] border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]">
+      <SettingsSection className="settings-view-enter">
         <div className="text-sm text-gray-500 dark:text-gray-400">加载中...</div>
-      </section>
+      </SettingsSection>
     );
   }
 
   return (
-    <section className="settings-view-enter rounded-[24px] border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]">
-      <button
+    <SettingsSection className="settings-view-enter">
+      <Button
         type="button"
+        variant="ghost"
+        size="xs"
         onClick={onBack}
-        className="mb-5 flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-blue-500"
+        className="mb-5 px-2 py-1 text-gray-400"
       >
         <ArrowLeft size={14} /> 返回设置
-      </button>
+      </Button>
 
       <SectionTitle icon={<Users size={15} />} title="用户管理" description="管理系统用户、角色和注册设置。" />
 
@@ -157,19 +174,11 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
             {allowRegistration ? '任何人可在登录页注册新账号' : '仅管理员可创建新用户'}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={handleToggleRegistration}
-          className={`relative h-6 w-11 rounded-full transition-colors ${
-            allowRegistration ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-              allowRegistration ? 'left-[22px]' : 'left-0.5'
-            }`}
-          />
-        </button>
+        <Switch
+          checked={allowRegistration}
+          onChange={handleToggleRegistration}
+          title={allowRegistration ? '关闭注册' : '开启注册'}
+        />
       </div>
 
       <div className="mb-3 text-xs font-bold text-gray-500 dark:text-gray-400">
@@ -197,27 +206,29 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
                     className="settings-expand-enter mt-2 flex items-center gap-2"
                     onSubmit={(e) => { e.preventDefault(); handleResetPassword(user.id); }}
                   >
-                    <input
+                    <Input
                       type="password"
                       placeholder="新密码"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      className="h-8 w-40 rounded-lg border border-gray-200 bg-white px-2 text-xs outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-[#1C1C1E] dark:text-white"
+                      className="h-8 w-40 text-xs"
                       autoFocus
                     />
-                    <button
+                    <Button
                       type="submit"
-                      className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-600"
+                      size="xs"
                     >
                       确认
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
                       onClick={() => { setResetPasswordId(''); setNewPassword(''); }}
-                      className="text-xs text-gray-400 hover:text-gray-600"
+                      variant="ghost"
+                      size="xs"
+                      className="px-2 py-1 text-gray-400"
                     >
                       取消
-                    </button>
+                    </Button>
                   </form>
                 )}
               </div>
@@ -255,7 +266,7 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
           ))}
         </div>
 
-        <div className="settings-card h-fit rounded-2xl border border-gray-100 bg-white/80 p-5 shadow-sm dark:border-white/10 dark:bg-[#2C2C2E]/75">
+        <div className="settings-card h-fit rounded-2xl border border-gray-100 bg-white/80 p-5 dark:border-white/10 dark:bg-[#2C2C2E]/75">
           <FormHeader title="创建用户" />
           <form onSubmit={handleCreateUser}>
             <Field label="用户名">
@@ -285,17 +296,18 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
                 <option value="admin">admin</option>
               </Select>
             </Field>
-            <button
+            <Button
               type="submit"
               disabled={isCreating}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-500 py-2.5 text-sm font-bold text-white shadow-md shadow-blue-500/20 transition-all hover:bg-blue-600 disabled:opacity-50"
+              className="mt-5"
+              fullWidth
             >
               <Plus size={15} />
               {isCreating ? '创建中...' : '创建用户'}
-            </button>
+            </Button>
           </form>
         </div>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

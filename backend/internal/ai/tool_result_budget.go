@@ -20,6 +20,8 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 		payload["model_view"] = "stdout/stderr may be truncated for stability; the UI keeps the full command event separately."
 	case "read_workspace_text":
 		trimMapString(payload, "content", profile.MaxReadFileContentRunes)
+	case "read_workspace_files":
+		budgetBatchReadPayload(payload, profile)
 	case "perseus_search_web", "web_search":
 		budgetWebSearchPayload(payload, profile)
 	case "web_extract":
@@ -35,6 +37,21 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 		return compactToolResultJSON(toolName, string(raw), profile.MaxToolResultRunes)
 	}
 	return string(raw)
+}
+
+func budgetBatchReadPayload(payload map[string]any, profile providerRuntimeProfile) {
+	rawItems, ok := payload["items"].([]any)
+	if !ok {
+		return
+	}
+	for _, item := range rawItems {
+		object, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		trimMapString(object, "content", profile.MaxReadFileContentRunes)
+	}
+	payload["items"] = rawItems
 }
 
 func compactToolResultJSON(toolName, raw string, maxRunes int) string {

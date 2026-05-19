@@ -63,9 +63,23 @@ func main() {
 	if err := diagnosticStore.Migrate(context.Background()); err != nil {
 		log.Fatalf("migrate diagnostic database: %v", err)
 	}
+	if info := store.LastDBRuntimeInfo(); info.RiskyWALMount {
+		_, _ = diagnosticStore.Append(context.Background(), store.DiagnosticLogInput{
+			UserID:         "system",
+			Stage:          "sqlite_storage_mode",
+			Level:          "warn",
+			ErrorMessage:   "SQLite WAL is enabled on a network-style mount; use SQLITE_JOURNAL_MODE=DELETE for reliable persistence.",
+			RequestSummary: info.MountType + " " + info.MountPoint,
+		})
+	}
 	agentRunStore := store.NewAgentRunStore(db)
 	if err := agentRunStore.Migrate(context.Background()); err != nil {
 		log.Fatalf("migrate agent run database: %v", err)
+	}
+	if count, err := agentRunStore.FailStaleRunningRuns(context.Background(), 2*time.Minute, "上次服务停止或本地状态保存中断，本轮已暂停，可点击继续本轮。"); err != nil {
+		log.Fatalf("recover stale agent runs: %v", err)
+	} else if count > 0 {
+		log.Printf("marked %d stale agent run(s) as recoverable failed", count)
 	}
 	skillStore := store.NewSkillStore(db)
 	if err := skillStore.Migrate(context.Background()); err != nil {

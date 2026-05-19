@@ -16,6 +16,7 @@ _local_artifacts/
 .agent_refs/
 .refs/
 .claude/
+tmp/
 deploy-package/
 deploy-package.zip
 perseus-studio.tar

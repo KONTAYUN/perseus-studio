@@ -30,6 +30,36 @@ export function seedOpenFolders(items) {
   return next;
 }
 
+export function fileTreeStateStorageKey(userId) {
+  return userId ? `perseus:file-tree:open-folders:${userId}` : '';
+}
+
+export function readStoredOpenFolders(userId) {
+  if (!userId || typeof window === 'undefined') return null;
+  const key = fileTreeStateStorageKey(userId);
+  if (!key) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return new Set(parsed.filter((item) => typeof item === 'string' && item.trim()));
+  } catch {
+    return null;
+  }
+}
+
+export function persistOpenFolders(userId, openFolders) {
+  if (!userId || typeof window === 'undefined') return;
+  const key = fileTreeStateStorageKey(userId);
+  if (!key) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(Array.from(openFolders || [])));
+  } catch {
+    // Ignore storage quota or privacy-mode failures; tree state will just be session-only.
+  }
+}
+
 export function flattenTree(items) {
   const result = [];
   for (const item of items) {
@@ -64,6 +94,16 @@ export function getParentPath(path) {
   const parts = path.split('/');
   parts.pop();
   return parts.join('/');
+}
+
+export function getAncestorFolderPaths(path) {
+  const parts = String(path || '').split('/').filter(Boolean);
+  parts.pop();
+  const ancestors = [];
+  for (let index = 1; index <= parts.length; index += 1) {
+    ancestors.push(parts.slice(0, index).join('/'));
+  }
+  return ancestors;
 }
 
 export function getFileTreeDropZone(clientY, rect, itemType) {
@@ -181,12 +221,45 @@ export function shouldReloadWorkspaceForToolEvents(toolEvents) {
     (item) =>
       item?.status === 'success' &&
       [
+        'edit_workspace_text',
         'save_workspace_file',
         'manage_workspace_path',
         'organize_workspace_matches',
         'run_workspace_command',
       ].includes(item?.tool_name)
   );
+}
+
+export function editorToolEventKey(item) {
+  if (!item?.tool_name || item.status !== 'success') return '';
+  const changedPaths = Array.isArray(item.changed_paths) ? item.changed_paths.join('|') : '';
+  return [
+    item.tool_call_id || '',
+    item.operation_hash || '',
+    item.tool_name || '',
+    item.path || '',
+    item.old_path || '',
+    item.new_path || '',
+    item.hash || '',
+    item.version_id || '',
+    changedPaths,
+  ].join('\u0001');
+}
+
+export function filterFreshEditorToolEvents(toolEvents, seenKeys) {
+  if (!seenKeys) return toolEvents || [];
+  const fresh = [];
+  for (const item of toolEvents || []) {
+    const key = editorToolEventKey(item);
+    if (!key) {
+      fresh.push(item);
+      continue;
+    }
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    fresh.push(item);
+  }
+  return fresh;
 }
 
 export function createZipBlob(entries) {

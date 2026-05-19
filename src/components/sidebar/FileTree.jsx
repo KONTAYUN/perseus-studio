@@ -177,7 +177,7 @@ export default function FileTree({ items, depth = 0, ide }) {
             e.stopPropagation();
             if (item.type === 'folder') ide.toggleFolder(item.path);
           }}
-          className={`motion-button file-tree-toggle flex h-5 w-5 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-blue-500 dark:text-gray-500 dark:hover:bg-white/10 ${
+          className={`motion-button ui-icon-button ui-icon-button-compact file-tree-toggle h-5 w-5 ${
             item.type === 'folder' ? 'visible' : 'invisible'
           }`}
           title={item.isOpen ? '收起文件夹' : '展开文件夹'}
@@ -213,7 +213,7 @@ export default function FileTree({ items, depth = 0, ide }) {
                     ide.selectItem(item.path, item.type);
                     ide.openCreateFileModal(item.path).catch((error) => console.error(error));
                   }}
-                  className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
+                  className="motion-button ui-icon-button ui-icon-button-compact h-5 w-5"
                   title="新建文件"
                 >
                   <FileCode2 size={12} />
@@ -222,7 +222,7 @@ export default function FileTree({ items, depth = 0, ide }) {
                   data-testid={`upload-${item.path}`}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
-                  className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500 cursor-pointer"
+                  className="motion-button ui-icon-button ui-icon-button-compact h-5 w-5 cursor-pointer"
                   title="上传到此文件夹"
                 >
                   <Upload size={12} />
@@ -243,7 +243,7 @@ export default function FileTree({ items, depth = 0, ide }) {
                     e.stopPropagation();
                     ide.downloadFromTreeAction(item.path, item.type).catch((error) => console.error(error));
                   }}
-                  className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-500 hover:text-blue-500"
+                  className="motion-button ui-icon-button ui-icon-button-compact h-5 w-5"
                   title="下载文件夹"
                 >
                   <Download size={12} />
@@ -257,7 +257,7 @@ export default function FileTree({ items, depth = 0, ide }) {
                 e.stopPropagation();
                 ide.openRenameModal(item.path, item.type).catch((error) => console.error(error));
               }}
-              className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
+              className="motion-button ui-icon-button ui-icon-button-compact h-5 w-5"
               title="重命名"
             >
               <Pencil size={12} />
@@ -270,7 +270,7 @@ export default function FileTree({ items, depth = 0, ide }) {
                   e.stopPropagation();
                   ide.downloadFromTreeAction(item.path, item.type).catch((error) => console.error(error));
                 }}
-                className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-blue-500"
+                className="motion-button ui-icon-button ui-icon-button-compact h-5 w-5"
                 title="下载"
               >
                 <Download size={12} />
@@ -287,7 +287,7 @@ export default function FileTree({ items, depth = 0, ide }) {
                 }
                 ide.openDeleteModal(item.path, item.type).catch((error) => console.error(error));
               }}
-              className="motion-button p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-red-500"
+              className="motion-button ui-icon-button ui-icon-button-compact ui-icon-button-danger h-5 w-5"
               title="删除"
             >
               <Trash2 size={12} />
@@ -299,7 +299,7 @@ export default function FileTree({ items, depth = 0, ide }) {
 
       {item.type === 'folder' && ide.fileDragOverId === item.id && (
         <div
-          className="settings-expand-enter mx-2 mb-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-600 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200"
+          className="file-drop-hint settings-expand-enter mx-2 mb-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-600 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200"
           style={{ marginLeft: `${depth * 12 + 28}px` }}
         >
           {ide.draggingFileId ? `松开后移动到 ${item.path}` : `松开后上传到 ${item.path}`}
@@ -323,7 +323,7 @@ function DropInsertionLine({ depth }) {
       className="pointer-events-none relative z-20 h-0"
       style={{ marginLeft: `${depth * 12 + 28}px`, marginRight: '8px' }}
     >
-      <div className="-translate-y-1/2 rounded-full border-t-2 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.35)] dark:border-blue-300 dark:shadow-[0_0_12px_rgba(147,197,253,0.35)]" />
+      <div className="file-drop-indicator-line -translate-y-1/2 rounded-full border-t-2 border-blue-500 dark:border-blue-300" />
     </div>
   );
 }
@@ -369,7 +369,7 @@ function InlineRenameInput({ item, ide }) {
           ide.cancelInlineRename?.();
         }
       }}
-      className="settings-expand-enter min-w-0 flex-1 rounded-md border border-blue-400/80 bg-white px-1.5 py-0.5 text-[13px] text-gray-800 outline-none ring-2 ring-blue-500/15 dark:bg-[#252527] dark:text-gray-100"
+      className="inline-rename-input settings-expand-enter min-w-0 flex-1 rounded-md border border-blue-400/80 bg-white px-1.5 py-0.5 text-[13px] text-gray-800 outline-none ring-2 ring-blue-500/15 dark:bg-[#252527] dark:text-gray-100"
     />
   );
 }

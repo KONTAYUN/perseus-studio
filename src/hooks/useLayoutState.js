@@ -244,17 +244,17 @@ export default function useLayoutState({ userId = '' } = {}) {
 
   const getPanelGlowStyle = (panelName) => {
     if (dragOverId === panelName && dragType !== 'reorder') {
-      return 'ring-2 ring-blue-500 bg-blue-50/20 dark:bg-blue-500/20 border-transparent';
+      return 'ui-panel-surface-drop bg-blue-50/20 dark:bg-blue-500/20 z-40';
     }
     if (activePanel === panelName) {
-      return 'ring-[1.5px] ring-blue-500/80 shadow-[0_0_24px_rgba(59,130,246,0.25)] dark:shadow-[0_0_30px_rgba(59,130,246,0.35)] border-transparent z-40';
+      return 'border-gray-200/80 dark:border-white/10 z-40';
     }
-    return 'border-gray-200/80 dark:border-white/10 shadow-xl z-10';
+    return 'border-gray-200/80 dark:border-white/10 z-10';
   };
 
   const getInputGlowStyle = () => {
     if (activePanel === 'chat-input') {
-      return 'border-blue-400/45 ring-1 ring-blue-500/16 shadow-[0_18px_44px_rgba(15,23,42,0.12),0_0_0_1px_rgba(59,130,246,0.06)] dark:border-blue-300/30 dark:ring-blue-300/14 dark:shadow-[0_18px_46px_rgba(0,0,0,0.36),0_0_0_1px_rgba(96,165,250,0.08)]';
+      return 'composer-shell-active';
     }
     return 'border-gray-200/75 dark:border-white/10 hover:border-gray-300/85 dark:hover:border-white/16';
   };

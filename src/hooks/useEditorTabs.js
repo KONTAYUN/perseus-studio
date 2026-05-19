@@ -1,18 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { apiGet, apiPost } from '../api/client';
-import { detectFileType, isAnyTrashPath, isTextPath, pathMatches } from './ideUtils';
+import { useRef, useState } from 'react';
+import { apiPost } from '../api/client';
+import { createEditorFileLoader } from './createEditorFileLoader';
+import { createEditorToolRefreshActions } from './editorToolRefreshActions';
+import { detectFileType } from './ideUtils';
 import {
-  buildActiveFileToolPlan,
-  buildInactiveTabWriteConflict,
-  filterTabsOutsidePath,
-  isSuccessfulEditorToolEvent,
   isTabDirty,
   nextActiveTabAfterClose,
-  pathMovesFromToolEvent,
-  remapEditorPath,
-  remapEditorTabs,
   removeTabByPath,
+  reorderTabsByPath,
 } from './editorTabUtils';
+import useActiveEditorTabSync from './useActiveEditorTabSync';
+import useEditorTabAutoSave from './useEditorTabAutoSave';
+import useEditorTabRefSync from './useEditorTabRefSync';
 
 export default function useEditorTabs({
   confirm,
@@ -51,86 +50,73 @@ export default function useEditorTabs({
   const isDirty =
     currentFilePath !== '' && isTextFile && currentFileContent !== savedFileContent;
 
-  useEffect(() => {
-    currentFilePathRef.current = currentFilePath;
-  }, [currentFilePath]);
-
-  useEffect(() => {
-    currentFileContentRef.current = currentFileContent;
-  }, [currentFileContent]);
-
-  useEffect(() => {
-    savedFileContentRef.current = savedFileContent;
-  }, [savedFileContent]);
-
-  useEffect(() => {
-    isTextFileRef.current = isTextFile;
-  }, [isTextFile]);
-
-  useEffect(() => {
-    externalFileConflictRef.current = externalFileConflict;
-  }, [externalFileConflict]);
-
-  useEffect(() => {
-    openTabsRef.current = openTabs;
-  }, [openTabs]);
-
-  useEffect(() => {
-    activeTabPathRef.current = activeTabPath;
-  }, [activeTabPath]);
-
-  useEffect(() => {
-    isDirtyRef.current = isDirty;
-  }, [isDirty]);
-
-  useEffect(() => {
-    if (!currentFilePath || activeTabPath !== currentFilePath) return;
-    const snapshot = buildTabSnapshot();
-    setOpenTabs((current) =>
-      current.map((tab) => (tab.path === currentFilePath ? { ...tab, ...snapshot } : tab))
-    );
-  }, [
-    currentFilePath,
+  useEditorTabRefSync({
     activeTabPath,
+    activeTabPathRef,
     currentFileContent,
-    savedFileContent,
-    currentFileHash,
-    currentFileVersionId,
-    currentFileType,
-    currentFileNotice,
+    currentFileContentRef,
+    currentFilePath,
+    currentFilePathRef,
     externalFileConflict,
+    externalFileConflictRef,
+    isDirty,
+    isDirtyRef,
+    isTextFile,
+    isTextFileRef,
+    openTabs,
+    openTabsRef,
+    savedFileContent,
+    savedFileContentRef,
+  });
+
+  useActiveEditorTabSync({
+    activeTabPath,
+    buildTabSnapshot,
+    currentFilePath,
+    currentFileContent,
+    currentFileHash,
+    currentFileNotice,
+    currentFileType,
+    currentFileVersionId,
     editorStatusMessage,
-  ]);
+    externalFileConflict,
+    savedFileContent,
+    setOpenTabs,
+  });
 
-  useEffect(() => {
-    if (autoSaveTimerRef.current) {
-      window.clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-    if (!currentFilePath || !isTextFile || !isDirty || externalFileConflict || isEditorLoading || isSavingFile) {
-      return undefined;
-    }
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      autoSaveTimerRef.current = null;
-      saveFileContent({ auto: true }).catch((error) => console.error('autoSave failed', error));
-    }, 1000);
-    return () => {
-      if (autoSaveTimerRef.current) {
-        window.clearTimeout(autoSaveTimerRef.current);
-        autoSaveTimerRef.current = null;
-      }
-    };
-  }, [currentFilePath, currentFileContent, savedFileContent, isTextFile, isDirty, externalFileConflict, isEditorLoading, isSavingFile]);
+  useEditorTabAutoSave({
+    autoSaveTimerRef,
+    currentFileContent,
+    currentFilePath,
+    externalFileConflict,
+    isDirty,
+    isDirtyRef,
+    isEditorLoading,
+    isSavingFile,
+    isTextFile,
+    saveFileContent,
+    savedFileContent,
+  });
 
-  useEffect(() => {
-    const onBeforeUnload = (event) => {
-      if (!isDirtyRef.current) return;
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, []);
+  const loadFileIntoEditor = createEditorFileLoader({
+    editorLoadRequestRef,
+    setActivePanel,
+    setActiveTabPath,
+    setCurrentFileContent,
+    setCurrentFileHash,
+    setCurrentFileNotice,
+    setCurrentFilePath,
+    setCurrentFileType,
+    setCurrentFileVersionId,
+    setEditorStatusMessage,
+    setErrorMessage,
+    setExternalFileConflict,
+    setIsEditorLoading,
+    setOpenTabs,
+    setSavedFileContent,
+    setSelectedItemPath,
+    setSelectedItemType,
+  });
 
   async function openFile(path) {
     await flushAutoSave();
@@ -187,6 +173,21 @@ export default function useEditorTabs({
       return;
     }
     closeCurrentFile();
+  }
+
+  function reorderTab(sourcePath, targetPath, position = 'before') {
+    const current = openTabsRef.current;
+    const currentWithActiveSnapshot = current.map((tab) =>
+      tab.path === currentFilePathRef.current ? { ...tab, ...buildTabSnapshot({ path: tab.path }) } : tab
+    );
+    const nextTabs = reorderTabsByPath(currentWithActiveSnapshot, sourcePath, targetPath, position);
+    const changed =
+      nextTabs.length === current.length &&
+      nextTabs.some((tab, index) => tab.path !== current[index]?.path);
+    if (!changed) return false;
+    openTabsRef.current = nextTabs;
+    setOpenTabs(nextTabs);
+    return true;
   }
 
   async function detachTab(path) {
@@ -330,140 +331,6 @@ export default function useEditorTabs({
     }
   }
 
-  async function loadFileIntoEditor(path, options = {}) {
-    const {
-      activatePanel = true,
-      preserveSelection = false,
-      hash = '',
-      versionId = '',
-      statusMessage = '',
-      clearConflict = true,
-    } = options;
-
-    const requestId = ++editorLoadRequestRef.current;
-    setIsEditorLoading(true);
-    setErrorMessage?.('');
-    if (clearConflict) {
-      setExternalFileConflict(null);
-    }
-    setEditorStatusMessage(statusMessage);
-    if (!preserveSelection) {
-      setSelectedItemPath?.(path);
-      setSelectedItemType?.('file');
-    }
-
-    try {
-      const fileType = detectFileType(path);
-      setCurrentFilePath(path);
-      setCurrentFileType(fileType);
-      setCurrentFileHash(hash || '');
-      setCurrentFileVersionId(versionId || '');
-
-      if (fileType === 'image') {
-        if (requestId !== editorLoadRequestRef.current) return;
-        setCurrentFileContent('');
-        setSavedFileContent('');
-        setCurrentFileNotice('图片文件暂不支持编辑');
-        setActiveTabPath(path);
-        upsertOpenTab({
-          path,
-          content: '',
-          savedContent: '',
-          hash: hash || '',
-          versionId: versionId || '',
-          fileType,
-          notice: '图片文件暂不支持编辑',
-          conflict: null,
-          statusMessage,
-        });
-        if (activatePanel) setActivePanel?.('editor');
-        return;
-      }
-
-      if (fileType === 'binary') {
-        if (requestId !== editorLoadRequestRef.current) return;
-        setCurrentFileContent('');
-        setSavedFileContent('');
-        setCurrentFileNotice('该文件类型暂不支持预览或编辑');
-        setActiveTabPath(path);
-        upsertOpenTab({
-          path,
-          content: '',
-          savedContent: '',
-          hash: hash || '',
-          versionId: versionId || '',
-          fileType,
-          notice: '该文件类型暂不支持预览或编辑',
-          conflict: null,
-          statusMessage,
-        });
-        if (activatePanel) setActivePanel?.('editor');
-        return;
-      }
-
-      const file = await apiGet(`/api/files/read?path=${encodeURIComponent(path)}`);
-      if (requestId !== editorLoadRequestRef.current) return;
-      setCurrentFilePath(file.path);
-      setCurrentFileNotice('');
-      setCurrentFileContent(file.content);
-      setSavedFileContent(file.content);
-      setCurrentFileHash(hash || file.hash || '');
-      setCurrentFileVersionId(versionId || '');
-      setActiveTabPath(file.path);
-      upsertOpenTab({
-        path: file.path,
-        content: file.content,
-        savedContent: file.content,
-        hash: hash || file.hash || '',
-        versionId: versionId || '',
-        fileType,
-        notice: '',
-        conflict: null,
-        statusMessage,
-      });
-      if (activatePanel) setActivePanel?.('editor');
-    } catch (error) {
-      if (requestId !== editorLoadRequestRef.current) return;
-      console.error('loadFileIntoEditor failed', error);
-      setErrorMessage?.(error.message);
-    } finally {
-      if (requestId === editorLoadRequestRef.current) {
-        setIsEditorLoading(false);
-      }
-    }
-  }
-
-  function upsertOpenTab(tab) {
-    setOpenTabs((current) => {
-      const index = current.findIndex((item) => item.path === tab.path);
-      if (index === -1) return [...current, { ...tab, updatedAt: Date.now() }];
-      const next = [...current];
-      next[index] = { ...next[index], ...tab, updatedAt: Date.now() };
-      return next;
-    });
-  }
-
-  function applyPathUpdate(oldPath, newPath) {
-    if (!oldPath || !newPath) return;
-
-    if (pathMatches(currentFilePathRef.current, oldPath)) {
-      const nextFilePath = remapEditorPath(currentFilePathRef.current, oldPath, newPath);
-      setCurrentFilePath(nextFilePath);
-      setCurrentFileType(detectFileType(nextFilePath));
-    }
-    setOpenTabs((current) => remapEditorTabs(current, oldPath, newPath));
-    setActiveTabPath((current) => remapEditorPath(current, oldPath, newPath));
-  }
-
-  function clearPathState(path) {
-    if (!path) return;
-    setOpenTabs((current) => filterTabsOutsidePath(current, path));
-    if (pathMatches(currentFilePathRef.current, path)) {
-      closeCurrentFile();
-      setEditorStatusMessage('当前文件已移入回收站');
-    }
-  }
-
   function closeCurrentFile() {
     editorLoadRequestRef.current += 1;
     setCurrentFilePath('');
@@ -495,115 +362,23 @@ export default function useEditorTabs({
     });
   }
 
-  async function refreshWorkspaceAfterAssistantTools(toolEvents) {
-    const successfulEvents = (toolEvents || []).filter(isSuccessfulEditorToolEvent);
-    if (successfulEvents.length === 0) return;
-
-    const activePath = currentFilePathRef.current;
-    const dirty = isDirtyRef.current;
-
-    for (const event of successfulEvents) {
-      const moves = pathMovesFromToolEvent(event);
-      if (moves.length > 0) {
-        for (const move of moves) {
-          applyPathUpdate(move.oldPath, move.newPath);
-        }
-      } else if (event.tool_name === 'manage_workspace_path' && isAnyTrashPath(event.new_path)) {
-        clearPathState(event.old_path || event.path);
-      }
-      await refreshMatchingOpenTabs(event);
-    }
-
-    const { activePath: plannedActivePath, reloadPlan, conflictPlan, closeNotice } = buildActiveFileToolPlan(successfulEvents, {
-      activePath,
-      dirty,
-    });
-    if (plannedActivePath && plannedActivePath !== activePath) {
-      setCurrentFilePath(plannedActivePath);
-      setCurrentFileType(detectFileType(plannedActivePath));
-    }
-
-    if (closeNotice) {
-      closeCurrentFile();
-      setEditorStatusMessage(closeNotice);
-      return;
-    }
-
-    if (conflictPlan) {
-      setExternalFileConflict(conflictPlan);
-      setEditorStatusMessage('');
-      return;
-    }
-
-    if (reloadPlan?.path) {
-      await loadFileIntoEditor(reloadPlan.path, {
-        preserveSelection: true,
-        hash: reloadPlan.hash || '',
-        versionId: reloadPlan.versionId || '',
-        statusMessage: reloadPlan.statusMessage,
-      });
-    }
-  }
-
-  async function refreshMatchingOpenTabs(event) {
-    if (!event?.tool_name) return;
-    const tabs = openTabsRef.current;
-    if (tabs.length === 0) return;
-    if (event.tool_name === 'manage_workspace_path' || event.tool_name === 'organize_workspace_matches') {
-      const moves = pathMovesFromToolEvent(event);
-      if (moves.length > 0) {
-        setOpenTabs((current) =>
-          current.map((item) => {
-            const matchedMove = moves.find((move) => pathMatches(item.path, move.oldPath));
-            if (!matchedMove) return item;
-            return {
-              ...item,
-              path: remapEditorPath(item.path, matchedMove.oldPath, matchedMove.newPath),
-              fileType: detectFileType(remapEditorPath(item.path, matchedMove.oldPath, matchedMove.newPath)),
-            };
-          })
-        );
-      }
-    }
-    if (event.tool_name === 'save_workspace_file' && event.path) {
-      const tab = tabs.find((item) => item.path === event.path && item.path !== currentFilePathRef.current);
-      if (!tab) return;
-      const dirty = isTabDirty(tab);
-      if (dirty) {
-        setOpenTabs((current) =>
-          current.map((item) =>
-            item.path === event.path
-              ? {
-                  ...item,
-                  conflict: buildInactiveTabWriteConflict(event),
-                }
-              : item
-          )
-        );
-        return;
-      }
-      if (!isTextPath(event.path)) return;
-      try {
-        const file = await apiGet(`/api/files/read?path=${encodeURIComponent(event.path)}`);
-        setOpenTabs((current) =>
-          current.map((item) =>
-            item.path === event.path
-              ? {
-                  ...item,
-                  content: file.content,
-                  savedContent: file.content,
-                  hash: event.hash || file.hash || '',
-                  versionId: event.version_id || item.versionId || '',
-                  statusMessage: '已自动刷新 AI 修改后的文件内容。',
-                }
-              : item
-          )
-        );
-      } catch (error) {
-        console.error('refreshMatchingOpenTabs failed', error);
-      }
-    }
-  }
+  const {
+    applyPathUpdate,
+    clearPathState,
+    refreshWorkspaceAfterAssistantTools,
+  } = createEditorToolRefreshActions({
+    closeCurrentFile,
+    currentFilePathRef,
+    isDirtyRef,
+    loadFileIntoEditor,
+    openTabsRef,
+    setActiveTabPath,
+    setCurrentFilePath,
+    setCurrentFileType,
+    setEditorStatusMessage,
+    setExternalFileConflict,
+    setOpenTabs,
+  });
 
   return {
     activeTabPath,
@@ -637,6 +412,7 @@ export default function useEditorTabs({
     openTabs,
     refreshWorkspaceAfterAssistantTools,
     reloadCurrentFileFromConflict,
+    reorderTab,
     saveCurrentFile,
     setCurrentFileContent,
     setEditorStatusMessage,

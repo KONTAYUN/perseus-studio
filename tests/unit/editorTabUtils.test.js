@@ -12,6 +12,7 @@ import {
   remapEditorPath,
   remapEditorTabs,
   removeTabByPath,
+  reorderTabsByPath,
 } from '../../src/hooks/editorTabUtils.js';
 import { LEGACY_TRASH_DIR, TRASH_DIR } from '../../src/hooks/ideUtils.js';
 
@@ -26,6 +27,24 @@ test('removeTabByPath and nextActiveTabAfterClose keep tab order stable', () => 
   assert.deepEqual(removeTabByPath(tabs, 'b.md'), [{ path: 'a.md' }, { path: 'c.md' }]);
   assert.deepEqual(nextActiveTabAfterClose(tabs, 'c.md'), { path: 'b.md' });
   assert.deepEqual(nextActiveTabAfterClose(tabs, 'a.md'), { path: 'c.md' });
+});
+
+test('reorderTabsByPath moves tabs before or after a target tab', () => {
+  const tabs = [{ path: 'a.md' }, { path: 'b.md' }, { path: 'c.md' }, { path: 'd.md' }];
+
+  assert.deepEqual(reorderTabsByPath(tabs, 'd.md', 'b.md', 'before').map((tab) => tab.path), [
+    'a.md',
+    'd.md',
+    'b.md',
+    'c.md',
+  ]);
+  assert.deepEqual(reorderTabsByPath(tabs, 'a.md', 'c.md', 'after').map((tab) => tab.path), [
+    'b.md',
+    'c.md',
+    'a.md',
+    'd.md',
+  ]);
+  assert.deepEqual(reorderTabsByPath(tabs, 'b.md', 'b.md', 'after'), tabs);
 });
 
 test('remapEditorTabs updates file and nested folder tabs', () => {
@@ -57,6 +76,7 @@ test('filterTabsOutsidePath removes deleted file or folder descendants', () => {
 });
 
 test('isSuccessfulEditorToolEvent accepts only successful editor-affecting tools', () => {
+  assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'edit_workspace_text' }), true);
   assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'save_workspace_file' }), true);
   assert.equal(isSuccessfulEditorToolEvent({ status: 'failed', tool_name: 'save_workspace_file' }), false);
   assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'web_search' }), false);
@@ -72,6 +92,21 @@ test('buildActiveFileToolPlan refreshes clean active file after AI write', () =>
     path: 'notes/a.md',
     hash: 'h1',
     versionId: 'v1',
+    statusMessage: '',
+  });
+  assert.equal(plan.conflictPlan, null);
+});
+
+test('buildActiveFileToolPlan refreshes clean active file after precise AI edit', () => {
+  const plan = buildActiveFileToolPlan(
+    [{ tool_name: 'edit_workspace_text', path: 'notes/a.md', hash: 'h-edit', version_id: 'v-edit' }],
+    { activePath: 'notes/a.md', dirty: false }
+  );
+
+  assert.deepEqual(plan.reloadPlan, {
+    path: 'notes/a.md',
+    hash: 'h-edit',
+    versionId: 'v-edit',
     statusMessage: '',
   });
   assert.equal(plan.conflictPlan, null);
