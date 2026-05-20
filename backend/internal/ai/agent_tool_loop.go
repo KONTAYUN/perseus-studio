@@ -8,12 +8,32 @@ import (
 )
 
 func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCall) (*BackgroundTaskRequest, bool, error) {
+	calls = normalizeAgentToolCallIDs(calls)
 	results := make([]TranscriptToolResult, 0, len(calls))
-	for _, call := range calls {
+	for callIndex, call := range calls {
 		r.toolCalls++
 		_, maxToolCalls := r.loopLimits()
 		if r.toolCalls > maxToolCalls {
 			r.toolCalls = maxToolCalls
+			for _, skipped := range calls[callIndex:] {
+				result, event := r.toolBudgetExhaustedResult(skipped, maxToolCalls)
+				r.events = append(r.events, event)
+				results = append(results, TranscriptToolResult{
+					ToolCallID: event.ToolCallID,
+					ToolName:   skipped.Name,
+					Content:    result,
+					IsError:    true,
+					Event:      event,
+				})
+				emitToolLifecycleEvent(r.opts, "tool_result_returned", "warn", map[string]any{
+					"tool_call_id": skipped.ID,
+					"tool_name":    skipped.Name,
+					"round":        r.currentRound,
+					"status":       "failed",
+					"is_error":     true,
+					"reason":       IncompleteReasonBudgetExhausted,
+				})
+			}
 			r.appendToolResults(results)
 			if err := r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint()); err != nil {
 				return nil, false, err
@@ -49,6 +69,31 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 		return nil, false, err
 	}
 	return nil, false, nil
+}
+
+func (r *agentRuntime) toolBudgetExhaustedResult(call agentToolCall, maxToolCalls int) (string, ToolEvent) {
+	if call.ID == "" {
+		call.ID = fmt.Sprintf("tool_%d", r.toolCalls)
+	}
+	message := "Tool call was not executed because the agent reached its tool-call budget. The run will stop and summarize progress."
+	payload := map[string]any{
+		"status":         IncompleteReasonBudgetExhausted,
+		"tool_name":      call.Name,
+		"tool_call_id":   call.ID,
+		"max_tool_calls": maxToolCalls,
+		"message":        message,
+	}
+	event := ToolEvent{
+		ToolCallID: call.ID,
+		ToolName:   call.Name,
+		Status:     "failed",
+		Label:      userFriendlyToolLabel(call.Name),
+		Error:      message,
+	}
+	if event.Label == "" {
+		event.Label = "工具未执行"
+	}
+	return mustJSON(payload), event
 }
 
 func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCall) (string, bool, *BackgroundTaskRequest, bool, error) {

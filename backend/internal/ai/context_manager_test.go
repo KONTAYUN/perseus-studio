@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -114,6 +115,107 @@ func TestContextManagerTracksBatchReadPathsForCompaction(t *testing.T) {
 	if strings.Contains(string(raw), "old b") {
 		t.Fatalf("expected stale batch read content to be compacted")
 	}
+	if !strings.Contains(string(raw), "old a") {
+		t.Fatalf("expected unaffected batch read content to remain available")
+	}
+	if !strings.Contains(string(raw), "Some batch read items were compacted") {
+		t.Fatalf("expected partial-stale batch read notice in provider context")
+	}
+}
+
+func TestContextManagerPreservesAdjacentReadRangesForSameFile(t *testing.T) {
+	transcript := newAgentTranscript()
+	appendReadRange(t, transcript, "read_1", "draft.txt", 240, 278, 400, "range 240-278 must stay")
+	appendReadRange(t, transcript, "read_2", "draft.txt", 278, 355, 400, "range 278-355 must stay")
+
+	compacted, actions := newAgentContextManager().compactTranscript(transcript, providerRuntimeProfile{})
+	if len(actions) != 0 {
+		t.Fatalf("adjacent ranges should not be compacted, got %#v", actions)
+	}
+	raw, err := json.Marshal(compacted)
+	if err != nil {
+		t.Fatalf("marshal transcript: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{"range 240-278 must stay", "range 278-355 must stay"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q to remain in compacted transcript", want)
+		}
+	}
+}
+
+func TestContextManagerCompactsExactDuplicateReadRange(t *testing.T) {
+	transcript := newAgentTranscript()
+	appendReadRange(t, transcript, "read_1", "draft.txt", 240, 278, 400, "same range content")
+	appendReadRange(t, transcript, "read_2", "draft.txt", 240, 278, 400, "same range content")
+
+	compacted, actions := newAgentContextManager().compactTranscript(transcript, providerRuntimeProfile{})
+	if !containsActionPrefix(actions, "superseded_read:draft.txt:240-278") {
+		t.Fatalf("expected duplicate range compaction, got %#v", actions)
+	}
+	older := compacted.Entries[1].ToolResults[0].Content
+	newer := compacted.Entries[3].ToolResults[0].Content
+	if !strings.Contains(older, "compacted_context") {
+		t.Fatalf("expected older duplicate read to be compacted, got %s", older)
+	}
+	if !strings.Contains(newer, "same range content") {
+		t.Fatalf("expected newer duplicate read to remain, got %s", newer)
+	}
+}
+
+func TestContextManagerCompactsContainedReadAfterWiderRead(t *testing.T) {
+	transcript := newAgentTranscript()
+	appendReadRange(t, transcript, "read_1", "draft.txt", 240, 278, 400, "narrow range content")
+	appendReadRange(t, transcript, "read_2", "draft.txt", 240, 355, 400, "wider range content")
+
+	compacted, actions := newAgentContextManager().compactTranscript(transcript, providerRuntimeProfile{})
+	if !containsActionPrefix(actions, "superseded_read:draft.txt:240-278") {
+		t.Fatalf("expected contained range compaction, got %#v", actions)
+	}
+	if !strings.Contains(compacted.Entries[1].ToolResults[0].Content, "compacted_context") {
+		t.Fatalf("expected contained older read to be compacted")
+	}
+}
+
+func TestContextManagerDoesNotCompactContainedReadAfterTruncatedWiderRead(t *testing.T) {
+	transcript := newAgentTranscript()
+	appendReadRange(t, transcript, "read_1", "draft.txt", 240, 278, 400, "narrow range content")
+	appendReadRangeWithTruncation(t, transcript, "read_2", "draft.txt", 240, 355, 400, "truncated wider range prefix", true)
+
+	compacted, actions := newAgentContextManager().compactTranscript(transcript, providerRuntimeProfile{})
+	if len(actions) != 0 {
+		t.Fatalf("truncated wider range should not supersede precise earlier range, got %#v", actions)
+	}
+	if !strings.Contains(compacted.Entries[1].ToolResults[0].Content, "narrow range content") {
+		t.Fatalf("expected precise older range to remain when newer wider read is truncated")
+	}
+}
+
+func TestContextManagerProtectsBatchReadWithCurrentSpanFromBudgetPruning(t *testing.T) {
+	transcript := newAgentTranscript()
+	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
+		ID:            "batch_read_1",
+		Name:          "read_workspace_files",
+		ArgumentsJSON: `{"paths":["a.txt","b.txt"],"start_line":1,"end_line":20}`,
+	}}})
+	transcript.AppendToolResults([]TranscriptToolResult{{
+		ToolCallID: "batch_read_1",
+		ToolName:   "read_workspace_files",
+		Content: `{"items":[` +
+			`{"path":"a.txt","content":"batch a range","start_line":1,"end_line":20,"total_lines":20},` +
+			`{"path":"b.txt","content":"batch b range","start_line":1,"end_line":20,"total_lines":20}` +
+			`],"count":2}`,
+		Event: ToolEvent{ToolName: "read_workspace_files", Status: "success"},
+	}})
+	appendReadRange(t, transcript, "read_a_later", "a.txt", 1, 20, 20, "newer a range")
+
+	currentReads := currentSuccessfulReadToolCalls(transcript)
+	if !currentReads["batch_read_1"] {
+		t.Fatalf("batch read should remain current because b.txt has no later superseding read")
+	}
+	if currentReads["read_a_later"] != true {
+		t.Fatalf("latest single-file read should be current")
+	}
 }
 
 func TestContextManagerPrunesOldToolResultsForBudget(t *testing.T) {
@@ -151,6 +253,15 @@ func TestContextManagerPrunesOldToolResultsForBudget(t *testing.T) {
 	}
 }
 
+func TestCompactedToolResultDetectionUsesStatusField(t *testing.T) {
+	if !isCompactedToolResultContent(`{"status":"compacted_context","message":"done"}`) {
+		t.Fatal("expected compacted status to be detected")
+	}
+	if isCompactedToolResultContent(`{"content":"literal \"status\":\"compacted_context\" text"}`) {
+		t.Fatal("did not expect literal content text to be treated as compacted")
+	}
+}
+
 func containsContextAction(items []string, target string) bool {
 	for _, item := range items {
 		if item == target {
@@ -167,4 +278,40 @@ func containsActionPrefix(items []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func appendReadRange(t *testing.T, transcript *AgentTranscript, callID, path string, startLine, endLine, totalLines int, content string) {
+	t.Helper()
+	appendReadRangeWithTruncation(t, transcript, callID, path, startLine, endLine, totalLines, content, false)
+}
+
+func appendReadRangeWithTruncation(t *testing.T, transcript *AgentTranscript, callID, path string, startLine, endLine, totalLines int, content string, truncated bool) {
+	t.Helper()
+	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
+		ID:            callID,
+		Name:          "read_workspace_text",
+		ArgumentsJSON: fmt.Sprintf(`{"path":%q,"start_line":%d,"end_line":%d}`, path, startLine, endLine),
+	}}})
+	payload := map[string]any{
+		"path":        path,
+		"content":     content,
+		"truncated":   truncated,
+		"start_line":  startLine,
+		"end_line":    endLine,
+		"total_lines": totalLines,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal read payload: %v", err)
+	}
+	transcript.AppendToolResults([]TranscriptToolResult{{
+		ToolCallID: callID,
+		ToolName:   "read_workspace_text",
+		Content:    string(raw),
+		Event: ToolEvent{
+			ToolName: "read_workspace_text",
+			Status:   "success",
+			Path:     path,
+		},
+	}})
 }

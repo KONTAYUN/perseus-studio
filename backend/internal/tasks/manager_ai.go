@@ -97,7 +97,7 @@ func (m *Manager) executeAIAgentTask(ctx context.Context, task store.Task, worke
 			return
 		}
 		m.updateAndPublish(taskCtx, task.ID, store.TaskRunning, "repair", fmt.Sprintf("repairing missing outputs %d/3", repairRound+1))
-		reply, err = m.runAIAgentOnce(taskCtx, userID, task.ID, payload, m.repairPrompt(payload, validation.Missing, repairRound+1), repairForceTool(validation.Missing))
+		reply, err = m.runAIAgentOnce(taskCtx, userID, task.ID, payload, m.repairPrompt(payload, validation.Missing, repairRound+1), repairForceTool(validation))
 		if err != nil {
 			if taskCtx.Err() != nil {
 				m.logAndPublish(context.Background(), userID, task.ID, "warn", "task canceled by request")

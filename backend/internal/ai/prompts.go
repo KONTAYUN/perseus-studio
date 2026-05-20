@@ -45,7 +45,7 @@ Failure Rules:
 工具、模型、命令或搜索失败后，根据 tool_result 的真实错误修正参数或选择下一步。不要把失败包装成成功。若写文件/产物任务失败，说明缺失项。已经进入工具工作流后，不要只回复“我接下来会做什么”然后停住；如果你给了用户阶段更新，必须在同一轮里继续调用工具，或在工具工作确实完成后调用 attempt_completion。连续失败时可以用 attempt_completion 总结未完成项，但不能声称已完成失败的操作。
 
 Final Response Rules:
-attempt_completion 的 summary 要简短说明做了什么、影响了哪些文件/路径、哪些工具失败或未完成。若已经调用过工具，最终交付使用 attempt_completion，不要直接输出普通文本作为最终结果。若没有调用工具，只能说计划、建议或推测，不能说已经完成外部操作。
+attempt_completion 的 summary 要简短说明做了什么、影响了哪些文件/路径、哪些工具失败或未完成。只要本轮有成功的 workspace 变更，changed_paths 必须覆盖每一次已验证变更涉及的路径；创建文件夹后又写文件时，文件夹和文件都要列出；移动/重命名/移入回收站时列出相关新旧路径。若已经调用过工具，最终交付使用 attempt_completion，不要直接输出普通文本作为最终结果。若没有调用工具，只能说计划、建议或推测，不能说已经完成外部操作。
 `)
 
 func prependOpenAISystem(messages []map[string]any) []map[string]any {

@@ -19,6 +19,7 @@ type anthropicStreamBlock struct {
 func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn, error) {
 	var content strings.Builder
 	deltas := newStreamDeltaEmitter(emitText)
+	visibleText := newProviderVisibleTextFilter()
 	blocks := map[int]*anthropicStreamBlock{}
 	finishReason := ""
 	usage := ProviderUsage{}
@@ -54,9 +55,8 @@ func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn
 			block.ID, _ = blockRaw["id"].(string)
 			block.Name, _ = blockRaw["name"].(string)
 			if text, _ := blockRaw["text"].(string); text != "" {
-				block.Text.WriteString(text)
-				content.WriteString(text)
-				deltas.Add(text)
+				visible := appendProviderVisibleText(&content, deltas, visibleText, text)
+				block.Text.WriteString(visible)
 			}
 			blocks[index] = block
 		case "content_block_delta":
@@ -72,9 +72,8 @@ func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn
 			case "text_delta":
 				text, _ := delta["text"].(string)
 				if text != "" {
-					block.Text.WriteString(text)
-					content.WriteString(text)
-					deltas.Add(text)
+					visible := appendProviderVisibleText(&content, deltas, visibleText, text)
+					block.Text.WriteString(visible)
 				}
 			case "input_json_delta":
 				partial, _ := delta["partial_json"].(string)
@@ -99,6 +98,7 @@ func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn
 		}
 		return nil
 	})
+	closeProviderVisibleText(&content, deltas, visibleText)
 	deltas.Flush()
 	if err != nil {
 		turn := buildAnthropicStreamTurn(content.String(), finishReason, blocks)

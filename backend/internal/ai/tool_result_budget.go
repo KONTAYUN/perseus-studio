@@ -20,8 +20,16 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 		payload["model_view"] = "stdout/stderr may be truncated for stability; the UI keeps the full command event separately."
 	case "read_workspace_text":
 		trimMapString(payload, "content", profile.MaxReadFileContentRunes)
+		if fitPayloadStringFieldToBudget(payload, "content", profile.MaxToolResultRunes) {
+			raw, _ := json.Marshal(payload)
+			return string(raw)
+		}
 	case "read_workspace_files":
 		budgetBatchReadPayload(payload, profile)
+		if fitBatchReadPayloadToBudget(payload, profile.MaxToolResultRunes) {
+			raw, _ := json.Marshal(payload)
+			return string(raw)
+		}
 	case "perseus_search_web", "web_search":
 		budgetWebSearchPayload(payload, profile)
 	case "web_extract":
@@ -52,6 +60,96 @@ func budgetBatchReadPayload(payload map[string]any, profile providerRuntimeProfi
 		trimMapString(object, "content", profile.MaxReadFileContentRunes)
 	}
 	payload["items"] = rawItems
+}
+
+func fitPayloadStringFieldToBudget(payload map[string]any, key string, maxRunes int) bool {
+	if maxRunes <= 0 {
+		return false
+	}
+	for attempts := 0; attempts < 8; attempts++ {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return false
+		}
+		over := len([]rune(string(raw))) - maxRunes
+		if over <= 0 {
+			return true
+		}
+		value, ok := payload[key].(string)
+		if !ok {
+			return false
+		}
+		runes := []rune(value)
+		if len(runes) == 0 {
+			return false
+		}
+		nextLen := len(runes) - over - 200
+		if nextLen < 0 {
+			nextLen = 0
+		}
+		payload[key] = string(runes[:nextLen])
+		payload[key+"_truncated_for_model"] = true
+		payload[key+"_truncation_note"] = fmt.Sprintf("kept first %d chars for model stability", nextLen)
+	}
+	return false
+}
+
+func fitBatchReadPayloadToBudget(payload map[string]any, maxRunes int) bool {
+	if maxRunes <= 0 {
+		return false
+	}
+	rawItems, ok := payload["items"].([]any)
+	if !ok {
+		return false
+	}
+	for attempts := 0; attempts < 80; attempts++ {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return false
+		}
+		over := len([]rune(string(raw))) - maxRunes
+		if over <= 0 {
+			return true
+		}
+		item, content := largestBatchReadContent(rawItems)
+		if item == nil || content == "" {
+			if len(rawItems) <= 1 {
+				return false
+			}
+			rawItems = rawItems[:len(rawItems)-1]
+			payload["items"] = rawItems
+			payload["items_truncated_for_model"] = true
+			payload["model_view"] = "Some batch read items were omitted from model context for stability. Re-read specific paths if needed."
+			continue
+		}
+		runes := []rune(content)
+		nextLen := len(runes) - over - 200
+		if nextLen < 0 {
+			nextLen = 0
+		}
+		item["content"] = string(runes[:nextLen])
+		item["content_truncated_for_model"] = true
+		item["content_truncation_note"] = fmt.Sprintf("kept first %d chars for model stability", nextLen)
+		payload["model_view"] = "Batch read contents may be truncated for model stability; path, range, and failure metadata are preserved."
+	}
+	return false
+}
+
+func largestBatchReadContent(items []any) (map[string]any, string) {
+	var selected map[string]any
+	selectedContent := ""
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		content, _ := item["content"].(string)
+		if len([]rune(content)) > len([]rune(selectedContent)) {
+			selected = item
+			selectedContent = content
+		}
+	}
+	return selected, selectedContent
 }
 
 func compactToolResultJSON(toolName, raw string, maxRunes int) string {

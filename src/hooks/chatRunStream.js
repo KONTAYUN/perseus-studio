@@ -15,6 +15,7 @@ import {
   normalizeConversationMessages,
   updateLoadingState,
 } from './chatStateUtils.js';
+import { markRunSteerApplied, markRunSteerReceived, markRunSteerRejected } from './chatSteerItems.js';
 
 function toolEventFromPayload(payload = {}) {
   return {
@@ -43,6 +44,7 @@ export async function waitForAgentRunStream({
   setContextCompactionNotice,
   setContextUsage,
   setConversationMessages,
+  setRunSteerItems,
   setRunSteerNotice,
   thinkingId,
 }) {
@@ -182,23 +184,14 @@ export async function waitForAgentRunStream({
     } else if (item?.type === 'agent_recovery_completed' || item?.type === 'agent_recovery_failed') {
       setAgentRecoveryNotice(buildAgentRecoveryNotice(item.type, payload));
     } else if (item?.type === 'agent_steer_received') {
-      setRunSteerNotice?.({
-        id: payload.steer_id || `steer_received_${Date.now()}`,
-        status: 'received',
-        text: '已收到引导，会在下一次安全边界应用。',
-      });
+      setRunSteerItems?.((current) => markRunSteerReceived(current, payload, { conversationId: conversationID, runId }));
+      setRunSteerNotice?.(null);
     } else if (item?.type === 'agent_steer_applied') {
-      setRunSteerNotice?.({
-        id: payload.steer_id || `steer_applied_${Date.now()}`,
-        status: 'applied',
-        text: '引导已应用到当前任务。',
-      });
+      setRunSteerItems?.((current) => markRunSteerApplied(current, payload, { conversationId: conversationID, runId }));
+      setRunSteerNotice?.(null);
     } else if (item?.type === 'agent_steer_rejected') {
-      setRunSteerNotice?.({
-        id: payload.steer_id || `steer_rejected_${Date.now()}`,
-        status: 'error',
-        text: payload.message || '引导未应用，请稍后重试。',
-      });
+      setRunSteerItems?.((current) => markRunSteerRejected(current, payload, { conversationId: conversationID, runId }));
+      setRunSteerNotice?.(null);
     }
     if (item?.type === 'assistant_message_started') {
       setConversationMessages((current) => mergeAssistantMessageStarted(current, thinkingId, payload.assistant_message));

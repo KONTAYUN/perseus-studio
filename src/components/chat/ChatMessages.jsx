@@ -2,6 +2,9 @@ import React from 'react';
 import { Copy, GitBranch, MessageSquare, RefreshCw, Trash2 } from 'lucide-react';
 import { completedActionItems, formatDate, loadingBubbleText, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
 import { Button, IconButton } from '../ui';
+import { RUN_STEER_STATUS, runSteerStatusLabel } from '../../hooks/chatSteerItems';
+
+const STEER_FAILURE_BUTTON_CLASS = 'border-white/20 bg-white/10 text-blue-50 hover:bg-white/15 hover:text-white dark:border-white/15 dark:bg-white/10';
 
 export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBottomInset }) {
   return (
@@ -77,9 +80,11 @@ function MessageBubble({ message, ide, canRegenerate }) {
   const actionItems = completedActionItems(message);
   const showLoadingOnly = message.pending && !(message.content || '').trim();
   const shouldShowFooterGap = shouldReserveMessageFooter(message);
+  const isSteerMessage = message.kind === 'steer';
   return (
     <div className={`group/message flex min-w-0 max-w-full overflow-hidden ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div className={`flex min-w-0 max-w-[88%] overflow-hidden flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+        {isSteerMessage && <SteerStatusLabel message={message} />}
         <div
           className={`message-bubble motion-message min-w-0 max-w-full overflow-hidden px-4 py-3 text-[14px] leading-relaxed ${
             message.role === 'user'
@@ -100,6 +105,9 @@ function MessageBubble({ message, ide, canRegenerate }) {
             </div>
           )}
           {actionItems.length > 0 && <CompletedActionItems items={actionItems} />}
+          {isSteerMessage && message.status === RUN_STEER_STATUS.failed && (
+            <SteerFailureActions message={message} ide={ide} />
+          )}
           {!message.pending && message.error && message.resumableRunId && (
             <Button
               type="button"
@@ -159,6 +167,83 @@ function MessageBubble({ message, ide, canRegenerate }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function SteerStatusLabel({ message }) {
+  const label = runSteerStatusLabel(message.status);
+  if (!label) return null;
+  const isFailed = message.status === RUN_STEER_STATUS.failed;
+  const isPending = message.status === RUN_STEER_STATUS.submitting || message.status === RUN_STEER_STATUS.received;
+  const toneClass = isFailed
+    ? 'text-amber-600 dark:text-amber-300'
+    : isPending
+    ? 'text-gray-400 dark:text-gray-500'
+    : 'text-blue-500/80 dark:text-blue-200/80';
+  return (
+    <div
+      className={`mb-1 mr-2 flex max-w-full items-center gap-1.5 truncate text-[11px] font-semibold ${toneClass}`}
+    >
+      <span>{label}</span>
+      {isPending && (
+        <span className="inline-flex gap-0.5">
+          <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
+          <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
+          <span className="h-1 w-1 animate-bounce rounded-full bg-current" />
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SteerFailureActions({ message, ide }) {
+  return (
+    <div className="mt-3 flex flex-wrap justify-end gap-1.5 text-blue-50">
+      {message.error && (
+        <div className="basis-full text-right text-[11px] font-semibold text-blue-50/80">
+          {message.error}
+        </div>
+      )}
+      <Button
+        type="button"
+        variant="subtle"
+        size="xs"
+        className={STEER_FAILURE_BUTTON_CLASS}
+        onClick={(e) => {
+          e.stopPropagation();
+          ide.retryRunSteerItem?.(message.id);
+        }}
+        disabled={!ide.isChatSending}
+      >
+        <RefreshCw size={13} />
+        重试
+      </Button>
+      <Button
+        type="button"
+        variant="subtle"
+        size="xs"
+        className={STEER_FAILURE_BUTTON_CLASS}
+        onClick={(e) => {
+          e.stopPropagation();
+          ide.queueRunSteerItemAfterRun?.(message.id);
+        }}
+      >
+        任务结束后发送
+      </Button>
+      <Button
+        type="button"
+        variant="subtle"
+        size="xs"
+        className={STEER_FAILURE_BUTTON_CLASS}
+        onClick={(e) => {
+          e.stopPropagation();
+          ide.discardRunSteerItem?.(message.id);
+        }}
+      >
+        <Trash2 size={13} />
+        删除
+      </Button>
     </div>
   );
 }

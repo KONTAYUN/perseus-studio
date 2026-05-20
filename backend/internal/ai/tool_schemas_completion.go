@@ -14,7 +14,7 @@ func completionParams() map[string]any {
 		"required": []string{"summary"},
 		"properties": map[string]any{
 			"summary":       map[string]any{"type": "string", "description": "Concise user-facing summary of what was completed."},
-			"changed_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Workspace paths changed or created during this task."},
+			"changed_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Workspace paths changed, created, moved, or deleted during this task. Include at least one verified path for every successful workspace mutation."},
 			"failed_items":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Items that could not be completed, if any."},
 			"notes":         map[string]any{"type": "string", "description": "Optional short caveats or follow-up notes."},
 		},

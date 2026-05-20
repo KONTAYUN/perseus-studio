@@ -47,7 +47,8 @@ func openAITranscriptMessages(entries []TranscriptEntry) []map[string]any {
 
 func anthropicTranscriptMessages(entries []TranscriptEntry) []map[string]any {
 	items := make([]map[string]any, 0, len(entries))
-	for _, entry := range entries {
+	for index := 0; index < len(entries); index++ {
+		entry := entries[index]
 		switch entry.Kind {
 		case transcriptEntryAssistant:
 			content := make([]map[string]any, 0, 1+len(entry.ToolCalls))
@@ -69,17 +70,10 @@ func anthropicTranscriptMessages(entries []TranscriptEntry) []map[string]any {
 			}
 			items = append(items, map[string]any{"role": "assistant", "content": content})
 		case transcriptEntryTool:
-			content := make([]map[string]any, 0, len(entry.ToolResults))
-			for _, result := range entry.ToolResults {
-				item := map[string]any{
-					"type":        "tool_result",
-					"tool_use_id": result.ToolCallID,
-					"content":     result.Content,
-				}
-				if result.IsError {
-					item["is_error"] = true
-				}
-				content = append(content, item)
+			content := anthropicToolResultContent(entry.ToolResults)
+			for index+1 < len(entries) && entries[index+1].Kind == transcriptEntryTool {
+				index++
+				content = append(content, anthropicToolResultContent(entries[index].ToolResults)...)
 			}
 			items = append(items, map[string]any{"role": "user", "content": content})
 		case transcriptEntryUser:
@@ -87,4 +81,20 @@ func anthropicTranscriptMessages(entries []TranscriptEntry) []map[string]any {
 		}
 	}
 	return items
+}
+
+func anthropicToolResultContent(results []TranscriptToolResult) []map[string]any {
+	content := make([]map[string]any, 0, len(results))
+	for _, result := range results {
+		item := map[string]any{
+			"type":        "tool_result",
+			"tool_use_id": result.ToolCallID,
+			"content":     result.Content,
+		}
+		if result.IsError {
+			item["is_error"] = true
+		}
+		content = append(content, item)
+	}
+	return content
 }

@@ -69,6 +69,32 @@ func TestParseOpenAIStreamReturnsPartialCompleteToolCallOnTransportError(t *test
 	}
 }
 
+func TestParseOpenAIStreamRemovesVisibleReasoningTagsAcrossChunks(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"<thin"}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"content":"king>\ninternal notes\n</thinking>\n visible"}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"content":" answer"}}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseOpenAIStream(strings.NewReader(stream), func(text string) {
+		deltas = append(deltas, text)
+	})
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if turn.Content != "visible answer" {
+		t.Fatalf("unexpected visible content: %q", turn.Content)
+	}
+	if strings.Contains(strings.Join(deltas, ""), "internal notes") {
+		t.Fatalf("reasoning leaked into deltas: %#v", deltas)
+	}
+}
+
 func TestParseAnthropicStreamAccumulatesTextAndToolUse(t *testing.T) {
 	stream := strings.Join([]string{
 		`event: content_block_start`,
@@ -115,6 +141,57 @@ func TestParseAnthropicStreamAccumulatesTextAndToolUse(t *testing.T) {
 	}
 	if len(turn.AnthropicRaw) != 2 {
 		t.Fatalf("expected raw text and tool blocks, got %#v", turn.AnthropicRaw)
+	}
+}
+
+func TestParseAnthropicStreamRemovesLiteralReasoningTextDeltas(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"<think>"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hidden"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"</think>\n\n公开结果"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseAnthropicStream(strings.NewReader(stream), func(text string) {
+		deltas = append(deltas, text)
+	})
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if turn.Content != "公开结果" {
+		t.Fatalf("unexpected visible content: %q", turn.Content)
+	}
+	if strings.Contains(strings.Join(deltas, ""), "hidden") {
+		t.Fatalf("reasoning leaked into deltas: %#v", deltas)
+	}
+	if len(turn.AnthropicRaw) != 1 || turn.AnthropicRaw[0]["text"] != "公开结果" {
+		t.Fatalf("unexpected anthropic raw blocks: %#v", turn.AnthropicRaw)
+	}
+}
+
+func TestSanitizeAnthropicVisibleTextBlocksHandlesReasoningAcrossBlocks(t *testing.T) {
+	blocks := []map[string]any{
+		{"type": "text", "text": "before <thinking>hidden"},
+		{"type": "text", "text": " still hidden</thinking> after"},
+		{"type": "tool_use", "id": "toolu_1", "name": "read_workspace_text", "input": map[string]any{"path": "a.txt"}},
+	}
+	got := sanitizeAnthropicVisibleTextBlocks(blocks)
+	if len(got) != 3 {
+		t.Fatalf("unexpected block count: %#v", got)
+	}
+	if got[0]["text"] != "before " || got[1]["text"] != " after" {
+		t.Fatalf("unexpected sanitized text blocks: %#v", got)
+	}
+	if got[2]["type"] != "tool_use" {
+		t.Fatalf("tool block was not preserved: %#v", got)
 	}
 }
 

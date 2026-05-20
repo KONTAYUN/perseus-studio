@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log"
 	"strings"
 
 	"webide-backend/internal/ai"
@@ -30,7 +31,7 @@ func (s *Server) failConversationRun(ctx context.Context, userID, conversationID
 		eventCtx = context.Background()
 	}
 	if diagnosticID != "" {
-		_, _ = s.appendRunEventStrict(eventCtx, store.AgentEventInput{
+		if _, err := s.appendRunEventStrict(eventCtx, store.AgentEventInput{
 			RunID:          runID,
 			UserID:         userID,
 			ConversationID: conversationID,
@@ -41,9 +42,11 @@ func (s *Server) failConversationRun(ctx context.Context, userID, conversationID
 				"diagnostic_log_id": diagnosticID,
 				"message":           "diagnostic log created",
 			},
-		})
+		}); err != nil {
+			log.Printf("[agent_run] append diagnostic event failed run=%s diagnostic=%s error=%v", runID, diagnosticID, err)
+		}
 	}
-	_, _ = s.appendRunEventStrict(eventCtx, store.AgentEventInput{
+	if _, err := s.appendRunEventStrict(eventCtx, store.AgentEventInput{
 		RunID:          runID,
 		UserID:         userID,
 		ConversationID: conversationID,
@@ -54,12 +57,16 @@ func (s *Server) failConversationRun(ctx context.Context, userID, conversationID
 			"error":             message,
 			"diagnostic_log_id": diagnosticID,
 		},
-	})
-	_, _ = s.publishRunStrict(context.Background(), userID, runID, status, stage, store.UpdateAgentRunInput{
+	}); err != nil {
+		log.Printf("[agent_run] append failure event failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
+	}
+	if _, err := s.publishRunStrict(context.Background(), userID, runID, status, stage, store.UpdateAgentRunInput{
 		ErrorMessage:    &message,
 		DiagnosticLogID: diagnosticID,
 		SetCompletedAt:  true,
-	})
+	}); err != nil {
+		log.Printf("[agent_run] publish failure state failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
+	}
 }
 
 func (s *Server) completeConversationRunWithBudgetExhaustion(ctx context.Context, userID, conversationID, userMessageID, runID string, assistantMessage store.Message, reply ai.Reply) error {

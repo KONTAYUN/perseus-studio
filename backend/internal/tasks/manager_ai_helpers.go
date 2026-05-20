@@ -30,9 +30,16 @@ func (m *Manager) failAIAgentTask(ctx context.Context, userID, taskID, conversat
 }
 
 type validationResult struct {
-	OK      bool
-	Missing []string
+	OK           bool
+	Missing      []string
+	MissingKinds []string
 }
+
+const (
+	missingOutputFile    = "file"
+	missingOutputMessage = "message"
+	missingOutputCommand = "command_result"
+)
 
 func (m *Manager) logPlan(ctx context.Context, userID, taskID string, payload AIAgentPayload) {
 	goal := strings.TrimSpace(payload.Goal)
@@ -163,7 +170,7 @@ func (m *Manager) repairPrompt(payload AIAgentPayload, missing []string, round i
 
 func (m *Manager) validateOutputs(ctx context.Context, payload AIAgentPayload, reply ai.Reply, files *workspace.Service) validationResult {
 	_ = ctx
-	var missing []string
+	result := validationResult{}
 	outputs := payload.ExpectedOutputs
 	if len(outputs) == 0 {
 		outputs = []ai.ExpectedOutput{{Type: "message", Description: "任务完成说明"}}
@@ -175,29 +182,38 @@ func (m *Manager) validateOutputs(ctx context.Context, payload AIAgentPayload, r
 			if path == "" {
 				path = firstChangedFile(reply.ToolEvents)
 				if path == "" {
-					missing = append(missing, "file output has no path and no created/modified file was recorded")
+					result.addMissing(missingOutputFile, "file output has no path and no created/modified file was recorded")
 					continue
 				}
 			}
 			file, err := files.ReadFile(path)
 			if err != nil {
-				missing = append(missing, "missing file: "+path)
+				result.addMissing(missingOutputFile, "missing file: "+path)
 				continue
 			}
 			if file.Size <= 0 || strings.TrimSpace(file.Content) == "" {
-				missing = append(missing, "empty file: "+path)
+				result.addMissing(missingOutputFile, "empty file: "+path)
 			}
 		case "message":
 			if strings.TrimSpace(reply.Content) == "" {
-				missing = append(missing, "missing assistant message: "+output.Description)
+				result.addMissing(missingOutputMessage, "missing assistant message: "+output.Description)
 			}
 		case "command_result":
 			if !hasCommandResult(reply.ToolEvents) {
-				missing = append(missing, "missing command result: "+output.Description)
+				result.addMissing(missingOutputCommand, "missing command result: "+output.Description)
 			}
 		}
 	}
-	return validationResult{OK: len(missing) == 0, Missing: missing}
+	result.OK = len(result.Missing) == 0
+	return result
+}
+
+func (r *validationResult) addMissing(kind, message string) {
+	if r == nil {
+		return
+	}
+	r.Missing = append(r.Missing, message)
+	r.MissingKinds = append(r.MissingKinds, kind)
 }
 
 func firstChangedFile(events []ai.ToolEvent) string {
@@ -226,9 +242,9 @@ func hasCommandResult(events []ai.ToolEvent) bool {
 	return false
 }
 
-func repairForceTool(missing []string) string {
-	for _, item := range missing {
-		if strings.Contains(item, "file") || strings.Contains(item, "文件") {
+func repairForceTool(validation validationResult) string {
+	for _, kind := range validation.MissingKinds {
+		if kind == missingOutputFile {
 			return "save_workspace_file"
 		}
 	}

@@ -684,6 +684,63 @@ func TestBudgetToolResultForModelTruncatesSearchResults(t *testing.T) {
 	}
 }
 
+func TestBudgetToolResultForModelPreservesReadWorkspaceTextShape(t *testing.T) {
+	raw := mustJSON(map[string]any{
+		"tool":    "read_workspace_text",
+		"path":    "draft.txt",
+		"content": strings.Repeat("x", 5000),
+	})
+	budgeted := budgetToolResultForModel("read_workspace_text", raw, providerRuntimeProfile{
+		MaxToolResultRunes:      900,
+		MaxReadFileContentRunes: 5000,
+	})
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
+		t.Fatalf("budgeted result is not json: %v", err)
+	}
+	if payload["path"] != "draft.txt" || payload["content"] == nil || payload["raw_prefix"] != nil {
+		t.Fatalf("expected structured read payload, got %#v", payload)
+	}
+	if payload["content_truncated_for_model"] != true {
+		t.Fatalf("expected content truncation flag, got %#v", payload)
+	}
+	if got := len([]rune(budgeted)); got > 900 {
+		t.Fatalf("expected payload within budget, got %d chars", got)
+	}
+}
+
+func TestBudgetToolResultForModelPreservesBatchReadItemsShape(t *testing.T) {
+	raw := mustJSON(map[string]any{
+		"tool": "read_workspace_files",
+		"items": []any{
+			map[string]any{"path": "a.txt", "content": strings.Repeat("a", 2500), "start_line": 1, "end_line": 50},
+			map[string]any{"path": "b.txt", "content": strings.Repeat("b", 2500), "start_line": 1, "end_line": 50},
+		},
+		"failed": []any{map[string]any{"path": "missing.txt", "error": "not found"}},
+	})
+	budgeted := budgetToolResultForModel("read_workspace_files", raw, providerRuntimeProfile{
+		MaxToolResultRunes:      1200,
+		MaxReadFileContentRunes: 2500,
+	})
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
+		t.Fatalf("budgeted result is not json: %v", err)
+	}
+	items, ok := payload["items"].([]any)
+	if !ok || len(items) == 0 || payload["raw_prefix"] != nil {
+		t.Fatalf("expected structured batch read payload, got %#v", payload)
+	}
+	first := items[0].(map[string]any)
+	if first["path"] == "" || first["content"] == nil {
+		t.Fatalf("expected item path/content to remain, got %#v", first)
+	}
+	if got := len([]rune(budgeted)); got > 1200 {
+		t.Fatalf("expected payload within budget, got %d chars", got)
+	}
+}
+
 func TestSanitizeConversationMessagesTruncatesOlderHistory(t *testing.T) {
 	messages := []store.Message{
 		{Role: "user", Content: strings.Repeat("old", 100)},
@@ -1015,6 +1072,51 @@ func TestRecoverableFinalResponseErrorFailsInsteadOfFakeSuccess(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "可继续本轮") {
 		t.Fatalf("expected continue hint in error, got %v", err)
+	}
+}
+
+func TestCompletionPathsMustCoverEachWorkspaceMutation(t *testing.T) {
+	runtime := &agentRuntime{
+		performedMutation: true,
+		events: []ToolEvent{
+			{
+				ToolName:     "save_workspace_file",
+				Status:       "success",
+				Path:         "episodes/31.txt",
+				ChangedPaths: []string{"episodes/31.txt"},
+			},
+			{
+				ToolName:     "save_workspace_file",
+				Status:       "success",
+				Path:         "episodes/32.txt",
+				ChangedPaths: []string{"episodes/32.txt"},
+			},
+		},
+	}
+
+	if missing := runtime.completionPathsMissingMutations([]string{"episodes/31.txt"}); len(missing) != 1 || missing[0] != "episodes/32.txt" {
+		t.Fatalf("expected only the second mutation to be missing, got %#v", missing)
+	}
+	if missing := runtime.completionPathsMissingMutations([]string{"episodes/31.txt", "episodes/32.txt"}); len(missing) != 0 {
+		t.Fatalf("expected all mutations to be covered, got %#v", missing)
+	}
+}
+
+func TestCompletionPathCoverageAllowsRenameNewPath(t *testing.T) {
+	runtime := &agentRuntime{
+		performedMutation: true,
+		events: []ToolEvent{{
+			ToolName:     "manage_workspace_path",
+			Status:       "success",
+			Path:         "draft-old.txt",
+			OldPath:      "draft-old.txt",
+			NewPath:      "draft-new.txt",
+			ChangedPaths: []string{"draft-old.txt", "draft-new.txt"},
+		}},
+	}
+
+	if missing := runtime.completionPathsMissingMutations([]string{"draft-new.txt"}); len(missing) != 0 {
+		t.Fatalf("expected rename to be covered by new path, got %#v", missing)
 	}
 }
 

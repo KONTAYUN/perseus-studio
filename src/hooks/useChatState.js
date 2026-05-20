@@ -7,6 +7,7 @@ import { createChatSteerActions, textOnlyPayload, useActiveAgentRunRef, usePendi
 import { waitForAgentRunStream } from './chatRunStream.js';
 import useChatLifecycleEffects from './useChatLifecycleEffects';
 import useChatReferenceActions from './useChatReferenceActions';
+import { mergeRunSteerItemsWithMessages } from './chatSteerItems';
 
 export default function useChatState({
   buildCurrentFileContext,
@@ -45,6 +46,7 @@ export default function useChatState({
   const [contextCompactionNotice, setContextCompactionNotice] = useState(null);
   const [agentRecoveryNotice, setAgentRecoveryNotice] = useState(null);
   const [runSteerNotice, setRunSteerNotice] = useState(null);
+  const [runSteerItems, setRunSteerItems] = useState([]);
   const [pendingRunMessage, setPendingRunMessage] = useState(null);
   const [activeAgentRun, setActiveAgentRun] = useState(null);
 
@@ -152,7 +154,10 @@ export default function useChatState({
   const {
     createPendingRunMessage,
     discardPendingRunMessage,
+    discardRunSteerItem,
     hasUnsupportedRuntimeGuidance,
+    queueRunSteerItemAfterRun,
+    retryRunSteerItem,
     sendPendingRunMessageAsSteer,
     steerChatInput,
     warnUnsupportedRuntimeGuidance,
@@ -165,9 +170,11 @@ export default function useChatState({
     currentConversationId,
     isChatSending,
     pendingRunMessage,
+    runSteerItems,
     sendChatPayloadRef,
     setChatInput,
     setPendingRunMessage,
+    setRunSteerItems,
     setRunSteerNotice,
     thinkingMode,
   });
@@ -229,6 +236,7 @@ export default function useChatState({
         setContextCompactionNotice,
         setContextUsage,
         setConversationMessages,
+        setRunSteerItems,
         setRunSteerNotice,
         thinkingId,
       });
@@ -253,7 +261,7 @@ export default function useChatState({
     chatSkillReferences,
     continueAgentRun,
     branchConversation,
-    conversationMessages,
+    conversationMessages: mergeRunSteerItemsWithMessages(conversationMessages, runSteerItems),
     conversations,
     contextCompactionNotice,
     contextUsage,
@@ -277,6 +285,9 @@ export default function useChatState({
     steerChatInput,
     sendPendingRunMessageAsSteer,
     discardPendingRunMessage,
+    retryRunSteerItem,
+    queueRunSteerItemAfterRun,
+    discardRunSteerItem,
     sendFollowupAnswer,
     compactCurrentConversation,
     stopChatGeneration,
@@ -286,5 +297,6 @@ export default function useChatState({
     setThinkingMode,
     thinkingMode,
     runSteerNotice,
+    runSteerItems,
   };
 }

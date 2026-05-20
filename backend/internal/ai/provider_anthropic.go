@@ -216,13 +216,15 @@ func (p anthropicProviderV2) parseNonStream(ctx context.Context, req providerTur
 	}
 	toolUses := data.toolUses()
 	logAnthropicResponseSummary(req.ConversationID, data, toolUses)
-	if strings.TrimSpace(data.text()) == "" && len(toolUses) == 0 {
+	content := providerVisibleText(data.text())
+	if strings.TrimSpace(content) == "" && len(toolUses) == 0 {
 		err := fmt.Errorf("empty model response")
 		p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_empty_response", "warn", duration.Milliseconds(), err, req.Snapshot.Summary)
 		return agentModelTurn{FinishReason: "empty_response"}, nil
 	}
+	data.Content = sanitizeAnthropicVisibleTextBlocks(data.Content)
 	turn := agentModelTurn{
-		Content:      data.text(),
+		Content:      content,
 		FinishReason: data.StopReason,
 		AnthropicRaw: data.Content,
 		ToolCalls:    make([]agentToolCall, 0, len(toolUses)),

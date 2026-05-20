@@ -86,13 +86,13 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
       {ide.pendingRunMessage && (
         <PendingRunMessagePanel
           message={ide.pendingRunMessage}
-          notice={ide.runSteerNotice}
+          notice={ide.runSteerNotice?.status === 'warn' || ide.runSteerNotice?.status === 'error' ? ide.runSteerNotice : null}
           disabled={!ide.isChatSending}
           onSteer={ide.sendPendingRunMessageAsSteer}
           onDelete={ide.discardPendingRunMessage}
         />
       )}
-      {!ide.pendingRunMessage && ide.runSteerNotice?.text && (
+      {!ide.pendingRunMessage && (ide.runSteerNotice?.status === 'warn' || ide.runSteerNotice?.status === 'error') && ide.runSteerNotice?.text && (
         <div className="run-steer-notice-panel motion-popover pointer-events-auto mb-3">
           {ide.runSteerNotice.text}
         </div>

@@ -1,6 +1,13 @@
 import { useEffect } from 'react';
 import { apiPost } from '../api/client';
 import { formatChatError } from './chatErrorUtils';
+import {
+  appendRunSteerItem,
+  buildRunSteerItem,
+  markRunSteerFailed,
+  markRunSteerReceived,
+  removeRunSteerItem,
+} from './chatSteerItems';
 
 export function textOnlyPayload(content, { conversationId = '', thinkingMode = 'standard' } = {}) {
   return {
@@ -23,9 +30,11 @@ export function createChatSteerActions({
   currentConversationId,
   isChatSending,
   pendingRunMessage,
+  runSteerItems,
   sendChatPayloadRef,
   setChatInput,
   setPendingRunMessage,
+  setRunSteerItems,
   setRunSteerNotice,
   thinkingMode,
 }) {
@@ -84,6 +93,28 @@ export function createChatSteerActions({
     setRunSteerNotice(null);
   }
 
+  async function retryRunSteerItem(itemId) {
+    const item = findRunSteerItem(runSteerItems, itemId);
+    if (!item?.content) return false;
+    setRunSteerItems((current) => removeRunSteerItem(current, itemId));
+    return sendRunSteer(item.content, {
+      conversationId: item.conversation_id,
+      thinkingMode,
+    });
+  }
+
+  function queueRunSteerItemAfterRun(itemId) {
+    const item = findRunSteerItem(runSteerItems, itemId);
+    if (!item?.content) return false;
+    setRunSteerItems((current) => removeRunSteerItem(current, itemId));
+    createPendingRunMessage(item.content);
+    return true;
+  }
+
+  function discardRunSteerItem(itemId) {
+    setRunSteerItems((current) => removeRunSteerItem(current, itemId));
+  }
+
   async function sendRunSteer(content, options = {}) {
     const trimmedContent = String(content || '').trim();
     if (!trimmedContent) return false;
@@ -97,27 +128,40 @@ export function createChatSteerActions({
       return true;
     }
     const clientSteerId = `client_steer_${Date.now()}`;
+    const steerItem = buildRunSteerItem({
+      clientSteerId,
+      content: trimmedContent,
+      conversationId: activeRun.conversationId || options.conversationId || currentConversationId,
+      runId: activeRun.runId,
+      pendingId: options.pendingId || '',
+    });
+    setRunSteerItems((current) => appendRunSteerItem(current, steerItem));
+    setRunSteerNotice(null);
     try {
-      await apiPost(`/api/agent-runs/${encodeURIComponent(activeRun.runId)}/steer`, {
+      const result = await apiPost(`/api/agent-runs/${encodeURIComponent(activeRun.runId)}/steer`, {
         content: trimmedContent,
         expected_run_id: activeRun.runId,
         client_steer_id: clientSteerId,
       });
-      setRunSteerNotice({
-        id: clientSteerId,
-        status: 'received',
-        text: '已收到引导，会在下一次安全边界应用。',
-      });
+      setRunSteerItems((current) => markRunSteerReceived(current, result?.event?.payload || {}, {
+        clientSteerId,
+        content: trimmedContent,
+        conversationId: activeRun.conversationId || options.conversationId || currentConversationId,
+        runId: activeRun.runId,
+      }));
       return true;
     } catch (error) {
       console.error('sendRunSteer failed', error);
+      setRunSteerItems((current) => markRunSteerFailed(current, clientSteerId, formatChatError(error)));
       setRunSteerNotice({
         id: clientSteerId,
         status: 'error',
         text: `引导暂未发送：${formatChatError(error)}`,
       });
       if (!options.pendingId) {
-        createPendingRunMessage(trimmedContent);
+        setRunSteerNotice(null);
+      } else {
+        setRunSteerItems((current) => removeRunSteerItem(current, clientSteerId));
       }
       return false;
     }
@@ -128,11 +172,18 @@ export function createChatSteerActions({
   return {
     createPendingRunMessage,
     discardPendingRunMessage,
+    discardRunSteerItem,
     hasUnsupportedRuntimeGuidance,
+    queueRunSteerItemAfterRun,
+    retryRunSteerItem,
     sendPendingRunMessageAsSteer,
     steerChatInput,
     warnUnsupportedRuntimeGuidance,
   };
+}
+
+function findRunSteerItem(items, itemId) {
+  return (items || []).find((item) => item.id === itemId || item.clientSteerId === itemId || item.steerId === itemId);
 }
 
 export function usePendingRunMessageAutoSend({

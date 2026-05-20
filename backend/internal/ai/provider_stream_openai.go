@@ -104,6 +104,7 @@ func (e *streamDeltaEmitter) Flush() {
 func parseOpenAIStream(body io.Reader, emitText func(string)) (agentModelTurn, error) {
 	var content strings.Builder
 	deltas := newStreamDeltaEmitter(emitText)
+	visibleText := newProviderVisibleTextFilter()
 	toolBuilders := map[int]*openAIStreamToolBuilder{}
 	finishReason := ""
 	err := readSSEEvents(body, func(event sseEvent) error {
@@ -120,8 +121,7 @@ func parseOpenAIStream(body io.Reader, emitText func(string)) (agentModelTurn, e
 				finishReason = choice.FinishReason
 			}
 			if text := normalizeOpenAIContent(choice.Delta.Content); text != "" {
-				content.WriteString(text)
-				deltas.Add(text)
+				appendProviderVisibleText(&content, deltas, visibleText, text)
 			}
 			for _, item := range choice.Delta.ToolCalls {
 				builder := toolBuilders[item.Index]
@@ -145,6 +145,7 @@ func parseOpenAIStream(body io.Reader, emitText func(string)) (agentModelTurn, e
 		}
 		return nil
 	})
+	closeProviderVisibleText(&content, deltas, visibleText)
 	deltas.Flush()
 	if err != nil {
 		turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)

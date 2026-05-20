@@ -99,3 +99,32 @@ func (r anthropicResponse) toolUses() []anthropicToolUse {
 	}
 	return items
 }
+
+func sanitizeAnthropicVisibleTextBlocks(content []map[string]any) []map[string]any {
+	if len(content) == 0 {
+		return content
+	}
+	filter := newProviderVisibleTextFilter()
+	next := make([]map[string]any, 0, len(content))
+	for _, block := range content {
+		if block["type"] != "text" {
+			next = append(next, block)
+			continue
+		}
+		text, _ := block["text"].(string)
+		visible := filter.Feed(text)
+		if strings.TrimSpace(visible) == "" {
+			continue
+		}
+		clean := cloneMapAny(block)
+		if clean == nil {
+			clean = map[string]any{"type": "text"}
+		}
+		clean["text"] = visible
+		next = append(next, clean)
+	}
+	if tail := filter.Close(); strings.TrimSpace(tail) != "" {
+		next = append(next, map[string]any{"type": "text", "text": tail})
+	}
+	return next
+}

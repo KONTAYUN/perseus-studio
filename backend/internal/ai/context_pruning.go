@@ -2,7 +2,6 @@ package ai
 
 import (
 	"encoding/json"
-	"sort"
 	"strings"
 )
 
@@ -19,7 +18,7 @@ func (m *agentContextManager) compactTranscript(transcript *AgentTranscript, pro
 }
 
 func compactSupersededReadResults(transcript *AgentTranscript) []string {
-	latestByPath := map[string]bool{}
+	var newerSpans []readResultSpan
 	var actions []string
 	for entryIndex := len(transcript.Entries) - 1; entryIndex >= 0; entryIndex-- {
 		entry := &transcript.Entries[entryIndex]
@@ -31,21 +30,21 @@ func compactSupersededReadResults(transcript *AgentTranscript) []string {
 			if !isReadWorkspaceTool(result.ToolName) || result.IsError {
 				continue
 			}
-			paths := readResultPaths(result)
-			if len(paths) == 0 {
+			spans := readResultSpans(result)
+			if len(spans) == 0 {
 				continue
 			}
 			allSuperseded := true
-			for _, path := range paths {
-				if !latestByPath[path] {
+			for _, span := range spans {
+				if !readSpanSupersededByAny(span, newerSpans) {
 					allSuperseded = false
-					latestByPath[path] = true
 				}
 			}
 			if allSuperseded {
-				result.Content = compactedToolResultNotice(result.ToolName, result.Event, "A newer read of this file exists later in the transcript. Re-read this path only if exact text is needed again.")
-				actions = append(actions, "superseded_read:"+strings.Join(paths, ","))
+				result.Content = compactedToolResultNotice(result.ToolName, result.Event, "A newer read of this file range exists later in the transcript. Re-read this path/range only if exact text is needed again.")
+				actions = append(actions, "superseded_read:"+strings.Join(readSpanLabels(spans), ","))
 			}
+			newerSpans = append(newerSpans, spans...)
 		}
 	}
 	return dedupeStrings(actions)
@@ -70,6 +69,15 @@ func compactReadsStaleAfterMutation(transcript *AgentTranscript) []string {
 			if !isReadWorkspaceTool(result.ToolName) || result.IsError {
 				continue
 			}
+			if result.ToolName == "read_workspace_files" {
+				stale, stalePaths := compactBatchReadItemsStaleAfterMutation(result, mutatedLater)
+				if stale {
+					for _, path := range stalePaths {
+						actions = append(actions, "stale_read_after_mutation:"+path)
+					}
+				}
+				continue
+			}
 			paths := readResultPaths(result)
 			if len(paths) == 0 {
 				continue
@@ -87,20 +95,6 @@ func compactReadsStaleAfterMutation(transcript *AgentTranscript) []string {
 		}
 	}
 	return dedupeStrings(actions)
-}
-
-func workspaceEventPaths(event ToolEvent) []string {
-	seen := map[string]bool{}
-	var paths []string
-	for _, path := range append([]string{event.Path, event.NewPath}, event.ChangedPaths...) {
-		normalized := normalizeWorkspaceEventPath(path)
-		if normalized == "" || seen[normalized] {
-			continue
-		}
-		seen[normalized] = true
-		paths = append(paths, normalized)
-	}
-	return paths
 }
 
 func compactedToolResultNotice(toolName string, event ToolEvent, message string) string {
@@ -137,7 +131,7 @@ func compactToolResultsForBudget(transcript *AgentTranscript, profile providerRu
 		target = budget
 	}
 
-	keepLatestRead := latestSuccessfulReadPaths(transcript)
+	keepCurrentRead := currentSuccessfulReadToolCalls(transcript)
 	recentEntryFloor := len(transcript.Entries) - 6
 	if recentEntryFloor < 0 {
 		recentEntryFloor = 0
@@ -150,11 +144,11 @@ func compactToolResultsForBudget(transcript *AgentTranscript, profile providerRu
 		}
 		for resultIndex := range entry.ToolResults {
 			result := &entry.ToolResults[resultIndex]
-			if result.IsError || strings.Contains(result.Content, `"status":"compacted_context"`) {
+			if result.IsError || isCompactedToolResultContent(result.Content) {
 				continue
 			}
 			path := normalizeWorkspaceEventPath(result.Event.Path)
-			if isReadWorkspaceTool(result.ToolName) && isLatestReadResult(result, keepLatestRead) {
+			if isReadWorkspaceTool(result.ToolName) && keepCurrentRead[result.ToolCallID] {
 				continue
 			}
 			before := estimateTextTokens(result.Content)
@@ -191,82 +185,45 @@ func estimateTranscriptTokens(transcript *AgentTranscript) int {
 	return total
 }
 
-func latestSuccessfulReadPaths(transcript *AgentTranscript) map[string]string {
-	latest := map[string]string{}
+func currentSuccessfulReadToolCalls(transcript *AgentTranscript) map[string]bool {
+	current := map[string]bool{}
 	if transcript == nil {
-		return latest
+		return current
 	}
-	for _, entry := range transcript.Entries {
+	var newerSpans []readResultSpan
+	for entryIndex := len(transcript.Entries) - 1; entryIndex >= 0; entryIndex-- {
+		entry := transcript.Entries[entryIndex]
 		if entry.Kind != transcriptEntryTool {
 			continue
 		}
-		for _, result := range entry.ToolResults {
+		for resultIndex := len(entry.ToolResults) - 1; resultIndex >= 0; resultIndex-- {
+			result := entry.ToolResults[resultIndex]
 			if !isReadWorkspaceTool(result.ToolName) || result.IsError {
 				continue
 			}
-			for _, path := range readResultPaths(&result) {
-				latest[path] = result.ToolCallID
+			spans := readResultSpans(&result)
+			if len(spans) == 0 {
+				continue
 			}
+			for _, span := range spans {
+				if !readSpanSupersededByAny(span, newerSpans) {
+					current[result.ToolCallID] = true
+					break
+				}
+			}
+			newerSpans = append(newerSpans, spans...)
 		}
 	}
-	return latest
+	return current
 }
 
 func isReadWorkspaceTool(toolName string) bool {
 	return toolName == "read_workspace_text" || toolName == "read_workspace_files"
 }
 
-func isLatestReadResult(result *TranscriptToolResult, latest map[string]string) bool {
-	if result == nil {
-		return false
-	}
-	paths := readResultPaths(result)
-	if len(paths) == 0 {
-		return false
-	}
-	for _, path := range paths {
-		if latest[path] != result.ToolCallID {
-			return false
-		}
-	}
-	return true
-}
-
-func readResultPaths(result *TranscriptToolResult) []string {
-	if result == nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	var paths []string
-	add := func(path string) {
-		normalized := normalizeWorkspaceEventPath(path)
-		if normalized == "" || seen[normalized] {
-			return
-		}
-		seen[normalized] = true
-		paths = append(paths, normalized)
-	}
-	if result.ToolName != "read_workspace_files" {
-		for _, path := range workspaceEventPaths(result.Event) {
-			add(path)
-		}
-	}
+func isCompactedToolResultContent(content string) bool {
 	var payload struct {
-		Path  string   `json:"path"`
-		Paths []string `json:"paths"`
-		Items []struct {
-			Path string `json:"path"`
-		} `json:"items"`
+		Status string `json:"status"`
 	}
-	if err := json.Unmarshal([]byte(result.Content), &payload); err == nil {
-		add(payload.Path)
-		for _, path := range payload.Paths {
-			add(path)
-		}
-		for _, item := range payload.Items {
-			add(item.Path)
-		}
-	}
-	sort.Strings(paths)
-	return paths
+	return json.Unmarshal([]byte(content), &payload) == nil && payload.Status == "compacted_context"
 }

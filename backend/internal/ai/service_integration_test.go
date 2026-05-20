@@ -347,6 +347,81 @@ func TestAgentBudgetExhaustionCanTriggerOnToolCallLimit(t *testing.T) {
 	}
 }
 
+func TestProcessToolCallsAddsSyntheticResultsForBudgetSkippedCalls(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
+		ID:              "run_budget_pairing_test",
+		UserID:          testUserID,
+		ConversationID:  "conv_budget_pairing_test",
+		UserMessageID:   "msg_budget_pairing_test",
+		ModelProviderID: "provider_budget_pairing_test",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	runtime := &agentRuntime{
+		service:          env.service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   "conv_budget_pairing_test",
+		messageID:        "msg_budget_pairing_test",
+		opts:             RunOptions{UserID: testUserID, RunID: run.ID},
+		profile:          providerRuntimeProfile{},
+		allowTask:        true,
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		toolLoopActive:   true,
+		transcript:       newAgentTranscript(),
+		contextManager:   newAgentContextManager(),
+		currentRound:     1,
+		toolCalls:        agentWorkspaceMaxToolCalls - 1,
+	}
+	calls := []agentToolCall{
+		{ID: "call_unknown_1", Name: "unknown_tool_one", ArgumentsJSON: `{}`},
+		{ID: "", Name: "unknown_tool_two", ArgumentsJSON: `{}`},
+		{ID: "call_unknown_1", Name: "unknown_tool_three", ArgumentsJSON: `{}`},
+	}
+	calls = normalizeAgentToolCallIDs(calls)
+	runtime.appendAssistantTurn(agentModelTurn{ToolCalls: calls})
+
+	if _, completed, err := runtime.processToolCalls(ctx, calls); err != nil || completed {
+		t.Fatalf("processToolCalls returned completed=%v err=%v", completed, err)
+	}
+	if len(runtime.transcript.Entries) != 2 {
+		t.Fatalf("expected assistant turn plus tool result turn, got %#v", runtime.transcript.Entries)
+	}
+	results := runtime.transcript.Entries[1].ToolResults
+	if len(results) != len(calls) {
+		t.Fatalf("expected one tool result per tool call, got %d results for %d calls", len(results), len(calls))
+	}
+	for index, result := range results {
+		if result.ToolCallID != calls[index].ID {
+			t.Fatalf("result %d has tool_call_id %q, want %q", index, result.ToolCallID, calls[index].ID)
+		}
+	}
+	if calls[1].ID == "" || calls[1].ID == "call_unknown_1" || calls[2].ID == "call_unknown_1" {
+		t.Fatalf("expected empty and duplicate tool call IDs to be normalized, got %#v", calls)
+	}
+	if !strings.Contains(results[1].Content, IncompleteReasonBudgetExhausted) || !strings.Contains(results[2].Content, IncompleteReasonBudgetExhausted) {
+		t.Fatalf("expected skipped calls to receive budget_exhausted tool results: %#v", results)
+	}
+	snapshot := runtime.contextManager.Build(agentProtocolOpenAI, runtime.messages, nil, runtime.transcript, providerRuntimeProfile{}, runtime.currentRound)
+	assistantToolCalls := 0
+	toolMessages := 0
+	for _, message := range snapshot.OpenAIMessages {
+		if calls, ok := message["tool_calls"].([]openAIToolCall); ok {
+			assistantToolCalls += len(calls)
+		}
+		if message["role"] == "tool" {
+			toolMessages++
+		}
+	}
+	if assistantToolCalls != len(calls) || toolMessages != len(calls) {
+		t.Fatalf("expected provider context to preserve tool call/result pairing, got calls=%d results=%d", assistantToolCalls, toolMessages)
+	}
+}
+
 func TestAgentAppliesPendingSteerBeforeNextModelTurn(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -682,9 +757,10 @@ func TestGenerateReplyOpenAIWritePersistsCheckpointWhenFinalReplyTimesOut(t *tes
 	assertToolCallRecord(t, env, "save_workspace_file", "success")
 }
 
-func TestGenerateReplyOpenAIReadThenTimeoutFallsBackToExplicitVersionReplacement(t *testing.T) {
+func TestGenerateReplyOpenAIReadThenTimeoutDoesNotApplyHeuristicReplacement(t *testing.T) {
 	env := newTestAIEnv(t)
 	env.service.client.Timeout = 20 * time.Millisecond
+	t.Setenv("PERSEUS_AGENT_MAX_CHECKPOINT_RESUMES", "0")
 	ctx := context.Background()
 	if _, err := env.files.CreateFile(ctx, "docs/book.md", "白皮书版本：14.2\n"); err != nil {
 		t.Fatalf("CreateFile returned error: %v", err)
@@ -724,21 +800,24 @@ func TestGenerateReplyOpenAIReadThenTimeoutFallsBackToExplicitVersionReplacement
 
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "你尝试修改一下工作给里面白皮书的内容，白皮书的版本本来是14.2，内部写错了，写成14.0.7，你帮我修改下。")
 	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
-	}
-	if !strings.Contains(reply.Content, "已根据你的明确替换指令") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
+	if err == nil {
+		t.Fatalf("expected provider timeout instead of heuristic mutation fallback, got reply %q", reply.Content)
 	}
 	readResult, err := env.files.ReadFile("docs/book.md")
 	if err != nil {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
-	if readResult.Content != "白皮书版本：14.0.7\n" {
+	if readResult.Content != "白皮书版本：14.2\n" {
 		t.Fatalf("unexpected file content: %q", readResult.Content)
 	}
 	assertToolCallRecord(t, env, "read_workspace_text", "success")
-	assertToolCallRecord(t, env, "save_workspace_file", "success")
+	var savedCount int
+	if err := env.db.QueryRow(`SELECT COUNT(*) FROM tool_calls WHERE tool_name = 'save_workspace_file'`).Scan(&savedCount); err != nil {
+		t.Fatalf("QueryRow returned error: %v", err)
+	}
+	if savedCount != 0 {
+		t.Fatalf("expected no heuristic save_workspace_file call, got %d", savedCount)
+	}
 }
 
 func TestGenerateReplyOpenAIMkdirWorkspace(t *testing.T) {

@@ -202,8 +202,10 @@ func (p openAIProviderV2) parseNonStream(ctx context.Context, req providerTurnRe
 	choice := data.Choices[0]
 	parsedToolCalls := extractOpenAIToolCalls(choice.Message)
 	logOpenAIResponseSummary(req.ConversationID, choice, parsedToolCalls)
+	content := providerVisibleText(normalizeOpenAIContent(choice.Message.Content))
+	choice.Message.Content = content
 	turn := agentModelTurn{
-		Content:       normalizeOpenAIContent(choice.Message.Content),
+		Content:       content,
 		FinishReason:  choice.FinishReason,
 		OpenAIMessage: choice.Message,
 		ToolCalls:     make([]agentToolCall, 0, len(parsedToolCalls)),

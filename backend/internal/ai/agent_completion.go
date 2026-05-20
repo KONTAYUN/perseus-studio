@@ -23,10 +23,10 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
 			return r.toolErrorJSON("attempt_completion", reason), true, false
 		}
-		if !r.completionPathsMatchMutation(attempt.ChangedPaths) {
+		if missing := r.completionPathsMissingMutations(attempt.ChangedPaths); len(missing) > 0 {
 			r.recordToolError()
-			reason := "attempt_completion 的 changed_paths 没有匹配到本轮已验证的 workspace 变更。"
-			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
+			reason := "attempt_completion 的 changed_paths 没有覆盖本轮已验证的 workspace 变更：" + strings.Join(missing, ", ")
+			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason, "missing_paths": missing})
 			return r.toolErrorJSON("attempt_completion", reason), true, false
 		}
 	}
@@ -67,22 +67,50 @@ func (r *agentRuntime) hasSuccessfulWorkspaceMutation() bool {
 	return false
 }
 
-func (r *agentRuntime) completionPathsMatchMutation(paths []string) bool {
-	known := map[string]bool{}
+func (r *agentRuntime) completionPathsMissingMutations(paths []string) []string {
+	declared := map[string]bool{}
+	for _, path := range paths {
+		normalized := normalizeWorkspaceEventPath(path)
+		if normalized != "" {
+			declared[normalized] = true
+		}
+	}
+	seenMissing := map[string]bool{}
+	var missing []string
 	for _, event := range r.events {
 		if event.Status != "success" || !isWorkspaceMutationTool(event.ToolName) {
 			continue
 		}
-		for _, path := range append([]string{event.Path, event.OldPath, event.NewPath}, event.ChangedPaths...) {
-			normalized := normalizeWorkspaceEventPath(path)
-			if normalized != "" {
-				known[normalized] = true
-			}
+		candidates := normalizedCompletionMutationPaths(event)
+		if len(candidates) == 0 || completionPathCovered(candidates, declared) {
+			continue
+		}
+		label := candidates[0]
+		if !seenMissing[label] {
+			seenMissing[label] = true
+			missing = append(missing, label)
 		}
 	}
-	for _, path := range paths {
+	return missing
+}
+
+func normalizedCompletionMutationPaths(event ToolEvent) []string {
+	seen := map[string]bool{}
+	var paths []string
+	for _, path := range append([]string{event.Path, event.NewPath, event.OldPath}, event.ChangedPaths...) {
 		normalized := normalizeWorkspaceEventPath(path)
-		if normalized != "" && known[normalized] {
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		paths = append(paths, normalized)
+	}
+	return paths
+}
+
+func completionPathCovered(candidates []string, declared map[string]bool) bool {
+	for _, candidate := range candidates {
+		if declared[candidate] {
 			return true
 		}
 	}

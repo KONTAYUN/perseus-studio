@@ -121,7 +121,7 @@ func (s *Service) refineOpenAIReply(ctx context.Context, conversationID, message
 	if len(data.Choices) == 0 {
 		return "", fmt.Errorf("empty model response")
 	}
-	return normalizeOpenAIContent(data.Choices[0].Message.Content), nil
+	return providerVisibleText(normalizeOpenAIContent(data.Choices[0].Message.Content)), nil
 }
 
 func (s *Service) refineAnthropicReply(ctx context.Context, conversationID, messageID string, provider store.ModelProvider, messages []store.Message, attachments []AttachmentPayload, opts RunOptions, draft string, round, totalRounds int, hasToolEvents bool) (string, error) {
@@ -157,5 +157,5 @@ func (s *Service) refineAnthropicReply(ctx context.Context, conversationID, mess
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)
 		return "", err
 	}
-	return data.text(), nil
+	return providerVisibleText(data.text()), nil
 }

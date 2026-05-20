@@ -19,6 +19,16 @@ import {
   normalizeStoredContextUsage,
   updateLoadingState,
 } from '../../src/hooks/chatStateUtils.js';
+import {
+  RUN_STEER_STATUS,
+  appendRunSteerItem,
+  buildRunSteerItem,
+  markRunSteerApplied,
+  markRunSteerFailed,
+  markRunSteerReceived,
+  mergeRunSteerItemsWithMessages,
+  runSteerStatusLabel,
+} from '../../src/hooks/chatSteerItems.js';
 
 test('appendUniqueProgressItem keeps progress ids unique', () => {
   const item = { id: 'a', text: 'one' };
@@ -110,6 +120,56 @@ test('buildProgressItem maps steer lifecycle events', () => {
     buildProgressItem('agent_steer_applied', { steer_id: 's1' }).text,
     '引导已应用到当前任务'
   );
+});
+
+test('run steer item stays pending until applied', () => {
+  const item = buildRunSteerItem({
+    clientSteerId: 'client-1',
+    content: '请只处理选中的文件',
+    conversationId: 'conv-1',
+    runId: 'run-1',
+  });
+  assert.equal(item.status, RUN_STEER_STATUS.submitting);
+  assert.equal(runSteerStatusLabel(item.status), '待引导');
+  assert.equal(runSteerStatusLabel(RUN_STEER_STATUS.received), '待引导');
+  assert.equal(runSteerStatusLabel(RUN_STEER_STATUS.applied), '已引导对话');
+});
+
+test('run steer item advances through received and applied events', () => {
+  const initial = appendRunSteerItem([], buildRunSteerItem({
+    clientSteerId: 'client-1',
+    content: '请先停一下',
+  }));
+  const received = markRunSteerReceived(initial, {
+    client_steer_id: 'client-1',
+    steer_id: 'steer-1',
+    content_preview: '请先停一下',
+  });
+  assert.equal(received[0].status, RUN_STEER_STATUS.received);
+  assert.equal(received[0].steerId, 'steer-1');
+
+  const applied = markRunSteerApplied(received, {
+    steer_id: 'steer-1',
+  });
+  assert.equal(applied[0].status, RUN_STEER_STATUS.applied);
+});
+
+test('run steer failure keeps visible content and can merge into timeline', () => {
+  const item = buildRunSteerItem({
+    clientSteerId: 'client-1',
+    content: '不要改全部章节',
+    createdAt: '2026-05-20T00:00:01Z',
+  });
+  const failed = markRunSteerFailed([item], 'client-1', 'network failed');
+  assert.equal(failed[0].status, RUN_STEER_STATUS.failed);
+  assert.equal(failed[0].content, '不要改全部章节');
+  assert.equal(failed[0].error, 'network failed');
+
+  const merged = mergeRunSteerItemsWithMessages([
+    { id: 'm1', role: 'assistant', content: 'working', created_at: '2026-05-20T00:00:00Z' },
+  ], failed);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[1].kind, 'steer');
 });
 
 test('normalizeContextUsageSummary calculates display metrics', () => {

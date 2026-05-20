@@ -16,16 +16,6 @@ func lastUserMessageContent(messages []store.Message) string {
 	return ""
 }
 
-func containsAny(content string, keywords []string) bool {
-	content = strings.ToLower(content)
-	for _, keyword := range keywords {
-		if strings.Contains(content, strings.ToLower(keyword)) {
-			return true
-		}
-	}
-	return false
-}
-
 func formatProviderError(statusCode int, raw any) error {
 	message := providerErrorMessage(raw)
 	lower := strings.ToLower(message)

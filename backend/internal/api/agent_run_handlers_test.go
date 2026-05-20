@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -69,6 +70,24 @@ func TestAgentRunSteerAcceptsRunningRunAndValidatesExpectedRun(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Type != "agent_steer_received" || !strings.Contains(events[0].PayloadJSON, "只处理我选中的文件") {
 		t.Fatalf("unexpected steer events: %#v", events)
+	}
+	var response struct {
+		Event struct {
+			Payload map[string]any `json:"payload"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode steer response: %v", err)
+	}
+	if response.Event.Payload["client_steer_id"] != "client-1" {
+		t.Fatalf("expected client_steer_id in response payload, got %#v", response.Event.Payload)
+	}
+	steerID, _ := response.Event.Payload["steer_id"].(string)
+	if strings.TrimSpace(steerID) == "" {
+		t.Fatalf("expected steer_id in response payload, got %#v", response.Event.Payload)
+	}
+	if response.Event.Payload["content_preview"] != "只处理我选中的文件" {
+		t.Fatalf("expected content_preview in response payload, got %#v", response.Event.Payload)
 	}
 
 	wrongReq := httptest.NewRequest(http.MethodPost, "/api/agent-runs/run-steer-api/steer", bytes.NewBufferString(`{"content":"x","expected_run_id":"other"}`))

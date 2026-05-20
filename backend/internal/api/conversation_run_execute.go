@@ -92,29 +92,14 @@ func (s *Server) executeConversationRun(userID, conversationID, userMessageID, m
 		if getPersistenceErr() != nil {
 			return
 		}
-		eventType := "run_log"
-		payload := map[string]any{"message": message}
-		if strings.Contains(message, "tool call started") {
-			eventType = "tool_call_log"
-			safePublish("publish_run_executing_tool", store.AgentRunRunning, "executing_tool", store.UpdateAgentRunInput{})
-		} else if strings.Contains(message, "tool call done") {
-			eventType = "tool_call_log"
-			safePublish("publish_run_waiting_model_after_tool", store.AgentRunRunning, "waiting_model_after_tool", store.UpdateAgentRunInput{})
-		} else if strings.Contains(message, "tool call failed") {
-			eventType = "tool_call_log"
-			safePublish("publish_run_waiting_model_after_tool", store.AgentRunRunning, "waiting_model_after_tool", store.UpdateAgentRunInput{})
-		} else if strings.Contains(message, "calling model round") {
-			eventType = "model_call_started"
-			safePublish("publish_run_calling_model", store.AgentRunRunning, "calling_model", store.UpdateAgentRunInput{})
-		}
 		safeAppendEvent("append_run_log_event", ctx, store.AgentEventInput{
 			RunID:          runID,
 			UserID:         userID,
 			ConversationID: conversationID,
 			MessageID:      userMessageID,
-			Type:           eventType,
+			Type:           "run_log",
 			Level:          level,
-			Payload:        payload,
+			Payload:        map[string]any{"message": message},
 		})
 	}
 

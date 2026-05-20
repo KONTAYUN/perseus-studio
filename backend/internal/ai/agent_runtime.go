@@ -26,11 +26,6 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 		r.currentRound = round + 1
 		turn, err := r.callModelWithRecovery(ctx, round)
 		if err != nil {
-			if isTimeoutError(err) {
-				if reply, ok := r.service.tryFallbackTextReplacement(ctx, r.conversationID, r.messageID, r.messages, r.events, r.opts); ok {
-					return reply, nil
-				}
-			}
 			return Reply{}, err
 		}
 		r.lastProviderFinishReason = turn.FinishReason
@@ -46,6 +41,7 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 			}
 			continue
 		}
+		turn.ToolCalls = normalizeAgentToolCallIDs(turn.ToolCalls)
 		r.commitAssistantContent(turn)
 		if r.opts.OnAssistantToolBoundary != nil {
 			r.opts.OnAssistantToolBoundary()

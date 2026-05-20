@@ -7,46 +7,6 @@ import (
 	"strings"
 )
 
-func (s *Service) execCreateWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在创建文件...", "", err
-	}
-	var args struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在创建文件...", "", fmt.Errorf("invalid tool arguments")
-	}
-	result, err := files.CreateTextFile(ctx, args.Path, args.Content, "ai_create")
-	if err != nil {
-		return "", "", "正在创建文件...", args.Path, err
-	}
-	summary := fmt.Sprintf("created file %s", result.Path)
-	return mustJSON(result), summary, "正在创建文件...", result.Path, nil
-}
-
-func (s *Service) execWriteWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在写入文件...", "", err
-	}
-	var args struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在写入文件...", "", fmt.Errorf("invalid tool arguments")
-	}
-	result, err := files.WriteExistingTextFile(ctx, args.Path, args.Content, "ai_write")
-	if err != nil {
-		return "", "", "正在写入文件...", args.Path, err
-	}
-	summary := fmt.Sprintf("wrote file %s", result.Path)
-	return mustJSON(result), summary, "正在写入文件...", result.Path, nil
-}
-
 func (s *Service) execSaveWorkspaceFile(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
 	files, err := s.factory.Workspace(userID)
 	if err != nil {

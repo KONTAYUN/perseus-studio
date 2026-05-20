@@ -2,6 +2,8 @@ package ai
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"webide-backend/internal/store"
 )
@@ -115,6 +117,26 @@ func cloneAgentToolCalls(items []agentToolCall) []agentToolCall {
 			ArgumentsJSON:  item.ArgumentsJSON,
 			AnthropicInput: cloneMapAny(item.AnthropicInput),
 		})
+	}
+	return next
+}
+
+func normalizeAgentToolCallIDs(items []agentToolCall) []agentToolCall {
+	if len(items) == 0 {
+		return nil
+	}
+	next := cloneAgentToolCalls(items)
+	seen := map[string]bool{}
+	for index := range next {
+		id := strings.TrimSpace(next[index].ID)
+		if id == "" || seen[id] {
+			id = fmt.Sprintf("tool_%d", index+1)
+			for seen[id] {
+				id = fmt.Sprintf("tool_%d_%d", index+1, len(seen)+1)
+			}
+		}
+		next[index].ID = id
+		seen[id] = true
 	}
 	return next
 }
