@@ -26,6 +26,29 @@ docker compose up -d --build
 # 第一个注册用户会自动成为管理员。
 ```
 
+## Docker 镜像
+
+每次推送到 `master` 后，GitHub Actions 会自动构建镜像并发布到 GitHub Container Registry：
+
+```text
+ghcr.io/kontayun/perseus-studio:latest
+ghcr.io/kontayun/perseus-studio:<commit-sha>
+```
+
+如果镜像包是私有的，服务器需要先用带 `read:packages` 权限的 GitHub token 登录：
+
+```bash
+docker login ghcr.io
+docker pull ghcr.io/kontayun/perseus-studio:latest
+```
+
+服务器上可以使用基于 image 的 Compose 文件，之后手动更新：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
 ## 用户系统
 
 - **第一个注册用户** 会自动成为 `admin`。

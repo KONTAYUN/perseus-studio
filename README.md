@@ -26,6 +26,29 @@ docker compose up -d --build
 # The first registered user automatically becomes admin.
 ```
 
+## Docker Image
+
+Pushes to `master` automatically build and publish a container image to GitHub Container Registry:
+
+```text
+ghcr.io/kontayun/perseus-studio:latest
+ghcr.io/kontayun/perseus-studio:<commit-sha>
+```
+
+For private packages, log in on the server with a GitHub token that has `read:packages` permission:
+
+```bash
+docker login ghcr.io
+docker pull ghcr.io/kontayun/perseus-studio:latest
+```
+
+You can deploy with an image-based Compose file and update manually:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
 ## User System
 
 - The **first registered user** automatically becomes `admin`.
