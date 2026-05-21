@@ -132,8 +132,7 @@ func (r *agentRuntime) ensureActiveAssistantMessage(content string) {
 }
 
 func (r *agentRuntime) appendActiveAssistantDelta(delta string) {
-	delta = strings.TrimSpace(delta)
-	if delta == "" || r.activeAssistantMessageID == "" || r.opts.OnAssistantMessageDelta == nil {
+	if strings.TrimSpace(delta) == "" || r.activeAssistantMessageID == "" || r.opts.OnAssistantMessageDelta == nil {
 		return
 	}
 	r.opts.OnAssistantMessageDelta(r.activeAssistantMessageID, delta)

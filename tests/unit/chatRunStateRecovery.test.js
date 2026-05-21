@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   appendRunProgressItem,
   appendRunTerminalMessage,
+  buildAssistantRunShell,
   mergeAssistantMessageStarted,
 } from '../../src/hooks/chatStateUtils.js';
 import { applyLatestRunState } from '../../src/hooks/chatRunStateRecovery.js';
@@ -106,6 +107,7 @@ test('run-id based pending shell continues receiving later updates after recover
   });
 
   assert.equal(next[1].progressItems[0].text, '正在保存 chapter-31.txt');
+  assert.equal(next[1].progressItems[1].text, '已保存 chapter-31.txt');
   assert.equal(next[1].progressItems.length, 2);
   assert.equal(next[1].runId, 'run-1');
 });
@@ -133,4 +135,51 @@ test('restored run shell is replaced by later assistant start using run id', () 
   assert.equal(next[1].id, 'a1');
   assert.equal(next[1].runId, 'run-1');
   assert.equal(next[1].pending, true);
+});
+
+test('applyLatestRunState keeps completed assistant segments immutable and anchors the shell after the user message', () => {
+  const messages = applyLatestRunState([
+    { id: 'u1', role: 'user', content: '继续', conversation_id: 'conv-1', created_at: '2026-05-21T00:00:00Z' },
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: '第一段已经完成',
+      conversation_id: 'conv-1',
+      runId: 'run-1',
+      pending: false,
+      created_at: '2026-05-21T00:00:01Z',
+    },
+    {
+      id: 'a2',
+      role: 'assistant',
+      content: '第二段已经完成',
+      conversation_id: 'conv-1',
+      runId: 'run-1',
+      pending: false,
+      created_at: '2026-05-21T00:00:02Z',
+    },
+  ], {
+    id: 'run-1',
+    conversation_id: 'conv-1',
+    user_message_id: 'u1',
+    status: 'running',
+    stage: 'executing_tool',
+  }, [
+    {
+      type: 'tool_call_started',
+      payload: {
+        tool_call_id: 'tc-1',
+        tool_name: 'read_workspace_text',
+        target_summary: 'demo.txt',
+      },
+    },
+  ]);
+
+  assert.equal(messages[0].id, 'u1');
+  assert.equal(messages[1].id, 'a1');
+  assert.equal(messages[2].id, 'a2');
+  assert.equal(messages[3].id, 'run_active_run-1');
+  assert.equal(messages[1].content, '第一段已经完成');
+  assert.equal(messages[2].content, '第二段已经完成');
+  assert.equal(messages[3].kind, 'run_shell');
 });

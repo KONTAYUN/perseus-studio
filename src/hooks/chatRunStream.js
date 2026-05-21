@@ -17,6 +17,7 @@ import {
   normalizeConversationMessages,
   updateLoadingState,
 } from './chatStateUtils.js';
+import { mergeConversationSnapshotPreservingActive } from './chatMessageMerge.js';
 import { markRunSteerApplied, markRunSteerReceived, markRunSteerRejected } from './chatSteerItems.js';
 
 function toolEventFromPayload(payload = {}) {
@@ -76,6 +77,7 @@ export async function waitForAgentRunStream({
   let source = null;
   let settled = false;
   let fallbackStarted = false;
+  let sawAssistantCompletion = false;
   let loadingTimer = null;
   const closeSource = () => {
     if (source) {
@@ -92,7 +94,7 @@ export async function waitForAgentRunStream({
       const data = await apiGet(`/api/conversations/${encodeURIComponent(conversationID)}/messages`);
       const messages = normalizeConversationMessages(data.items || []);
       if (isRunConversationVisible()) {
-        setConversationMessages(messages);
+        setConversationMessages((current) => mergeConversationSnapshotPreservingActive(current, messages));
       }
       const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
       await onAssistantToolEvents?.(lastAssistant?.attachments || []);
@@ -164,7 +166,9 @@ export async function waitForAgentRunStream({
   const finish = async () => {
     closeSource();
     await loadConversations();
-    await refreshFromLatestAssistantMessage();
+    if (fallbackStarted || !sawAssistantCompletion) {
+      await refreshFromLatestAssistantMessage();
+    }
     settled = true;
   };
 
@@ -214,7 +218,6 @@ export async function waitForAgentRunStream({
       }
     } else if (item?.type === 'agent_steer_received') {
       setRunSteerItems?.((current) => markRunSteerReceived(current, payload, { conversationId: conversationID, runId }));
-      clearVisibleRunSteerNotice();
     } else if (item?.type === 'agent_steer_applied') {
       setRunSteerItems?.((current) => markRunSteerApplied(current, payload, { conversationId: conversationID, runId }));
       clearVisibleRunSteerNotice();
@@ -272,6 +275,7 @@ export async function waitForAgentRunStream({
       appendProgress(item?.type, payload, message);
     }
     if (item?.type === 'assistant_message_completed') {
+      sawAssistantCompletion = true;
       if (payload.assistant_message) {
         setVisibleConversationMessages((current) => mergeAssistantMessageCompleted(current, thinkingId, payload.assistant_message, { runId }));
         await onAssistantToolEvents?.(payload.assistant_message.attachments || []);

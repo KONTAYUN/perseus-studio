@@ -5,6 +5,7 @@ import {
   appendRunProgressItem,
   appendUniqueProgressItem,
   buildAgentRecoveryNotice,
+  buildAssistantRunShell,
   buildContextCompactionNotice,
   buildContextUsageLabel,
   buildContextUsageTitle,
@@ -20,6 +21,7 @@ import {
   normalizeStoredContextUsage,
   updateLoadingState,
 } from '../../src/hooks/chatStateUtils.js';
+import { mergeConversationSnapshotPreservingActive } from '../../src/hooks/chatMessageMerge.js';
 import {
   RUN_STEER_STATUS,
   appendRunSteerItem,
@@ -94,6 +96,99 @@ test('assistant message merges keep live progress while pending and clear it on 
   assert.equal(completed[0].pending, false);
   assert.equal(completed[0].content, '完成');
   assert.deepEqual(completed[0].progressItems, []);
+});
+
+test('assistant segments from the same run stay as separate immutable messages', () => {
+  const first = mergeAssistantMessageCompleted(
+    mergeAssistantMessageStarted(
+      [
+        { id: 'u1', role: 'user', content: '继续', conversation_id: 'conv-1' },
+        buildAssistantRunShell({
+          id: 'shell-1',
+          conversationId: 'conv-1',
+          runId: 'run-1',
+        }),
+      ],
+      'shell-1',
+      { id: 'a1', role: 'assistant', status: 'streaming', content: '', conversation_id: 'conv-1' },
+      { runId: 'run-1' }
+    ),
+    'shell-1',
+    { id: 'a1', role: 'assistant', content: '第一段', attachments: [], conversation_id: 'conv-1' },
+    { runId: 'run-1' }
+  );
+
+  const second = mergeAssistantMessageCompleted(
+    mergeAssistantMessageStarted(
+      first,
+      'shell-2',
+      { id: 'a2', role: 'assistant', status: 'streaming', content: '', conversation_id: 'conv-1' },
+      { runId: 'run-1' }
+    ),
+    'shell-2',
+    { id: 'a2', role: 'assistant', content: '第二段', attachments: [], conversation_id: 'conv-1' },
+    { runId: 'run-1' }
+  );
+
+  assert.deepEqual(second.map((item) => item.id), ['u1', 'a1', 'a2']);
+  assert.equal(second[1].content, '第一段');
+  assert.equal(second[2].content, '第二段');
+  assert.equal(second[1].runId, 'run-1');
+  assert.equal(second[2].runId, 'run-1');
+});
+
+test('conversation snapshot merge preserves newer active stream text', () => {
+  const merged = mergeConversationSnapshotPreservingActive([
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: '已经流出来的文字更长',
+      pending: true,
+      activeMessageId: 'a1',
+      runId: 'run-1',
+      progressItems: [{ id: 'p1', text: '正在保存文件' }],
+      created_at: '2026-05-21T00:00:01Z',
+    },
+  ], [
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: '已经流出来',
+      pending: false,
+      attachments: [{ tool_name: 'save_workspace_file' }],
+      created_at: '2026-05-21T00:00:01Z',
+    },
+  ]);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].content, '已经流出来的文字更长');
+  assert.equal(merged[0].pending, true);
+  assert.equal(merged[0].runId, 'run-1');
+  assert.deepEqual(merged[0].attachments, [{ tool_name: 'save_workspace_file' }]);
+  assert.equal(merged[0].progressItems[0].text, '正在保存文件');
+});
+
+test('conversation snapshot merge accepts terminal snapshots after stream state is no longer active', () => {
+  const merged = mergeConversationSnapshotPreservingActive([
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: '旧的本地文字',
+      pending: false,
+      created_at: '2026-05-21T00:00:01Z',
+    },
+  ], [
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: '服务端最终文字',
+      pending: false,
+      created_at: '2026-05-21T00:00:01Z',
+    },
+  ]);
+
+  assert.equal(merged[0].content, '服务端最终文字');
+  assert.equal(merged[0].pending, false);
 });
 
 test('committed user message anchors the assistant run shell after branch reloads', () => {
@@ -227,6 +322,26 @@ test('run steer item advances through received and applied events', () => {
   assert.equal(applied[0].status, RUN_STEER_STATUS.applied);
   assert.equal(applied[0].conversation_id, 'conv-1');
   assert.equal(applied[0].runId, 'run-1');
+});
+
+test('received run steer stays visible in composer preview until applied', () => {
+  const initial = appendRunSteerItem([], buildRunSteerItem({
+    clientSteerId: 'client-1',
+    content: '先别改结尾',
+    conversationId: 'conv-1',
+    runId: 'run-1',
+  }));
+  const received = markRunSteerReceived(initial, {
+    client_steer_id: 'client-1',
+    steer_id: 'steer-1',
+    content_preview: '先别改结尾',
+  });
+  assert.equal(pendingRunSteerPreviewItems(received).length, 1);
+  assert.equal(mergeRunSteerItemsWithMessages([], received).length, 0);
+
+  const applied = markRunSteerApplied(received, { steer_id: 'steer-1' });
+  assert.equal(pendingRunSteerPreviewItems(applied).length, 0);
+  assert.equal(mergeRunSteerItemsWithMessages([], applied).length, 1);
 });
 
 test('visible run steer items stay scoped to the selected conversation', () => {

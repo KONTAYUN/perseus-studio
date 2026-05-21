@@ -47,6 +47,25 @@ func TestParseOpenAIStreamAccumulatesTextAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestRuntimeAssistantDeltaPreservesChunkWhitespace(t *testing.T) {
+	var deltas []string
+	runtime := &agentRuntime{
+		activeAssistantMessageID: "active-1",
+		opts: RunOptions{
+			OnAssistantMessageDelta: func(_ string, delta string) {
+				deltas = append(deltas, delta)
+			},
+		},
+	}
+
+	runtime.appendActiveAssistantDelta("hello ")
+	runtime.appendActiveAssistantDelta("world\n")
+
+	if strings.Join(deltas, "") != "hello world\n" {
+		t.Fatalf("expected whitespace-preserving deltas, got %#v", deltas)
+	}
+}
+
 func TestParseOpenAIStreamRevealsTextAfterToolWhenRequired(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"content":"我先读取文件。"}}]}`,

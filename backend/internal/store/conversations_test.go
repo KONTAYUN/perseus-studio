@@ -251,6 +251,74 @@ func TestAgentRunResumeClearsTerminalStateAndListsEventsAfterSeq(t *testing.T) {
 	}
 }
 
+func TestListEventsFilteredLimitsTypesWithoutReplayingWholeRun(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	runs := NewAgentRunStore(db)
+	if err := runs.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+	run, err := runs.CreateRun(ctx, CreateAgentRunInput{
+		UserID:          "user-a",
+		ConversationID:  "conv-a",
+		UserMessageID:   "msg-a",
+		ModelProviderID: "mp-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := runs.AppendEvent(ctx, AgentEventInput{
+			RunID:          run.ID,
+			UserID:         "user-a",
+			ConversationID: "conv-a",
+			Type:           "assistant_message_delta",
+			Level:          "info",
+			Payload:        map[string]any{"delta": "x"},
+		}); err != nil {
+			t.Fatalf("AppendEvent delta returned error: %v", err)
+		}
+	}
+	received, err := runs.AppendEvent(ctx, AgentEventInput{
+		RunID:          run.ID,
+		UserID:         "user-a",
+		ConversationID: "conv-a",
+		Type:           "agent_steer_received",
+		Level:          "info",
+		Payload:        map[string]any{"content": "慢一点"},
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent steer received returned error: %v", err)
+	}
+	applied, err := runs.AppendEvent(ctx, AgentEventInput{
+		RunID:          run.ID,
+		UserID:         "user-a",
+		ConversationID: "conv-a",
+		Type:           "agent_steer_applied",
+		Level:          "info",
+		Payload:        map[string]any{"content": "慢一点"},
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent steer applied returned error: %v", err)
+	}
+
+	items, err := runs.ListEventsFiltered(ctx, "user-a", run.ID, AgentEventFilter{
+		Types: []string{"agent_steer_received", "agent_steer_applied"},
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered returned error: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != received.ID || items[1].ID != applied.ID {
+		t.Fatalf("expected only steer events in seq order, got %#v", items)
+	}
+}
+
 func TestLatestConversationEventByTypeIsUserScoped(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))

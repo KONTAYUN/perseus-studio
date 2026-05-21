@@ -1,4 +1,13 @@
-import { PLAYFUL_PENDING_STATUSES, agentEventText, nextLoadingStatus } from './chatStatusTextUtils.js';
+import {
+  agentEventText,
+  completedToolStatus,
+  isPendingStatusText,
+  nextLoadingStatus,
+  pendingToolStatus,
+  playfulPendingStatus,
+  updateLoadingState,
+} from './chatStatusTextUtils.js';
+import { normalizeConversationMessage } from './chatRunMessageState.js';
 
 export {
   agentEventText,
@@ -8,175 +17,27 @@ export {
   pendingToolStatus,
   playfulPendingStatus,
   updateLoadingState,
-} from './chatStatusTextUtils.js';
+};
 
-export function buildAssistantRunShell({ id, conversationId, createdAt, content = '', attachments = [], runId = '' } = {}) {
-  return {
-    id,
-    runId,
-    conversation_id: conversationId || 'pending',
-    role: 'assistant',
-    content,
-    attachments,
-    pending: true,
-    created_at: createdAt || new Date().toISOString(),
-    progressItems: [],
-    loadingState: {
-      text: PLAYFUL_PENDING_STATUSES[0],
-      visibleText: PLAYFUL_PENDING_STATUSES[0],
-      stage: 'holding',
-      activeSince: Date.now(),
-    },
-    activeMessageId: '',
-  };
-}
+export {
+  appendRunProgressItem,
+  appendRunTerminalMessage,
+  appendUniqueProgressItem,
+  buildAssistantRunShell,
+  buildProgressItem,
+  hasActiveRunShell,
+  hasStreamingAssistantMessage,
+  isRunShellMessage,
+  mapPendingAssistant,
+  mergeAssistantMessageCompleted,
+  mergeAssistantMessageStarted,
+  mergeCommittedRunStart,
+} from './chatRunMessageState.js';
 
-export function mergeCommittedRunStart(
-  messages,
-  {
-    optimisticUserId = '',
-    thinkingId = '',
-    userMessage,
-    assistantShell,
-  } = {}
-) {
-  const committedUser = normalizeConversationMessage(userMessage);
-  if (!committedUser?.id || !thinkingId) return messages || [];
-  const shellRunId = assistantShell?.runId || '';
-  const existingShell = (messages || []).find((item) => item.id === thinkingId || (shellRunId && item.runId === shellRunId));
-  const shell = normalizeRunShell(
-    existingShell
-      ? { ...(assistantShell || {}), ...existingShell, runId: existingShell.runId || shellRunId }
-      : assistantShell,
-    thinkingId,
-    committedUser.conversation_id
-  );
-  const withoutPlaceholders = removeRunStartPlaceholders(messages, {
-    optimisticUserId,
-    thinkingId,
-    committedUser,
-  });
-  const userIndex = findCommittedUserIndex(withoutPlaceholders, committedUser);
-  const nextMessages = [...withoutPlaceholders];
-  const existingShellIndex = nextMessages.findIndex(
-    (item) => item.id === thinkingId || (shell.runId && item.runId === shell.runId)
-  );
-  const insertUserIndex = userIndex >= 0 ? userIndex : nextMessages.length;
-  if (userIndex >= 0) {
-    nextMessages[insertUserIndex] = {
-      ...nextMessages[insertUserIndex],
-      ...committedUser,
-    };
-  } else {
-    nextMessages.splice(insertUserIndex, 0, committedUser);
-  }
-  if (existingShellIndex >= 0) {
-    nextMessages[existingShellIndex] = {
-      ...nextMessages[existingShellIndex],
-      ...shell,
-    };
-    if (existingShellIndex !== insertUserIndex + 1) {
-      const [existingShell] = nextMessages.splice(existingShellIndex, 1);
-      const targetIndex = nextMessages.findIndex((item) => item.id === committedUser.id);
-      nextMessages.splice(targetIndex >= 0 ? targetIndex + 1 : nextMessages.length, 0, existingShell);
-    }
-  } else {
-    nextMessages.splice(insertUserIndex + 1, 0, shell);
-  }
-  return nextMessages;
-}
+export { normalizeConversationMessage };
 
-export function appendUniqueProgressItem(items, nextItem) {
-  if (!nextItem?.id) return items;
-  if ((items || []).some((item) => item.id === nextItem.id)) return items;
-  return [...(items || []), nextItem];
-}
-
-export function appendRunProgressItem(messages, thinkingId, nextItem) {
-  if (!thinkingId || !nextItem?.id) return messages;
-  let changed = false;
-  const nextMessages = (messages || []).map((item) => {
-    const isTarget =
-      item.id === thinkingId ||
-      (item.runId && item.runId === nextItem.runId) ||
-      (item.role === 'assistant' && item.pending && item.activeMessageId);
-    if (!isTarget) return item;
-    changed = true;
-    return {
-      ...item,
-      progressItems: appendUniqueProgressItem(item.progressItems, nextItem),
-    };
-  });
-  return changed ? nextMessages : messages;
-}
-
-export function mergeAssistantMessageStarted(messages, thinkingId, assistantMessage, { runId = '' } = {}) {
-  const assistant = normalizeConversationMessage(assistantMessage);
-  if (!assistant) return messages;
-  const nextAssistant = {
-    ...assistant,
-    runId,
-    pending: true,
-    activeMessageId: assistant.id,
-    progressItems: [],
-  };
-  let inserted = false;
-  const nextMessages = [];
-  for (const item of messages || []) {
-    const isRunShell = runId && item.runId === runId;
-    if (item.id !== thinkingId && item.id !== assistant.id && !isRunShell) {
-      nextMessages.push(item);
-      continue;
-    }
-    if (inserted) continue;
-    inserted = true;
-    nextMessages.push({
-      ...nextAssistant,
-      loadingState: item.loadingState || nextAssistant.loadingState,
-      progressItems: item.progressItems || [],
-    });
-  }
-  return inserted ? nextMessages : [...(messages || []), nextAssistant];
-}
-
-export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMessage, { runId = '' } = {}) {
-  const assistant = normalizeConversationMessage(assistantMessage);
-  if (!assistant) return messages;
-  const nextAssistant = {
-    ...assistant,
-    runId,
-    pending: false,
-    activeMessageId: '',
-    progressItems: [],
-  };
-  let inserted = false;
-  const nextMessages = [];
-  for (const item of messages || []) {
-    const isActiveShell =
-      (item.id === thinkingId || (runId && item.runId === runId)) &&
-      (!item.activeMessageId || item.activeMessageId === assistant.id);
-    if (!isActiveShell && item.id !== assistant.id) {
-      nextMessages.push(item);
-      continue;
-    }
-    if (inserted) continue;
-    inserted = true;
-    nextMessages.push(nextAssistant);
-  }
-  return inserted ? nextMessages : [...(messages || []), nextAssistant];
-}
-
-export function buildProgressItem(type, payload = {}, fallbackText = '') {
-  const text = agentEventText(type, payload) || payload.message || fallbackText || '';
-  if (!text) return null;
-  return {
-    id: payload.event_id || `${type}:${payload.tool_call_id || payload.round || payload.path || payload.message || payload.reason || text}`,
-    runId: payload.run_id || payload.runId || '',
-    type,
-    text,
-    toolName: payload.tool_name || '',
-    status: payload.status || '',
-  };
+export function normalizeConversationMessages(items) {
+  return (items || []).map((item) => normalizeConversationMessage(item));
 }
 
 export function formatContextTokenCount(value) {
@@ -308,125 +169,4 @@ export function buildAgentRecoveryNotice(type, payload = {}) {
     text: agentEventText(type, payload),
     createdAt: Date.now(),
   };
-}
-
-export function normalizeConversationMessage(message) {
-  if (!message) return message;
-  const next = {
-    attachments: [],
-    ...message,
-  };
-  if (next.meta?.kind && !next.kind) {
-    next.kind = next.meta.kind;
-  }
-  if (next.meta?.status && !next.status) {
-    next.status = next.meta.status;
-  }
-  if (next.role === 'assistant' && next.status === 'streaming') {
-    next.pending = true;
-    next.activeMessageId = next.id;
-    next.loadingState = next.loadingState || {
-      text: nextLoadingStatus(0),
-      visibleText: nextLoadingStatus(0),
-      stage: 'holding',
-      activeSince: Date.now(),
-    };
-  }
-  return next;
-}
-
-export function normalizeConversationMessages(items) {
-  return (items || []).map((item) => normalizeConversationMessage(item));
-}
-
-export function appendRunTerminalMessage(messages, latestRun) {
-  if (!isRecoverableTerminalRun(latestRun)) return messages || [];
-  if ((messages || []).some((item) => item.resumableRunId === latestRun.id)) return messages || [];
-  const message = String(latestRun.error_message || '').trim() || '上一轮任务没有正常完成，可继续本轮。';
-  return [
-    ...(messages || []),
-    {
-      id: `run_error_${latestRun.id}`,
-      conversation_id: latestRun.conversation_id,
-      role: 'assistant',
-      content: latestRun.status === 'canceled' ? '这轮任务已停止，可继续本轮。' : message,
-      attachments: [],
-      created_at: latestRun.completed_at || latestRun.updated_at || new Date().toISOString(),
-      pending: false,
-      error: true,
-      resumableRunId: latestRun.id,
-      diagnosticLogId: latestRun.diagnostic_log_id || '',
-    },
-  ];
-}
-
-export function hasStreamingAssistantMessage(items) {
-  return (items || []).some((item) => item?.role === 'assistant' && (item?.status === 'streaming' || item?.activeMessageId));
-}
-
-export function mapPendingAssistant(current, thinkingId, transform, runId = '') {
-  let updated = false;
-  const next = current.map((item) => {
-    const isPendingTarget =
-      item.id === thinkingId ||
-      (runId && item.runId === runId) ||
-      (item.role === 'assistant' && item.pending);
-    if (!isPendingTarget || updated) return item;
-    updated = true;
-    return transform(item);
-  });
-  return next;
-}
-
-export function hasActiveRunShell(items, runId) {
-  if (!runId) return false;
-  return (items || []).some((item) => item?.role === 'assistant' && item?.pending && item?.runId === runId);
-}
-
-function normalizeRunShell(shell, thinkingId, conversationId) {
-  const runId = shell?.runId || '';
-  const base = buildAssistantRunShell({
-    id: runId || thinkingId,
-    conversationId,
-    createdAt: new Date().toISOString(),
-    runId,
-  });
-  return {
-    ...base,
-    ...(shell || {}),
-    id: runId || thinkingId,
-    runId,
-    conversation_id: conversationId || shell?.conversation_id || base.conversation_id,
-    role: 'assistant',
-    pending: true,
-  };
-}
-
-function removeRunStartPlaceholders(messages, { optimisticUserId, thinkingId, committedUser }) {
-  return (messages || []).filter((item) => {
-    if (!item) return false;
-    if (item.id === thinkingId) return false;
-    if (item.id === optimisticUserId) return false;
-    if (item.id === committedUser.id) return true;
-    if (
-      item.role === 'user' &&
-      item.id?.startsWith?.('temp_user_') &&
-      item.conversation_id === committedUser.conversation_id &&
-      item.content === committedUser.content
-    ) {
-      return false;
-    }
-    return true;
-  });
-}
-
-function findCommittedUserIndex(messages, committedUser) {
-  return (messages || []).findIndex((item) => item.id === committedUser.id);
-}
-
-function isRecoverableTerminalRun(run) {
-  if (!run?.id) return false;
-  if (run.status !== 'failed' && run.status !== 'canceled') return false;
-  if (!run.user_message_id) return false;
-  return true;
 }

@@ -2,7 +2,9 @@ import {
   appendRunTerminalMessage,
   buildAssistantRunShell,
   buildProgressItem,
+  isRunShellMessage,
   nextLoadingStatus,
+  normalizeConversationMessage,
 } from './chatStateUtils.js';
 
 export function applyLatestRunState(messages, latestRun, events = [], options = {}) {
@@ -11,6 +13,7 @@ export function applyLatestRunState(messages, latestRun, events = [], options = 
 
   const snapshot = buildRunProgressSnapshot(events, latestRun);
   const shellId = options.thinkingId || `run_active_${latestRun.id}`;
+  const userMessageId = latestRun.user_message_id || '';
   const shell = {
     ...buildAssistantRunShell({
       id: shellId,
@@ -30,23 +33,46 @@ export function applyLatestRunState(messages, latestRun, events = [], options = 
     },
   };
 
-  let updated = false;
-  const nextMessages = (terminalMessages || []).map((item) => {
-    if (item.id === shellId || item.runId === latestRun.id || (item.role === 'assistant' && item.pending && item.activeMessageId)) {
-      updated = true;
+  const normalized = (terminalMessages || []).map((item) => normalizeConversationMessage(item));
+  const activeMessageIndex = snapshot.activeMessageId
+    ? normalized.findIndex((item) => item.id === snapshot.activeMessageId)
+    : -1;
+  if (activeMessageIndex >= 0) {
+    const nextMessages = normalized
+      .filter((item) => !isRunShellMessage(item, { thinkingId: shellId, runId: latestRun.id }))
+      .map((item) => {
+      if (item.id !== snapshot.activeMessageId) return item;
+      return {
+        ...item,
+        pending: true,
+        runId: latestRun.id,
+        activeMessageId: item.id,
+        progressItems: snapshot.progressItems,
+        loadingState: {
+          text: snapshot.loadingText,
+          visibleText: snapshot.loadingText,
+          stage: 'holding',
+          activeSince: Date.now(),
+        },
+      };
+      });
+    return nextMessages;
+  }
+
+  const shellIndex = normalized.findIndex((item) => isRunShellMessage(item, { thinkingId: shellId, runId: latestRun.id }));
+  if (shellIndex >= 0) {
+    const nextMessages = normalized.map((item, index) => {
+      if (index !== shellIndex) return item;
       return {
         ...item,
         ...shell,
-        id: item.id || shell.id,
-        content: item.content || shell.content,
-        attachments: item.attachments || [],
-        activeMessageId: item.activeMessageId || shell.activeMessageId,
       };
-    }
-    return item;
-  });
-  if (updated) return nextMessages;
-  return [...nextMessages, shell];
+    });
+    return moveMessageToEnd(nextMessages, shellIndex);
+  }
+
+  const inserted = appendMessageToEnd(normalized, shell);
+  return inserted;
 }
 
 function isActiveRun(run) {
@@ -109,6 +135,20 @@ function isRunSnapshotLoadingType(type = '') {
     type === 'completion_rejected' ||
     type === 'local_persistence_failed'
   );
+}
+
+function appendMessageToEnd(messages, message) {
+  const next = [...(messages || [])];
+  next.push(message);
+  return next;
+}
+
+function moveMessageToEnd(messages, messageIndex) {
+  const next = [...(messages || [])];
+  if (messageIndex < 0 || messageIndex >= next.length) return next;
+  const [message] = next.splice(messageIndex, 1);
+  next.push(message);
+  return next;
 }
 
 function runStageLoadingText(stage = '') {

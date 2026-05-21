@@ -86,7 +86,10 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		events, err := s.runs.ListEvents(r.Context(), user.UserID, runID)
+		events, err := s.runs.ListEventsFiltered(r.Context(), user.UserID, runID, store.AgentEventFilter{
+			Types: strings.Split(r.URL.Query().Get("types"), ","),
+			Limit: queryInt(r, "limit", 200),
+		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -101,6 +104,18 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func queryInt(r *http.Request, key string, fallback int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
 }
 
 func (s *Server) steerAgentRun(ctx context.Context, userID, runID string, body io.Reader) (store.AgentEvent, error) {

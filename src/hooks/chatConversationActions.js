@@ -245,13 +245,48 @@ async function loadLatestRunEvents(run) {
   if (!run?.id) {
     return [];
   }
+  const types = latestRunRecoveryEventTypes(run);
   try {
-    const data = await apiGet(`/api/agent-runs/${encodeURIComponent(run.id)}/events`);
+    const query = types.length > 0
+      ? `?types=${encodeURIComponent(types.join(','))}&limit=120`
+      : '';
+    const data = await apiGet(`/api/agent-runs/${encodeURIComponent(run.id)}/events${query}`);
     return data.items || [];
   } catch (error) {
     console.error('loadLatestRunEvents failed', error);
     return [];
   }
+}
+
+function latestRunRecoveryEventTypes(run) {
+  if (!run?.id) return [];
+  const steerTypes = ['agent_steer_received', 'agent_steer_applied'];
+  if (run.status !== 'running' && run.status !== 'queued') {
+    return steerTypes;
+  }
+  return [
+    'assistant_message_started',
+    'assistant_message_completed',
+    'tool_call_started',
+    'tool_call_completed',
+    'tool_call_failed',
+    'model_call_attempt_started',
+    'model_call_attempt_completed',
+    'model_call_attempt_failed',
+    'model_call_retrying',
+    'model_message_started',
+    'model_stream_recovering',
+    'context_compaction_started',
+    'context_compaction_failed',
+    'agent_recovery_started',
+    'agent_recovery_retrying',
+    'agent_budget_exhausted',
+    'agent_budget_summary_started',
+    'agent_budget_summary_failed',
+    'completion_rejected',
+    'local_persistence_failed',
+    ...steerTypes,
+  ];
 }
 
 function recoverableRunFromLatestRun(run) {
