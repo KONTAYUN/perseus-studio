@@ -47,6 +47,63 @@ func TestParseOpenAIStreamAccumulatesTextAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestParseOpenAIStreamRevealsTextAfterToolWhenRequired(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"我先读取文件。"}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_workspace_text","arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+		RevealTextAfterTool: true,
+	})
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if turn.Content != "我先读取文件。" {
+		t.Fatalf("unexpected content: %q", turn.Content)
+	}
+	if strings.Join(deltas, "") != "我先读取文件。" {
+		t.Fatalf("expected gated text to flush after tool call, got %#v", deltas)
+	}
+	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].Name != "read_workspace_text" {
+		t.Fatalf("unexpected tool calls: %#v", turn.ToolCalls)
+	}
+}
+
+func TestParseOpenAIStreamDoesNotRevealRequiredTextWithoutTool(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"我稍后会处理。"}}]}`,
+		``,
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+		RevealTextAfterTool: true,
+	})
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if turn.Content != "我稍后会处理。" {
+		t.Fatalf("unexpected content: %q", turn.Content)
+	}
+	if len(deltas) != 0 {
+		t.Fatalf("required no-tool text should stay hidden from the user, got %#v", deltas)
+	}
+}
+
 func TestParseOpenAIStreamReturnsPartialCompleteToolCallOnTransportError(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"save_workspace_file","arguments":"{\"path\":\"a.txt\",\"content\":\"x\",\"mode\":\"create\"}"}}]}}]}`,
@@ -141,6 +198,75 @@ func TestParseAnthropicStreamAccumulatesTextAndToolUse(t *testing.T) {
 	}
 	if len(turn.AnthropicRaw) != 2 {
 		t.Fatalf("expected raw text and tool blocks, got %#v", turn.AnthropicRaw)
+	}
+}
+
+func TestParseAnthropicStreamRevealsTextAfterToolWhenRequired(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"我先检查文件。"}}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_workspace_text","input":{}}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"a.txt\"}"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseAnthropicStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+		RevealTextAfterTool: true,
+	})
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if turn.Content != "我先检查文件。" {
+		t.Fatalf("unexpected content: %q", turn.Content)
+	}
+	if strings.Join(deltas, "") != "我先检查文件。" {
+		t.Fatalf("expected gated text to flush after tool use, got %#v", deltas)
+	}
+	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].Name != "read_workspace_text" {
+		t.Fatalf("unexpected tool calls: %#v", turn.ToolCalls)
+	}
+}
+
+func TestParseAnthropicStreamDoesNotRevealRequiredTextWithoutTool(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"我稍后会处理。"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseAnthropicStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+		RevealTextAfterTool: true,
+	})
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if turn.Content != "我稍后会处理。" {
+		t.Fatalf("unexpected content: %q", turn.Content)
+	}
+	if len(deltas) != 0 {
+		t.Fatalf("required no-tool text should stay hidden from the user, got %#v", deltas)
 	}
 }
 

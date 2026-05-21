@@ -3,7 +3,7 @@ import { createChatCompactionActions } from './chatCompactionActions';
 import { createChatConversationActions } from './chatConversationActions';
 import { createChatRegenerateResumeActions } from './chatRegenerateResumeActions';
 import { createChatSendActions } from './chatSendActions';
-import { createChatSteerActions, textOnlyPayload, useActiveAgentRunRef, usePendingRunMessageAutoSend } from './chatSteerActions';
+import { createChatSteerActions, textOnlyPayload, useActiveAgentRunRef, useMissedRunSteerAutoQueue, usePendingRunMessageAutoSend } from './chatSteerActions';
 import { waitForAgentRunStream } from './chatRunStream.js';
 import useChatLifecycleEffects from './useChatLifecycleEffects';
 import useChatReferenceActions from './useChatReferenceActions';
@@ -53,6 +53,8 @@ export default function useChatState({
   const suppressNextConversationLoadRef = useRef(false);
   const activeChatAbortRef = useRef(null);
   const activeAgentRunRef = useRef(null);
+  const currentConversationIdRef = useRef('');
+  const conversationTransitionRef = useRef(null);
   const sendChatPayloadRef = useRef(null);
   const conversationMessagesRef = useRef([]);
   const contextUsageRequestRef = useRef(0);
@@ -70,6 +72,8 @@ export default function useChatState({
   } = createChatConversationActions({
     contextUsageRequestRef,
     conversations,
+    conversationTransitionRef,
+    currentConversationIdRef,
     currentConversationId,
     selectedModel,
     setAgentRecoveryNotice,
@@ -91,6 +95,7 @@ export default function useChatState({
     contextUsageRequestRef,
     conversationMessages,
     conversationMessagesRef,
+    currentConversationIdRef,
     currentConversationId,
     loadConversationMessages,
     setAgentRecoveryNotice,
@@ -110,11 +115,23 @@ export default function useChatState({
   useActiveAgentRunRef(activeAgentRun, activeAgentRunRef);
   usePendingRunMessageAutoSend({
     currentConversationId,
+    currentConversationIdRef,
     isChatSending,
     pendingRunMessage,
     resumableRun,
     sendChatPayloadRef,
     setPendingRunMessage,
+    setRunSteerNotice,
+    thinkingMode,
+  });
+  useMissedRunSteerAutoQueue({
+    currentConversationId,
+    currentConversationIdRef,
+    isChatSending,
+    resumableRun,
+    runSteerItems,
+    setPendingRunMessage,
+    setRunSteerItems,
     setRunSteerNotice,
     thinkingMode,
   });
@@ -168,6 +185,7 @@ export default function useChatState({
     chatInput,
     chatSkillReferences,
     currentConversationId,
+    currentConversationIdRef,
     isChatSending,
     pendingRunMessage,
     runSteerItems,
@@ -188,6 +206,8 @@ export default function useChatState({
     chatSkillReferences,
     compactCurrentConversation,
     createPendingRunMessage,
+    conversationTransitionRef,
+    currentConversationIdRef,
     currentConversationId,
     ensureConversation,
     hasUnsupportedRuntimeGuidance,

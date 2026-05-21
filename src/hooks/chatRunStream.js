@@ -8,6 +8,7 @@ import {
   buildProgressItem,
   hasStreamingAssistantMessage,
   mapPendingAssistant,
+  mergeCommittedRunStart,
   mergeAssistantMessageCompleted,
   mergeAssistantMessageStarted,
   nextLoadingStatus,
@@ -96,6 +97,9 @@ export async function waitForAgentRunStream({
   const appendProgress = (type, payload = {}, fallbackText = '') => {
     const nextItem = buildProgressItem(type, payload, fallbackText);
     if (!nextItem) return;
+    if (shouldEnsureProgressShell(type)) {
+      ensureThinkingShell();
+    }
     setConversationMessages((current) => appendRunProgressItem(current, thinkingId, nextItem));
   };
   const applyFollowupQuestion = (payload = {}) => {
@@ -193,7 +197,21 @@ export async function waitForAgentRunStream({
       setRunSteerItems?.((current) => markRunSteerRejected(current, payload, { conversationId: conversationID, runId }));
       setRunSteerNotice?.(null);
     }
-    if (item?.type === 'assistant_message_started') {
+    if (item?.type === 'user_message_committed') {
+      setConversationMessages((current) =>
+        mergeCommittedRunStart(current, {
+          thinkingId,
+          userMessage: payload.user_message,
+          assistantShell: buildAssistantRunShell({
+            id: thinkingId,
+            conversationId: conversationID,
+            createdAt: new Date().toISOString(),
+            content: '',
+            attachments: [],
+          }),
+        })
+      );
+    } else if (item?.type === 'assistant_message_started') {
       setConversationMessages((current) => mergeAssistantMessageStarted(current, thinkingId, payload.assistant_message));
     } else if (item?.type === 'assistant_message_delta') {
       const messageId = payload.message_id;
@@ -219,6 +237,7 @@ export async function waitForAgentRunStream({
       if (payload.status === 'success' && payload.tool_name) {
         await onAssistantToolEvents?.([toolEventFromPayload(payload)]);
       }
+      appendProgress(item?.type, payload, message);
     } else if (item?.type === 'model_message_started') {
       ensureThinkingShell();
     } else if (item?.type === 'user_question_requested') {
@@ -302,4 +321,8 @@ export async function waitForAgentRunStream({
       }
     };
   });
+}
+
+function shouldEnsureProgressShell(type = '') {
+  return type.startsWith('tool_call_') || type === 'tool_scope_rejected' || type === 'completion_rejected' || type === 'local_persistence_failed';
 }

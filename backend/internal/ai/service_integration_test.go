@@ -595,6 +595,253 @@ func TestGenerateReplyOpenAIToolLoopRequiresToolAndSuppressesInvalidText(t *test
 	}
 }
 
+func TestGenerateReplyOpenAIRequiredToolStreamsPlanWhenToolCallFollows(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+
+		count := requestCount.Add(1)
+		assertOpenAIToolChoiceRequired(t, payload)
+		switch count {
+		case 1:
+			writeOpenAIStreamTextAndToolCall(t, w, "我先查看工作区，再决定下一步。", "call_inspect_1", "inspect_workspace", `{"path":"","max_depth":1}`)
+		case 2:
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已查看工作区。"} `)
+		default:
+			t.Fatalf("unexpected request count: %d", count)
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看当前文件")
+	var streamed strings.Builder
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "demo.txt"}}, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			if eventType == "model_delta" {
+				if text, _ := payload["text"].(string); text != "" {
+					streamed.WriteString(text)
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if requestCount.Load() != 2 {
+		t.Fatalf("expected tool execution plus completion, got %d requests", requestCount.Load())
+	}
+	if !strings.Contains(streamed.String(), "我先查看工作区") {
+		t.Fatalf("expected same-turn plan text to stream after tool call appeared, got %q", streamed.String())
+	}
+	if !strings.Contains(reply.Content, "已查看工作区") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+}
+
+func TestGenerateReplyOpenAIRequiredToolUsesConcisePreambleBeforeTool(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	longPreamble := "我先读取完整文件，看清当前第103镜前后的全貌。\n\n好，我已经完整看清了。现在的问题是这段反应还是太标准了，我会先写很多分析，然后再继续解释为什么要这么改。"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		writeOpenAIStreamTextAndToolCall(t, w, longPreamble, "call_inspect_1", "inspect_workspace", `{"path":"","max_depth":1}`)
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看当前文件")
+	runtime := &agentRuntime{
+		service:          env.service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   conversation.ID,
+		messageID:        userMessage.ID,
+		provider:         provider,
+		messages:         messages,
+		opts:             RunOptions{UserID: testUserID},
+		profile:          runtimeProfileForProvider(provider),
+		allowTask:        true,
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		transcript:       newAgentTranscript(),
+		contextManager:   newAgentContextManager(),
+	}
+	turn, err := runtime.callModel(ctx, 0)
+	if err != nil {
+		t.Fatalf("callModel returned error: %v", err)
+	}
+	turn.ToolCalls = normalizeAgentToolCallIDs(turn.ToolCalls)
+	turn, skipped := prepareToolTurnForExecution(turn)
+	if skipped != 0 {
+		t.Fatalf("expected no skipped tools, got %d", skipped)
+	}
+	if turn.Content != "我先读取完整文件，看清当前第103镜前后的全貌。" {
+		t.Fatalf("expected concise first preamble, got %q", turn.Content)
+	}
+}
+
+func TestAgentRuntimeExecutesOnlyOneToolPerModelTurn(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	if _, err := env.files.CreateFile(ctx, "a.txt", "before"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		count := requestCount.Add(1)
+		switch count {
+		case 1:
+			writeOpenAIStreamTextAndToolCalls(t, w, "我先逐步处理文件。", []streamToolCall{
+				{id: "call_read_1", name: "read_workspace_text", args: `{"path":"a.txt"}`},
+				{id: "call_save_1", name: "save_workspace_file", args: `{"path":"a.txt","content":"after","mode":"overwrite"}`},
+			})
+		case 2:
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已读取文件。"} `)
+		default:
+			t.Fatalf("unexpected request count: %d", count)
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "处理文件")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "a.txt"}}, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "已读取文件") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	file, err := env.files.ReadFile("a.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if file.Content != "before" {
+		t.Fatalf("second tool call should not have executed in same turn, got file content %q", file.Content)
+	}
+}
+
+func TestAgentRuntimeSkipsStaleToolTurnWhenSteerArrivesBeforeToolExecution(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	if _, err := env.files.CreateFile(ctx, "a.txt", "before"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	firstRequestSeen := make(chan struct{})
+	allowFirstResponse := make(chan struct{})
+	done := make(chan error, 1)
+	var requestCount atomic.Int32
+	var capturedSecondRequest []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		count := requestCount.Add(1)
+		switch count {
+		case 1:
+			close(firstRequestSeen)
+			select {
+			case <-allowFirstResponse:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("timed out waiting to release first response")
+			}
+			writeOpenAIStreamTextAndToolCall(t, w, "我先直接保存。", "call_save_1", "save_workspace_file", `{"path":"a.txt","content":"stale","mode":"overwrite"}`)
+		case 2:
+			if items, ok := payload["messages"].([]any); ok {
+				for _, item := range items {
+					if message, ok := item.(map[string]any); ok {
+						capturedSecondRequest = append(capturedSecondRequest, message)
+					}
+				}
+			}
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已按新引导停止旧保存。"} `)
+		default:
+			t.Fatalf("unexpected request count: %d", count)
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "处理文件")
+	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
+		ID:              "run_stale_steer_test",
+		UserID:          testUserID,
+		ConversationID:  conversation.ID,
+		UserMessageID:   userMessage.ID,
+		ModelProviderID: provider.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	if _, err := env.runs.UpdateRun(ctx, testUserID, run.ID, store.UpdateAgentRunInput{Status: store.AgentRunRunning, Stage: "calling_model"}); err != nil {
+		t.Fatalf("UpdateRun returned error: %v", err)
+	}
+	go func() {
+		_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "a.txt"}}, RunOptions{UserID: testUserID, RunID: run.ID})
+		done <- err
+	}()
+
+	select {
+	case <-firstRequestSeen:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first provider request")
+	}
+	if _, err := env.runs.AppendEvent(ctx, store.AgentEventInput{
+		RunID:          run.ID,
+		UserID:         testUserID,
+		ConversationID: conversation.ID,
+		Type:           "agent_steer_received",
+		Level:          "info",
+		Payload: map[string]any{
+			"steer_id":        "steer-late",
+			"client_steer_id": "client-late",
+			"content":         "不要保存旧方案，先停下来。",
+			"content_preview": "不要保存旧方案，先停下来。",
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent returned error: %v", err)
+	}
+	close(allowFirstResponse)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("GenerateReply returned error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for GenerateReply")
+	}
+	file, err := env.files.ReadFile("a.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if file.Content != "before" {
+		t.Fatalf("stale tool call should not have executed, got file content %q", file.Content)
+	}
+	if !messagesContainContent(capturedSecondRequest, "用户在任务运行中补充了最新引导") ||
+		!messagesContainContent(capturedSecondRequest, "不要保存旧方案") {
+		t.Fatalf("steer guidance missing from second provider request: %#v", capturedSecondRequest)
+	}
+}
+
 func TestGenerateReplyOpenAIWriteExistingFile(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -2382,6 +2629,46 @@ func writeOpenAIStreamText(t *testing.T, w http.ResponseWriter, content string) 
 	chunks := []map[string]any{
 		{"choices": []map[string]any{{"delta": map[string]any{"content": content}}}},
 		{"choices": []map[string]any{{"delta": map[string]any{}, "finish_reason": "stop"}}},
+	}
+	for _, chunk := range chunks {
+		raw, err := json.Marshal(chunk)
+		if err != nil {
+			t.Fatalf("Marshal returned error: %v", err)
+		}
+		fmt.Fprintf(w, "data: %s\n\n", raw)
+	}
+	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+func writeOpenAIStreamTextAndToolCall(t *testing.T, w http.ResponseWriter, content, id, name, arguments string) {
+	t.Helper()
+	writeOpenAIStreamTextAndToolCalls(t, w, content, []streamToolCall{{id: id, name: name, args: arguments}})
+}
+
+type streamToolCall struct {
+	id   string
+	name string
+	args string
+}
+
+func writeOpenAIStreamTextAndToolCalls(t *testing.T, w http.ResponseWriter, content string, calls []streamToolCall) {
+	t.Helper()
+	w.Header().Set("Content-Type", "text/event-stream")
+	toolCalls := make([]map[string]any, 0, len(calls))
+	for index, call := range calls {
+		toolCalls = append(toolCalls, map[string]any{
+			"index": index,
+			"id":    call.id,
+			"type":  "function",
+			"function": map[string]any{
+				"name":      call.name,
+				"arguments": call.args,
+			},
+		})
+	}
+	chunks := []map[string]any{
+		{"choices": []map[string]any{{"delta": map[string]any{"content": content}}}},
+		{"choices": []map[string]any{{"delta": map[string]any{"tool_calls": toolCalls}, "finish_reason": "tool_calls"}}},
 	}
 	for _, chunk := range chunks {
 		raw, err := json.Marshal(chunk)

@@ -5,10 +5,41 @@ export function formatFileSize(size) {
 }
 
 export function loadingBubbleText(message, fallbackText = '') {
+  const progress = latestLiveProgressItem(message);
+  if (progress?.text) return progress.text;
   if (message?.loadingState && Object.prototype.hasOwnProperty.call(message.loadingState, 'visibleText')) {
     return message.loadingState.visibleText;
   }
   return fallbackText || '正在处理';
+}
+
+export function latestLiveProgressItem(message) {
+  const items = message?.progressItems || [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (isActiveLiveProgressType(item?.type) && (item.text || '').trim()) {
+      return item;
+    }
+  }
+  return null;
+}
+
+function isActiveLiveProgressType(type = '') {
+  return (
+    type === 'tool_call_started' ||
+    type === 'tool_call_failed' ||
+    type === 'tool_scope_rejected' ||
+    type === 'completion_rejected' ||
+    type === 'local_persistence_failed' ||
+    type === 'agent_budget_exhausted' ||
+    type === 'agent_budget_summary_started' ||
+    type === 'agent_budget_summary_failed' ||
+    type === 'agent_recovery_started' ||
+    type === 'agent_recovery_retrying' ||
+    type === 'agent_recovery_failed' ||
+    type === 'context_compaction_started' ||
+    type === 'context_compaction_failed'
+  );
 }
 
 export function visibleMessageAttachments(message) {

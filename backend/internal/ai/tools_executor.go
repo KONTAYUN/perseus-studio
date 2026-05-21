@@ -14,6 +14,7 @@ import (
 func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, messageID, name, argumentsJSON, operationHash string, opts RunOptions, profile providerRuntimeProfile) (string, ToolEvent, error) {
 	startedAt := time.Now()
 	toolCallID := idgen.NewAt("tc", startedAt)
+	targetSummary := toolTargetSummary(name, argumentsJSON)
 	logTask(opts, "info", fmt.Sprintf("tool call started: %s", name))
 	emitToolLifecycleEvent(opts, "tool_call_started", "info", map[string]any{
 		"tool_call_id":      toolCallID,
@@ -21,6 +22,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		"status":            "running",
 		"operation_hash":    operationHash,
 		"arguments_summary": summarizeToolArguments(argumentsJSON),
+		"target_summary":    targetSummary,
 	})
 	if s.calls != nil {
 		recorded, recordErr := s.calls.StartToolCall(ctx, store.ToolCallInput{
@@ -91,6 +93,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		"operation_hash":    operationHash,
 		"arguments_summary": summarizeToolArguments(argumentsJSON),
 		"result_summary":    truncate(summary, 500),
+		"target_summary":    targetSummary,
 		"duration_ms":       durationMS,
 		"verification":      verification,
 	}
@@ -98,7 +101,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		eventPayload["error"] = errorText
 		eventPayload["recovery_hint"] = toolFailureRecoveryHint(name, errorText)
 	}
-	event := ToolEvent{ToolCallID: toolCallID, ToolName: name, Label: label, Status: status, OperationHash: operationHash, Path: path, Error: errorText, DurationMS: durationMS}
+	event := ToolEvent{ToolCallID: toolCallID, ToolName: name, Label: label, Status: status, TargetSummary: targetSummary, OperationHash: operationHash, Path: path, Error: errorText, DurationMS: durationMS}
 	if status == "success" {
 		var meta struct {
 			Path          string   `json:"path"`
@@ -186,6 +189,8 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		}
 	}
 	if status == "success" {
+		event.TargetSummary = completedToolTargetSummary(name, event, argumentsJSON)
+		eventPayload["target_summary"] = event.TargetSummary
 		if event.Path != "" {
 			eventPayload["path"] = event.Path
 		}

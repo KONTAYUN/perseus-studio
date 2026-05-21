@@ -70,6 +70,18 @@ type streamDeltaEmitter struct {
 	bytes       int
 }
 
+type providerStreamParseOptions struct {
+	EmitText            func(string)
+	RevealTextAfterTool bool
+}
+
+type toolGatedStreamDeltaEmitter struct {
+	inner           *streamDeltaEmitter
+	revealAfterTool bool
+	toolObserved    bool
+	buffer          strings.Builder
+}
+
 func newStreamDeltaEmitter(emit func(string)) *streamDeltaEmitter {
 	return &streamDeltaEmitter{
 		emit:        emit,
@@ -102,8 +114,54 @@ func (e *streamDeltaEmitter) Flush() {
 }
 
 func parseOpenAIStream(body io.Reader, emitText func(string)) (agentModelTurn, error) {
+	return parseOpenAIStreamWithOptions(body, providerStreamParseOptions{EmitText: emitText})
+}
+
+func newToolGatedStreamDeltaEmitter(opts providerStreamParseOptions) *toolGatedStreamDeltaEmitter {
+	return &toolGatedStreamDeltaEmitter{
+		inner:           newStreamDeltaEmitter(opts.EmitText),
+		revealAfterTool: opts.RevealTextAfterTool,
+	}
+}
+
+func (e *toolGatedStreamDeltaEmitter) Add(text string) {
+	if e == nil || text == "" {
+		return
+	}
+	if !e.revealAfterTool || e.toolObserved {
+		e.inner.Add(text)
+		return
+	}
+	e.buffer.WriteString(text)
+}
+
+func (e *toolGatedStreamDeltaEmitter) MarkToolObserved() {
+	if e == nil || e.toolObserved {
+		return
+	}
+	e.toolObserved = true
+	if e.buffer.Len() == 0 {
+		return
+	}
+	e.inner.Add(e.buffer.String())
+	e.buffer.Reset()
+	e.inner.Flush()
+}
+
+func (e *toolGatedStreamDeltaEmitter) Flush() {
+	if e == nil {
+		return
+	}
+	if !e.revealAfterTool || e.toolObserved {
+		e.inner.Flush()
+		return
+	}
+	e.buffer.Reset()
+}
+
+func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOptions) (agentModelTurn, error) {
 	var content strings.Builder
-	deltas := newStreamDeltaEmitter(emitText)
+	deltas := newToolGatedStreamDeltaEmitter(opts)
 	visibleText := newProviderVisibleTextFilter()
 	toolBuilders := map[int]*openAIStreamToolBuilder{}
 	finishReason := ""
@@ -124,6 +182,7 @@ func parseOpenAIStream(body io.Reader, emitText func(string)) (agentModelTurn, e
 				appendProviderVisibleText(&content, deltas, visibleText, text)
 			}
 			for _, item := range choice.Delta.ToolCalls {
+				deltas.MarkToolObserved()
 				builder := toolBuilders[item.Index]
 				if builder == nil {
 					builder = &openAIStreamToolBuilder{}

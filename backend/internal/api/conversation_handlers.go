@@ -258,6 +258,21 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			UserID:         user.UserID,
 			ConversationID: conversationID,
 			MessageID:      userMessage.ID,
+			Type:           "user_message_committed",
+			Level:          "info",
+			Payload: map[string]any{
+				"message":      "user message committed",
+				"user_message": userMessage,
+			},
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if _, err := s.appendRunEventStrict(r.Context(), store.AgentEventInput{
+			RunID:          run.ID,
+			UserID:         user.UserID,
+			ConversationID: conversationID,
+			MessageID:      userMessage.ID,
 			Type:           "run_queued",
 			Level:          "info",
 			Payload: map[string]any{

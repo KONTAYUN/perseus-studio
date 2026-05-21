@@ -2,7 +2,7 @@ package ai
 
 import "strings"
 
-var providerReasoningTagNames = []string{"thinking", "think"}
+var providerReasoningTagNames = []string{"thinking", "think", "tool_call", "tool_calls"}
 
 type providerVisibleTextFilter struct {
 	buffer    string
@@ -19,7 +19,11 @@ func providerVisibleText(text string) string {
 	return strings.TrimSpace(filter.Feed(text) + filter.Close())
 }
 
-func appendProviderVisibleText(content *strings.Builder, deltas *streamDeltaEmitter, filter *providerVisibleTextFilter, text string) string {
+type providerVisibleTextEmitter interface {
+	Add(string)
+}
+
+func appendProviderVisibleText(content *strings.Builder, deltas providerVisibleTextEmitter, filter *providerVisibleTextFilter, text string) string {
 	if filter == nil {
 		filter = newProviderVisibleTextFilter()
 	}
@@ -35,7 +39,7 @@ func appendProviderVisibleText(content *strings.Builder, deltas *streamDeltaEmit
 	return visible
 }
 
-func closeProviderVisibleText(content *strings.Builder, deltas *streamDeltaEmitter, filter *providerVisibleTextFilter) string {
+func closeProviderVisibleText(content *strings.Builder, deltas providerVisibleTextEmitter, filter *providerVisibleTextFilter) string {
 	if filter == nil {
 		return ""
 	}

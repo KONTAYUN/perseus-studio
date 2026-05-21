@@ -95,9 +95,9 @@ export function agentEventText(type, payload = {}) {
     case 'model_stream_recovering':
       return playfulPendingStatus(type);
     case 'tool_call_started':
-      return pendingToolStatus(payload.tool_name);
+      return pendingToolStatus(payload);
     case 'tool_call_completed':
-      return completedToolStatus(payload.tool_name);
+      return completedToolStatus(payload);
     case 'user_question_requested':
       return '';
     case 'tool_call_failed':
@@ -161,33 +161,45 @@ export function agentEventText(type, payload = {}) {
   }
 }
 
-export function pendingToolStatus(toolName) {
-  if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return '正在查看工作区';
-  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return '正在读取文件';
-  if (toolName === 'edit_workspace_text') return '正在编辑文件';
-  if (toolName === 'save_workspace_file') return '正在保存文件';
-  if (toolName === 'manage_workspace_path') return '正在管理路径';
-  if (toolName === 'organize_workspace_matches') return '正在整理文件';
-  if (toolName === 'run_workspace_command') return '正在运行命令';
-  if (toolName === 'perseus_search_web' || toolName === 'web_search') return '正在搜索资料';
-  if (toolName === 'web_extract') return '正在读取网页';
-  if (toolName === 'list_skills' || toolName === 'read_skill' || toolName === 'install_skill_from_attachment' || toolName === 'delete_skill') return '正在处理技能';
+export function pendingToolStatus(input) {
+  const { toolName, target } = normalizeToolStatusInput(input);
+  if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return target ? `正在查看 ${target}` : '正在查看工作区';
+  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return target ? `正在读取 ${target}` : '正在读取文件';
+  if (toolName === 'edit_workspace_text') return target ? `正在编辑 ${target}` : '正在编辑文件';
+  if (toolName === 'save_workspace_file') return target ? `正在保存 ${target}` : '正在保存文件';
+  if (toolName === 'manage_workspace_path') return target ? `正在管理 ${target}` : '正在管理路径';
+  if (toolName === 'organize_workspace_matches') return target ? `正在整理 ${target}` : '正在整理文件';
+  if (toolName === 'run_workspace_command') return target ? `正在运行 ${target} 的命令` : '正在运行命令';
+  if (toolName === 'perseus_search_web' || toolName === 'web_search') return target ? `正在搜索 ${target}` : '正在搜索资料';
+  if (toolName === 'web_extract') return target ? `正在读取 ${target}` : '正在读取网页';
+  if (toolName === 'list_skills' || toolName === 'read_skill' || toolName === 'install_skill_from_attachment' || toolName === 'delete_skill') return target ? `正在处理 ${target}` : '正在处理技能';
   return playfulPendingStatus(toolName || 'default');
 }
 
-export function completedToolStatus(toolName) {
+export function completedToolStatus(input) {
+  const { toolName, target } = normalizeToolStatusInput(input);
   if (toolName === 'ask_followup_question') return '';
-  if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return '已查看工作区';
-  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return '已读取文件';
-  if (toolName === 'edit_workspace_text') return '已编辑文件';
-  if (toolName === 'save_workspace_file') return '已保存文件';
-  if (toolName === 'manage_workspace_path') return '已管理路径';
-  if (toolName === 'organize_workspace_matches') return '已整理文件';
-  if (toolName === 'run_workspace_command') return '已运行命令';
-  if (toolName === 'perseus_search_web' || toolName === 'web_search') return '已搜索资料';
-  if (toolName === 'web_extract') return '已读取网页';
-  if (toolName === 'list_skills' || toolName === 'read_skill' || toolName === 'install_skill_from_attachment' || toolName === 'delete_skill') return '已处理技能';
+  if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return target ? `已查看 ${target}` : '已查看工作区';
+  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return target ? `已读取 ${target}` : '已读取文件';
+  if (toolName === 'edit_workspace_text') return target ? `已编辑 ${target}` : '已编辑文件';
+  if (toolName === 'save_workspace_file') return target ? `已保存 ${target}` : '已保存文件';
+  if (toolName === 'manage_workspace_path') return target ? `已管理 ${target}` : '已管理路径';
+  if (toolName === 'organize_workspace_matches') return target ? `已整理 ${target}` : '已整理文件';
+  if (toolName === 'run_workspace_command') return target ? `已运行 ${target} 的命令` : '已运行命令';
+  if (toolName === 'perseus_search_web' || toolName === 'web_search') return target ? `已搜索 ${target}` : '已搜索资料';
+  if (toolName === 'web_extract') return target ? `已读取 ${target}` : '已读取网页';
+  if (toolName === 'list_skills' || toolName === 'read_skill' || toolName === 'install_skill_from_attachment' || toolName === 'delete_skill') return target ? `已处理 ${target}` : '已处理技能';
   return '已处理';
+}
+
+function normalizeToolStatusInput(input) {
+  if (typeof input === 'string') {
+    return { toolName: input, target: '' };
+  }
+  return {
+    toolName: input?.tool_name || input?.toolName || '',
+    target: String(input?.target_summary || input?.targetSummary || '').trim(),
+  };
 }
 
 export function playfulPendingStatus(seed = '') {

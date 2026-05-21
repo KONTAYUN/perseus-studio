@@ -30,6 +30,42 @@ export function buildAssistantRunShell({ id, conversationId, createdAt, content 
   };
 }
 
+export function mergeCommittedRunStart(
+  messages,
+  {
+    optimisticUserId = '',
+    thinkingId = '',
+    userMessage,
+    assistantShell,
+  } = {}
+) {
+  const committedUser = normalizeConversationMessage(userMessage);
+  if (!committedUser?.id || !thinkingId) return messages || [];
+  const shell = normalizeRunShell(
+    (messages || []).find((item) => item.id === thinkingId) || assistantShell,
+    thinkingId,
+    committedUser.conversation_id
+  );
+  const withoutPlaceholders = removeRunStartPlaceholders(messages, {
+    optimisticUserId,
+    thinkingId,
+    committedUser,
+  });
+  const userIndex = findCommittedUserIndex(withoutPlaceholders, committedUser);
+  const nextMessages = [...withoutPlaceholders];
+  const insertUserIndex = userIndex >= 0 ? userIndex : nextMessages.length;
+  if (userIndex >= 0) {
+    nextMessages[insertUserIndex] = {
+      ...nextMessages[insertUserIndex],
+      ...committedUser,
+    };
+  } else {
+    nextMessages.splice(insertUserIndex, 0, committedUser);
+  }
+  nextMessages.splice(insertUserIndex + 1, 0, shell);
+  return nextMessages;
+}
+
 export function appendUniqueProgressItem(items, nextItem) {
   if (!nextItem?.id) return items;
   if ((items || []).some((item) => item.id === nextItem.id)) return items;
@@ -40,7 +76,10 @@ export function appendRunProgressItem(messages, thinkingId, nextItem) {
   if (!thinkingId || !nextItem?.id) return messages;
   let changed = false;
   const nextMessages = (messages || []).map((item) => {
-    if (item.id !== thinkingId || item.activeMessageId) return item;
+    const isTarget =
+      item.id === thinkingId ||
+      (item.role === 'assistant' && item.pending && item.activeMessageId);
+    if (!isTarget) return item;
     changed = true;
     return {
       ...item,
@@ -71,6 +110,7 @@ export function mergeAssistantMessageStarted(messages, thinkingId, assistantMess
     nextMessages.push({
       ...nextAssistant,
       loadingState: item.loadingState || nextAssistant.loadingState,
+      progressItems: item.progressItems || [],
     });
   }
   return inserted ? nextMessages : [...(messages || []), nextAssistant];
@@ -249,6 +289,12 @@ export function normalizeConversationMessage(message) {
     attachments: [],
     ...message,
   };
+  if (next.meta?.kind && !next.kind) {
+    next.kind = next.meta.kind;
+  }
+  if (next.meta?.status && !next.status) {
+    next.status = next.meta.status;
+  }
   if (next.role === 'assistant' && next.status === 'streaming') {
     next.pending = true;
     next.activeMessageId = next.id;
@@ -281,4 +327,42 @@ export function mapPendingAssistant(current, thinkingId, transform) {
     return transform(item);
   });
   return next;
+}
+
+function normalizeRunShell(shell, thinkingId, conversationId) {
+  const base = buildAssistantRunShell({
+    id: thinkingId,
+    conversationId,
+    createdAt: new Date().toISOString(),
+  });
+  return {
+    ...base,
+    ...(shell || {}),
+    id: thinkingId,
+    conversation_id: conversationId || shell?.conversation_id || base.conversation_id,
+    role: 'assistant',
+    pending: true,
+  };
+}
+
+function removeRunStartPlaceholders(messages, { optimisticUserId, thinkingId, committedUser }) {
+  return (messages || []).filter((item) => {
+    if (!item) return false;
+    if (item.id === thinkingId) return false;
+    if (item.id === optimisticUserId) return false;
+    if (item.id === committedUser.id) return true;
+    if (
+      item.role === 'user' &&
+      item.id?.startsWith?.('temp_user_') &&
+      item.conversation_id === committedUser.conversation_id &&
+      item.content === committedUser.content
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function findCommittedUserIndex(messages, committedUser) {
+  return (messages || []).findIndex((item) => item.id === committedUser.id);
 }

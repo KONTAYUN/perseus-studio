@@ -7,6 +7,8 @@ import {
   markRunSteerFailed,
   markRunSteerReceived,
   removeRunSteerItem,
+  removeRunSteerItems,
+  unappliedRunSteerItems,
 } from './chatSteerItems';
 
 export function textOnlyPayload(content, { conversationId = '', thinkingMode = 'standard' } = {}) {
@@ -28,6 +30,7 @@ export function createChatSteerActions({
   chatInput,
   chatSkillReferences,
   currentConversationId,
+  currentConversationIdRef,
   isChatSending,
   pendingRunMessage,
   runSteerItems,
@@ -44,7 +47,7 @@ export function createChatSteerActions({
     setPendingRunMessage({
       id: `pending_run_${Date.now()}`,
       content: trimmedContent,
-      conversationId: activeAgentRunRef.current?.conversationId || currentConversationId,
+      conversationId: activeAgentRunRef.current?.conversationId || currentConversationIdRef?.current || currentConversationId,
       createdAt: new Date().toISOString(),
       thinkingMode,
     });
@@ -122,7 +125,7 @@ export function createChatSteerActions({
     if (!isChatSending || !activeRun?.runId) {
       setPendingRunMessage((current) => (options.pendingId && current?.id === options.pendingId ? null : current));
       await sendChatPayloadRef.current?.(textOnlyPayload(trimmedContent, {
-        conversationId: options.conversationId || currentConversationId,
+        conversationId: options.conversationId || currentConversationIdRef?.current || currentConversationId,
         thinkingMode: options.thinkingMode || thinkingMode,
       }));
       return true;
@@ -131,7 +134,7 @@ export function createChatSteerActions({
     const steerItem = buildRunSteerItem({
       clientSteerId,
       content: trimmedContent,
-      conversationId: activeRun.conversationId || options.conversationId || currentConversationId,
+      conversationId: activeRun.conversationId || options.conversationId || currentConversationIdRef?.current || currentConversationId,
       runId: activeRun.runId,
       pendingId: options.pendingId || '',
     });
@@ -146,7 +149,7 @@ export function createChatSteerActions({
       setRunSteerItems((current) => markRunSteerReceived(current, result?.event?.payload || {}, {
         clientSteerId,
         content: trimmedContent,
-        conversationId: activeRun.conversationId || options.conversationId || currentConversationId,
+        conversationId: activeRun.conversationId || options.conversationId || currentConversationIdRef?.current || currentConversationId,
         runId: activeRun.runId,
       }));
       return true;
@@ -188,6 +191,7 @@ function findRunSteerItem(items, itemId) {
 
 export function usePendingRunMessageAutoSend({
   currentConversationId,
+  currentConversationIdRef,
   isChatSending,
   pendingRunMessage,
   resumableRun,
@@ -202,10 +206,48 @@ export function usePendingRunMessageAutoSend({
     setPendingRunMessage(null);
     setRunSteerNotice(null);
     sendChatPayloadRef.current?.(textOnlyPayload(nextMessage.content, {
-      conversationId: nextMessage.conversationId || currentConversationId,
+      conversationId: nextMessage.conversationId || currentConversationIdRef?.current || currentConversationId,
       thinkingMode: nextMessage.thinkingMode || thinkingMode,
     }));
-  }, [currentConversationId, isChatSending, pendingRunMessage, resumableRun, sendChatPayloadRef, setPendingRunMessage, setRunSteerNotice, thinkingMode]);
+  }, [currentConversationId, currentConversationIdRef, isChatSending, pendingRunMessage, resumableRun, sendChatPayloadRef, setPendingRunMessage, setRunSteerNotice, thinkingMode]);
+}
+
+export function useMissedRunSteerAutoQueue({
+  currentConversationId,
+  currentConversationIdRef,
+  isChatSending,
+  resumableRun,
+  runSteerItems,
+  setPendingRunMessage,
+  setRunSteerItems,
+  setRunSteerNotice,
+  thinkingMode,
+}) {
+  useEffect(() => {
+    if (isChatSending || resumableRun) return;
+    const missed = unappliedRunSteerItems(runSteerItems);
+    if (missed.length === 0) return;
+    const content = missed.map((item) => item.content).filter(Boolean).join('\n\n').trim();
+    if (!content) return;
+    setRunSteerItems((current) =>
+      removeRunSteerItems(
+        current,
+        missed.flatMap((item) => [item.id, item.clientSteerId, item.steerId])
+      )
+    );
+    setPendingRunMessage({
+      id: `pending_run_${Date.now()}`,
+      content,
+      conversationId: missed[0]?.conversation_id || currentConversationIdRef?.current || currentConversationId,
+      createdAt: new Date().toISOString(),
+      thinkingMode,
+    });
+    setRunSteerNotice({
+      id: `steer_missed_${Date.now()}`,
+      status: 'queued',
+      text: '引导没有赶上上一轮，已转为下一条消息。',
+    });
+  }, [currentConversationId, currentConversationIdRef, isChatSending, resumableRun, runSteerItems, setPendingRunMessage, setRunSteerItems, setRunSteerNotice, thinkingMode]);
 }
 
 export function useActiveAgentRunRef(activeAgentRun, activeAgentRunRef) {

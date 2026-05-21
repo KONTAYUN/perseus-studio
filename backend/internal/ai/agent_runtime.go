@@ -42,6 +42,29 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 			continue
 		}
 		turn.ToolCalls = normalizeAgentToolCallIDs(turn.ToolCalls)
+		if pending, err := r.hasPendingSteers(ctx); err != nil {
+			return Reply{}, err
+		} else if pending {
+			emitToolLifecycleEvent(r.opts, "agent_steer_deferred_stale_turn", "info", map[string]any{
+				"round":         round + 1,
+				"tool_calls":    len(turn.ToolCalls),
+				"message":       "new user guidance arrived before tool execution; stale tool turn skipped",
+				"recovery_hint": "apply pending steer before executing model-planned tools",
+				"safe_boundary": "before_tool_execution",
+			})
+			continue
+		}
+		var skippedToolCalls int
+		turn, skippedToolCalls = prepareToolTurnForExecution(turn)
+		if skippedToolCalls > 0 {
+			emitToolLifecycleEvent(r.opts, "tool_calls_serialized", "info", map[string]any{
+				"round":         round + 1,
+				"executed":      1,
+				"skipped":       skippedToolCalls,
+				"message":       "model returned multiple tool calls; executing one before asking for the next step",
+				"safe_boundary": "after_each_tool",
+			})
+		}
 		r.commitAssistantContent(turn)
 		if r.opts.OnAssistantToolBoundary != nil {
 			r.opts.OnAssistantToolBoundary()

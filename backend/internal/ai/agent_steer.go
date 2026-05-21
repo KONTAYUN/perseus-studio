@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"webide-backend/internal/store"
 )
@@ -46,6 +47,7 @@ func (r *agentRuntime) applyPendingSteers(ctx context.Context, round int) error 
 			"client_steer_id": item.ClientSteerID,
 			"content_preview": firstNonEmpty(item.Preview, contentPreviewForSteer(content, 120)),
 			"round":           round + 1,
+			"created_at":      time.Now().UTC().Format(time.RFC3339Nano),
 			"message":         "引导已应用到当前任务",
 		}
 		if r.opts.Event == nil {
@@ -68,6 +70,17 @@ func (r *agentRuntime) applyPendingSteers(ctx context.Context, round int) error 
 		return err
 	}
 	return nil
+}
+
+func (r *agentRuntime) hasPendingSteers(ctx context.Context) (bool, error) {
+	if r == nil || r.service == nil || r.service.runs == nil || r.opts.UserID == "" || r.opts.RunID == "" {
+		return false, nil
+	}
+	items, err := pendingSteersForRun(ctx, r.service.runs, r.opts.UserID, r.opts.RunID)
+	if err != nil {
+		return false, err
+	}
+	return len(items) > 0, nil
 }
 
 func pendingSteersForRun(ctx context.Context, runs *store.AgentRunStore, userID, runID string) ([]pendingSteer, error) {

@@ -41,3 +41,13 @@ func TestProviderVisibleTextKeepsTextBeforeStrayClosingTag(t *testing.T) {
 		t.Fatalf("unexpected visible text: %q", got)
 	}
 }
+
+func TestProviderVisibleTextRemovesToolCallProtocolBlocks(t *testing.T) {
+	got := providerVisibleText("先看文件\n<tool_call>{\"name\":\"read_workspace_text\"}</tool_call>\n继续")
+	if strings.Contains(got, "tool_call") || strings.Contains(got, "read_workspace_text") {
+		t.Fatalf("tool protocol leaked: %q", got)
+	}
+	if strings.TrimSpace(got) != "先看文件\n\n继续" {
+		t.Fatalf("unexpected visible text: %q", got)
+	}
+}

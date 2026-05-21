@@ -17,8 +17,12 @@ type anthropicStreamBlock struct {
 }
 
 func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn, error) {
+	return parseAnthropicStreamWithOptions(body, providerStreamParseOptions{EmitText: emitText})
+}
+
+func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOptions) (agentModelTurn, error) {
 	var content strings.Builder
-	deltas := newStreamDeltaEmitter(emitText)
+	deltas := newToolGatedStreamDeltaEmitter(opts)
 	visibleText := newProviderVisibleTextFilter()
 	blocks := map[int]*anthropicStreamBlock{}
 	finishReason := ""
@@ -54,6 +58,9 @@ func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn
 			block.Type, _ = blockRaw["type"].(string)
 			block.ID, _ = blockRaw["id"].(string)
 			block.Name, _ = blockRaw["name"].(string)
+			if block.Type == "tool_use" {
+				deltas.MarkToolObserved()
+			}
 			if text, _ := blockRaw["text"].(string); text != "" {
 				visible := appendProviderVisibleText(&content, deltas, visibleText, text)
 				block.Text.WriteString(visible)

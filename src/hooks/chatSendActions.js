@@ -1,6 +1,6 @@
 import { apiPostFormWithSignal } from '../api/client';
 import { formatChatError } from './chatErrorUtils';
-import { buildAssistantRunShell, mapPendingAssistant } from './chatStateUtils.js';
+import { buildAssistantRunShell, mapPendingAssistant, mergeCommittedRunStart } from './chatStateUtils.js';
 
 export function createChatSendActions({
   activeChatAbortRef,
@@ -10,7 +10,9 @@ export function createChatSendActions({
   chatInput,
   chatSkillReferences,
   compactCurrentConversation,
+  conversationTransitionRef,
   createPendingRunMessage,
+  currentConversationIdRef,
   currentConversationId,
   ensureConversation,
   hasUnsupportedRuntimeGuidance,
@@ -49,6 +51,7 @@ export function createChatSendActions({
       setChatError('请先在设置页配置并启用模型');
       return;
     }
+    await waitForConversationTransition(conversationTransitionRef);
     if (isChatSending && !usingOverride) {
       if (hasUnsupportedRuntimeGuidance) {
         warnUnsupportedRuntimeGuidance();
@@ -59,6 +62,7 @@ export function createChatSendActions({
     }
     const payload = {
       content: trimmedContent,
+      conversationId: currentConversationIdRef?.current || currentConversationId,
       attachments: attachmentsForSend.map((item) => ({
         id: item.id,
         name: item.name,
@@ -94,12 +98,14 @@ export function createChatSendActions({
       setChatError('请先在设置页配置并启用模型');
       return;
     }
+    await waitForConversationTransition(conversationTransitionRef);
     const payload = {
       content: trimmedAnswer,
       attachments: [],
       fileReferences: [],
       skillReferences: [],
       currentFileContext: null,
+      conversationId: currentConversationIdRef?.current || currentConversationId,
       thinkingMode,
     };
     if (isChatSending) {
@@ -110,7 +116,9 @@ export function createChatSendActions({
   }
 
   async function sendChatPayload(payload) {
+    await waitForConversationTransition(conversationTransitionRef);
     const trimmedContent = payload.content.trim();
+    const conversationIDForPayload = payload.conversationId || currentConversationIdRef?.current || currentConversationId;
     const stamp = Date.now();
     const optimisticId = `temp_user_${stamp}`;
     const thinkingId = `temp_assistant_${stamp}`;
@@ -134,7 +142,7 @@ export function createChatSendActions({
       ...current.filter((item) => !(item.queued && item.content === trimmedContent)),
       {
         id: optimisticId,
-        conversation_id: currentConversationId || 'pending',
+        conversation_id: conversationIDForPayload || 'pending',
         role: 'user',
         content: trimmedContent,
         attachments: metadataAttachments,
@@ -142,7 +150,7 @@ export function createChatSendActions({
       },
       buildAssistantRunShell({
         id: thinkingId,
-        conversationId: currentConversationId || 'pending',
+        conversationId: conversationIDForPayload || 'pending',
         createdAt: new Date().toISOString(),
         content: '',
         attachments: [],
@@ -150,12 +158,13 @@ export function createChatSendActions({
     ]);
     setIsChatSending(true);
 
-    let conversationID = payload.conversationId || currentConversationId;
+    let conversationID = conversationIDForPayload;
     const abortController = new AbortController();
     const control = { abort: () => abortController.abort() };
     activeChatAbortRef.current = control;
     try {
       if (conversationID) {
+        currentConversationIdRef.current = conversationID;
         setCurrentConversationId(conversationID);
       } else {
         conversationID = await ensureConversation(selectedModel.id);
@@ -167,6 +176,23 @@ export function createChatSendActions({
         abortController.signal
       );
       setCurrentConversationId(result.conversation.id);
+      currentConversationIdRef.current = result.conversation.id;
+      if (result.user_message) {
+        setConversationMessages((current) =>
+          mergeCommittedRunStart(current, {
+            optimisticUserId: optimisticId,
+            thinkingId,
+            userMessage: result.user_message,
+            assistantShell: buildAssistantRunShell({
+              id: thinkingId,
+              conversationId: result.conversation.id,
+              createdAt: new Date().toISOString(),
+              content: '',
+              attachments: [],
+            }),
+          })
+        );
+      }
       if (result.run?.id) {
         await waitForAgentRun(result.run.id, result.conversation.id, thinkingId, control);
       } else {
@@ -184,12 +210,13 @@ export function createChatSendActions({
   }
 
   function setQueuedUserMessage(payload, content) {
+    const conversationIDForPayload = payload.conversationId || currentConversationIdRef?.current || currentConversationId;
     setQueuedChatMessages((current) => [...current, payload]);
     setConversationMessages((current) => [
       ...current,
       {
         id: `queued_user_${Date.now()}`,
-        conversation_id: currentConversationId || 'pending',
+        conversation_id: conversationIDForPayload || 'pending',
         role: 'user',
         content,
         attachments: [
@@ -247,6 +274,17 @@ export function createChatSendActions({
     sendChatPayload,
     sendFollowupAnswer,
   };
+}
+
+async function waitForConversationTransition(conversationTransitionRef) {
+  const transition = conversationTransitionRef?.current;
+  if (!transition) return;
+  try {
+    await transition;
+  } catch {
+    // The branch/select action owns the visible error. Sending then continues
+    // against the last confirmed conversation, matching Codex-style committed state.
+  }
 }
 
 function buildMessageFormData(payload, modelProviderId, defaultThinkingMode, filesToSend) {

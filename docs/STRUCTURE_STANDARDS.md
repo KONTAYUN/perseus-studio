@@ -29,6 +29,7 @@ When a file grows too large, split it by the responsibility it already contains.
 - Hooks/actions own state flow, async actions, and cross-component coordination.
 - Utilities contain pure functions only.
 - Chat stream merging belongs in chat stream utilities/actions, not render components.
+- Running input queue semantics belong in chat state/actions: queued follow-up messages, pending steers, rejected steers, and committed steer messages must stay separate, following the Codex-style input queue documented in `HARNESS.md`.
 - File tree selection, drag/drop, mutation, trash, search, and download behavior stay in their existing hook/action modules.
 - Layout math and FLIP/animation helpers stay in layout modules.
 - Chat Composer changes stay inside `src/components/chat/composer/`; the wrapper remains a facade.

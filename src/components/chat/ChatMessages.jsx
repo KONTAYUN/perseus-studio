@@ -1,6 +1,6 @@
 import React from 'react';
 import { Copy, GitBranch, MessageSquare, RefreshCw, Trash2 } from 'lucide-react';
-import { completedActionItems, formatDate, loadingBubbleText, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
+import { completedActionItems, formatDate, latestLiveProgressItem, loadingBubbleText, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
 import { Button, IconButton } from '../ui';
 import { RUN_STEER_STATUS, runSteerStatusLabel } from '../../hooks/chatSteerItems';
 
@@ -104,6 +104,7 @@ function MessageBubble({ message, ide, canRegenerate }) {
               {message.content}
             </div>
           )}
+          {!showLoadingOnly && message.pending && <LiveProgressLine message={message} />}
           {actionItems.length > 0 && <CompletedActionItems items={actionItems} />}
           {isSteerMessage && message.status === RUN_STEER_STATUS.failed && (
             <SteerFailureActions message={message} ide={ide} />
@@ -167,6 +168,17 @@ function MessageBubble({ message, ide, canRegenerate }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function LiveProgressLine({ message }) {
+  const item = latestLiveProgressItem(message);
+  if (!item?.text) return null;
+  return (
+    <div className="mt-2 flex min-w-0 max-w-full items-center gap-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+      <span className="min-w-0 truncate">{item.text}</span>
     </div>
   );
 }

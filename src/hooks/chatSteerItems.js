@@ -7,9 +7,9 @@ export const RUN_STEER_STATUS = {
 
 const RUN_STEER_STATUS_ORDER = {
   [RUN_STEER_STATUS.submitting]: 0,
-  [RUN_STEER_STATUS.failed]: 1,
-  [RUN_STEER_STATUS.received]: 2,
-  [RUN_STEER_STATUS.applied]: 3,
+  [RUN_STEER_STATUS.received]: 1,
+  [RUN_STEER_STATUS.applied]: 2,
+  [RUN_STEER_STATUS.failed]: 3,
 };
 
 export function buildRunSteerItem({
@@ -41,13 +41,13 @@ export function buildRunSteerItem({
 export function runSteerStatusLabel(status) {
   switch (status) {
     case RUN_STEER_STATUS.submitting:
-      return '待引导';
+      return '正在引导';
     case RUN_STEER_STATUS.received:
-      return '待引导';
+      return '正在引导';
     case RUN_STEER_STATUS.applied:
       return '已引导对话';
     case RUN_STEER_STATUS.failed:
-      return '引导失败';
+      return '引导未送达';
     default:
       return '';
   }
@@ -63,6 +63,30 @@ export function appendRunSteerItem(items, nextItem) {
 
 export function removeRunSteerItem(items, itemId) {
   return (items || []).filter((item) => item.id !== itemId && item.clientSteerId !== itemId && item.steerId !== itemId);
+}
+
+export function removeRunSteerItems(items, itemIds = []) {
+  const ids = new Set((itemIds || []).filter(Boolean));
+  if (ids.size === 0) return items || [];
+  return (items || []).filter((item) => !ids.has(item.id) && !ids.has(item.clientSteerId) && !ids.has(item.steerId));
+}
+
+export function unappliedRunSteerItems(items) {
+  return (items || []).filter(
+    (item) =>
+      item?.content &&
+      (item.status === RUN_STEER_STATUS.submitting || item.status === RUN_STEER_STATUS.received)
+  );
+}
+
+export function pendingRunSteerPreviewItems(items) {
+  return (items || []).filter(
+    (item) =>
+      item?.content &&
+      (item.status === RUN_STEER_STATUS.submitting ||
+        item.status === RUN_STEER_STATUS.received ||
+        item.status === RUN_STEER_STATUS.failed)
+  );
 }
 
 export function markRunSteerFailed(items, itemId, error = '') {
@@ -96,11 +120,18 @@ export function markRunSteerRejected(items, eventPayload = {}, fallback = {}) {
 }
 
 export function mergeRunSteerItemsWithMessages(messages, runSteerItems) {
-  const visibleItems = (runSteerItems || []).filter((item) => item?.content);
+  const visibleItems = (runSteerItems || []).filter(
+    (item) =>
+      item?.content &&
+      item.status === RUN_STEER_STATUS.applied &&
+      !hasMatchingSteerMessage(messages, item)
+  );
   if (visibleItems.length === 0) return messages || [];
   const messageIds = new Set((messages || []).map((message) => message.id));
   const additions = visibleItems.filter((item) => !messageIds.has(item.id));
   return [...(messages || []), ...additions].sort((a, b) => {
+    if (isSteerMessage(a) && isPendingAssistantMessage(b)) return -1;
+    if (isPendingAssistantMessage(a) && isSteerMessage(b)) return 1;
     const aTime = Date.parse(a.created_at || '') || 0;
     const bTime = Date.parse(b.created_at || '') || 0;
     if (aTime !== bTime) return aTime - bTime;
@@ -182,6 +213,26 @@ function strongerRunSteerStatus(currentStatus, nextStatus) {
   const currentRank = RUN_STEER_STATUS_ORDER[currentStatus] ?? 0;
   const nextRank = RUN_STEER_STATUS_ORDER[nextStatus] ?? 0;
   return nextRank >= currentRank ? nextStatus : currentStatus;
+}
+
+function isSteerMessage(message) {
+  return message?.kind === 'steer' || message?.meta?.kind === 'steer';
+}
+
+function isPendingAssistantMessage(message) {
+  return message?.role === 'assistant' && !!message?.pending;
+}
+
+function hasMatchingSteerMessage(messages, item) {
+  return (messages || []).some((message) => {
+    if (!isSteerMessage(message)) return false;
+    const meta = message.meta || {};
+    return (
+      (!!item.steerId && meta.steer_id === item.steerId) ||
+      (!!item.clientSteerId && meta.client_steer_id === item.clientSteerId) ||
+      (!!item.content && message.content === item.content)
+    );
+  });
 }
 
 function removeEmptyFields(value) {

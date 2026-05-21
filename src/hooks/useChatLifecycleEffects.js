@@ -6,6 +6,7 @@ export default function useChatLifecycleEffects({
   contextUsageRequestRef,
   conversationMessages,
   conversationMessagesRef,
+  currentConversationIdRef,
   currentConversationId,
   loadConversationMessages,
   setAgentRecoveryNotice,
@@ -17,6 +18,10 @@ export default function useChatLifecycleEffects({
   useEffect(() => {
     conversationMessagesRef.current = conversationMessages;
   }, [conversationMessages, conversationMessagesRef]);
+
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversationId || '';
+  }, [currentConversationId, currentConversationIdRef]);
 
   useEffect(() => {
     if (!contextCompactionNotice || contextCompactionNotice.status === 'started') return undefined;

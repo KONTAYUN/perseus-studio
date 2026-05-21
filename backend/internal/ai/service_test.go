@@ -741,6 +741,22 @@ func TestBudgetToolResultForModelPreservesBatchReadItemsShape(t *testing.T) {
 	}
 }
 
+func TestToolTargetSummaryAvoidsContentAndKeepsSafeTarget(t *testing.T) {
+	saveArgs := `{"path":"drafts/chapter-1.md","content":"secret long content","mode":"overwrite"}`
+	if got := toolTargetSummary("save_workspace_file", saveArgs); got != "drafts/chapter-1.md" {
+		t.Fatalf("unexpected save target summary: %q", got)
+	}
+	if strings.Contains(toolTargetSummary("save_workspace_file", saveArgs), "secret") {
+		t.Fatal("target summary leaked file content")
+	}
+	if got := toolTargetSummary("read_workspace_files", `{"paths":["a.md","b.md","c.md"]}`); got != "3 个文件" {
+		t.Fatalf("unexpected batch read target summary: %q", got)
+	}
+	if got := toolTargetSummary("search_workspace_text", `{"query":"关键线索"}`); got != "“关键线索”" {
+		t.Fatalf("unexpected search target summary: %q", got)
+	}
+}
+
 func TestSanitizeConversationMessagesTruncatesOlderHistory(t *testing.T) {
 	messages := []store.Message{
 		{Role: "user", Content: strings.Repeat("old", 100)},

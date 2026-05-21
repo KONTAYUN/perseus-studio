@@ -73,6 +73,16 @@ For any frontend UI work, read and follow `docs/UI_DESIGN_SYSTEM.md` before chan
 - Backend agent changes should preserve these boundaries: runtime loop, model turn, checkpoint recovery, tool loop, completion/follow-up, tool registry, tool arguments/ledger, and tool events.
 - Prefer mature agent boundaries over local patch logic: read/search/edit tools, workflow completion, follow-up question, checkpoint recovery, and durable tool ledger remain separate concepts.
 
+## Running Input Queue Rules
+
+Runtime input must follow the Codex-style queue model, not ad hoc chat bubbles:
+
+- A normal message submitted while a run is busy is a queued follow-up message. It stays above the composer and is sent after the current run reaches a terminal state, unless the run is recoverable and should be continued first.
+- A steer submitted while a run is busy is a pending steer. Show it immediately as pending input above the composer; do not merge it into conversation history until the backend emits `agent_steer_applied`.
+- A steer that is rejected or cannot be delivered stays in the pending-input area with retry/delete/queue-after-run actions. It is not a committed chat-history message.
+- If a pending steer misses the active run before it is applied, move it into the queued follow-up path instead of leaving it stuck as pending guidance.
+- Branching/selecting conversations is a committed-state transition. Sending after a branch must wait for the new conversation id before posting the message.
+
 ## Background Task Rules
 
 Use `start_background_task` for long-running or multi-step work, including:

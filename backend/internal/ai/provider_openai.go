@@ -88,20 +88,23 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 			}
 		}
 		defer closeStream()
-		emitPublicText := !normalizeProviderToolChoice(req.ToolChoice).requiresTool()
+		requiresTool := normalizeProviderToolChoice(req.ToolChoice).requiresTool()
 		var emitText func(string)
-		if emitPublicText {
+		if req.Opts.Event != nil && !requiresTool {
 			emitText = func(text string) {
 				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
 			}
 		}
-		turn, err := parseOpenAIStream(streamBody, emitText)
-		if emitPublicText && strings.TrimSpace(turn.Content) != "" {
+		turn, err := parseOpenAIStreamWithOptions(streamBody, providerStreamParseOptions{
+			EmitText:            emitText,
+			RevealTextAfterTool: requiresTool,
+		})
+		if emitText != nil && strings.TrimSpace(turn.Content) != "" && (!requiresTool || len(turn.ToolCalls) > 0) {
 			turn.PublicTextStreamed = true
 		}
 		if err != nil {
 			if partial, ok := partialTurnFromStreamError(err); ok {
-				if emitPublicText && strings.TrimSpace(partial.Content) != "" {
+				if emitText != nil && strings.TrimSpace(partial.Content) != "" && (!requiresTool || len(partial.ToolCalls) > 0) {
 					partial.PublicTextStreamed = true
 				}
 				log.Printf("[ai] openai stream_partial_tool_recovered conversation=%s endpoint=%s tool_calls=%d error=%v", req.ConversationID, endpoint, len(partial.ToolCalls), err)

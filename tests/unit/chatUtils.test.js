@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { completedActionItems, followupQuestionAttachment, formatToolLabel, loadingBubbleText, pendingFollowupQuestion, shouldReserveMessageFooter, visibleMessageAttachments } from '../../src/components/chat/chatUtils.js';
+import { completedActionItems, followupQuestionAttachment, formatToolLabel, latestLiveProgressItem, loadingBubbleText, pendingFollowupQuestion, shouldReserveMessageFooter, visibleMessageAttachments } from '../../src/components/chat/chatUtils.js';
 import { shouldReloadWorkspaceForToolEvents } from '../../src/hooks/ideUtils.js';
 
 test('visibleMessageAttachments hides editor context metadata', () => {
@@ -51,6 +51,56 @@ test('shouldReserveMessageFooter keeps spacing for visible content but not progr
       progressItems: [],
     }),
     false
+  );
+});
+
+test('loadingBubbleText prefers real live tool progress over playful fallback', () => {
+  const message = {
+    pending: true,
+    loadingState: { visibleText: '正在烹饪' },
+    progressItems: [
+      { id: 'internal', type: 'model_call_attempt_started', text: '正在裁剪' },
+      { id: 'tool', type: 'tool_call_started', text: '正在读取 drafts/chapter-1.md' },
+    ],
+  };
+
+  assert.equal(latestLiveProgressItem(message).text, '正在读取 drafts/chapter-1.md');
+  assert.equal(loadingBubbleText(message), '正在读取 drafts/chapter-1.md');
+});
+
+test('loadingBubbleText does not use completed tool states as active progress', () => {
+  const message = {
+    pending: true,
+    loadingState: { visibleText: '正在烹饪' },
+    progressItems: [
+      { id: 'start', type: 'tool_call_started', text: '正在编辑 drafts/chapter-1.md' },
+      { id: 'done', type: 'tool_call_completed', text: '已编辑 drafts/chapter-1.md' },
+    ],
+  };
+
+  assert.equal(latestLiveProgressItem(message).text, '正在编辑 drafts/chapter-1.md');
+  assert.equal(loadingBubbleText(message), '正在编辑 drafts/chapter-1.md');
+});
+
+test('loadingBubbleText falls back when progress only contains completed states', () => {
+  assert.equal(
+    loadingBubbleText({
+      pending: true,
+      loadingState: { visibleText: '正在烹饪' },
+      progressItems: [{ id: 'done', type: 'tool_call_completed', text: '已读取 drafts/chapter-1.md' }],
+    }),
+    '正在烹饪'
+  );
+});
+
+test('loadingBubbleText keeps playful fallback when no real live progress exists', () => {
+  assert.equal(
+    loadingBubbleText({
+      pending: true,
+      loadingState: { visibleText: '正在烹饪' },
+      progressItems: [{ id: 'internal', type: 'model_call_attempt_started', text: '正在裁剪' }],
+    }),
+    '正在烹饪'
   );
 });
 

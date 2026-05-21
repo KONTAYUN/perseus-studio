@@ -115,3 +115,110 @@ func truncatePlainRunes(value string, maxLen int) string {
 	}
 	return string(runes)
 }
+
+func toolTargetSummary(name, argumentsJSON string) string {
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(argumentsJSON), &decoded); err != nil {
+		return ""
+	}
+	switch name {
+	case "find_workspace_files":
+		return quotedSummary(stringField(decoded, "query", "pattern"))
+	case "search_workspace_text", "perseus_search_web", "web_search":
+		return quotedSummary(stringField(decoded, "query"))
+	case "inspect_workspace", "read_workspace_text", "edit_workspace_text", "save_workspace_file":
+		return pathSummary(stringField(decoded, "path"))
+	case "read_workspace_files":
+		return pathsCountSummary(stringSliceField(decoded, "paths"))
+	case "manage_workspace_path":
+		return pathSummary(stringField(decoded, "path"))
+	case "organize_workspace_matches":
+		target := pathSummary(stringField(decoded, "target_folder"))
+		match := quotedSummary(stringField(decoded, "match_text"))
+		if target != "" && match != "" {
+			return target + " / " + match
+		}
+		if target != "" {
+			return target
+		}
+		return match
+	case "web_extract":
+		return truncatePlainRunes(stringField(decoded, "url"), 96)
+	case "run_workspace_command":
+		if cwd := pathSummary(stringField(decoded, "cwd")); cwd != "" {
+			return cwd
+		}
+		return "workspace"
+	case "read_skill", "delete_skill":
+		return truncatePlainRunes(stringField(decoded, "skill_id"), 80)
+	case "install_skill_from_attachment":
+		return truncatePlainRunes(stringField(decoded, "attachment_id"), 80)
+	default:
+		return ""
+	}
+}
+
+func completedToolTargetSummary(name string, event ToolEvent, argumentsJSON string) string {
+	if len(event.ChangedPaths) > 1 {
+		return fmt.Sprintf("%d 个路径", len(event.ChangedPaths))
+	}
+	for _, candidate := range []string{event.Path, event.NewPath, event.OldPath, event.URL, event.SkillID, event.Cwd} {
+		if text := pathSummary(candidate); text != "" {
+			return text
+		}
+	}
+	if len(event.ChangedPaths) == 1 {
+		return pathSummary(event.ChangedPaths[0])
+	}
+	return toolTargetSummary(name, argumentsJSON)
+}
+
+func stringField(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringSliceField(values map[string]any, key string) []string {
+	raw, ok := values[key].([]any)
+	if !ok {
+		return nil
+	}
+	items := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			items = append(items, text)
+		}
+	}
+	return items
+}
+
+func quotedSummary(value string) string {
+	value = truncatePlainRunes(value, 80)
+	if value == "" {
+		return ""
+	}
+	return "“" + value + "”"
+}
+
+func pathSummary(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = strings.Trim(value, "/")
+	if value == "" || value == "." {
+		return ""
+	}
+	return truncatePlainRunes(value, 96)
+}
+
+func pathsCountSummary(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	if len(paths) == 1 {
+		return pathSummary(paths[0])
+	}
+	return fmt.Sprintf("%d 个文件", len(paths))
+}

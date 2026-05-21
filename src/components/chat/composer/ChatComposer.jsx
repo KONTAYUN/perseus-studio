@@ -5,6 +5,7 @@ import ComposerInput from './ComposerInput';
 import ComposerReferences from './ComposerReferences';
 import FollowupQuestionPanel from './FollowupQuestionPanel';
 import PendingRunMessagePanel from './PendingRunMessagePanel';
+import RunSteerPreviewPanel from './RunSteerPreviewPanel';
 
 export default function ChatComposer({ ide, panelId = 'chat', composerRef, submitChatMessage }) {
   const attachmentInputRef = React.useRef(null);
@@ -90,6 +91,14 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
           disabled={!ide.isChatSending}
           onSteer={ide.sendPendingRunMessageAsSteer}
           onDelete={ide.discardPendingRunMessage}
+        />
+      )}
+      {!ide.pendingRunMessage && (
+        <RunSteerPreviewPanel
+          items={ide.runSteerItems}
+          onDelete={ide.discardRunSteerItem}
+          onQueueAfterRun={ide.queueRunSteerItemAfterRun}
+          onRetry={ide.retryRunSteerItem}
         />
       )}
       {!ide.pendingRunMessage && (ide.runSteerNotice?.status === 'warn' || ide.runSteerNotice?.status === 'error') && ide.runSteerNotice?.text && (

@@ -52,6 +52,7 @@ type ToolEvent struct {
 	ToolName      string   `json:"tool_name"`
 	Label         string   `json:"label"`
 	Status        string   `json:"status"`
+	TargetSummary string   `json:"target_summary,omitempty"`
 	OperationHash string   `json:"operation_hash,omitempty"`
 	Question      string   `json:"question,omitempty"`
 	Options       []string `json:"options,omitempty"`

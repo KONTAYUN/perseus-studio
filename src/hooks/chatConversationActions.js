@@ -7,6 +7,8 @@ import {
 export function createChatConversationActions({
   contextUsageRequestRef,
   conversations,
+  conversationTransitionRef,
+  currentConversationIdRef,
   currentConversationId,
   selectedModel,
   setAgentRecoveryNotice,
@@ -28,8 +30,10 @@ export function createChatConversationActions({
       const data = await apiGet('/api/conversations');
       const items = data.items || [];
       setConversations(items);
-      if (currentConversationId && !items.some((item) => item.id === currentConversationId)) {
+      const activeConversationID = currentConversationIdRef?.current || currentConversationId;
+      if (activeConversationID && !items.some((item) => item.id === activeConversationID)) {
         contextUsageRequestRef.current += 1;
+        currentConversationIdRef.current = '';
         setCurrentConversationId('');
         setConversationMessages([]);
         setContextUsage(null);
@@ -69,11 +73,13 @@ export function createChatConversationActions({
   }
 
   async function ensureConversation(modelProviderID) {
-    if (currentConversationId) return currentConversationId;
+    const existingConversationID = currentConversationIdRef?.current || currentConversationId;
+    if (existingConversationID) return existingConversationID;
     const conversation = await apiPost('/api/conversations', {
       selected_model_provider_id: modelProviderID,
     });
     suppressNextConversationLoadRef.current = true;
+    currentConversationIdRef.current = conversation.id;
     setCurrentConversationId(conversation.id);
     await loadConversations();
     return conversation.id;
@@ -90,6 +96,7 @@ export function createChatConversationActions({
       const conversation = await apiPost('/api/conversations', {
         selected_model_provider_id: selectedModel.id,
       });
+      currentConversationIdRef.current = conversation.id;
       setCurrentConversationId(conversation.id);
       setConversationMessages([]);
       setContextUsage(null);
@@ -103,6 +110,7 @@ export function createChatConversationActions({
   }
 
   async function selectConversation(conversationID) {
+    currentConversationIdRef.current = conversationID;
     setCurrentConversationId(conversationID);
     setContextUsage(null);
     setContextCompactionNotice(null);
@@ -119,7 +127,8 @@ export function createChatConversationActions({
     setResumableRun(null);
     try {
       await apiDelete(`/api/conversations/${encodeURIComponent(conversationID)}`);
-      if (currentConversationId === conversationID) {
+      if ((currentConversationIdRef?.current || currentConversationId) === conversationID) {
+        currentConversationIdRef.current = '';
         setCurrentConversationId('');
         setConversationMessages([]);
         setContextUsage(null);
@@ -152,26 +161,42 @@ export function createChatConversationActions({
   }
 
   async function branchConversation(messageID) {
-    if (!currentConversationId || !messageID) return;
+    const sourceConversationID = currentConversationIdRef?.current || currentConversationId;
+    if (!sourceConversationID || !messageID) return;
     setChatError('');
-    try {
-      const result = await apiPost(`/api/conversations/${encodeURIComponent(currentConversationId)}/branch`, {
+    const transition = (async () => {
+      const result = await apiPost(`/api/conversations/${encodeURIComponent(sourceConversationID)}/branch`, {
         message_id: messageID,
       });
       suppressNextConversationLoadRef.current = true;
+      currentConversationIdRef.current = result.conversation.id;
       setCurrentConversationId(result.conversation.id);
       setConversationMessages(normalizeConversationMessages(result.messages || []));
       setContextUsage(null);
       setContextCompactionNotice(null);
       setIsConversationMenuOpen(false);
       await loadConversations();
+      return result.conversation.id;
+    })();
+    if (conversationTransitionRef) {
+      const trackedTransition = transition.finally(() => {
+        if (conversationTransitionRef.current === trackedTransition) {
+          conversationTransitionRef.current = null;
+        }
+      });
+      conversationTransitionRef.current = trackedTransition;
+    }
+    try {
+      return await transition;
     } catch (error) {
       console.error('branchConversation failed', error);
       setChatError(error.message);
+      return '';
     }
   }
 
   function returnChatHome() {
+    currentConversationIdRef.current = '';
     setCurrentConversationId('');
     setConversationMessages([]);
     setContextUsage(null);
