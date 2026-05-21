@@ -3,6 +3,11 @@ import {
   normalizeConversationMessages,
   normalizeStoredContextUsage,
 } from './chatStateUtils.js';
+import { applyLatestRunState } from './chatRunStateRecovery.js';
+import {
+  buildAppliedRunSteerItemsFromEvents,
+  reconcileRunSteerItems,
+} from './chatSteerItems.js';
 
 export function createChatConversationActions({
   contextUsageRequestRef,
@@ -21,6 +26,7 @@ export function createChatConversationActions({
   setIsConversationMenuOpen,
   setResumableRun,
   setSelectedModelId,
+  setRunSteerItems,
   suppressNextConversationLoadRef,
 }) {
   async function loadConversations() {
@@ -63,7 +69,23 @@ export function createChatConversationActions({
         }),
       ]);
       if (contextUsageRequestRef.current !== requestId) return;
-      setConversationMessages(normalizeConversationMessages(data.items || []));
+      const runEvents = await loadLatestRunEvents(data.latest_run);
+      if (contextUsageRequestRef.current !== requestId) return;
+      const messages = applyLatestRunState(
+        normalizeConversationMessages(data.items || []),
+        data.latest_run,
+        runEvents
+      );
+      const restoredSteers = buildAppliedRunSteerItemsFromEvents(runEvents, {
+        conversationId: conversationID,
+        runId: data.latest_run?.id || '',
+      });
+      if (contextUsageRequestRef.current !== requestId) return;
+      if (restoredSteers.length > 0) {
+        setRunSteerItems?.((current) => reconcileRunSteerItems(current, restoredSteers));
+      }
+      setConversationMessages(messages);
+      setResumableRun(recoverableRunFromLatestRun(data.latest_run));
       setContextUsage(normalizeStoredContextUsage(usageData, selectedModel));
     } catch (error) {
       if (contextUsageRequestRef.current !== requestId) return;
@@ -216,5 +238,29 @@ export function createChatConversationActions({
     renameConversation,
     returnChatHome,
     selectConversation,
+  };
+}
+
+async function loadLatestRunEvents(run) {
+  if (!run?.id) {
+    return [];
+  }
+  try {
+    const data = await apiGet(`/api/agent-runs/${encodeURIComponent(run.id)}/events`);
+    return data.items || [];
+  } catch (error) {
+    console.error('loadLatestRunEvents failed', error);
+    return [];
+  }
+}
+
+function recoverableRunFromLatestRun(run) {
+  if (!run?.id || !run.user_message_id || (run.status !== 'failed' && run.status !== 'canceled')) {
+    return null;
+  }
+  return {
+    runId: run.id,
+    conversationId: run.conversation_id,
+    diagnosticLogId: run.diagnostic_log_id || '',
   };
 }

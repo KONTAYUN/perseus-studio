@@ -41,19 +41,23 @@ export function createChatSteerActions({
   setRunSteerNotice,
   thinkingMode,
 }) {
-  function createPendingRunMessage(content) {
+  function createPendingRunMessage(content, options = {}) {
     const trimmedContent = String(content || '').trim();
     if (!trimmedContent) return false;
+    const activeRunConversationId = activeAgentRunRef.current?.conversationId || '';
+    const targetConversationId = currentConversationIdRef?.current || currentConversationId;
+    const conversationId = options.conversationId || activeRunConversationId || targetConversationId;
     setPendingRunMessage({
       id: `pending_run_${Date.now()}`,
       content: trimmedContent,
-      conversationId: activeAgentRunRef.current?.conversationId || currentConversationIdRef?.current || currentConversationId,
+      conversationId,
       createdAt: new Date().toISOString(),
       thinkingMode,
     });
     setChatInput('');
     setRunSteerNotice({
       id: `steer_notice_${Date.now()}`,
+      conversationId,
       status: 'queued',
       text: pendingRunMessage ? '已替换挂起消息，当前任务结束后自动发送。' : '已挂起，当前任务结束后自动发送。',
     });
@@ -63,6 +67,7 @@ export function createChatSteerActions({
   function warnUnsupportedRuntimeGuidance() {
     setRunSteerNotice({
       id: `steer_notice_${Date.now()}`,
+      conversationId: currentConversationIdRef?.current || currentConversationId,
       status: 'warn',
       text: '运行中引导暂不支持附件、文件引用或 Skill，请等待当前任务结束后发送。',
     });
@@ -71,6 +76,13 @@ export function createChatSteerActions({
   async function steerChatInput() {
     const trimmedContent = chatInput.trim();
     if (!trimmedContent) return;
+    const activeRun = activeAgentRunRef.current;
+    const targetConversationId = currentConversationIdRef?.current || currentConversationId;
+    if (!activeRun?.runId || activeRun.conversationId !== targetConversationId) {
+      createPendingRunMessage(trimmedContent, { conversationId: targetConversationId });
+      setChatInput('');
+      return;
+    }
     if (chatAttachments.length > 0 || chatFileReferences.length > 0 || chatSkillReferences.length > 0) {
       warnUnsupportedRuntimeGuidance();
       return;
@@ -92,7 +104,8 @@ export function createChatSteerActions({
   }
 
   function discardPendingRunMessage() {
-    setPendingRunMessage(null);
+    const targetConversationId = currentConversationIdRef?.current || currentConversationId;
+    setPendingRunMessage((current) => (!targetConversationId || current?.conversationId === targetConversationId ? null : current));
     setRunSteerNotice(null);
   }
 
@@ -110,7 +123,7 @@ export function createChatSteerActions({
     const item = findRunSteerItem(runSteerItems, itemId);
     if (!item?.content) return false;
     setRunSteerItems((current) => removeRunSteerItem(current, itemId));
-    createPendingRunMessage(item.content);
+    createPendingRunMessage(item.content, { conversationId: item.conversation_id });
     return true;
   }
 
@@ -122,10 +135,15 @@ export function createChatSteerActions({
     const trimmedContent = String(content || '').trim();
     if (!trimmedContent) return false;
     const activeRun = activeAgentRunRef.current;
-    if (!isChatSending || !activeRun?.runId) {
+    const targetConversationId = options.conversationId || currentConversationIdRef?.current || currentConversationId;
+    if (!isChatSending || !activeRun?.runId || activeRun.conversationId !== targetConversationId) {
       setPendingRunMessage((current) => (options.pendingId && current?.id === options.pendingId ? null : current));
+      if (isChatSending) {
+        createPendingRunMessage(trimmedContent, { conversationId: targetConversationId });
+        return true;
+      }
       await sendChatPayloadRef.current?.(textOnlyPayload(trimmedContent, {
-        conversationId: options.conversationId || currentConversationIdRef?.current || currentConversationId,
+        conversationId: targetConversationId,
         thinkingMode: options.thinkingMode || thinkingMode,
       }));
       return true;
@@ -134,7 +152,7 @@ export function createChatSteerActions({
     const steerItem = buildRunSteerItem({
       clientSteerId,
       content: trimmedContent,
-      conversationId: activeRun.conversationId || options.conversationId || currentConversationIdRef?.current || currentConversationId,
+      conversationId: activeRun.conversationId || targetConversationId,
       runId: activeRun.runId,
       pendingId: options.pendingId || '',
     });
@@ -149,7 +167,7 @@ export function createChatSteerActions({
       setRunSteerItems((current) => markRunSteerReceived(current, result?.event?.payload || {}, {
         clientSteerId,
         content: trimmedContent,
-        conversationId: activeRun.conversationId || options.conversationId || currentConversationIdRef?.current || currentConversationId,
+        conversationId: activeRun.conversationId || targetConversationId,
         runId: activeRun.runId,
       }));
       return true;
@@ -158,6 +176,7 @@ export function createChatSteerActions({
       setRunSteerItems((current) => markRunSteerFailed(current, clientSteerId, formatChatError(error)));
       setRunSteerNotice({
         id: clientSteerId,
+        conversationId: targetConversationId,
         status: 'error',
         text: `引导暂未发送：${formatChatError(error)}`,
       });
@@ -244,6 +263,7 @@ export function useMissedRunSteerAutoQueue({
     });
     setRunSteerNotice({
       id: `steer_missed_${Date.now()}`,
+      conversationId: missed[0]?.conversation_id || currentConversationIdRef?.current || currentConversationId,
       status: 'queued',
       text: '引导没有赶上上一轮，已转为下一条消息。',
     });

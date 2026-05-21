@@ -82,6 +82,7 @@ Runtime input must follow the Codex-style queue model, not ad hoc chat bubbles:
 - A steer that is rejected or cannot be delivered stays in the pending-input area with retry/delete/queue-after-run actions. It is not a committed chat-history message.
 - If a pending steer misses the active run before it is applied, move it into the queued follow-up path instead of leaving it stuck as pending guidance.
 - Branching/selecting conversations is a committed-state transition. Sending after a branch must wait for the new conversation id before posting the message.
+- Conversation timelines and composer runtime-input previews are isolated by conversation id. Events from a run in one conversation may continue to persist in the backend, but must not mutate the visible message list, pending steer UI, context-usage notices, or recovery notices for another selected conversation.
 
 ## Background Task Rules
 

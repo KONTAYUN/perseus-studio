@@ -10,9 +10,10 @@ export {
   updateLoadingState,
 } from './chatStatusTextUtils.js';
 
-export function buildAssistantRunShell({ id, conversationId, createdAt, content = '', attachments = [] } = {}) {
+export function buildAssistantRunShell({ id, conversationId, createdAt, content = '', attachments = [], runId = '' } = {}) {
   return {
     id,
+    runId,
     conversation_id: conversationId || 'pending',
     role: 'assistant',
     content,
@@ -41,8 +42,12 @@ export function mergeCommittedRunStart(
 ) {
   const committedUser = normalizeConversationMessage(userMessage);
   if (!committedUser?.id || !thinkingId) return messages || [];
+  const shellRunId = assistantShell?.runId || '';
+  const existingShell = (messages || []).find((item) => item.id === thinkingId || (shellRunId && item.runId === shellRunId));
   const shell = normalizeRunShell(
-    (messages || []).find((item) => item.id === thinkingId) || assistantShell,
+    existingShell
+      ? { ...(assistantShell || {}), ...existingShell, runId: existingShell.runId || shellRunId }
+      : assistantShell,
     thinkingId,
     committedUser.conversation_id
   );
@@ -53,6 +58,9 @@ export function mergeCommittedRunStart(
   });
   const userIndex = findCommittedUserIndex(withoutPlaceholders, committedUser);
   const nextMessages = [...withoutPlaceholders];
+  const existingShellIndex = nextMessages.findIndex(
+    (item) => item.id === thinkingId || (shell.runId && item.runId === shell.runId)
+  );
   const insertUserIndex = userIndex >= 0 ? userIndex : nextMessages.length;
   if (userIndex >= 0) {
     nextMessages[insertUserIndex] = {
@@ -62,7 +70,19 @@ export function mergeCommittedRunStart(
   } else {
     nextMessages.splice(insertUserIndex, 0, committedUser);
   }
-  nextMessages.splice(insertUserIndex + 1, 0, shell);
+  if (existingShellIndex >= 0) {
+    nextMessages[existingShellIndex] = {
+      ...nextMessages[existingShellIndex],
+      ...shell,
+    };
+    if (existingShellIndex !== insertUserIndex + 1) {
+      const [existingShell] = nextMessages.splice(existingShellIndex, 1);
+      const targetIndex = nextMessages.findIndex((item) => item.id === committedUser.id);
+      nextMessages.splice(targetIndex >= 0 ? targetIndex + 1 : nextMessages.length, 0, existingShell);
+    }
+  } else {
+    nextMessages.splice(insertUserIndex + 1, 0, shell);
+  }
   return nextMessages;
 }
 
@@ -78,6 +98,7 @@ export function appendRunProgressItem(messages, thinkingId, nextItem) {
   const nextMessages = (messages || []).map((item) => {
     const isTarget =
       item.id === thinkingId ||
+      (item.runId && item.runId === nextItem.runId) ||
       (item.role === 'assistant' && item.pending && item.activeMessageId);
     if (!isTarget) return item;
     changed = true;
@@ -89,11 +110,12 @@ export function appendRunProgressItem(messages, thinkingId, nextItem) {
   return changed ? nextMessages : messages;
 }
 
-export function mergeAssistantMessageStarted(messages, thinkingId, assistantMessage) {
+export function mergeAssistantMessageStarted(messages, thinkingId, assistantMessage, { runId = '' } = {}) {
   const assistant = normalizeConversationMessage(assistantMessage);
   if (!assistant) return messages;
   const nextAssistant = {
     ...assistant,
+    runId,
     pending: true,
     activeMessageId: assistant.id,
     progressItems: [],
@@ -101,7 +123,8 @@ export function mergeAssistantMessageStarted(messages, thinkingId, assistantMess
   let inserted = false;
   const nextMessages = [];
   for (const item of messages || []) {
-    if (item.id !== thinkingId && item.id !== assistant.id) {
+    const isRunShell = runId && item.runId === runId;
+    if (item.id !== thinkingId && item.id !== assistant.id && !isRunShell) {
       nextMessages.push(item);
       continue;
     }
@@ -116,11 +139,12 @@ export function mergeAssistantMessageStarted(messages, thinkingId, assistantMess
   return inserted ? nextMessages : [...(messages || []), nextAssistant];
 }
 
-export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMessage) {
+export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMessage, { runId = '' } = {}) {
   const assistant = normalizeConversationMessage(assistantMessage);
   if (!assistant) return messages;
   const nextAssistant = {
     ...assistant,
+    runId,
     pending: false,
     activeMessageId: '',
     progressItems: [],
@@ -128,7 +152,9 @@ export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMe
   let inserted = false;
   const nextMessages = [];
   for (const item of messages || []) {
-    const isActiveShell = item.id === thinkingId && (!item.activeMessageId || item.activeMessageId === assistant.id);
+    const isActiveShell =
+      (item.id === thinkingId || (runId && item.runId === runId)) &&
+      (!item.activeMessageId || item.activeMessageId === assistant.id);
     if (!isActiveShell && item.id !== assistant.id) {
       nextMessages.push(item);
       continue;
@@ -145,6 +171,7 @@ export function buildProgressItem(type, payload = {}, fallbackText = '') {
   if (!text) return null;
   return {
     id: payload.event_id || `${type}:${payload.tool_call_id || payload.round || payload.path || payload.message || payload.reason || text}`,
+    runId: payload.run_id || payload.runId || '',
     type,
     text,
     toolName: payload.tool_name || '',
@@ -312,15 +339,37 @@ export function normalizeConversationMessages(items) {
   return (items || []).map((item) => normalizeConversationMessage(item));
 }
 
+export function appendRunTerminalMessage(messages, latestRun) {
+  if (!isRecoverableTerminalRun(latestRun)) return messages || [];
+  if ((messages || []).some((item) => item.resumableRunId === latestRun.id)) return messages || [];
+  const message = String(latestRun.error_message || '').trim() || '上一轮任务没有正常完成，可继续本轮。';
+  return [
+    ...(messages || []),
+    {
+      id: `run_error_${latestRun.id}`,
+      conversation_id: latestRun.conversation_id,
+      role: 'assistant',
+      content: latestRun.status === 'canceled' ? '这轮任务已停止，可继续本轮。' : message,
+      attachments: [],
+      created_at: latestRun.completed_at || latestRun.updated_at || new Date().toISOString(),
+      pending: false,
+      error: true,
+      resumableRunId: latestRun.id,
+      diagnosticLogId: latestRun.diagnostic_log_id || '',
+    },
+  ];
+}
+
 export function hasStreamingAssistantMessage(items) {
   return (items || []).some((item) => item?.role === 'assistant' && (item?.status === 'streaming' || item?.activeMessageId));
 }
 
-export function mapPendingAssistant(current, thinkingId, transform) {
+export function mapPendingAssistant(current, thinkingId, transform, runId = '') {
   let updated = false;
   const next = current.map((item) => {
     const isPendingTarget =
       item.id === thinkingId ||
+      (runId && item.runId === runId) ||
       (item.role === 'assistant' && item.pending);
     if (!isPendingTarget || updated) return item;
     updated = true;
@@ -329,16 +378,24 @@ export function mapPendingAssistant(current, thinkingId, transform) {
   return next;
 }
 
+export function hasActiveRunShell(items, runId) {
+  if (!runId) return false;
+  return (items || []).some((item) => item?.role === 'assistant' && item?.pending && item?.runId === runId);
+}
+
 function normalizeRunShell(shell, thinkingId, conversationId) {
+  const runId = shell?.runId || '';
   const base = buildAssistantRunShell({
-    id: thinkingId,
+    id: runId || thinkingId,
     conversationId,
     createdAt: new Date().toISOString(),
+    runId,
   });
   return {
     ...base,
     ...(shell || {}),
-    id: thinkingId,
+    id: runId || thinkingId,
+    runId,
     conversation_id: conversationId || shell?.conversation_id || base.conversation_id,
     role: 'assistant',
     pending: true,
@@ -365,4 +422,11 @@ function removeRunStartPlaceholders(messages, { optimisticUserId, thinkingId, co
 
 function findCommittedUserIndex(messages, committedUser) {
   return (messages || []).findIndex((item) => item.id === committedUser.id);
+}
+
+function isRecoverableTerminalRun(run) {
+  if (!run?.id) return false;
+  if (run.status !== 'failed' && run.status !== 'canceled') return false;
+  if (!run.user_message_id) return false;
+  return true;
 }

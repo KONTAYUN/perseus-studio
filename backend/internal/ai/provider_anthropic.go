@@ -126,7 +126,7 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 				closeStream()
 				return partial, nil
 			}
-			if shouldFallbackAfterStreamError(ctx, err, req.CanCheckpointResume) {
+			if shouldFallbackAfterStreamError(ctx, err) {
 				log.Printf("[ai] anthropic stream_parse_error_fallback conversation=%s endpoint=%s error=%v", req.ConversationID, endpoint, err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 				emitToolLifecycleEvent(req.Opts, "model_stream_recovering", "warn", map[string]any{
@@ -171,17 +171,16 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 
 func (s *Service) callAnthropicAgentTurn(ctx context.Context, runtime *agentRuntime, round int) (agentModelTurn, error) {
 	return s.providerV2(agentProtocolAnthropic).Turn(ctx, providerTurnRequest{
-		ConversationID:      runtime.conversationID,
-		MessageID:           runtime.messageID,
-		Provider:            runtime.provider,
-		Protocol:            runtime.protocol,
-		Tools:               runtime.tools(),
-		ToolChoice:          runtime.toolChoice(),
-		Snapshot:            runtime.lastContextSnapshot,
-		PerformedMutation:   runtime.performedMutation,
-		HasToolEvents:       len(runtime.events) > 0,
-		CanCheckpointResume: runtime.hasRecoverableCheckpoint(ctx),
-		Opts:                runtime.opts,
+		ConversationID:    runtime.conversationID,
+		MessageID:         runtime.messageID,
+		Provider:          runtime.provider,
+		Protocol:          runtime.protocol,
+		Tools:             runtime.tools(),
+		ToolChoice:        runtime.toolChoice(),
+		Snapshot:          runtime.lastContextSnapshot,
+		PerformedMutation: runtime.performedMutation,
+		HasToolEvents:     len(runtime.events) > 0,
+		Opts:              runtime.opts,
 	})
 }
 

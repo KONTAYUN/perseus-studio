@@ -198,7 +198,11 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+		response := map[string]any{"items": items}
+		if run, err := s.runs.LatestConversationRun(r.Context(), user.UserID, conversationID); err == nil {
+			response["latest_run"] = run
+		}
+		writeJSON(w, http.StatusOK, response)
 	case http.MethodPost:
 		content, modelProviderID, thinkingMode, attachmentsJSON, attachmentPayloads, err := s.parseConversationMessageRequest(r)
 		if err != nil {

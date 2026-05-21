@@ -28,17 +28,16 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 	r.annotateRequestSummary()
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	turn, err := r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
-		ConversationID:      r.conversationID,
-		MessageID:           r.messageID,
-		Provider:            r.provider,
-		Protocol:            r.protocol,
-		Tools:               r.tools(),
-		ToolChoice:          r.toolChoice(),
-		Snapshot:            r.lastContextSnapshot,
-		PerformedMutation:   r.performedMutation,
-		HasToolEvents:       len(r.events) > 0,
-		CanCheckpointResume: r.hasRecoverableCheckpoint(ctx),
-		Opts:                r.opts,
+		ConversationID:    r.conversationID,
+		MessageID:         r.messageID,
+		Provider:          r.provider,
+		Protocol:          r.protocol,
+		Tools:             r.tools(),
+		ToolChoice:        r.toolChoice(),
+		Snapshot:          r.lastContextSnapshot,
+		PerformedMutation: r.performedMutation,
+		HasToolEvents:     len(r.events) > 0,
+		Opts:              r.opts,
 	})
 	if err == nil || r.contextOverflowRetried || !isContextOverflowError(err) || isContextCanceledError(err) {
 		return turn, err
@@ -51,23 +50,17 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 	r.annotateRequestSummary()
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	return r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
-		ConversationID:      r.conversationID,
-		MessageID:           r.messageID,
-		Provider:            r.provider,
-		Protocol:            r.protocol,
-		Tools:               r.tools(),
-		ToolChoice:          r.toolChoice(),
-		Snapshot:            r.lastContextSnapshot,
-		PerformedMutation:   r.performedMutation,
-		HasToolEvents:       len(r.events) > 0,
-		CanCheckpointResume: r.hasRecoverableCheckpoint(ctx),
-		Opts:                r.opts,
+		ConversationID:    r.conversationID,
+		MessageID:         r.messageID,
+		Provider:          r.provider,
+		Protocol:          r.protocol,
+		Tools:             r.tools(),
+		ToolChoice:        r.toolChoice(),
+		Snapshot:          r.lastContextSnapshot,
+		PerformedMutation: r.performedMutation,
+		HasToolEvents:     len(r.events) > 0,
+		Opts:              r.opts,
 	})
-}
-
-func (r *agentRuntime) hasRecoverableCheckpoint(ctx context.Context) bool {
-	checkpoint, ok := r.service.loadRunCheckpoint(ctx, r.opts)
-	return ok && checkpoint.Transcript != nil && len(checkpoint.Transcript.Entries) > 0
 }
 
 func (r *agentRuntime) annotateRequestSummary() {

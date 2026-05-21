@@ -7,7 +7,10 @@ import { createChatSteerActions, textOnlyPayload, useActiveAgentRunRef, useMisse
 import { waitForAgentRunStream } from './chatRunStream.js';
 import useChatLifecycleEffects from './useChatLifecycleEffects';
 import useChatReferenceActions from './useChatReferenceActions';
-import { mergeRunSteerItemsWithMessages } from './chatSteerItems';
+import {
+  mergeRunSteerItemsWithMessages,
+  visibleRunSteerTimelineItems,
+} from './chatSteerItems';
 
 export default function useChatState({
   buildCurrentFileContext,
@@ -86,6 +89,7 @@ export default function useChatState({
     setIsConversationMenuOpen,
     setResumableRun,
     setSelectedModelId,
+    setRunSteerItems,
     suppressNextConversationLoadRef,
   });
 
@@ -198,6 +202,7 @@ export default function useChatState({
   });
 
   const { sendChatMessage, sendChatPayload, sendFollowupAnswer } = createChatSendActions({
+    activeAgentRunRef,
     activeChatAbortRef,
     buildCurrentFileContext,
     chatAttachments,
@@ -246,6 +251,7 @@ export default function useChatState({
         afterSeq,
         control,
         conversationID,
+        currentConversationIdRef,
         loadConversations,
         onAssistantToolEvents,
         onTasksChanged,
@@ -281,7 +287,10 @@ export default function useChatState({
     chatSkillReferences,
     continueAgentRun,
     branchConversation,
-    conversationMessages: mergeRunSteerItemsWithMessages(conversationMessages, runSteerItems),
+    conversationMessages: mergeRunSteerItemsWithMessages(
+      conversationMessages,
+      visibleRunSteerTimelineItems(runSteerItems, currentConversationId)
+    ),
     conversations,
     contextCompactionNotice,
     contextUsage,
@@ -289,6 +298,8 @@ export default function useChatState({
     currentConversationId,
     deleteConversation,
     isChatSending,
+    isCurrentConversationSending:
+      isChatSending && (!activeAgentRun?.conversationId || activeAgentRun.conversationId === currentConversationId),
     isConversationMenuOpen,
     loadConversationMessages,
     loadConversations,

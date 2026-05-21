@@ -139,6 +139,61 @@ export function mergeRunSteerItemsWithMessages(messages, runSteerItems) {
   });
 }
 
+export function visibleRunSteerTimelineItems(runSteerItems, conversationId) {
+  const targetConversationId = String(conversationId || '').trim();
+  if (!targetConversationId) return [];
+  return (runSteerItems || []).filter((item) => item?.conversation_id === targetConversationId);
+}
+
+export function buildAppliedRunSteerItemsFromEvents(events = [], { conversationId = '', runId = '' } = {}) {
+  const receivedBySteer = new Map();
+  const appliedItems = [];
+  for (const event of events || []) {
+    const type = event?.type || '';
+    if (type !== 'agent_steer_received' && type !== 'agent_steer_applied') continue;
+    const payload = event.payload || {};
+    const steerId = String(payload.steer_id || '').trim();
+    const clientSteerId = String(payload.client_steer_id || '').trim();
+    const key = steerId || clientSteerId || String(event.id || '').trim();
+    if (!key) continue;
+    if (type === 'agent_steer_received') {
+      receivedBySteer.set(key, {
+        content: String(payload.content || payload.content_preview || '').trim(),
+        createdAt: payload.created_at || event.created_at || '',
+        clientSteerId,
+        steerId,
+      });
+      continue;
+    }
+    const received = receivedBySteer.get(key) || {};
+    const content = String(payload.content || payload.content_preview || received.content || '').trim();
+    if (!content) continue;
+    appliedItems.push({
+      ...buildRunSteerItem({
+        clientSteerId: clientSteerId || received.clientSteerId || key,
+        content,
+        conversationId: event.conversation_id || conversationId,
+        runId: event.run_id || runId,
+        createdAt: payload.created_at || event.created_at || received.createdAt,
+      }),
+      id: `steer_${event.id || key}`,
+      steerId: steerId || received.steerId || '',
+      status: RUN_STEER_STATUS.applied,
+    });
+  }
+  return appliedItems;
+}
+
+export function reconcileRunSteerItems(items, nextItems = []) {
+  let current = items || [];
+  for (const nextItem of nextItems || []) {
+    if (!nextItem?.content) continue;
+    const merged = mergeRunSteerItem(current, nextItem);
+    current = merged === current ? appendRunSteerItem(current, nextItem) : merged;
+  }
+  return current;
+}
+
 function mergeRunSteerEvent(items, eventPayload = {}, fallback = {}) {
   const clientSteerId = String(eventPayload.client_steer_id || fallback.clientSteerId || '').trim();
   const steerId = String(eventPayload.steer_id || fallback.steerId || '').trim();
@@ -156,6 +211,8 @@ function mergeRunSteerEvent(items, eventPayload = {}, fallback = {}) {
       id: item.id,
       clientSteerId: item.clientSteerId,
       steerId,
+      conversation_id: fallback.conversationId,
+      runId: fallback.runId,
       status,
       content,
       error: fallback.error,

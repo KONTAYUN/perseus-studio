@@ -3,6 +3,7 @@ import { formatChatError } from './chatErrorUtils';
 import { buildAssistantRunShell, mapPendingAssistant, mergeCommittedRunStart } from './chatStateUtils.js';
 
 export function createChatSendActions({
+  activeAgentRunRef,
   activeChatAbortRef,
   buildCurrentFileContext,
   chatAttachments,
@@ -52,12 +53,23 @@ export function createChatSendActions({
       return;
     }
     await waitForConversationTransition(conversationTransitionRef);
-    if (isChatSending && !usingOverride) {
+    const targetConversationId = currentConversationIdRef?.current || currentConversationId;
+    const activeRunConversationId = activeAgentRunRef?.current?.conversationId || activeChatAbortRef.current?.conversationId || '';
+    const isBusyInSameConversation = isChatSending && (!activeRunConversationId || activeRunConversationId === targetConversationId);
+    if (isBusyInSameConversation && !usingOverride) {
       if (hasUnsupportedRuntimeGuidance) {
         warnUnsupportedRuntimeGuidance();
         return;
       }
       createPendingRunMessage(trimmedContent);
+      return;
+    }
+    if (isChatSending && !usingOverride) {
+      if (hasUnsupportedRuntimeGuidance) {
+        warnUnsupportedRuntimeGuidance();
+        return;
+      }
+      createPendingRunMessage(trimmedContent, { conversationId: targetConversationId });
       return;
     }
     const payload = {
@@ -119,6 +131,11 @@ export function createChatSendActions({
     await waitForConversationTransition(conversationTransitionRef);
     const trimmedContent = payload.content.trim();
     const conversationIDForPayload = payload.conversationId || currentConversationIdRef?.current || currentConversationId;
+    const shouldUpdateVisibleConversation = () =>
+      !conversationIDForPayload || (currentConversationIdRef?.current || currentConversationId) === conversationIDForPayload;
+    const setVisibleConversationMessages = (updater) => {
+      setConversationMessages((current) => (shouldUpdateVisibleConversation() ? updater(current) : current));
+    };
     const stamp = Date.now();
     const optimisticId = `temp_user_${stamp}`;
     const thinkingId = `temp_assistant_${stamp}`;
@@ -136,9 +153,11 @@ export function createChatSendActions({
     ];
     const filesToSend = payload.attachments.map((item) => item.file).filter(Boolean);
 
-    setChatError('');
-    setResumableRun(null);
-    setConversationMessages((current) => [
+    if (shouldUpdateVisibleConversation()) {
+      setChatError('');
+      setResumableRun(null);
+    }
+    setVisibleConversationMessages((current) => [
       ...current.filter((item) => !(item.queued && item.content === trimmedContent)),
       {
         id: optimisticId,
@@ -160,14 +179,20 @@ export function createChatSendActions({
 
     let conversationID = conversationIDForPayload;
     const abortController = new AbortController();
-    const control = { abort: () => abortController.abort() };
+    const control = {
+      conversationId: conversationID || conversationIDForPayload || '',
+      abort: () => abortController.abort(),
+    };
     activeChatAbortRef.current = control;
     try {
       if (conversationID) {
-        currentConversationIdRef.current = conversationID;
-        setCurrentConversationId(conversationID);
+        if (shouldUpdateVisibleConversation()) {
+          currentConversationIdRef.current = conversationID;
+          setCurrentConversationId(conversationID);
+        }
       } else {
         conversationID = await ensureConversation(selectedModel.id);
+        control.conversationId = conversationID;
       }
       const formData = buildMessageFormData(payload, selectedModel.id, thinkingMode, filesToSend);
       const result = await apiPostFormWithSignal(
@@ -175,10 +200,13 @@ export function createChatSendActions({
         formData,
         abortController.signal
       );
-      setCurrentConversationId(result.conversation.id);
-      currentConversationIdRef.current = result.conversation.id;
+      if (shouldUpdateVisibleConversation()) {
+        setCurrentConversationId(result.conversation.id);
+        currentConversationIdRef.current = result.conversation.id;
+      }
+      control.conversationId = result.conversation.id;
       if (result.user_message) {
-        setConversationMessages((current) =>
+        setVisibleConversationMessages((current) =>
           mergeCommittedRunStart(current, {
             optimisticUserId: optimisticId,
             thinkingId,
@@ -189,6 +217,7 @@ export function createChatSendActions({
               createdAt: new Date().toISOString(),
               content: '',
               attachments: [],
+              runId: result.run?.id || '',
             }),
           })
         );
@@ -197,7 +226,9 @@ export function createChatSendActions({
         await waitForAgentRun(result.run.id, result.conversation.id, thinkingId, control);
       } else {
         await loadConversations();
-        await loadConversationMessages(result.conversation.id);
+        if (shouldUpdateVisibleConversation()) {
+          await loadConversationMessages(result.conversation.id);
+        }
         if (result.task) onTasksChanged?.(result.task);
         await onAssistantToolEvents?.(result.assistant_message?.attachments || []);
       }
@@ -212,26 +243,35 @@ export function createChatSendActions({
   function setQueuedUserMessage(payload, content) {
     const conversationIDForPayload = payload.conversationId || currentConversationIdRef?.current || currentConversationId;
     setQueuedChatMessages((current) => [...current, payload]);
-    setConversationMessages((current) => [
-      ...current,
-      {
-        id: `queued_user_${Date.now()}`,
-        conversation_id: conversationIDForPayload || 'pending',
-        role: 'user',
-        content,
-        attachments: [
-          ...payload.attachments.map(({ file, ...item }) => item),
-          ...payload.fileReferences,
-          ...payload.skillReferences,
-        ],
-        created_at: new Date().toISOString(),
-        queued: true,
-      },
-    ]);
+    setConversationMessages((current) => {
+      const visibleConversationId = currentConversationIdRef?.current || currentConversationId;
+      if (conversationIDForPayload && visibleConversationId && conversationIDForPayload !== visibleConversationId) {
+        return current;
+      }
+      return [
+        ...current,
+        {
+          id: `queued_user_${Date.now()}`,
+          conversation_id: conversationIDForPayload || 'pending',
+          role: 'user',
+          content,
+          attachments: [
+            ...payload.attachments.map(({ file, ...item }) => item),
+            ...payload.fileReferences,
+            ...payload.skillReferences,
+          ],
+          created_at: new Date().toISOString(),
+          queued: true,
+        },
+      ];
+    });
   }
 
   function handleSendError(error, thinkingId, conversationID) {
     console.error('sendChatMessage failed', error);
+    if (conversationID && currentConversationIdRef?.current && currentConversationIdRef.current !== conversationID) {
+      return;
+    }
     if (error?.name === 'AbortError') {
       setChatError('');
       setConversationMessages((current) =>

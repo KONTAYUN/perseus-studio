@@ -6,6 +6,7 @@ import {
   buildAssistantRunShell,
   buildContextCompactionNotice,
   buildProgressItem,
+  hasActiveRunShell,
   hasStreamingAssistantMessage,
   mapPendingAssistant,
   mergeCommittedRunStart,
@@ -35,6 +36,7 @@ export async function waitForAgentRunStream({
   afterSeq = 0,
   control,
   conversationID,
+  currentConversationIdRef,
   loadConversations,
   onAssistantToolEvents,
   onTasksChanged,
@@ -49,7 +51,17 @@ export async function waitForAgentRunStream({
   setRunSteerNotice,
   thinkingId,
 }) {
-  setConversationMessages((current) =>
+  const isRunConversationVisible = () => (currentConversationIdRef?.current || '') === conversationID;
+  const setVisibleConversationMessages = (updater) => {
+    setConversationMessages((current) => (isRunConversationVisible() ? updater(current) : current));
+  };
+  const clearVisibleRunSteerNotice = () => {
+    if (isRunConversationVisible()) {
+      setRunSteerNotice?.(null);
+    }
+  };
+
+  setVisibleConversationMessages((current) =>
     mapPendingAssistant(current, thinkingId, (item) => ({
       ...item,
       loadingState: {
@@ -58,7 +70,7 @@ export async function waitForAgentRunStream({
         stage: 'holding',
         activeSince: Date.now(),
       },
-    }))
+    }), runId)
   );
 
   let source = null;
@@ -79,7 +91,9 @@ export async function waitForAgentRunStream({
     try {
       const data = await apiGet(`/api/conversations/${encodeURIComponent(conversationID)}/messages`);
       const messages = normalizeConversationMessages(data.items || []);
-      setConversationMessages(messages);
+      if (isRunConversationVisible()) {
+        setConversationMessages(messages);
+      }
       const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
       await onAssistantToolEvents?.(lastAssistant?.attachments || []);
     } catch (error) {
@@ -97,10 +111,11 @@ export async function waitForAgentRunStream({
   const appendProgress = (type, payload = {}, fallbackText = '') => {
     const nextItem = buildProgressItem(type, payload, fallbackText);
     if (!nextItem) return;
+    nextItem.runId = runId;
     if (shouldEnsureProgressShell(type)) {
       ensureThinkingShell();
     }
-    setConversationMessages((current) => appendRunProgressItem(current, thinkingId, nextItem));
+    setVisibleConversationMessages((current) => appendRunProgressItem(current, thinkingId, nextItem));
   };
   const applyFollowupQuestion = (payload = {}) => {
     const question = (payload.question || '').trim();
@@ -114,7 +129,7 @@ export async function waitForAgentRunStream({
       options: payload.options || [],
       allow_freeform: payload.allow_freeform !== false,
     };
-    setConversationMessages((current) =>
+    setVisibleConversationMessages((current) =>
       current.map((messageItem) => {
         const isTarget =
           messageItem.role === 'assistant' &&
@@ -129,8 +144,9 @@ export async function waitForAgentRunStream({
     );
   };
   const ensureThinkingShell = () => {
-    setConversationMessages((current) => {
+    setVisibleConversationMessages((current) => {
       if (current.some((item) => item.id === thinkingId)) return current;
+      if (hasActiveRunShell(current, runId)) return current;
       if (hasStreamingAssistantMessage(current)) return current;
       return [
         ...current,
@@ -140,6 +156,7 @@ export async function waitForAgentRunStream({
           createdAt: new Date().toISOString(),
           content: '',
           attachments: [],
+          runId,
         }),
       ];
     });
@@ -179,26 +196,34 @@ export async function waitForAgentRunStream({
     const payload = item?.payload || {};
     const message = agentEventText(item?.type, payload) || payload.message;
     if (item?.type === 'model_request_summary') {
-      setContextUsage(normalizeContextUsageSummary(payload, selectedModel));
+      if (isRunConversationVisible()) {
+        setContextUsage(normalizeContextUsageSummary(payload, selectedModel));
+      }
     } else if (item?.type === 'context_compaction_started' || item?.type === 'context_compaction_completed' || item?.type === 'context_compaction_failed') {
-      setContextCompactionNotice(buildContextCompactionNotice(item.type, payload));
+      if (isRunConversationVisible()) {
+        setContextCompactionNotice(buildContextCompactionNotice(item.type, payload));
+      }
     } else if (item?.type === 'agent_recovery_started' || item?.type === 'agent_recovery_retrying') {
-      setAgentRecoveryNotice(buildAgentRecoveryNotice(item.type, payload));
-      setChatError('');
+      if (isRunConversationVisible()) {
+        setAgentRecoveryNotice(buildAgentRecoveryNotice(item.type, payload));
+        setChatError('');
+      }
     } else if (item?.type === 'agent_recovery_completed' || item?.type === 'agent_recovery_failed') {
-      setAgentRecoveryNotice(buildAgentRecoveryNotice(item.type, payload));
+      if (isRunConversationVisible()) {
+        setAgentRecoveryNotice(buildAgentRecoveryNotice(item.type, payload));
+      }
     } else if (item?.type === 'agent_steer_received') {
       setRunSteerItems?.((current) => markRunSteerReceived(current, payload, { conversationId: conversationID, runId }));
-      setRunSteerNotice?.(null);
+      clearVisibleRunSteerNotice();
     } else if (item?.type === 'agent_steer_applied') {
       setRunSteerItems?.((current) => markRunSteerApplied(current, payload, { conversationId: conversationID, runId }));
-      setRunSteerNotice?.(null);
+      clearVisibleRunSteerNotice();
     } else if (item?.type === 'agent_steer_rejected') {
       setRunSteerItems?.((current) => markRunSteerRejected(current, payload, { conversationId: conversationID, runId }));
-      setRunSteerNotice?.(null);
+      clearVisibleRunSteerNotice();
     }
     if (item?.type === 'user_message_committed') {
-      setConversationMessages((current) =>
+      setVisibleConversationMessages((current) =>
         mergeCommittedRunStart(current, {
           thinkingId,
           userMessage: payload.user_message,
@@ -208,16 +233,17 @@ export async function waitForAgentRunStream({
             createdAt: new Date().toISOString(),
             content: '',
             attachments: [],
+            runId,
           }),
         })
       );
     } else if (item?.type === 'assistant_message_started') {
-      setConversationMessages((current) => mergeAssistantMessageStarted(current, thinkingId, payload.assistant_message));
+      setVisibleConversationMessages((current) => mergeAssistantMessageStarted(current, thinkingId, payload.assistant_message, { runId }));
     } else if (item?.type === 'assistant_message_delta') {
       const messageId = payload.message_id;
       const delta = payload.delta || '';
       if (messageId && delta) {
-        setConversationMessages((current) =>
+        setVisibleConversationMessages((current) =>
           current.map((messageItem) =>
             (messageItem.id === thinkingId && messageItem.activeMessageId === messageId) || messageItem.id === messageId
               ? {
@@ -247,7 +273,7 @@ export async function waitForAgentRunStream({
     }
     if (item?.type === 'assistant_message_completed') {
       if (payload.assistant_message) {
-        setConversationMessages((current) => mergeAssistantMessageCompleted(current, thinkingId, payload.assistant_message));
+        setVisibleConversationMessages((current) => mergeAssistantMessageCompleted(current, thinkingId, payload.assistant_message, { runId }));
         await onAssistantToolEvents?.(payload.assistant_message.attachments || []);
       }
       if (payload.task) {
@@ -279,8 +305,8 @@ export async function waitForAgentRunStream({
 
   loadingTimer = window.setInterval(() => {
     if (settled) return;
-    setConversationMessages((current) =>
-      mapPendingAssistant(current, thinkingId, (item) => updateLoadingState(item))
+    setVisibleConversationMessages((current) =>
+      mapPendingAssistant(current, thinkingId, (item) => updateLoadingState(item), runId)
     );
   }, 80);
 

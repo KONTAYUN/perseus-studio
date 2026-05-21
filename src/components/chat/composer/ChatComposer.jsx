@@ -13,10 +13,14 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
   const didMountFocusRef = React.useRef(false);
   const [isSkillMenuOpen, setIsSkillMenuOpen] = React.useState(false);
   const [answeringQuestionId, setAnsweringQuestionId] = React.useState('');
+  const isCurrentConversationSending = ide.isCurrentConversationSending ?? ide.isChatSending;
+  const visiblePendingRunMessage = visibleConversationItem(ide.pendingRunMessage, ide.currentConversationId);
+  const visibleRunSteerItems = (ide.runSteerItems || []).filter((item) => item.conversation_id === ide.currentConversationId);
+  const visibleRunSteerNotice = visibleConversationItem(ide.runSteerNotice, ide.currentConversationId);
   const followupQuestion = pendingFollowupQuestion(ide.conversationMessages);
   const isAnsweringFollowup = !!answeringQuestionId && answeringQuestionId === followupQuestion?.messageId;
   const isSendDisabled =
-    !ide.isChatSending &&
+    !isCurrentConversationSending &&
     !ide.chatInput.trim() &&
     ide.chatAttachments.length === 0 &&
     ide.chatFileReferences.length === 0 &&
@@ -27,10 +31,10 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
       didMountFocusRef.current = true;
       return;
     }
-    if (!ide.isChatSending) {
+    if (!isCurrentConversationSending) {
       window.setTimeout(() => chatInputRef.current?.focus(), 0);
     }
-  }, [ide.isChatSending]);
+  }, [isCurrentConversationSending]);
 
   React.useEffect(() => {
     if (!followupQuestion || answeringQuestionId !== followupQuestion.messageId) {
@@ -73,7 +77,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
       {followupQuestion && (
         <FollowupQuestionPanel
           question={followupQuestion}
-          disabled={ide.isChatSending || isAnsweringFollowup}
+          disabled={isCurrentConversationSending || isAnsweringFollowup}
           onChoose={async (option) => {
             setAnsweringQuestionId(followupQuestion.messageId);
             try {
@@ -84,26 +88,26 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
           }}
         />
       )}
-      {ide.pendingRunMessage && (
+      {visiblePendingRunMessage && (
         <PendingRunMessagePanel
-          message={ide.pendingRunMessage}
-          notice={ide.runSteerNotice?.status === 'warn' || ide.runSteerNotice?.status === 'error' ? ide.runSteerNotice : null}
-          disabled={!ide.isChatSending}
+          message={visiblePendingRunMessage}
+          notice={visibleRunSteerNotice?.status === 'warn' || visibleRunSteerNotice?.status === 'error' ? visibleRunSteerNotice : null}
+          disabled={!isCurrentConversationSending}
           onSteer={ide.sendPendingRunMessageAsSteer}
           onDelete={ide.discardPendingRunMessage}
         />
       )}
-      {!ide.pendingRunMessage && (
+      {!visiblePendingRunMessage && (
         <RunSteerPreviewPanel
-          items={ide.runSteerItems}
+          items={visibleRunSteerItems}
           onDelete={ide.discardRunSteerItem}
           onQueueAfterRun={ide.queueRunSteerItemAfterRun}
           onRetry={ide.retryRunSteerItem}
         />
       )}
-      {!ide.pendingRunMessage && (ide.runSteerNotice?.status === 'warn' || ide.runSteerNotice?.status === 'error') && ide.runSteerNotice?.text && (
+      {!visiblePendingRunMessage && (visibleRunSteerNotice?.status === 'warn' || visibleRunSteerNotice?.status === 'error') && visibleRunSteerNotice?.text && (
         <div className="run-steer-notice-panel motion-popover pointer-events-auto mb-3">
-          {ide.runSteerNotice.text}
+          {visibleRunSteerNotice.text}
         </div>
       )}
       <div
@@ -126,7 +130,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
           onRemoveSkillReference={ide.removeSkillReference}
         />
         <ComposerInput
-          ide={ide}
+          ide={{ ...ide, isChatSending: isCurrentConversationSending }}
           attachmentInputRef={attachmentInputRef}
           inputRef={chatInputRef}
           isSkillMenuOpen={isSkillMenuOpen}
@@ -140,6 +144,13 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
       </div>
     </div>
   );
+}
+
+function visibleConversationItem(item, conversationId) {
+  if (!item) return null;
+  if (!conversationId) return null;
+  const itemConversationId = item.conversationId || item.conversation_id || '';
+  return !itemConversationId || itemConversationId === conversationId ? item : null;
 }
 
 function isComposerDrag(e) {

@@ -324,6 +324,56 @@ func TestLatestConversationEventByTypeIsUserScoped(t *testing.T) {
 	}
 }
 
+func TestLatestConversationRunIsUserScoped(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	runs := NewAgentRunStore(db)
+	if err := runs.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+	first, err := runs.CreateRun(ctx, CreateAgentRunInput{
+		UserID:          "user-a",
+		ConversationID:  "conv-a",
+		UserMessageID:   "msg-a",
+		ModelProviderID: "mp-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun first returned error: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	latest, err := runs.CreateRun(ctx, CreateAgentRunInput{
+		UserID:          "user-a",
+		ConversationID:  "conv-a",
+		UserMessageID:   "msg-b",
+		ModelProviderID: "mp-b",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun latest returned error: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := runs.CreateRun(ctx, CreateAgentRunInput{
+		UserID:          "user-b",
+		ConversationID:  "conv-a",
+		UserMessageID:   "msg-other",
+		ModelProviderID: "mp-other",
+	}); err != nil {
+		t.Fatalf("CreateRun other user returned error: %v", err)
+	}
+
+	got, err := runs.LatestConversationRun(ctx, "user-a", "conv-a")
+	if err != nil {
+		t.Fatalf("LatestConversationRun returned error: %v", err)
+	}
+	if got.ID != latest.ID || got.ID == first.ID {
+		t.Fatalf("expected latest user-a run %s, got %#v", latest.ID, got)
+	}
+}
+
 func TestAgentRunCheckpointLifecycle(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))

@@ -2,14 +2,11 @@ package ai
 
 import "context"
 
-func shouldFallbackAfterStreamError(ctx context.Context, err error, checkpointAvailable bool) bool {
+func shouldFallbackAfterStreamError(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
 	if ctx != nil && ctx.Err() != nil {
-		return false
-	}
-	if checkpointAvailable && isCheckpointRecoverableProviderError(err) {
 		return false
 	}
 	return true

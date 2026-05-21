@@ -1607,18 +1607,31 @@ func TestGenerateReplyOpenAIFailsWhenModelNeverCompletesAfterMutation(t *testing
 	}
 }
 
-func TestGenerateReplyOpenAIResumesFromCheckpointWhenFinalStreamBreaks(t *testing.T) {
+func TestGenerateReplyOpenAIFallsBackToNonStreamWhenFinalStreamBreaks(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
-	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
 		switch requestCount.Add(1) {
 		case 1:
+			if payload["stream"] != true {
+				t.Fatalf("expected first request to stream, got %#v", payload["stream"])
+			}
 			writeOpenAIToolCall(t, w, "write_1", "save_workspace_file", `{"path":"verified-stream-fallback.txt","content":"done","mode":"create"}`)
 		case 2:
+			if payload["stream"] != true {
+				t.Fatalf("expected final request to stream before fallback, got %#v", payload["stream"])
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial final\"}}]}\n\n")
 			if flusher, ok := w.(http.Flusher); ok {
@@ -1634,7 +1647,10 @@ func TestGenerateReplyOpenAIResumesFromCheckpointWhenFinalStreamBreaks(t *testin
 			}
 			_ = conn.Close()
 		case 3:
-			writeOpenAIToolCall(t, w, "done_after_resume", "attempt_completion", `{"summary":"已从断点继续并完成。","changed_paths":["verified-stream-fallback.txt"]}`)
+			if payload["stream"] != false {
+				t.Fatalf("expected same-turn fallback to disable stream, got %#v", payload["stream"])
+			}
+			writeOpenAIToolCall(t, w, "done_after_fallback", "attempt_completion", `{"summary":"已通过非流式降级完成。","changed_paths":["verified-stream-fallback.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", requestCount.Load())
 		}
@@ -1646,11 +1662,11 @@ func TestGenerateReplyOpenAIResumesFromCheckpointWhenFinalStreamBreaks(t *testin
 	if err != nil {
 		t.Fatalf("GenerateReply returned error: %v", err)
 	}
-	if !strings.Contains(reply.Content, "已从断点继续并完成") {
+	if !strings.Contains(reply.Content, "已通过非流式降级完成") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
 	if requestCount.Load() != 3 {
-		t.Fatalf("expected write, broken final stream, and checkpoint resume, got %d", requestCount.Load())
+		t.Fatalf("expected write, broken final stream, and non-stream fallback, got %d", requestCount.Load())
 	}
 }
 
@@ -1946,7 +1962,7 @@ func TestGenerateReplyCheckpointResumeAfterTransientProviderError(t *testing.T) 
 	}
 }
 
-func TestGenerateReplyCheckpointResumeSkipsNonStreamFallbackWhenCheckpointExists(t *testing.T) {
+func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
@@ -1962,7 +1978,6 @@ func TestGenerateReplyCheckpointResumeSkipsNonStreamFallbackWhenCheckpointExists
 		if err != nil {
 			t.Fatalf("ReadAll returned error: %v", err)
 		}
-		body := string(raw)
 		var payload map[string]any
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			t.Fatalf("invalid request payload: %v", err)
@@ -1972,8 +1987,14 @@ func TestGenerateReplyCheckpointResumeSkipsNonStreamFallbackWhenCheckpointExists
 		}
 		switch requestCount.Add(1) {
 		case 1:
+			if payload["stream"] != true {
+				t.Fatalf("expected first request to stream, got %#v", payload["stream"])
+			}
 			writeOpenAIToolCall(t, w, "read_before_failure", "read_workspace_text", `{"path":"draft.txt"}`)
 		case 2:
+			if payload["stream"] != true {
+				t.Fatalf("expected second request to stream before fallback, got %#v", payload["stream"])
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Connection", "close")
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
@@ -1989,11 +2010,30 @@ func TestGenerateReplyCheckpointResumeSkipsNonStreamFallbackWhenCheckpointExists
 				panic(http.ErrAbortHandler)
 			}
 			_ = conn.Close()
-		default:
-			if !strings.Contains(body, "上一轮模型供应商连接中断") {
-				t.Fatalf("expected checkpoint recovery reminder in request %d: %s", requestCount.Load(), body)
+		case 3:
+			if payload["stream"] != false {
+				t.Fatalf("expected non-stream fallback before checkpoint recovery, got %#v", payload["stream"])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(529)
+			_, _ = w.Write([]byte(`{"error":{"message":"fallback overloaded"}}`))
+		case 4, 5:
+			if payload["stream"] != false {
+				t.Fatalf("expected SDK retry to stay on non-stream fallback, got %#v", payload["stream"])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(529)
+			_, _ = w.Write([]byte(`{"error":{"message":"fallback overloaded"}}`))
+		case 6:
+			if payload["stream"] != true {
+				t.Fatalf("expected checkpoint resume to rebuild a streaming provider turn, got %#v", payload["stream"])
+			}
+			if !strings.Contains(string(raw), "上一轮模型供应商连接中断") {
+				t.Fatalf("expected checkpoint recovery reminder in request %d: %s", requestCount.Load(), string(raw))
 			}
 			writeOpenAIToolCall(t, w, "done_after_resume", "attempt_completion", `{"summary":"已从断点继续并完成。"}`)
+		default:
+			t.Fatalf("unexpected request count: %d", requestCount.Load())
 		}
 	}))
 	defer server.Close()
@@ -2018,8 +2058,8 @@ func TestGenerateReplyCheckpointResumeSkipsNonStreamFallbackWhenCheckpointExists
 	if !strings.Contains(reply.Content, "已从断点继续并完成") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
-	if fallbackRequests.Load() != 0 {
-		t.Fatalf("expected checkpoint resume instead of non-stream fallback, got %d fallback requests", fallbackRequests.Load())
+	if fallbackRequests.Load() != 3 {
+		t.Fatalf("expected non-stream fallback plus SDK retries before checkpoint resume, got %d fallback requests", fallbackRequests.Load())
 	}
 }
 
@@ -2198,16 +2238,26 @@ func TestGenerateReplyAnthropicEmptyStreamFallsBackToNonStream(t *testing.T) {
 	}
 }
 
-func TestGenerateReplyAnthropicResumesFromCheckpointWhenFinalStreamBreaks(t *testing.T) {
+func TestGenerateReplyAnthropicFallsBackToNonStreamWhenFinalStreamBreaks(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
-	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
 		switch requestCount.Add(1) {
 		case 1:
+			if payload["stream"] != true {
+				t.Fatalf("expected first request to stream, got %#v", payload["stream"])
+			}
 			writeJSON(t, w, map[string]any{
 				"content": []map[string]any{{
 					"type": "tool_use",
@@ -2222,6 +2272,9 @@ func TestGenerateReplyAnthropicResumesFromCheckpointWhenFinalStreamBreaks(t *tes
 				"stop_reason": "tool_use",
 			})
 		case 2:
+			if payload["stream"] != true {
+				t.Fatalf("expected final request to stream before fallback, got %#v", payload["stream"])
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, "event: content_block_start\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"partial final\"}}\n\n")
@@ -2238,13 +2291,16 @@ func TestGenerateReplyAnthropicResumesFromCheckpointWhenFinalStreamBreaks(t *tes
 			}
 			_ = conn.Close()
 		case 3:
+			if payload["stream"] != false {
+				t.Fatalf("expected same-turn fallback to disable stream, got %#v", payload["stream"])
+			}
 			writeJSON(t, w, map[string]any{
 				"content": []map[string]any{{
 					"type": "tool_use",
-					"id":   "done_after_resume",
+					"id":   "done_after_fallback",
 					"name": "attempt_completion",
 					"input": map[string]any{
-						"summary":       "已从断点继续并完成。",
+						"summary":       "已通过非流式降级完成。",
 						"changed_paths": []string{"anthropic-verified-stream-fallback.txt"},
 					},
 				}},
@@ -2261,11 +2317,11 @@ func TestGenerateReplyAnthropicResumesFromCheckpointWhenFinalStreamBreaks(t *tes
 	if err != nil {
 		t.Fatalf("GenerateReply returned error: %v", err)
 	}
-	if !strings.Contains(reply.Content, "已从断点继续并完成") {
+	if !strings.Contains(reply.Content, "已通过非流式降级完成") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
 	if requestCount.Load() != 3 {
-		t.Fatalf("expected write, broken final stream, and checkpoint resume, got %d", requestCount.Load())
+		t.Fatalf("expected write, broken final stream, and non-stream fallback, got %d", requestCount.Load())
 	}
 }
 

@@ -36,18 +36,17 @@ func (r *agentRuntime) handleBudgetExhausted(ctx context.Context, reason string,
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 
 	turn, err := r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
-		ConversationID:      r.conversationID,
-		MessageID:           r.messageID,
-		Provider:            r.provider,
-		Protocol:            r.protocol,
-		Tools:               nil,
-		ToolChoice:          providerToolChoice{Mode: providerToolChoiceNone},
-		DisableTools:        true,
-		Snapshot:            r.lastContextSnapshot,
-		PerformedMutation:   r.performedMutation,
-		HasToolEvents:       len(r.events) > 0,
-		CanCheckpointResume: false,
-		Opts:                r.opts,
+		ConversationID:    r.conversationID,
+		MessageID:         r.messageID,
+		Provider:          r.provider,
+		Protocol:          r.protocol,
+		Tools:             nil,
+		ToolChoice:        providerToolChoice{Mode: providerToolChoiceNone},
+		DisableTools:      true,
+		Snapshot:          r.lastContextSnapshot,
+		PerformedMutation: r.performedMutation,
+		HasToolEvents:     len(r.events) > 0,
+		Opts:              r.opts,
 	})
 	r.transcript = originalTranscript
 

@@ -10,18 +10,17 @@ import (
 )
 
 type providerTurnRequest struct {
-	ConversationID      string
-	MessageID           string
-	Provider            store.ModelProvider
-	Protocol            agentProtocol
-	Tools               []map[string]any
-	ToolChoice          providerToolChoice
-	DisableTools        bool
-	Snapshot            ContextSnapshot
-	PerformedMutation   bool
-	HasToolEvents       bool
-	CanCheckpointResume bool
-	Opts                RunOptions
+	ConversationID    string
+	MessageID         string
+	Provider          store.ModelProvider
+	Protocol          agentProtocol
+	Tools             []map[string]any
+	ToolChoice        providerToolChoice
+	DisableTools      bool
+	Snapshot          ContextSnapshot
+	PerformedMutation bool
+	HasToolEvents     bool
+	Opts              RunOptions
 }
 
 type providerToolChoiceMode string

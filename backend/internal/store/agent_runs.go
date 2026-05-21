@@ -174,6 +174,18 @@ WHERE id = ? AND user_id = ?
 	return scanAgentRun(row)
 }
 
+func (s *AgentRunStore) LatestConversationRun(ctx context.Context, userID, conversationID string) (AgentRun, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_provider_id,
+       status, stage, error_message, diagnostic_log_id, created_at, started_at, completed_at, updated_at
+FROM agent_runs
+WHERE user_id = ? AND conversation_id = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`, userID, conversationID)
+	return scanAgentRun(row)
+}
+
 func (s *AgentRunStore) UpdateRun(ctx context.Context, userID, id string, input UpdateAgentRunInput) (AgentRun, error) {
 	now := time.Now().UTC()
 	var startedAt any

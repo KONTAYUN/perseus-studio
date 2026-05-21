@@ -57,6 +57,7 @@ export function createChatRegenerateResumeActions({
           createdAt: new Date().toISOString(),
           content: '',
           attachments: [],
+          runId: '',
         }),
       ]
     );
@@ -109,6 +110,7 @@ export function createChatRegenerateResumeActions({
         createdAt: new Date().toISOString(),
         content: '',
         attachments: [],
+        runId,
       }),
     ]);
     const control = { abort: () => {} };

@@ -24,6 +24,7 @@ import {
   RUN_STEER_STATUS,
   appendRunSteerItem,
   buildRunSteerItem,
+  buildAppliedRunSteerItemsFromEvents,
   markRunSteerApplied,
   markRunSteerFailed,
   markRunSteerReceived,
@@ -31,6 +32,7 @@ import {
   pendingRunSteerPreviewItems,
   removeRunSteerItems,
   runSteerStatusLabel,
+  visibleRunSteerTimelineItems,
   unappliedRunSteerItems,
 } from '../../src/hooks/chatSteerItems.js';
 
@@ -43,6 +45,7 @@ test('appendUniqueProgressItem keeps progress ids unique', () => {
 test('buildProgressItem maps tool calls to friendly text', () => {
   assert.deepEqual(buildProgressItem('tool_call_started', { tool_call_id: 'tc1', tool_name: 'read_workspace_text' }), {
     id: 'tool_call_started:tc1',
+    runId: '',
     type: 'tool_call_started',
     text: '正在读取文件',
     toolName: 'read_workspace_text',
@@ -205,6 +208,8 @@ test('run steer item advances through received and applied events', () => {
   const initial = appendRunSteerItem([], buildRunSteerItem({
     clientSteerId: 'client-1',
     content: '请先停一下',
+    conversationId: 'conv-1',
+    runId: 'run-1',
   }));
   const received = markRunSteerReceived(initial, {
     client_steer_id: 'client-1',
@@ -213,11 +218,73 @@ test('run steer item advances through received and applied events', () => {
   });
   assert.equal(received[0].status, RUN_STEER_STATUS.received);
   assert.equal(received[0].steerId, 'steer-1');
+  assert.equal(received[0].conversation_id, 'conv-1');
+  assert.equal(received[0].runId, 'run-1');
 
   const applied = markRunSteerApplied(received, {
     steer_id: 'steer-1',
   });
   assert.equal(applied[0].status, RUN_STEER_STATUS.applied);
+  assert.equal(applied[0].conversation_id, 'conv-1');
+  assert.equal(applied[0].runId, 'run-1');
+});
+
+test('visible run steer items stay scoped to the selected conversation', () => {
+  const items = [
+    {
+      id: 'steer-a',
+      conversation_id: 'conv-a',
+      status: RUN_STEER_STATUS.applied,
+      content: 'a',
+    },
+    {
+      id: 'steer-b',
+      conversation_id: 'conv-b',
+      status: RUN_STEER_STATUS.applied,
+      content: 'b',
+    },
+  ];
+
+  assert.deepEqual(visibleRunSteerTimelineItems(items, ''), []);
+  assert.deepEqual(visibleRunSteerTimelineItems(items, 'conv-a'), [items[0]]);
+});
+
+test('applied steer events can be restored from durable run events', () => {
+  const items = buildAppliedRunSteerItemsFromEvents([
+    {
+      id: 'evt-1',
+      run_id: 'run-1',
+      conversation_id: 'conv-1',
+      type: 'agent_steer_received',
+      payload: {
+        steer_id: 'steer-1',
+        client_steer_id: 'client-1',
+        content: '请先整理目录',
+        created_at: '2026-05-21T06:08:00Z',
+      },
+    },
+    {
+      id: 'evt-2',
+      run_id: 'run-1',
+      conversation_id: 'conv-1',
+      type: 'agent_steer_applied',
+      payload: {
+        steer_id: 'steer-1',
+        client_steer_id: 'client-1',
+        created_at: '2026-05-21T06:08:10Z',
+      },
+    },
+  ], {
+    conversationId: 'conv-1',
+    runId: 'run-1',
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, RUN_STEER_STATUS.applied);
+  assert.equal(items[0].conversation_id, 'conv-1');
+  assert.equal(items[0].runId, 'run-1');
+  assert.equal(items[0].steerId, 'steer-1');
+  assert.equal(items[0].content, '请先整理目录');
 });
 
 test('run steer failure stays in pending input preview, not committed timeline', () => {
