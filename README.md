@@ -2,6 +2,8 @@
 
 Browser-based IDE with integrated AI chat, background task execution, and a skill/plugin system. Multi-user support with per-user data isolation. Single-container deployment via Docker.
 
+Some internal package names still use the historical `webide-*` naming for compatibility with existing module imports and lockfiles. Product-facing documentation and UI use **Perseus Studio**.
+
 ## Features
 
 - **Multi-user** — registration, login, per-user data isolation

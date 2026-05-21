@@ -301,7 +301,7 @@ Rules:
 - Composer action buttons belong in `composer-action-dock`; they must stay fixed to the lower right of the composer shell and must not vertically track the textarea center as it grows.
 - The action dock is a translucent floating glass layer; text may pass underneath it. Do not add text-flow avoidance, contenteditable mirrors, or dynamic button-safe padding to route text around the dock.
 - Composer implementation lives under `src/components/chat/composer/`; future input, action dock, attachment, reference, skill menu, and follow-up question work should stay in the matching subcomponent instead of expanding the wrapper.
-- Composer CSS lives in `src/styles/chat.css`; keep shell, textarea, action dock, scroll-to-bottom, and follow-up question classes together.
+- Composer CSS lives in `src/styles/chat-composer.css`; keep shell, textarea, action dock, pending input, scroll-to-bottom, and follow-up question classes together.
 - Context usage/compaction status should be visible but quiet.
 - Progress items should be lightweight chips, not large cards.
 

@@ -52,7 +52,8 @@ src/                        React frontend (Vite + Tailwind)
     surfaces.css            Reusable surfaces and low-depth material classes
     motion.css              Shared animation and interaction primitives
     controls.css            Shared button/icon/segmented/switch rules
-    chat.css                Chat messages, composer, follow-up panel
+    chat.css                Chat messages and chat progress surfaces
+    chat-composer.css       Composer shell, action dock, pending input, follow-up panel
     editor.css              Editor tabs/drop/textarea rules
     file-tree.css           File tree rows, labels, drag indicators
     settings.css            Settings modal/card/view animation rules

@@ -42,7 +42,8 @@ When a file grows too large, split it by the responsibility it already contains.
 - `src/styles/surfaces.css`: reusable surfaces, cards, overlays, panel glow, non-motion visual primitives.
 - `src/styles/motion.css`: animation keyframes/classes, motion primitives, shared interactive control motion.
 - `src/styles/controls.css`: shared interactive control geometry and states.
-- `src/styles/chat.css`: chat messages, composer, follow-up question panel, scroll-to-bottom control.
+- `src/styles/chat.css`: chat messages, assistant progress, recovery notices, and chat-only message surfaces.
+- `src/styles/chat-composer.css`: composer shell, action dock, pending input queue, follow-up question panel, and scroll-to-bottom control.
 - `src/styles/editor.css`: editor tabs, editor textarea, editor drop states.
 - `src/styles/file-tree.css`: file tree rows, file labels, inline rename/drop indicators.
 - `src/styles/settings.css`: settings modal/card/view-specific transitions.
