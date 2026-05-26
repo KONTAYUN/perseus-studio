@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
@@ -42,8 +43,13 @@ func (s *Server) executeConversationRun(userID, conversationID, userMessageID, m
 
 	var persistenceMu sync.Mutex
 	var persistenceErr error
+	runStartedAt := time.Now()
 	recordPersistenceErr := func(stage string, err error) {
 		if err == nil {
+			return
+		}
+		if isExpectedRunCancellation(err) {
+			log.Printf("[agent_run] persistence canceled conversation=%s run=%s stage=%s error=%v", conversationID, runID, stage, err)
 			return
 		}
 		wrapped := fmt.Errorf("%s: %w", stage, err)
@@ -56,6 +62,7 @@ func (s *Server) executeConversationRun(userID, conversationID, userMessageID, m
 				Stage:          stage,
 				Level:          "error",
 				ErrorMessage:   err.Error(),
+				RequestSummary: s.runPersistenceDiagnosticSummary(userID, runID, stage, runStartedAt),
 			}); diagErr == nil {
 				wrapped = ai.WithDiagnosticID(wrapped, item.ID)
 			}

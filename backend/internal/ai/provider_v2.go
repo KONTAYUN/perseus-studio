@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"webide-backend/internal/store"
@@ -98,8 +99,15 @@ func openAIProviderToolChoice(choice providerToolChoice) any {
 }
 
 func anthropicProviderToolChoice(choice providerToolChoice) map[string]any {
+	return anthropicProviderToolChoiceForReasoning(choice, false)
+}
+
+func anthropicProviderToolChoiceForReasoning(choice providerToolChoice, reasoningEnabled bool) map[string]any {
 	choice = normalizeProviderToolChoice(choice)
 	payload := map[string]any{"type": "auto", "disable_parallel_tool_use": true}
+	if reasoningEnabled && choice.requiresTool() {
+		return payload
+	}
 	switch choice.Mode {
 	case providerToolChoiceRequired:
 		payload["type"] = "any"
@@ -136,6 +144,9 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"stream":                       summary.Stream,
 		"tool_choice":                  summary.ToolChoice,
 		"requires_tool":                summary.RequiresTool,
+		"thinking_mode":                summary.ThinkingMode,
+		"reasoning_support":            summary.ReasoningSupport,
+		"reasoning_effort":             summary.ReasoningEffort,
 		"tools_count":                  summary.ToolsCount,
 		"tool_names":                   summary.ToolNames,
 		"parallel_tool_calls":          summary.ParallelToolCalls,
@@ -197,6 +208,9 @@ func providerFailureClass(err error, summary ProviderRequestSummary) string {
 	}
 	var providerErr *ProviderResponseError
 	if errors.As(err, &providerErr) {
+		if failureClass := providerResponseFailureClass(providerErr, err); failureClass != "" {
+			return failureClass
+		}
 		if providerErr.StatusCode == http.StatusBadRequest {
 			if summary.RequiresTool && summary.ToolChoice == "required" {
 				return "provider_rejected_required_tool_choice"
@@ -214,5 +228,45 @@ func providerFailureClass(err error, summary ProviderRequestSummary) string {
 	if isCheckpointRecoverableProviderError(err) {
 		return "provider_transient_transport"
 	}
+	if failureClass := providerTransportFailureClass(err); failureClass != "" {
+		return failureClass
+	}
 	return ""
+}
+
+func providerResponseFailureClass(providerErr *ProviderResponseError, err error) string {
+	if providerErr == nil {
+		return ""
+	}
+	text := strings.ToLower(strings.Join([]string{providerErr.Message, providerErr.ResponseSnippet, errString(err)}, "\n"))
+	switch {
+	case strings.Contains(text, "model_not_found") ||
+		strings.Contains(text, "model not found") ||
+		strings.Contains(text, "no available channel for model") ||
+		strings.Contains(text, "does not exist") && strings.Contains(text, "model"):
+		return "provider_model_unavailable"
+	case providerErr.StatusCode == http.StatusUnauthorized || providerErr.StatusCode == http.StatusForbidden:
+		return "provider_auth_failed"
+	case providerErr.StatusCode == http.StatusNotFound:
+		return "provider_endpoint_or_model_not_found"
+	default:
+		return ""
+	}
+}
+
+func providerTransportFailureClass(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "no such host") || strings.Contains(text, "lookup ") && strings.Contains(text, ":53"):
+		return "provider_dns_lookup_failed"
+	case strings.Contains(text, "connection refused"):
+		return "provider_connection_refused"
+	case strings.Contains(text, "context deadline exceeded") || strings.Contains(text, "client.timeout exceeded"):
+		return "provider_transport_timeout"
+	default:
+		return ""
+	}
 }

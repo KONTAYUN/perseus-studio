@@ -623,6 +623,22 @@ func TestExecuteToolWebSearchWithoutProviderReturnsClearError(t *testing.T) {
 	}
 }
 
+func TestToolDiagnosticClassifiesExpectedToolFailures(t *testing.T) {
+	missingPathErr := fmt.Errorf("stat /data/users/user-1/workspace/docs/missing.md: no such file or directory")
+	diag := buildToolDiagnostic("read_workspace_text", `{"path":"docs/missing.md"}`, "docs/missing.md", 12, missingPathErr)
+	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_path_not_found"`) {
+		t.Fatalf("unexpected missing path diagnostic: %#v", diag)
+	}
+	if strings.Contains(diag.ErrorMessage, "/data/users/") || !strings.Contains(diag.ErrorMessage, "workspace:docs/missing.md") {
+		t.Fatalf("expected sanitized workspace path, got %q", diag.ErrorMessage)
+	}
+
+	diag = buildToolDiagnostic("perseus_search_web", `{"query":"openai"}`, "“openai”", 3, fmt.Errorf("未配置可用搜索工具，请先在设置页配置 Tavily 或 Brave。"))
+	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"search_provider_not_configured"`) {
+		t.Fatalf("unexpected search diagnostic: %#v", diag)
+	}
+}
+
 func TestBudgetToolResultForModelTruncatesCommandOutput(t *testing.T) {
 	raw := mustJSON(map[string]any{
 		"command":   "find . -type f",
@@ -1056,6 +1072,118 @@ func TestRuntimeToolChoiceRequiresToolsForActiveToolLoop(t *testing.T) {
 	}
 }
 
+func TestNativeReasoningPolicyMapsThinkingModes(t *testing.T) {
+	openAIProvider := store.ModelProvider{Protocol: "openai", ModelID: "gpt-5.4", ReasoningCapability: store.ReasoningCapabilityOpenAIReasoning}
+	cases := map[string]string{
+		ThinkingModeLight:    "low",
+		ThinkingModeStandard: "medium",
+		ThinkingModeDeep:     "high",
+		ThinkingModeExpert:   "xhigh",
+	}
+	for mode, expected := range cases {
+		payload := map[string]any{}
+		applyOpenAIReasoningPayload(payload, openAIProvider, mode)
+		if payload["reasoning_effort"] != expected {
+			t.Fatalf("expected OpenAI effort %s for mode %s, got %#v", expected, mode, payload)
+		}
+	}
+
+	anthropicProvider := store.ModelProvider{Protocol: "anthropic", ModelID: "claude-opus-4-6", ReasoningCapability: store.ReasoningCapabilityAnthropicAdaptive}
+	anthropicCases := map[string]string{
+		ThinkingModeStandard: "medium",
+		ThinkingModeDeep:     "high",
+		ThinkingModeExpert:   "max",
+	}
+	for mode, expected := range anthropicCases {
+		payload := map[string]any{}
+		applyAnthropicReasoningPayload(payload, anthropicProvider, mode)
+		outputConfig, _ := payload["output_config"].(map[string]any)
+		if outputConfig["effort"] != expected {
+			t.Fatalf("expected Anthropic effort %s for mode %s, got %#v", expected, mode, payload)
+		}
+	}
+}
+
+func TestNativeReasoningPolicyDoesNotSendUnknownModelParams(t *testing.T) {
+	provider := store.ModelProvider{Protocol: "openai", ModelID: "qwen-plus", ReasoningCapability: store.ReasoningCapabilityAuto}
+	payload := map[string]any{}
+	policy := applyOpenAIReasoningPayload(payload, provider, ThinkingModeExpert)
+	if policy.Support != store.ReasoningSupportNone || len(payload) != 0 {
+		t.Fatalf("expected unknown model to omit reasoning params, policy=%#v payload=%#v", policy, payload)
+	}
+}
+
+func TestNativeReasoningPolicyUsesSourceBackedOpenAIModelTable(t *testing.T) {
+	provider := store.ModelProvider{
+		Protocol:            "openai",
+		BaseURL:             "https://example.com/v1",
+		ModelID:             "gpt-5.4",
+		ReasoningCapability: store.ReasoningCapabilityAuto,
+	}
+	payload := map[string]any{}
+	policy := applyOpenAIReasoningPayload(payload, provider, ThinkingModeExpert)
+	if policy.Support != store.ReasoningSupportOpenAI || payload["reasoning_effort"] != "xhigh" {
+		t.Fatalf("expected source-backed OpenAI model reasoning params, policy=%#v payload=%#v", policy, payload)
+	}
+}
+
+func TestNativeReasoningPolicyDoesNotUseThinkingNameHeuristics(t *testing.T) {
+	provider := store.ModelProvider{
+		Protocol:            "openai",
+		BaseURL:             "https://example.com/v1",
+		ModelID:             "kimi-k2-thinking",
+		ReasoningCapability: store.ReasoningCapabilityAuto,
+	}
+	payload := map[string]any{}
+	policy := applyOpenAIReasoningPayload(payload, provider, ThinkingModeExpert)
+	if policy.Support != store.ReasoningSupportNone || len(payload) != 0 {
+		t.Fatalf("expected thinking-like unknown model to omit reasoning params, policy=%#v payload=%#v", policy, payload)
+	}
+}
+
+func TestNativeReasoningPolicyPreservesVariableDiscoveryLevels(t *testing.T) {
+	provider := store.ModelProvider{
+		Protocol:                  "openai",
+		BaseURL:                   "https://proxy.example/v1",
+		ModelID:                   "provider/gpt",
+		ReasoningCapability:       store.ReasoningCapabilityOpenAIReasoning,
+		ReasoningCapabilitySource: store.ReasoningCapabilitySourceProviderDiscovery,
+		ReasoningProfileLevels:    "light,deep",
+	}
+	payload := map[string]any{}
+	policy := applyOpenAIReasoningPayload(payload, provider, ThinkingModeExpert)
+	if payload["reasoning_effort"] != "low" || policy.ThinkingMode != ThinkingModeLight {
+		t.Fatalf("expected unsupported mode to clamp to discovery default light, policy=%#v payload=%#v", policy, payload)
+	}
+	payload = map[string]any{}
+	policy = applyOpenAIReasoningPayload(payload, provider, ThinkingModeDeep)
+	if payload["reasoning_effort"] != "high" || policy.ThinkingMode != ThinkingModeDeep {
+		t.Fatalf("expected supported discovery level to be sent, policy=%#v payload=%#v", policy, payload)
+	}
+}
+
+func TestNativeReasoningPolicyIgnoresMismatchedCapability(t *testing.T) {
+	provider := store.ModelProvider{
+		Protocol:            "anthropic",
+		BaseURL:             "https://api.anthropic.com/v1",
+		ModelID:             "claude-opus-4-6",
+		ReasoningCapability: store.ReasoningCapabilityOpenAIReasoning,
+	}
+	payload := map[string]any{}
+	policy := applyAnthropicReasoningPayload(payload, provider, ThinkingModeExpert)
+	if policy.Support != store.ReasoningSupportNone || len(payload) != 0 {
+		t.Fatalf("expected mismatched protocol/capability to omit reasoning params, policy=%#v payload=%#v", policy, payload)
+	}
+}
+
+func TestAnthropicReasoningUsesAutoToolChoice(t *testing.T) {
+	required := providerToolChoice{Mode: providerToolChoiceRequired}
+	choice := anthropicProviderToolChoiceForReasoning(required, true)
+	if choice["type"] != "auto" || choice["disable_parallel_tool_use"] != true {
+		t.Fatalf("expected adaptive thinking to use auto tool choice, got %#v", choice)
+	}
+}
+
 func TestRuntimeForceToolOnlyBeforeFirstToolAttempt(t *testing.T) {
 	runtime := &agentRuntime{opts: RunOptions{ForceTool: "save_workspace_file"}}
 	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceForced || choice.ToolName != "save_workspace_file" {
@@ -1213,6 +1341,20 @@ func TestAnthropicMessagesEndpointKeepsStandardPath(t *testing.T) {
 	expected := baseURL + "/messages"
 	if actual := anthropicMessagesEndpoint(baseURL); actual != expected {
 		t.Fatalf("expected %q, got %q", expected, actual)
+	}
+}
+
+func TestProviderFailureClassSeparatesConfigFromTransientHTTP(t *testing.T) {
+	err := &ProviderResponseError{
+		StatusCode:      http.StatusServiceUnavailable,
+		Message:         "模型供应商请求失败（HTTP 503）：No available channel for model claude-opus-4-7-thinking under group default",
+		ResponseSnippet: `{"error":{"code":"model_not_found","message":"No available channel for model claude-opus-4-7-thinking"}}`,
+	}
+	if got := providerFailureClass(err, ProviderRequestSummary{}); got != "provider_model_unavailable" {
+		t.Fatalf("expected provider_model_unavailable, got %q", got)
+	}
+	if got := providerFailureClass(fmt.Errorf(`Post "https://pomo.zanbi.fun/v1/chat/completions": dial tcp: lookup pomo.zanbi.fun on 127.0.0.11:53: no such host`), ProviderRequestSummary{}); got != "provider_dns_lookup_failed" {
+		t.Fatalf("expected provider_dns_lookup_failed, got %q", got)
 	}
 }
 

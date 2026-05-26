@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	ThinkingModeLight    = "light"
 	ThinkingModeStandard = "standard"
 	ThinkingModeDeep     = "deep"
 	ThinkingModeExpert   = "expert"
@@ -18,6 +19,8 @@ const (
 
 func normalizeThinkingMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case ThinkingModeLight:
+		return ThinkingModeLight
 	case ThinkingModeDeep:
 		return ThinkingModeDeep
 	case ThinkingModeExpert:

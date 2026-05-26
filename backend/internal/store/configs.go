@@ -7,23 +7,28 @@ import (
 )
 
 type ModelProvider struct {
-	ID                          string    `json:"id"`
-	UserID                      string    `json:"user_id"`
-	Name                        string    `json:"name"`
-	Protocol                    string    `json:"protocol"`
-	BaseURL                     string    `json:"base_url"`
-	APIKey                      string    `json:"-"`
-	MaskedKey                   string    `json:"masked_key"`
-	ModelID                     string    `json:"model_id"`
-	Enabled                     bool      `json:"enabled"`
-	IsDefault                   bool      `json:"is_default"`
-	ContextWindowTokens         int       `json:"context_window_tokens"`
-	AutoCompactEnabled          bool      `json:"auto_compact_enabled"`
-	AutoCompactThresholdPercent int       `json:"auto_compact_threshold_percent"`
-	CompactReservedTokens       int       `json:"compact_reserved_tokens"`
-	PruneToolOutputsEnabled     bool      `json:"prune_tool_outputs_enabled"`
-	CreatedAt                   time.Time `json:"created_at"`
-	UpdatedAt                   time.Time `json:"updated_at"`
+	ID                          string          `json:"id"`
+	UserID                      string          `json:"user_id"`
+	Name                        string          `json:"name"`
+	Protocol                    string          `json:"protocol"`
+	BaseURL                     string          `json:"base_url"`
+	APIKey                      string          `json:"-"`
+	MaskedKey                   string          `json:"masked_key"`
+	ModelID                     string          `json:"model_id"`
+	Enabled                     bool            `json:"enabled"`
+	IsDefault                   bool            `json:"is_default"`
+	ReasoningCapability         string          `json:"reasoning_capability"`
+	ReasoningCapabilitySource   string          `json:"reasoning_capability_source,omitempty"`
+	ReasoningProfileLevels      string          `json:"reasoning_profile_levels,omitempty"`
+	ReasoningSupport            string          `json:"reasoning_support"`
+	ThinkingProfile             ThinkingProfile `json:"thinking_profile"`
+	ContextWindowTokens         int             `json:"context_window_tokens"`
+	AutoCompactEnabled          bool            `json:"auto_compact_enabled"`
+	AutoCompactThresholdPercent int             `json:"auto_compact_threshold_percent"`
+	CompactReservedTokens       int             `json:"compact_reserved_tokens"`
+	PruneToolOutputsEnabled     bool            `json:"prune_tool_outputs_enabled"`
+	CreatedAt                   time.Time       `json:"created_at"`
+	UpdatedAt                   time.Time       `json:"updated_at"`
 }
 
 type SearchProvider struct {
@@ -46,6 +51,9 @@ type ModelProviderInput struct {
 	ModelID                     string `json:"model_id"`
 	Enabled                     bool   `json:"enabled"`
 	IsDefault                   bool   `json:"is_default"`
+	ReasoningCapability         string `json:"reasoning_capability"`
+	ReasoningCapabilitySource   string `json:"reasoning_capability_source"`
+	ReasoningProfileLevels      string `json:"reasoning_profile_levels"`
 	ContextWindowTokens         int    `json:"context_window_tokens"`
 	AutoCompactEnabled          *bool  `json:"auto_compact_enabled"`
 	AutoCompactThresholdPercent int    `json:"auto_compact_threshold_percent"`
@@ -112,6 +120,9 @@ CREATE TABLE IF NOT EXISTS search_providers (
 		{"auto_compact_threshold_percent", "INTEGER NOT NULL DEFAULT 80"},
 		{"compact_reserved_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"prune_tool_outputs_enabled", "INTEGER NOT NULL DEFAULT 1"},
+		{"reasoning_capability", "TEXT NOT NULL DEFAULT 'auto'"},
+		{"reasoning_capability_source", "TEXT NOT NULL DEFAULT ''"},
+		{"reasoning_profile_levels", "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, column := range modelProviderColumns {
 		if err := AddColumnIfNotExists(ctx, s.db, "model_providers", column.name, column.def); err != nil {

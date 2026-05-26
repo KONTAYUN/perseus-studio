@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -118,6 +119,27 @@ func TestInstallZipRejectsZipSlip(t *testing.T) {
 	_, err := service.InstallZip(context.Background(), "test-user-id", makeZip(t, map[string]string{"../SKILL.md": "# bad"}), true)
 	if err == nil {
 		t.Fatalf("expected zip slip error")
+	}
+}
+
+func TestInstallZipRejectsPathConflictsWithClearError(t *testing.T) {
+	service := newTestService(t)
+	raw := makeZip(t, map[string]string{
+		"webnovel-writer/assets":       "file where directory should be",
+		"webnovel-writer/assets/a.txt": "asset",
+		"webnovel-writer/SKILL.md":     "# Skill\n",
+	})
+	_, err := service.InstallZip(context.Background(), "test-user-id", raw, true)
+	if err == nil || !strings.Contains(err.Error(), "zip 包含冲突路径") {
+		t.Fatalf("expected clear conflict error, got %v", err)
+	}
+}
+
+func TestReadSkillMissingReturnsFriendlyError(t *testing.T) {
+	service := newTestService(t)
+	_, err := service.ReadSkill(context.Background(), "test-user-id", "missing", true)
+	if err == nil || err.Error() != "skill not found" {
+		t.Fatalf("expected friendly missing skill error, got %v", err)
 	}
 }
 

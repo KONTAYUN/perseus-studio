@@ -51,6 +51,10 @@ func anthropicTranscriptMessages(entries []TranscriptEntry) []map[string]any {
 		entry := entries[index]
 		switch entry.Kind {
 		case transcriptEntryAssistant:
+			if len(entry.AnthropicContent) > 0 {
+				items = append(items, map[string]any{"role": "assistant", "content": cloneMapAnySlice(entry.AnthropicContent)})
+				continue
+			}
 			content := make([]map[string]any, 0, 1+len(entry.ToolCalls))
 			if strings.TrimSpace(entry.Text) != "" {
 				content = append(content, map[string]any{"type": "text", "text": entry.Text})

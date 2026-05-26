@@ -22,6 +22,7 @@ export function AnchoredPopover({
   className = '',
   align = 'end',
   gap = 8,
+  estimatedHeight = 0,
   margin = 12,
   maxHeight = 420,
   matchAnchorWidth = false,
@@ -34,8 +35,10 @@ export function AnchoredPopover({
   width = 320,
   zIndex = 430,
 }) {
-  const position = useAnchoredPopoverPosition(anchorRef, {
+  const popoverRef = React.useRef(null);
+  const position = useAnchoredPopoverPosition(anchorRef, popoverRef, {
     align,
+    estimatedHeight,
     gap,
     margin,
     maxHeight,
@@ -61,6 +64,7 @@ export function AnchoredPopover({
     <>
       {showBackdrop && <div className="fixed inset-0" style={{ zIndex: zIndex - 10 }} onClick={() => onClose?.()} />}
       <div
+        ref={popoverRef}
         data-testid={testId}
         className={cn(
           'motion-popover ui-popover-surface fixed overflow-hidden rounded-2xl border border-gray-100/90 bg-white/95 backdrop-blur-2xl dark:border-white/10 dark:bg-[#252527]/95',
@@ -82,9 +86,10 @@ export function AnchoredPopover({
   );
 }
 
-function useAnchoredPopoverPosition(anchorRef, options) {
+function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
   const {
     align = 'end',
+    estimatedHeight = 0,
     gap = 8,
     margin = 12,
     maxHeight = 420,
@@ -106,6 +111,7 @@ function useAnchoredPopoverPosition(anchorRef, options) {
     if (!anchor) return;
 
     const rect = anchor.getBoundingClientRect();
+    const popoverHeight = measurePopoverHeight(popoverRef?.current);
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     const baseWidth = matchAnchorWidth ? rect.width : preferredWidth;
@@ -117,9 +123,10 @@ function useAnchoredPopoverPosition(anchorRef, options) {
       const openLeft = placement === 'left' ? leftSpace >= resolvedWidth || leftSpace >= rightSpace : rightSpace < resolvedWidth && leftSpace > rightSpace;
       const sideLeft = openLeft ? rect.left - gap - resolvedWidth : rect.right + gap;
       const left = Math.min(Math.max(sideLeft, margin), viewportWidth - resolvedWidth - margin);
-      const minSideHeight = Math.min(160, viewportHeight - margin * 2);
-      const top = Math.min(Math.max(rect.top, margin), viewportHeight - minSideHeight - margin);
-      const resolvedMaxHeight = Math.max(120, Math.min(maxHeight, viewportHeight - top - margin));
+      const availableAtAnchor = Math.max(0, viewportHeight - rect.top - margin);
+      const resolvedMaxHeight = resolveMaxHeight(availableAtAnchor, maxHeight, 120);
+      const placementHeight = resolvePlacementHeight(popoverHeight, resolvedMaxHeight, estimatedHeight);
+      const top = Math.min(Math.max(rect.top, margin), viewportHeight - placementHeight - margin);
 
       setPosition({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight });
       return;
@@ -136,13 +143,14 @@ function useAnchoredPopoverPosition(anchorRef, options) {
     const below = viewportHeight - rect.bottom - gap - margin;
     const above = rect.top - gap - margin;
     const opensAbove = below < 240 && above > below;
-    const resolvedMaxHeight = Math.max(180, Math.min(maxHeight, opensAbove ? above : below));
+    const resolvedMaxHeight = resolveMaxHeight(opensAbove ? above : below, maxHeight, 80);
+    const placementHeight = resolvePlacementHeight(popoverHeight, resolvedMaxHeight, estimatedHeight);
     const top = opensAbove
-      ? Math.max(margin, rect.top - gap - resolvedMaxHeight)
-      : Math.min(rect.bottom + gap, viewportHeight - resolvedMaxHeight - margin);
+      ? Math.max(margin, rect.top - gap - placementHeight)
+      : Math.min(rect.bottom + gap, viewportHeight - placementHeight - margin);
 
     setPosition({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight });
-  }, [align, anchorRef, gap, margin, matchAnchorWidth, maxHeight, minWidth, placement, preferredWidth]);
+  }, [align, anchorRef, estimatedHeight, gap, margin, matchAnchorWidth, maxHeight, minWidth, placement, popoverRef, preferredWidth]);
 
   React.useLayoutEffect(() => {
     if (!open) return undefined;
@@ -159,8 +167,10 @@ function useAnchoredPopoverPosition(anchorRef, options) {
     frameId = window.requestAnimationFrame(followAnchor);
 
     const anchor = anchorRef?.current;
-    const observer = typeof ResizeObserver !== 'undefined' && anchor ? new ResizeObserver(updatePosition) : null;
-    observer?.observe(anchor);
+    const popover = popoverRef?.current;
+    const observer = typeof ResizeObserver !== 'undefined' && (anchor || popover) ? new ResizeObserver(updatePosition) : null;
+    if (anchor) observer?.observe(anchor);
+    if (popover) observer?.observe(popover);
 
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
@@ -170,7 +180,24 @@ function useAnchoredPopoverPosition(anchorRef, options) {
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [anchorRef, open, updatePosition]);
+  }, [anchorRef, open, popoverRef, updatePosition]);
 
   return position;
+}
+
+function measurePopoverHeight(popover) {
+  if (!popover) return 0;
+  const rectHeight = Math.ceil(popover.getBoundingClientRect().height || 0);
+  const scrollHeight = Math.ceil(popover.scrollHeight || 0);
+  return Math.max(rectHeight, scrollHeight, 0);
+}
+
+function resolveMaxHeight(available, maxHeight, minHeight) {
+  const availableHeight = Math.max(0, available);
+  return Math.max(minHeight, Math.min(maxHeight, availableHeight));
+}
+
+function resolvePlacementHeight(popoverHeight, maxHeight, estimatedHeight = 0) {
+  const measuredHeight = popoverHeight > 0 ? popoverHeight : estimatedHeight;
+  return measuredHeight > 0 ? Math.min(measuredHeight, maxHeight) : maxHeight;
 }

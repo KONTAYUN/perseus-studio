@@ -20,6 +20,9 @@ type ProviderRequestSummary struct {
 	Stream                    *bool    `json:"stream,omitempty"`
 	ToolChoice                string   `json:"tool_choice,omitempty"`
 	RequiresTool              bool     `json:"requires_tool,omitempty"`
+	ThinkingMode              string   `json:"thinking_mode,omitempty"`
+	ReasoningSupport          string   `json:"reasoning_support,omitempty"`
+	ReasoningEffort           string   `json:"reasoning_effort,omitempty"`
 	ToolsCount                int      `json:"tools_count,omitempty"`
 	ToolNames                 []string `json:"tool_names,omitempty"`
 	ParallelToolCalls         *bool    `json:"parallel_tool_calls,omitempty"`

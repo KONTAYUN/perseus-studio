@@ -28,12 +28,13 @@ type AgentTranscript struct {
 }
 
 type TranscriptEntry struct {
-	Kind        transcriptEntryKind    `json:"kind"`
-	Text        string                 `json:"text,omitempty"`
-	ToolCalls   []agentToolCall        `json:"tool_calls,omitempty"`
-	ToolResults []TranscriptToolResult `json:"tool_results,omitempty"`
-	Usage       ProviderUsage          `json:"usage,omitempty"`
-	Metadata    map[string]any         `json:"metadata,omitempty"`
+	Kind             transcriptEntryKind    `json:"kind"`
+	Text             string                 `json:"text,omitempty"`
+	ToolCalls        []agentToolCall        `json:"tool_calls,omitempty"`
+	AnthropicContent []map[string]any       `json:"anthropic_content,omitempty"`
+	ToolResults      []TranscriptToolResult `json:"tool_results,omitempty"`
+	Usage            ProviderUsage          `json:"usage,omitempty"`
+	Metadata         map[string]any         `json:"metadata,omitempty"`
 }
 
 type TranscriptToolResult struct {
@@ -53,10 +54,11 @@ func (t *AgentTranscript) AppendAssistantTurn(turn agentModelTurn) {
 		return
 	}
 	entry := TranscriptEntry{
-		Kind:      transcriptEntryAssistant,
-		Text:      turn.Content,
-		ToolCalls: cloneAgentToolCalls(turn.ToolCalls),
-		Usage:     turn.Usage,
+		Kind:             transcriptEntryAssistant,
+		Text:             turn.Content,
+		ToolCalls:        cloneAgentToolCalls(turn.ToolCalls),
+		AnthropicContent: cloneMapAnySlice(turn.AnthropicRaw),
+		Usage:            turn.Usage,
 	}
 	if turn.FinishReason != "" {
 		entry.Metadata = map[string]any{"finish_reason": turn.FinishReason}
@@ -94,12 +96,13 @@ func (t *AgentTranscript) Clone() *AgentTranscript {
 	next.Entries = make([]TranscriptEntry, 0, len(t.Entries))
 	for _, entry := range t.Entries {
 		next.Entries = append(next.Entries, TranscriptEntry{
-			Kind:        entry.Kind,
-			Text:        entry.Text,
-			ToolCalls:   cloneAgentToolCalls(entry.ToolCalls),
-			ToolResults: cloneTranscriptToolResults(entry.ToolResults),
-			Usage:       entry.Usage,
-			Metadata:    cloneMapAny(entry.Metadata),
+			Kind:             entry.Kind,
+			Text:             entry.Text,
+			ToolCalls:        cloneAgentToolCalls(entry.ToolCalls),
+			AnthropicContent: cloneMapAnySlice(entry.AnthropicContent),
+			ToolResults:      cloneTranscriptToolResults(entry.ToolResults),
+			Usage:            entry.Usage,
+			Metadata:         cloneMapAny(entry.Metadata),
 		})
 	}
 	return next
@@ -167,6 +170,17 @@ func cloneMapAny(input map[string]any) map[string]any {
 	var next map[string]any
 	if err := json.Unmarshal(raw, &next); err != nil {
 		return nil
+	}
+	return next
+}
+
+func cloneMapAnySlice(input []map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	next := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		next = append(next, cloneMapAny(item))
 	}
 	return next
 }

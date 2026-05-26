@@ -7,6 +7,7 @@ import { createChatSteerActions, textOnlyPayload, useActiveAgentRunRef, useMisse
 import { waitForAgentRunStream } from './chatRunStream.js';
 import useChatLifecycleEffects from './useChatLifecycleEffects';
 import useChatReferenceActions from './useChatReferenceActions';
+import { normalizeThinkingModeForModel } from './modelReasoningUtils';
 import {
   mergeRunSteerItemsWithMessages,
   visibleRunSteerTimelineItems,
@@ -115,6 +116,10 @@ export default function useChatState({
     setQueuedChatMessages(rest);
     sendChatPayload(nextMessage);
   }, [isChatSending, queuedChatMessages]);
+
+  useEffect(() => {
+    setThinkingMode((current) => normalizeThinkingModeForModel(current, selectedModel));
+  }, [selectedModel?.id, selectedModel?.thinking_profile]);
 
   useActiveAgentRunRef(activeAgentRun, activeAgentRunRef);
   usePendingRunMessageAutoSend({

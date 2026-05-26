@@ -12,6 +12,18 @@ func validateModelProvider(input ModelProviderInput, requireKey bool) error {
 	if input.Protocol != "openai" && input.Protocol != "anthropic" {
 		return fmt.Errorf("protocol must be openai or anthropic")
 	}
+	if strings.TrimSpace(input.ReasoningCapability) != "" && NormalizeReasoningCapability(input.ReasoningCapability) != strings.ToLower(strings.TrimSpace(input.ReasoningCapability)) {
+		return fmt.Errorf("reasoning_capability must be auto, disabled, openai_reasoning, or anthropic_adaptive")
+	}
+	if strings.TrimSpace(input.ReasoningCapabilitySource) != "" && NormalizeReasoningCapabilitySource(input.ReasoningCapabilitySource) != strings.ToLower(strings.TrimSpace(input.ReasoningCapabilitySource)) {
+		return fmt.Errorf("reasoning_capability_source must be provider_discovery or explicit_override")
+	}
+	if strings.TrimSpace(input.ReasoningProfileLevels) != "" && NormalizeReasoningProfileLevels(input.ReasoningProfileLevels) == "" {
+		return fmt.Errorf("reasoning_profile_levels contains no supported levels")
+	}
+	if NormalizeReasoningCapabilitySource(input.ReasoningCapabilitySource) != ReasoningCapabilitySourceProviderDiscovery && strings.TrimSpace(input.ReasoningProfileLevels) != "" {
+		return fmt.Errorf("reasoning_profile_levels requires provider_discovery source")
+	}
 	if strings.TrimSpace(input.BaseURL) == "" {
 		return fmt.Errorf("base_url is required")
 	}
@@ -65,6 +77,9 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 		&item.AutoCompactThresholdPercent,
 		&item.CompactReservedTokens,
 		&pruneToolOutputsEnabled,
+		&item.ReasoningCapability,
+		&item.ReasoningCapabilitySource,
+		&item.ReasoningProfileLevels,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	)
@@ -72,6 +87,11 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 	item.IsDefault = isDefault == 1
 	item.AutoCompactEnabled = autoCompactEnabled == 1
 	item.PruneToolOutputsEnabled = pruneToolOutputsEnabled == 1
+	item.ReasoningCapability = NormalizeReasoningCapability(item.ReasoningCapability)
+	item.ReasoningCapabilitySource = NormalizeReasoningCapabilitySource(item.ReasoningCapabilitySource)
+	item.ReasoningProfileLevels = NormalizeReasoningProfileLevels(item.ReasoningProfileLevels)
+	item.ThinkingProfile = ResolveModelThinkingProfile(item)
+	item.ReasoningSupport = ReasoningSupportFromThinkingProfile(item.ThinkingProfile)
 	item.MaskedKey = maskKey(item.APIKey)
 	return item, err
 }

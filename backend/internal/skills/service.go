@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,6 +123,9 @@ func (s *Service) ReadSkill(ctx context.Context, userID, id string, enabledOnly 
 	id = normalizeSkillID(id)
 	item, err := s.store.GetSkill(ctx, userID, id)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return ReadResult{}, fmt.Errorf("skill not found")
+		}
 		return ReadResult{}, err
 	}
 	if enabledOnly && !item.Enabled {

@@ -23,6 +23,11 @@ type steerAgentRunRequest struct {
 	ClientSteerID string `json:"client_steer_id"`
 }
 
+type cancelAgentRunRequest struct {
+	Source string `json:"source"`
+	Reason string `json:"reason"`
+}
+
 func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 	user := MustUserFromContext(r.Context())
 	path := strings.TrimPrefix(r.URL.Path, "/api/agent-runs/")
@@ -53,7 +58,11 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		run, err := s.cancelAgentRun(r.Context(), user.UserID, runID)
+		var req cancelAgentRunRequest
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&req)
+		}
+		run, err := s.cancelAgentRun(r.Context(), user.UserID, runID, req)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -213,7 +222,7 @@ func (s *Server) resumeAgentRun(ctx context.Context, userID, runID string) (stor
 	return resumed, event, nil
 }
 
-func (s *Server) cancelAgentRun(ctx context.Context, userID, runID string) (store.AgentRun, error) {
+func (s *Server) cancelAgentRun(ctx context.Context, userID, runID string, req cancelAgentRunRequest) (store.AgentRun, error) {
 	run, err := s.runs.GetRun(ctx, userID, runID)
 	if err != nil {
 		return store.AgentRun{}, err
@@ -222,18 +231,29 @@ func (s *Server) cancelAgentRun(ctx context.Context, userID, runID string) (stor
 		return run, nil
 	}
 	s.runCancelMu.Lock()
-	cancel := s.runCancels[runID]
-	s.runCancelMu.Unlock()
-	if cancel != nil {
-		cancel()
+	entry := s.runCancels[runID]
+	if entry != nil {
+		entry.source = normalizeCancelSource(req.Source)
+		entry.reason = normalizeCancelReason(req.Reason)
+		entry.requestedAt = time.Now().UTC()
 	}
+	s.runCancelMu.Unlock()
+	if entry != nil && entry.cancel != nil {
+		entry.cancel()
+	}
+	source := normalizeCancelSource(req.Source)
+	reason := normalizeCancelReason(req.Reason)
 	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
 		RunID:          runID,
 		UserID:         userID,
 		ConversationID: run.ConversationID,
 		Type:           "run_cancel_requested",
 		Level:          "warn",
-		Payload:        map[string]any{"message": "cancel requested"},
+		Payload: map[string]any{
+			"message": "cancel requested",
+			"source":  source,
+			"reason":  reason,
+		},
 	}); err != nil {
 		return store.AgentRun{}, err
 	}
@@ -337,11 +357,29 @@ func (s *Server) appendRunEventStrict(ctx context.Context, input store.AgentEven
 func (s *Server) registerRunCancel(runID string, cancel context.CancelFunc) {
 	s.runCancelMu.Lock()
 	defer s.runCancelMu.Unlock()
-	s.runCancels[runID] = cancel
+	s.runCancels[runID] = &runCancelEntry{cancel: cancel}
 }
 
 func (s *Server) unregisterRunCancel(runID string) {
 	s.runCancelMu.Lock()
 	defer s.runCancelMu.Unlock()
 	delete(s.runCancels, runID)
+}
+
+func normalizeCancelSource(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "stop_button", "client_abort", "server", "unknown":
+		return normalized
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeCancelReason(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unspecified"
+	}
+	return contentPreview(value, 120)
 }

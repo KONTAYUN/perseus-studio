@@ -40,6 +40,10 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		"messages": req.Snapshot.OpenAIMessages,
 		"stream":   true,
 	}
+	reasoningPolicy := applyOpenAIReasoningPayload(payload, req.Provider, req.Opts.ThinkingMode)
+	req.Snapshot.Summary.ReasoningSupport = reasoningPolicy.Support
+	req.Snapshot.Summary.ReasoningEffort = reasoningPolicy.OpenAIEffort
+	req.Snapshot.Summary.ThinkingMode = reasoningPolicy.ThinkingMode
 	if toolsEnabled {
 		payload["tools"] = req.Tools
 		payload["tool_choice"] = openAIProviderToolChoice(req.ToolChoice)

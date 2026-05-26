@@ -27,7 +27,7 @@ func unzipSafe(raw []byte, dest string) error {
 		}
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
+				return fmt.Errorf("zip 包含冲突路径：%s", filepath.ToSlash(name))
 			}
 			continue
 		}
@@ -36,7 +36,7 @@ func unzipSafe(raw []byte, dest string) error {
 			return fmt.Errorf("zip 解压后内容过大")
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
+			return fmt.Errorf("zip 包含冲突路径：%s", filepath.ToSlash(name))
 		}
 		src, err := file.Open()
 		if err != nil {
@@ -45,6 +45,9 @@ func unzipSafe(raw []byte, dest string) error {
 		dst, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err != nil {
 			_ = src.Close()
+			if os.IsExist(err) {
+				return fmt.Errorf("zip 包含重复路径：%s", filepath.ToSlash(name))
+			}
 			return err
 		}
 		_, copyErr := io.Copy(dst, io.LimitReader(src, maxExtractedBytes+1))

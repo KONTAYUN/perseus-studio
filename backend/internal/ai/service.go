@@ -196,17 +196,9 @@ func (s *Service) generateReply(ctx context.Context, conversationID, messageID, 
 
 	switch provider.Protocol {
 	case "openai":
-		reply, err := s.generateOpenAI(ctx, conversationID, messageID, provider, messages, attachments, opts)
-		if err != nil {
-			return Reply{}, err
-		}
-		return s.applyThinkingMode(ctx, conversationID, messageID, provider, messages, attachments, opts, reply)
+		return s.generateOpenAI(ctx, conversationID, messageID, provider, messages, attachments, opts)
 	case "anthropic":
-		reply, err := s.generateAnthropic(ctx, conversationID, messageID, provider, messages, attachments, opts)
-		if err != nil {
-			return Reply{}, err
-		}
-		return s.applyThinkingMode(ctx, conversationID, messageID, provider, messages, attachments, opts, reply)
+		return s.generateAnthropic(ctx, conversationID, messageID, provider, messages, attachments, opts)
 	default:
 		return Reply{}, fmt.Errorf("unsupported protocol: %s", provider.Protocol)
 	}

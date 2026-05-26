@@ -386,11 +386,35 @@ func TestParseAnthropicStreamIgnoresThinkingDeltasForVisibleText(t *testing.T) {
 	if turn.Content != "" || len(turn.ToolCalls) != 0 {
 		t.Fatalf("expected no visible content/tool calls, got %#v", turn)
 	}
+	if len(turn.AnthropicRaw) != 1 || turn.AnthropicRaw[0]["type"] != "thinking" || turn.AnthropicRaw[0]["signature"] != "sig" {
+		t.Fatalf("expected thinking block preserved for Anthropic transcript, got %#v", turn.AnthropicRaw)
+	}
 	if turn.FinishReason != "end_turn" {
 		t.Fatalf("unexpected finish reason: %q", turn.FinishReason)
 	}
 	if turn.Usage.InputTokens != 10 || turn.Usage.OutputTokens != 8 {
 		t.Fatalf("unexpected usage: %#v", turn.Usage)
+	}
+}
+
+func TestParseAnthropicStreamPreservesRedactedThinkingBlock(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque"}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":0}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	turn, err := parseAnthropicStream(strings.NewReader(stream), nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if len(turn.AnthropicRaw) != 1 || turn.AnthropicRaw[0]["type"] != "redacted_thinking" || turn.AnthropicRaw[0]["data"] != "opaque" {
+		t.Fatalf("expected redacted thinking block preserved, got %#v", turn.AnthropicRaw)
 	}
 }
 

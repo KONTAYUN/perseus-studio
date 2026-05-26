@@ -75,6 +75,10 @@ func isContextCanceledError(err error) bool {
 	return errors.Is(err, context.Canceled) || strings.Contains(strings.ToLower(err.Error()), "context canceled")
 }
 
+func IsContextCanceledError(err error) bool {
+	return isContextCanceledError(err)
+}
+
 func openAITimeoutStage(performedMutation, hasToolEvents bool) string {
 	if performedMutation {
 		return "等待模型最终回复"

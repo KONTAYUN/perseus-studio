@@ -30,8 +30,6 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 	req.Snapshot.Summary.ToolsCount = 0
 	req.Snapshot.Summary.ToolNames = nil
 	if toolsEnabled {
-		req.Snapshot.Summary.ToolChoice = providerToolChoiceSummary(req.ToolChoice)
-		req.Snapshot.Summary.RequiresTool = normalizeProviderToolChoice(req.ToolChoice).requiresTool()
 		req.Snapshot.Summary.ToolsCount = len(toolNames)
 		req.Snapshot.Summary.ToolNames = toolNames
 		req.Snapshot.Summary.ParallelToolCalls = boolPtr(false)
@@ -42,9 +40,19 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 		"messages":   req.Snapshot.AnthropicMessages,
 		"stream":     true,
 	}
+	reasoningPolicy := applyAnthropicReasoningPayload(payload, req.Provider, req.Opts.ThinkingMode)
+	req.Snapshot.Summary.ReasoningSupport = reasoningPolicy.Support
+	req.Snapshot.Summary.ReasoningEffort = reasoningPolicy.AnthropicEffort
+	req.Snapshot.Summary.ThinkingMode = reasoningPolicy.ThinkingMode
 	if toolsEnabled {
 		payload["tools"] = req.Tools
-		payload["tool_choice"] = anthropicProviderToolChoice(req.ToolChoice)
+		actualChoice := req.ToolChoice
+		if reasoningPolicy.AnthropicAdaptiveEnabled() && normalizeProviderToolChoice(actualChoice).requiresTool() {
+			actualChoice = providerToolChoice{Mode: providerToolChoiceAuto}
+		}
+		req.Snapshot.Summary.ToolChoice = providerToolChoiceSummary(actualChoice)
+		req.Snapshot.Summary.RequiresTool = normalizeProviderToolChoice(actualChoice).requiresTool()
+		payload["tool_choice"] = anthropicProviderToolChoiceForReasoning(req.ToolChoice, reasoningPolicy.AnthropicAdaptiveEnabled())
 	}
 	if req.Snapshot.AnthropicSystem != "" {
 		payload["system"] = req.Snapshot.AnthropicSystem

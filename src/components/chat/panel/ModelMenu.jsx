@@ -1,22 +1,34 @@
 import React from 'react';
 import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { AnchoredPopover, Button } from '../../ui';
-
-const thinkingModes = [
-  ['standard', '标准'],
-  ['deep', '深度'],
-  ['expert', '专家'],
-];
+import {
+  normalizeThinkingModeForModel,
+  supportsNativeReasoning,
+  thinkingModeLabelForModel,
+  thinkingModeOptionsForModel,
+} from '../../../hooks/modelReasoningUtils';
 
 export default function ModelMenu({ ide, panelId }) {
   const modelButtonRef = React.useRef(null);
   const modelSubmenuButtonRef = React.useRef(null);
   const [isModelSubmenuOpen, setIsModelSubmenuOpen] = React.useState(false);
-  const currentThinkingLabel = thinkingModes.find(([value]) => value === ide.thinkingMode)?.[1] || '标准';
+  const selectedModel = ide.selectedModel;
+  const thinkingModes = thinkingModeOptionsForModel(selectedModel);
+  const currentThinkingMode = normalizeThinkingModeForModel(ide.thinkingMode, selectedModel);
+  const currentThinkingLabel = thinkingModeLabelForModel(currentThinkingMode, selectedModel);
+  const hasNativeReasoning = supportsNativeReasoning(selectedModel);
+  const setThinkingMode = ide.setThinkingMode;
 
   React.useEffect(() => {
     if (!ide.isModelMenuOpen) setIsModelSubmenuOpen(false);
   }, [ide.isModelMenuOpen]);
+
+  React.useEffect(() => {
+    const normalized = normalizeThinkingModeForModel(ide.thinkingMode, selectedModel);
+    if (normalized !== (ide.thinkingMode || 'standard')) {
+      setThinkingMode?.(normalized);
+    }
+  }, [ide.thinkingMode, selectedModel?.id, selectedModel?.thinking_profile, setThinkingMode]);
 
   return (
     <div className="relative min-w-0 max-w-full">
@@ -31,7 +43,7 @@ export default function ModelMenu({ ide, panelId }) {
         className="motion-button flex min-w-0 max-w-full items-center justify-center gap-1.5 overflow-hidden rounded-lg px-1.5 py-1 text-sm font-semibold text-gray-800 hover:text-blue-500 dark:text-gray-200 dark:hover:text-blue-400"
       >
         <span className="block min-w-0 truncate text-center">
-          {ide.selectedModel?.name || '未配置模型'} · {currentThinkingLabel}
+          {selectedModel?.name || '未配置模型'}{hasNativeReasoning ? ` · ${currentThinkingLabel}` : ''}
         </span>
         <ChevronDown size={14} className="flex-shrink-0 text-gray-400" />
       </button>
@@ -67,27 +79,31 @@ export default function ModelMenu({ ide, panelId }) {
           </div>
         ) : (
           <>
-            <div className="px-2 pb-1 pt-1 text-[11px] font-semibold text-gray-400">思考强度</div>
-            {thinkingModes.map(([value, label]) => (
-              <button
-                key={value}
-                data-testid={`thinking-mode-${value}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  ide.setThinkingMode?.(value);
-                  ide.setIsModelMenuOpen(false);
-                }}
-                className={`motion-row flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold ${
-                  (ide.thinkingMode || 'standard') === value
-                    ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300'
-                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5'
-                }`}
-              >
-                <span>{label}</span>
-                {(ide.thinkingMode || 'standard') === value && <Check size={14} />}
-              </button>
-            ))}
-            <div className="my-1 border-t border-gray-100 dark:border-white/10" />
+            {hasNativeReasoning && (
+              <>
+                <div className="px-2 pb-1 pt-1 text-[11px] font-semibold text-gray-400">思考强度</div>
+                {thinkingModes.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    data-testid={`thinking-mode-${value}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setThinkingMode?.(value);
+                      ide.setIsModelMenuOpen(false);
+                    }}
+                    className={`motion-row flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold ${
+                      currentThinkingMode === value
+                        ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300'
+                        : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5'
+                    }`}
+                  >
+                    <span>{label}</span>
+                    {currentThinkingMode === value && <Check size={14} />}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-gray-100 dark:border-white/10" />
+              </>
+            )}
             <div>
               <button
                 ref={modelSubmenuButtonRef}
@@ -100,7 +116,7 @@ export default function ModelMenu({ ide, panelId }) {
                 }}
                 className="motion-row flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5"
               >
-                <span className="min-w-0 truncate">{ide.selectedModel?.name || '未配置模型'}</span>
+                <span className="min-w-0 truncate">{selectedModel?.name || '未配置模型'}</span>
                 <ChevronRight size={14} className="shrink-0 text-gray-400" />
               </button>
               <AnchoredPopover
@@ -124,12 +140,13 @@ export default function ModelMenu({ ide, panelId }) {
                     data-testid={`model-option-${model.id}`}
                     onClick={(e) => {
                       e.stopPropagation();
+                      setThinkingMode?.(normalizeThinkingModeForModel(ide.thinkingMode, model));
                       ide.setSelectedModelId(model.id);
                       setIsModelSubmenuOpen(false);
                       ide.setIsModelMenuOpen(false);
                     }}
                     className={`motion-row flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left ${
-                      ide.selectedModel?.id === model.id
+                      selectedModel?.id === model.id
                         ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300'
                         : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5'
                     }`}
@@ -140,7 +157,7 @@ export default function ModelMenu({ ide, panelId }) {
                         {model.protocol} · {model.model_id}
                       </span>
                     </span>
-                    {ide.selectedModel?.id === model.id && <Check size={14} className="shrink-0" />}
+                    {selectedModel?.id === model.id && <Check size={14} className="shrink-0" />}
                   </button>
                 ))}
               </AnchoredPopover>

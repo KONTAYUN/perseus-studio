@@ -105,7 +105,10 @@ export async function waitForAgentRunStream({
   control.abort = () => {
     closeSource();
     settled = true;
-    apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {}).catch((error) => {
+    apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {
+      source: 'stop_button',
+      reason: 'user_requested_stop',
+    }).catch((error) => {
       console.error('cancelAgentRun failed', error);
     });
   };
@@ -324,7 +327,10 @@ export async function waitForAgentRunStream({
     control.abort = () => {
       closeSource();
       settled = true;
-      apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {}).catch((error) => {
+      apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {
+        source: 'stop_button',
+        reason: 'user_requested_stop',
+      }).catch((error) => {
         console.error('cancelAgentRun failed', error);
       });
       const error = new DOMException('Aborted', 'AbortError');

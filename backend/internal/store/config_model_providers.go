@@ -10,6 +10,7 @@ func (s *ConfigStore) ListModelProviders(ctx context.Context, userID string) ([]
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, user_id, name, protocol, base_url, api_key, model_id, enabled, is_default,
        context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
+       reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
        created_at, updated_at
 FROM model_providers
 WHERE user_id = ?
@@ -54,12 +55,12 @@ func (s *ConfigStore) CreateModelProvider(ctx context.Context, userID string, in
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO model_providers (
   id, user_id, name, protocol, base_url, api_key, model_id, enabled, is_default,
-  context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
+  context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled, reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
   created_at, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `, id, userID, strings.TrimSpace(input.Name), input.Protocol, strings.TrimSpace(input.BaseURL), input.APIKey, strings.TrimSpace(input.ModelID), boolToInt(input.Enabled), boolToInt(input.IsDefault),
-		settings.ContextWindowTokens, boolToInt(settings.AutoCompactEnabled), settings.AutoCompactThresholdPercent, settings.CompactReservedTokens, boolToInt(settings.PruneToolOutputsEnabled), now, now)
+		settings.ContextWindowTokens, boolToInt(settings.AutoCompactEnabled), settings.AutoCompactThresholdPercent, settings.CompactReservedTokens, boolToInt(settings.PruneToolOutputsEnabled), NormalizeReasoningCapability(input.ReasoningCapability), NormalizeReasoningCapabilitySource(input.ReasoningCapabilitySource), NormalizeReasoningProfileLevels(input.ReasoningProfileLevels), now, now)
 	if err != nil {
 		return ModelProvider{}, err
 	}
@@ -99,12 +100,12 @@ func (s *ConfigStore) UpdateModelProvider(ctx context.Context, userID, id string
 	_, err = tx.ExecContext(ctx, `
 UPDATE model_providers
 SET name = ?, protocol = ?, base_url = ?, api_key = ?, model_id = ?, enabled = ?, is_default = ?,
-    context_window_tokens = ?, auto_compact_enabled = ?, auto_compact_threshold_percent = ?, compact_reserved_tokens = ?, prune_tool_outputs_enabled = ?,
+    context_window_tokens = ?, auto_compact_enabled = ?, auto_compact_threshold_percent = ?, compact_reserved_tokens = ?, prune_tool_outputs_enabled = ?, reasoning_capability = ?, reasoning_capability_source = ?, reasoning_profile_levels = ?,
     updated_at = ?
 WHERE id = ? AND user_id = ?
 `, strings.TrimSpace(input.Name), input.Protocol, strings.TrimSpace(input.BaseURL), apiKey, strings.TrimSpace(input.ModelID), boolToInt(input.Enabled), boolToInt(input.IsDefault),
 		settings.ContextWindowTokens, boolToInt(settings.AutoCompactEnabled), settings.AutoCompactThresholdPercent, settings.CompactReservedTokens, boolToInt(settings.PruneToolOutputsEnabled),
-		now, id, userID)
+		NormalizeReasoningCapability(input.ReasoningCapability), NormalizeReasoningCapabilitySource(input.ReasoningCapabilitySource), NormalizeReasoningProfileLevels(input.ReasoningProfileLevels), now, id, userID)
 	if err != nil {
 		return ModelProvider{}, err
 	}
@@ -146,6 +147,7 @@ func (s *ConfigStore) GetModelProvider(ctx context.Context, userID, id string) (
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, user_id, name, protocol, base_url, api_key, model_id, enabled, is_default,
        context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
+       reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
        created_at, updated_at
 FROM model_providers
 WHERE id = ? AND user_id = ?

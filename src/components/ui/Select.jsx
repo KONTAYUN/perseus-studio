@@ -14,6 +14,7 @@ export function Select({ value, onChange, children, disabled = false, className 
       disabled: child.props.disabled,
     }));
   const selected = options.find((item) => item.value === value) || options[0];
+  const estimatedPopoverHeight = Math.min(280, Math.max(44, options.length * 38 + 8));
 
   const choose = (option) => {
     if (option.disabled) return;
@@ -40,6 +41,7 @@ export function Select({ value, onChange, children, disabled = false, className 
       <AnchoredPopover
         anchorRef={buttonRef}
         align="start"
+        estimatedHeight={estimatedPopoverHeight}
         gap={6}
         matchAnchorWidth
         maxHeight={280}

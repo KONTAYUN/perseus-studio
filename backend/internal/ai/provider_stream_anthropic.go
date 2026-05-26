@@ -13,6 +13,8 @@ type anthropicStreamBlock struct {
 	Name        string
 	Text        strings.Builder
 	Thinking    strings.Builder
+	Signature   string
+	Data        string
 	PartialJSON strings.Builder
 }
 
@@ -58,6 +60,8 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 			block.Type, _ = blockRaw["type"].(string)
 			block.ID, _ = blockRaw["id"].(string)
 			block.Name, _ = blockRaw["name"].(string)
+			block.Signature, _ = blockRaw["signature"].(string)
+			block.Data, _ = blockRaw["data"].(string)
 			if block.Type == "tool_use" {
 				deltas.MarkToolObserved()
 			}
@@ -91,8 +95,15 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 					block.Thinking.WriteString(thinking)
 				}
 			case "signature_delta":
-				// Anthropic sends signatures for extended-thinking blocks just before
-				// content_block_stop. They are verification metadata, not user text.
+				signature, _ := delta["signature"].(string)
+				if signature != "" {
+					block.Signature = signature
+				}
+			case "redacted_thinking_delta":
+				data, _ := delta["data"].(string)
+				if data != "" {
+					block.Data = data
+				}
 			}
 		case "message_delta":
 			delta, _ := raw["delta"].(map[string]any)
@@ -132,6 +143,19 @@ func buildAnthropicStreamTurn(content string, finishReason string, blocks map[in
 			text := block.Text.String()
 			if text != "" {
 				turn.AnthropicRaw = append(turn.AnthropicRaw, map[string]any{"type": "text", "text": text})
+			}
+		case "thinking":
+			thinking := block.Thinking.String()
+			if thinking != "" || block.Signature != "" {
+				item := map[string]any{"type": "thinking", "thinking": thinking}
+				if block.Signature != "" {
+					item["signature"] = block.Signature
+				}
+				turn.AnthropicRaw = append(turn.AnthropicRaw, item)
+			}
+		case "redacted_thinking":
+			if block.Data != "" {
+				turn.AnthropicRaw = append(turn.AnthropicRaw, map[string]any{"type": "redacted_thinking", "data": block.Data})
 			}
 		case "tool_use":
 			args := strings.TrimSpace(block.PartialJSON.String())

@@ -2,6 +2,8 @@ package api
 
 import (
 	"time"
+
+	"webide-backend/internal/store"
 )
 
 type discoverModelsRequest struct {
@@ -12,8 +14,13 @@ type discoverModelsRequest struct {
 }
 
 type discoveredModel struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID                        string                 `json:"id"`
+	Name                      string                 `json:"name"`
+	ReasoningCapability       string                 `json:"reasoning_capability,omitempty"`
+	ReasoningCapabilitySource string                 `json:"reasoning_capability_source,omitempty"`
+	ReasoningProfileLevels    string                 `json:"reasoning_profile_levels,omitempty"`
+	ReasoningSupport          string                 `json:"reasoning_support,omitempty"`
+	ThinkingProfile           *store.ThinkingProfile `json:"thinking_profile,omitempty"`
 }
 
 type testModelProviderRequest struct {

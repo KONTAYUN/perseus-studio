@@ -67,7 +67,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 			"recovery_hint": toolFailureRecoveryHint(name, errorText),
 		})
 		summary = errorText
-		s.recordToolDiagnostic(ctx, opts, conversationID, messageID, name, err)
+		s.recordToolDiagnostic(ctx, opts, conversationID, messageID, name, argumentsJSON, targetSummary, durationMS, err)
 		verification = ToolVerification{Status: "skipped", Message: "tool execution failed"}
 	}
 	if status == "success" && verification.Status == "failed" {
@@ -79,7 +79,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 			"verification":  verification,
 		})
 		summary = "workspace verification failed: " + verification.Message
-		s.recordToolDiagnostic(ctx, opts, conversationID, messageID, name, fmt.Errorf("workspace verification failed: %s", verification.Message))
+		s.recordToolDiagnostic(ctx, opts, conversationID, messageID, name, argumentsJSON, targetSummary, durationMS, fmt.Errorf("workspace verification failed: %s", verification.Message))
 	}
 	if status == "success" {
 		label = userFriendlyToolLabel(name)

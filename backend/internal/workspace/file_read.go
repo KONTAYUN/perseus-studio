@@ -15,6 +15,9 @@ func (s *Service) ReadFile(path string) (FileReadResult, error) {
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return FileReadResult{}, fmt.Errorf("file does not exist")
+		}
 		return FileReadResult{}, err
 	}
 	if info.IsDir() {
@@ -50,6 +53,9 @@ func (s *Service) ReadTextFileRange(path string, startLine, endLine, maxChars in
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return TextReadResult{}, fmt.Errorf("file does not exist")
+		}
 		return TextReadResult{}, err
 	}
 	if info.IsDir() {

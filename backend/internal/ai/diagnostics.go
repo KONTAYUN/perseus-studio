@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -68,6 +69,10 @@ func (s *Service) appendProviderDiagnostic(ctx context.Context, opts RunOptions,
 	if s.diag == nil || opts.UserID == "" || err == nil {
 		return ""
 	}
+	requestSummary = strings.TrimSpace(requestSummary)
+	if requestSummary == "" {
+		requestSummary = fallbackProviderDiagnosticSummary(stage, err)
+	}
 	input := store.DiagnosticLogInput{
 		UserID:          opts.UserID,
 		ConversationID:  conversationID,
@@ -81,7 +86,7 @@ func (s *Service) appendProviderDiagnostic(ctx context.Context, opts RunOptions,
 		Stage:           stage,
 		Level:           level,
 		ErrorMessage:    err.Error(),
-		RequestSummary:  strings.TrimSpace(requestSummary),
+		RequestSummary:  requestSummary,
 		DurationMS:      duration.Milliseconds(),
 	}
 	if parsed, parseErr := url.Parse(strings.TrimSpace(provider.BaseURL)); parseErr == nil {
@@ -107,18 +112,21 @@ func (s *Service) appendProviderDiagnostic(ctx context.Context, opts RunOptions,
 	return item.ID
 }
 
-func (s *Service) recordToolDiagnostic(ctx context.Context, opts RunOptions, conversationID, messageID, toolName string, err error) {
+func (s *Service) recordToolDiagnostic(ctx context.Context, opts RunOptions, conversationID, messageID, toolName, argumentsJSON, targetSummary string, durationMS int64, err error) {
 	if s.diag == nil || opts.UserID == "" || err == nil {
 		return
 	}
+	diag := buildToolDiagnostic(toolName, argumentsJSON, targetSummary, durationMS, err)
 	_, _ = s.diag.Append(ctx, store.DiagnosticLogInput{
 		UserID:         opts.UserID,
 		ConversationID: conversationID,
 		MessageID:      messageID,
 		TaskID:         opts.TaskID,
 		Stage:          "tool_call:" + toolName,
-		Level:          "error",
-		ErrorMessage:   err.Error(),
+		Level:          diag.Level,
+		ErrorMessage:   diag.ErrorMessage,
+		RequestSummary: diag.RequestSummary,
+		DurationMS:     durationMS,
 	})
 }
 
@@ -149,6 +157,18 @@ func diagnosticErrorMessage(err error) string {
 		return fmt.Sprintf("%s（已记录诊断日志 ID：%s，可在 设置 → 诊断日志 中导出。）", sanitizeUserFacingAIError(err.Error()), id)
 	}
 	return sanitizeUserFacingAIError(err.Error())
+}
+
+func fallbackProviderDiagnosticSummary(stage string, err error) string {
+	payload := map[string]any{
+		"failure_class": providerFailureClass(err, ProviderRequestSummary{}),
+		"stage":         stage,
+	}
+	if payload["failure_class"] == "" {
+		delete(payload, "failure_class")
+	}
+	raw, _ := json.Marshal(payload)
+	return string(raw)
 }
 
 func sanitizeUserFacingAIError(message string) string {

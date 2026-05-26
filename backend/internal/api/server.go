@@ -42,7 +42,14 @@ type Server struct {
 	cfg           config.Config
 	mux           *http.ServeMux
 	runCancelMu   sync.Mutex
-	runCancels    map[string]context.CancelFunc
+	runCancels    map[string]*runCancelEntry
+}
+
+type runCancelEntry struct {
+	cancel      context.CancelFunc
+	source      string
+	reason      string
+	requestedAt time.Time
 }
 
 type pathRequest struct {
@@ -135,7 +142,7 @@ func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, config
 		ai:            aiService,
 		cfg:           cfg,
 		mux:           http.NewServeMux(),
-		runCancels:    make(map[string]context.CancelFunc),
+		runCancels:    make(map[string]*runCancelEntry),
 	}
 	s.register()
 	return s

@@ -1,6 +1,9 @@
 package ai
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAnthropicTranscriptMessagesCoalescesAdjacentToolResults(t *testing.T) {
 	transcript := newAgentTranscript()
@@ -32,5 +35,32 @@ func TestAnthropicTranscriptMessagesCoalescesAdjacentToolResults(t *testing.T) {
 	}
 	if content[0]["tool_use_id"] != "call_1" || content[1]["tool_use_id"] != "call_2" {
 		t.Fatalf("unexpected tool result order: %#v", content)
+	}
+}
+
+func TestAnthropicTranscriptMessagesPreservesThinkingBlocks(t *testing.T) {
+	transcript := newAgentTranscript()
+	transcript.AppendAssistantTurn(agentModelTurn{
+		Content: "我会读取文件。",
+		AnthropicRaw: []map[string]any{
+			{"type": "thinking", "thinking": "private reasoning", "signature": "sig"},
+			{"type": "text", "text": "我会读取文件。"},
+			{"type": "tool_use", "id": "call_1", "name": "read_workspace_text", "input": map[string]any{"path": "a.txt"}},
+		},
+		ToolCalls: []agentToolCall{{ID: "call_1", Name: "read_workspace_text", ArgumentsJSON: `{"path":"a.txt"}`}},
+	})
+
+	messages := anthropicTranscriptMessages(transcript.Entries)
+	content, ok := messages[0]["content"].([]map[string]any)
+	if !ok || len(content) != 3 {
+		t.Fatalf("unexpected assistant content: %#v", messages)
+	}
+	if content[0]["type"] != "thinking" || content[0]["signature"] != "sig" {
+		t.Fatalf("expected thinking block preserved, got %#v", content[0])
+	}
+	for _, block := range content {
+		if block["type"] == "text" && strings.Contains(block["text"].(string), "private reasoning") {
+			t.Fatalf("thinking leaked into visible text: %#v", content)
+		}
 	}
 }
