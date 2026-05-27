@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -20,6 +21,7 @@ import (
 
 type testAIEnv struct {
 	service       *Service
+	factory       *usersvc.Factory
 	db            *sql.DB
 	root          string
 	configs       *store.ConfigStore
@@ -80,6 +82,73 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "install_skill_from_attachment")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "delete_skill")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "ask_followup_question")
+}
+
+func TestOrdinaryUserSkillToolSchemaIsReadOnly(t *testing.T) {
+	loaded := map[string]bool{"skills": true}
+	names := toolNamesFromOpenAITools(openAIToolsForLoadedToolsets(loaded, true, "user"))
+	for _, name := range []string{"list_skills", "read_skill"} {
+		if !names[name] {
+			t.Fatalf("expected ordinary user skill schema to include %s, got %#v", name, names)
+		}
+	}
+	for _, name := range []string{"install_skill_from_attachment", "delete_skill"} {
+		if names[name] {
+			t.Fatalf("ordinary user skill schema must not include %s: %#v", name, names)
+		}
+	}
+	result, _, _, _, err := execLoadPerseusToolsetForRole(`{"toolset":"skills"}`, "user")
+	if err != nil {
+		t.Fatalf("execLoadPerseusToolsetForRole returned error: %v", err)
+	}
+	if strings.Contains(result, "install_skill_from_attachment") || strings.Contains(result, "delete_skill") {
+		t.Fatalf("ordinary user load_perseus_toolset leaked admin skill tools: %s", result)
+	}
+}
+
+func TestOrdinaryUserCanReadPublicSkillOwnedByAdmin(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	adminID := "admin-user-id"
+	installPath := filepath.Join(env.root, "users", adminID, "skills", "public-skill")
+	if err := os.MkdirAll(installPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(installPath, "SKILL.md"), []byte("# Public Skill\n\nShared instruction."), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	adminSkills, err := env.factory.Skills(adminID)
+	if err != nil {
+		t.Fatalf("factory skills returned error: %v", err)
+	}
+	enabled := true
+	if _, err := adminSkills.Update(ctx, adminID, "public-skill", store.SkillInput{
+		Visibility: store.ResourceVisibilityPublic,
+		Enabled:    &enabled,
+	}); err != nil {
+		t.Fatalf("mark public returned error: %v", err)
+	}
+	if err := adminSkills.Sync(ctx, adminID); err != nil {
+		t.Fatalf("resync public skill returned error: %v", err)
+	}
+	if item, err := adminSkills.Get(ctx, adminID, "public-skill"); err != nil {
+		t.Fatalf("get public skill returned error: %v", err)
+	} else if item.Visibility != store.ResourceVisibilityPublic || !item.Enabled {
+		t.Fatalf("expected public skill to remain public after owner sync, got %#v", item)
+	}
+	if _, err := env.factory.Skills(testUserID); err != nil {
+		t.Fatalf("factory skills for ordinary user returned error: %v", err)
+	}
+	result, _, _, _, err := env.service.executeTool(ctx, "read_skill", `{"skill_id":"public-skill"}`, RunOptions{
+		UserID:   testUserID,
+		UserRole: "user",
+	})
+	if err != nil {
+		t.Fatalf("ordinary user read public skill returned error: %v", err)
+	}
+	if !strings.Contains(result, "Shared instruction.") {
+		t.Fatalf("expected public skill content, got %s", result)
+	}
 }
 
 func TestWorkspacePromptsDoNotExposeLegacyWorkspaceToolNames(t *testing.T) {
@@ -1513,6 +1582,7 @@ func newTestAIEnv(t *testing.T) *testAIEnv {
 
 	return &testAIEnv{
 		service:       service,
+		factory:       factory,
 		db:            db,
 		root:          root,
 		configs:       configs,

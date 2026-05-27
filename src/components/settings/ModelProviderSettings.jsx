@@ -36,6 +36,7 @@ import ModelProviderDiscoveryPanel from './ModelProviderDiscoveryPanel';
 
 const emptyModel = applyContextPreset({
   name: '',
+  visibility: 'private',
   protocol: 'openai',
   base_url: '',
   api_key: '',
@@ -78,6 +79,7 @@ export default function ModelProviderSettings({ ide }) {
     setEditingId(item.id);
     setDraft({
       name: item.name,
+      visibility: item.visibility || 'private',
       protocol: item.protocol,
       base_url: item.base_url,
       api_key: '',
@@ -178,6 +180,7 @@ export default function ModelProviderSettings({ ide }) {
                     <span className="font-bold text-gray-800 dark:text-gray-100">{item.name}</span>
                     {item.is_default && <Badge tone="blue">默认</Badge>}
                     <Badge tone={item.enabled ? 'green' : 'gray'}>{item.enabled ? '启用' : '禁用'}</Badge>
+                    <Badge tone={item.visibility === 'public' ? 'blue' : 'gray'}>{item.visibility === 'public' ? '公开' : '私密'}</Badge>
                   </div>
                   <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
                     {item.protocol} · {item.model_id} · {item.base_url}
@@ -215,6 +218,12 @@ export default function ModelProviderSettings({ ide }) {
               placeholder="OpenRouter GPT"
               required
             />
+          </Field>
+          <Field label="可见性">
+            <Select value={draft.visibility || 'private'} onChange={(e) => setDraft({ ...draft, visibility: e.target.value })}>
+              <option value="private">私密（仅管理员）</option>
+              <option value="public">公开（所有用户）</option>
+            </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="协议">

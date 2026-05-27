@@ -66,6 +66,7 @@ func (m *Manager) runAIAgentOnce(ctx context.Context, userID, taskID string, pay
 	}}
 	return m.ai.GenerateTaskReply(ctx, payload.ConversationID, payload.UserMessageID, payload.ModelProviderID, messages, nil, ai.RunOptions{
 		UserID:    userID,
+		UserRole:  payload.UserRole,
 		TaskID:    taskID,
 		ForceTool: forceTool,
 		Log: func(level, message string) {

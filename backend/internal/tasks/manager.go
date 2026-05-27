@@ -40,6 +40,7 @@ type AIAgentPayload struct {
 	UserMessageID   string              `json:"user_message_id"`
 	UserMessage     string              `json:"user_message"`
 	ModelProviderID string              `json:"model_provider_id"`
+	UserRole        string              `json:"user_role,omitempty"`
 	Attachments     json.RawMessage     `json:"attachments"`
 	CreatedFromChat bool                `json:"created_from_chat"`
 	DecisionReason  string              `json:"decision_reason"`

@@ -6,6 +6,10 @@ import (
 )
 
 func toolsForToolset(toolset string) ([]string, bool) {
+	return toolsForToolsetRole(toolset, "admin")
+}
+
+func toolsForToolsetRole(toolset, role string) ([]string, bool) {
 	switch toolset {
 	case "workspace":
 		return []string{
@@ -25,6 +29,9 @@ func toolsForToolset(toolset string) ([]string, bool) {
 	case "search":
 		return []string{"attempt_completion", "perseus_search_web", "web_extract"}, true
 	case "skills":
+		if normalizeRunUserRole(role) != "admin" {
+			return []string{"attempt_completion", "list_skills", "read_skill"}, true
+		}
 		return []string{"attempt_completion", "list_skills", "read_skill", "install_skill_from_attachment", "delete_skill"}, true
 	case "task":
 		return []string{"attempt_completion", "start_background_task"}, true

@@ -29,6 +29,10 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "selected_model_provider_id is required")
 			return
 		}
+		if _, err := s.configs.GetModelProviderForUser(r.Context(), user.UserID, user.Role, req.SelectedModelProviderID); err != nil {
+			writeError(w, http.StatusBadRequest, "selected model is not available")
+			return
+		}
 		item, err := s.conversations.CreateConversation(r.Context(), store.CreateConversationInput{
 			UserID:                  user.UserID,
 			Title:                   req.Title,
@@ -144,7 +148,7 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusBadRequest, "model_provider_id is required")
 			return
 		}
-		result, err := s.ai.CompactConversation(r.Context(), user.UserID, conversationID, conversation.SelectedModelProviderID, "manual", req.Instructions)
+		result, err := s.ai.CompactConversation(r.Context(), user.UserID, user.Role, conversationID, conversation.SelectedModelProviderID, "manual", req.Instructions)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -227,6 +231,10 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusBadRequest, "model_provider_id is required")
 			return
 		}
+		if _, err := s.configs.GetModelProviderForUser(r.Context(), user.UserID, user.Role, modelProviderID); err != nil {
+			writeError(w, http.StatusBadRequest, "selected model is not available")
+			return
+		}
 		if modelProviderID != conversation.SelectedModelProviderID {
 			if err := s.conversations.UpdateConversationModel(r.Context(), user.UserID, conversationID, modelProviderID); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
@@ -288,7 +296,7 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 		}
 
 		updatedConversation, _ := s.conversations.GetConversation(r.Context(), user.UserID, conversationID)
-		go s.executeConversationRun(user.UserID, conversationID, userMessage.ID, modelProviderID, strings.TrimSpace(content), string(attachmentsJSON), attachmentPayloads, thinkingMode, run.ID)
+		go s.executeConversationRun(user.UserID, user.Role, conversationID, userMessage.ID, modelProviderID, strings.TrimSpace(content), string(attachmentsJSON), attachmentPayloads, thinkingMode, run.ID)
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"conversation": updatedConversation,
 			"user_message": userMessage,

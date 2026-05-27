@@ -62,20 +62,22 @@ export default function ModelMenu({ ide, panelId }) {
         {ide.enabledModels.length === 0 ? (
           <div className="p-4 text-center">
             <div className="text-sm font-bold text-gray-800 dark:text-gray-100">未配置模型</div>
-            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">请先在设置页添加并启用模型。</div>
-            <Button
-              data-testid="open-settings-from-model-menu"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                ide.setIsModelMenuOpen(false);
-                ide.setIsSettingsOpen(true);
-              }}
-              className="mt-3"
-              size="sm"
-            >
-              打开设置
-            </Button>
+            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">当前没有可用模型。</div>
+            {ide.currentUser?.role === 'admin' && (
+              <Button
+                data-testid="open-settings-from-model-menu"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  ide.setIsModelMenuOpen(false);
+                  ide.setIsSettingsOpen(true);
+                }}
+                className="mt-3"
+                size="sm"
+              >
+                打开设置
+              </Button>
+            )}
           </div>
         ) : (
           <>

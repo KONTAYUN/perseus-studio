@@ -11,11 +11,15 @@ import (
 )
 
 func (s *Service) execListSkills(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	return s.execListSkillsForRole(ctx, userID, "admin", argumentsJSON)
+}
+
+func (s *Service) execListSkillsForRole(ctx context.Context, userID, role, argumentsJSON string) (string, string, string, string, error) {
 	skillsSvc, err := s.factory.Skills(userID)
 	if err != nil {
 		return "", "", "正在查看 Skills...", "", err
 	}
-	items, err := skillsSvc.ListEnabled(ctx, userID)
+	items, err := skillsSvc.ListEnabledForUser(ctx, userID, normalizeRunUserRole(role))
 	if err != nil {
 		return "", "", "正在查看 Skills...", "", err
 	}
@@ -32,6 +36,10 @@ func (s *Service) execListSkills(ctx context.Context, userID, argumentsJSON stri
 }
 
 func (s *Service) execReadSkill(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	return s.execReadSkillForRole(ctx, userID, "admin", argumentsJSON)
+}
+
+func (s *Service) execReadSkillForRole(ctx context.Context, userID, role, argumentsJSON string) (string, string, string, string, error) {
 	var args struct {
 		SkillID string `json:"skill_id"`
 	}
@@ -42,7 +50,18 @@ func (s *Service) execReadSkill(ctx context.Context, userID, argumentsJSON strin
 	if err != nil {
 		return "", "", "正在读取 Skill...", "", err
 	}
-	result, err := skillsSvc.ReadSkill(ctx, userID, args.SkillID, true)
+	item, err := skillsSvc.GetForUser(ctx, userID, normalizeRunUserRole(role), args.SkillID)
+	if err != nil {
+		return "", "", "正在读取 Skill...", "", err
+	}
+	ownerSkillsSvc := skillsSvc
+	if item.UserID != userID {
+		ownerSkillsSvc, err = s.factory.Skills(item.UserID)
+		if err != nil {
+			return "", "", "正在读取 Skill...", "", err
+		}
+	}
+	result, err := ownerSkillsSvc.ReadSkillForUser(ctx, userID, normalizeRunUserRole(role), args.SkillID, true)
 	if err != nil {
 		return "", "", "正在读取 Skill...", "", err
 	}
@@ -51,6 +70,9 @@ func (s *Service) execReadSkill(ctx context.Context, userID, argumentsJSON strin
 }
 
 func (s *Service) execInstallSkillFromAttachment(ctx context.Context, userID, argumentsJSON string, opts RunOptions) (string, string, string, string, error) {
+	if normalizeRunUserRole(opts.UserRole) != "admin" {
+		return "", "", "正在安装 Skill...", "", fmt.Errorf("admin required")
+	}
 	var args struct {
 		AttachmentID string `json:"attachment_id"`
 		SkillID      string `json:"skill_id"`
@@ -94,6 +116,13 @@ func (s *Service) execInstallSkillFromAttachment(ctx context.Context, userID, ar
 }
 
 func (s *Service) execDeleteSkill(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	return s.execDeleteSkillForRole(ctx, userID, "admin", argumentsJSON)
+}
+
+func (s *Service) execDeleteSkillForRole(ctx context.Context, userID, role, argumentsJSON string) (string, string, string, string, error) {
+	if normalizeRunUserRole(role) != "admin" {
+		return "", "", "正在删除 Skill...", "", fmt.Errorf("admin required")
+	}
 	var args struct {
 		SkillID string `json:"skill_id"`
 	}
@@ -104,11 +133,18 @@ func (s *Service) execDeleteSkill(ctx context.Context, userID, argumentsJSON str
 	if err != nil {
 		return "", "", "正在删除 Skill...", "", err
 	}
-	item, err := skillsSvc.Get(ctx, userID, args.SkillID)
+	item, err := skillsSvc.GetForUser(ctx, userID, "admin", args.SkillID)
 	if err != nil {
 		return "", "", "正在删除 Skill...", args.SkillID, err
 	}
-	if err := skillsSvc.Delete(ctx, userID, args.SkillID); err != nil {
+	ownerSkillsSvc := skillsSvc
+	if item.UserID != userID {
+		ownerSkillsSvc, err = s.factory.Skills(item.UserID)
+		if err != nil {
+			return "", "", "正在删除 Skill...", args.SkillID, err
+		}
+	}
+	if err := ownerSkillsSvc.DeleteAny(ctx, args.SkillID); err != nil {
 		return "", "", "正在删除 Skill...", args.SkillID, err
 	}
 	payload := map[string]any{

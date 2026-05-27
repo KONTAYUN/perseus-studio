@@ -112,6 +112,14 @@ type compactConversationRequest struct {
 	Instructions string `json:"instructions"`
 }
 
+func (s *Server) requireAdminOrWriteForbidden(w http.ResponseWriter, r *http.Request) bool {
+	if s.requireAdmin(r) {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "admin required")
+	return false
+}
+
 type chatAttachmentMetadata struct {
 	ID                string `json:"id"`
 	Name              string `json:"name"`

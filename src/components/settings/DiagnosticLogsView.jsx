@@ -6,25 +6,27 @@ import { diagnosticShortJudgement, formatRequestSummary } from './diagnosticLogU
 
 export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
-  const [scope, setScope] = React.useState(isAdmin ? 'all' : 'mine');
+  const [scope, setScope] = React.useState('all');
   const [logs, setLogs] = React.useState([]);
   const [usersById, setUsersById] = React.useState({});
   const [message, setMessage] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
   const [expandedIds, setExpandedIds] = React.useState(new Set());
-  const isAllUsersScope = isAdmin && scope === 'all';
+  const isAllUsersScope = true;
+
+  if (!isAdmin) return null;
 
   React.useEffect(() => {
-    setScope(isAdmin ? 'all' : 'mine');
+    setScope('all');
   }, [isAdmin]);
 
   const loadLogs = React.useCallback(async () => {
     setIsLoading(true);
     setMessage('');
     try {
-      const data = await apiGet(isAllUsersScope ? '/api/admin/diagnostics/logs?limit=200' : '/api/diagnostics/logs?limit=100');
+      const data = await apiGet('/api/admin/diagnostics/logs?limit=200');
       setLogs(data.logs || []);
-      setUsersById(isAllUsersScope ? data.users || {} : {});
+      setUsersById(data.users || {});
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -37,7 +39,7 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
   }, [loadLogs]);
 
   const fetchExportText = async () => {
-    const path = isAllUsersScope ? '/api/admin/diagnostics/export?limit=200' : '/api/diagnostics/export?limit=100';
+    const path = '/api/admin/diagnostics/export?limit=200';
     const response = await fetch(`${API_BASE_URL}${path}`, {
       credentials: 'include',
     });
@@ -52,7 +54,7 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
     try {
       const text = await fetchExportText();
       await navigator.clipboard.writeText(text);
-      setMessage(isAllUsersScope ? '已复制全部用户最近诊断日志。' : '已复制最近诊断日志。');
+      setMessage('已复制全部用户最近诊断日志。');
     } catch (error) {
       setMessage(error.message);
     }
@@ -65,7 +67,7 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = isAllUsersScope ? 'perseus-diagnostic-logs-all-users.txt' : 'perseus-diagnostic-logs.txt';
+      link.download = 'perseus-diagnostic-logs-all-users.txt';
       link.click();
       URL.revokeObjectURL(url);
       setMessage('已导出诊断日志。');
@@ -76,19 +78,17 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
 
   const clearLogs = async () => {
     const ok = await dialog?.confirm?.({
-      title: isAllUsersScope ? '清空全部诊断日志' : '清空诊断日志',
-      message: isAllUsersScope
-        ? '确认清空所有用户的诊断日志？此操作不可恢复，但不会影响会话、消息、workspace 文件或 run checkpoint。'
-        : '确认清空自己的诊断日志？',
-      confirmLabel: isAllUsersScope ? '清空全部日志' : '清空日志',
+      title: '清空全部诊断日志',
+      message: '确认清空所有用户的诊断日志？此操作不可恢复，但不会影响会话、消息、workspace 文件或 run checkpoint。',
+      confirmLabel: '清空全部日志',
       tone: 'red',
     });
     if (!ok) return;
     try {
-      await apiDelete(isAllUsersScope ? '/api/admin/diagnostics/logs' : '/api/diagnostics/logs');
+      await apiDelete('/api/admin/diagnostics/logs');
       setLogs([]);
       setExpandedIds(new Set());
-      setMessage(isAllUsersScope ? '全部用户诊断日志已清空。' : '诊断日志已清空。');
+      setMessage('全部用户诊断日志已清空。');
     } catch (error) {
       setMessage(error.message);
     }
@@ -103,7 +103,7 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
     });
     if (!ok) return;
     try {
-      await apiDelete(`${isAllUsersScope ? '/api/admin/diagnostics/logs' : '/api/diagnostics/logs'}/${encodeURIComponent(item.id)}`);
+      await apiDelete(`/api/admin/diagnostics/logs/${encodeURIComponent(item.id)}`);
       setLogs((current) => current.filter((entry) => entry.id !== item.id));
       setExpandedIds((current) => {
         const next = new Set(current);
@@ -132,29 +132,26 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
           <Button type="button" variant="ghost" size="sm" onClick={onBack}>
             <ArrowLeft size={16} /> 诊断日志
           </Button>
-          {isAdmin && (
-            <SegmentedControl
-              value={scope}
-              onChange={setScope}
-              options={[
-                { value: 'all', label: '全部用户' },
-                { value: 'mine', label: '我的日志' },
-              ]}
-            />
-          )}
+          <SegmentedControl
+            value={scope}
+            onChange={setScope}
+            options={[
+              { value: 'all', label: '全部用户' },
+            ]}
+          />
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" size="sm" onClick={loadLogs}>
             <RefreshCw size={14} /> 刷新
           </Button>
           <Button type="button" size="sm" onClick={copyLogs}>
-            <Clipboard size={14} /> {isAllUsersScope ? '复制汇总' : '复制最近日志'}
+            <Clipboard size={14} /> 复制汇总
           </Button>
           <Button type="button" size="sm" onClick={exportLogs}>
             <Download size={14} /> 导出日志
           </Button>
           <Button type="button" variant="danger" size="sm" onClick={clearLogs}>
-            <Trash2 size={14} /> {isAllUsersScope ? '清空全部' : '清空日志'}
+            <Trash2 size={14} /> 清空全部
           </Button>
         </div>
       </div>

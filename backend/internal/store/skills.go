@@ -13,6 +13,7 @@ type Skill struct {
 	UserID      string    `json:"user_id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
+	Visibility  string    `json:"visibility"`
 	SourcePath  string    `json:"source_path"`
 	InstallPath string    `json:"install_path"`
 	Enabled     bool      `json:"enabled"`
@@ -23,6 +24,7 @@ type Skill struct {
 type SkillInput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Visibility  string `json:"visibility"`
 	Enabled     *bool  `json:"enabled"`
 }
 
@@ -31,6 +33,7 @@ type UpsertSkillInput struct {
 	UserID      string
 	Name        string
 	Description string
+	Visibility  string
 	SourcePath  string
 	InstallPath string
 	Enabled     bool
@@ -64,10 +67,14 @@ CREATE TABLE IF NOT EXISTS skills (
 	if err := AddColumnIfNotExists(ctx, s.db, "skills", "user_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := AddColumnIfNotExists(ctx, s.db, "skills", "visibility", "TEXT NOT NULL DEFAULT 'private'"); err != nil {
+		return err
+	}
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_skills_enabled_updated_at ON skills(enabled, updated_at);
 CREATE INDEX IF NOT EXISTS idx_skills_name_source_path ON skills(name, source_path);
 CREATE INDEX IF NOT EXISTS idx_skills_user_id ON skills(user_id);
+CREATE INDEX IF NOT EXISTS idx_skills_visibility_enabled ON skills(visibility, enabled);
 `
 	_, err := s.db.ExecContext(ctx, indexes)
 	return err
@@ -75,7 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_skills_user_id ON skills(user_id);
 
 func (s *SkillStore) ListSkills(ctx context.Context, userID string) ([]Skill, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, user_id, name, description, source_path, install_path, enabled, created_at, updated_at
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
 FROM skills
 WHERE user_id = ?
 ORDER BY updated_at DESC
@@ -96,9 +103,57 @@ ORDER BY updated_at DESC
 	return items, rows.Err()
 }
 
+func (s *SkillStore) ListSkillsForUser(ctx context.Context, userID, role string) ([]Skill, error) {
+	if role == "admin" {
+		return s.ListAllSkills(ctx)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
+FROM skills
+WHERE enabled = 1 AND visibility = ?
+ORDER BY updated_at DESC
+`, ResourceVisibilityPublic)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []Skill
+	for rows.Next() {
+		item, err := scanSkill(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *SkillStore) ListAllSkills(ctx context.Context) ([]Skill, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
+FROM skills
+ORDER BY updated_at DESC
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []Skill
+	for rows.Next() {
+		item, err := scanSkill(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *SkillStore) ListEnabledSkills(ctx context.Context, userID string) ([]Skill, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, user_id, name, description, source_path, install_path, enabled, created_at, updated_at
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
 FROM skills
 WHERE enabled = 1 AND user_id = ?
 ORDER BY updated_at DESC
@@ -119,18 +174,84 @@ ORDER BY updated_at DESC
 	return items, rows.Err()
 }
 
+func (s *SkillStore) ListEnabledSkillsForUser(ctx context.Context, userID, role string) ([]Skill, error) {
+	if role == "admin" {
+		rows, err := s.db.QueryContext(ctx, `
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
+FROM skills
+WHERE enabled = 1
+ORDER BY updated_at DESC
+`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		var items []Skill
+		for rows.Next() {
+			item, err := scanSkill(rows)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
+		}
+		return items, rows.Err()
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
+FROM skills
+WHERE enabled = 1 AND visibility = ?
+ORDER BY updated_at DESC
+`, ResourceVisibilityPublic)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []Skill
+	for rows.Next() {
+		item, err := scanSkill(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *SkillStore) GetSkill(ctx context.Context, userID, id string) (Skill, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, user_id, name, description, source_path, install_path, enabled, created_at, updated_at
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
 FROM skills
 WHERE id = ? AND user_id = ?
 `, id, userID)
 	return scanSkill(row)
 }
 
+func (s *SkillStore) GetSkillForUser(ctx context.Context, userID, role, id string) (Skill, error) {
+	if role == "admin" {
+		return s.GetSkillAny(ctx, id)
+	}
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
+FROM skills
+WHERE id = ? AND enabled = 1 AND visibility = ?
+`, id, ResourceVisibilityPublic)
+	return scanSkill(row)
+}
+
+func (s *SkillStore) GetSkillAny(ctx context.Context, id string) (Skill, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
+FROM skills
+WHERE id = ?
+`, id)
+	return scanSkill(row)
+}
+
 func (s *SkillStore) FindSkillByNameSource(ctx context.Context, userID, name, sourcePath string) (Skill, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, user_id, name, description, source_path, install_path, enabled, created_at, updated_at
+SELECT id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at
 FROM skills
 WHERE lower(name) = lower(?) AND source_path = ? AND user_id = ?
 ORDER BY updated_at DESC
@@ -147,18 +268,20 @@ func (s *SkillStore) UpsertSkill(ctx context.Context, input UpsertSkillInput) (S
 		return Skill{}, fmt.Errorf("name is required")
 	}
 	now := time.Now().UTC()
+	visibility := NormalizeResourceVisibility(input.Visibility)
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO skills (id, user_id, name, description, source_path, install_path, enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO skills (id, user_id, name, description, visibility, source_path, install_path, enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   name = excluded.name,
   description = excluded.description,
+  visibility = excluded.visibility,
   source_path = excluded.source_path,
   install_path = excluded.install_path,
   enabled = excluded.enabled,
   updated_at = excluded.updated_at
 WHERE skills.user_id = excluded.user_id
-`, input.ID, input.UserID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), strings.TrimSpace(input.SourcePath), strings.TrimSpace(input.InstallPath), boolToInt(input.Enabled), now, now)
+`, input.ID, input.UserID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), visibility, strings.TrimSpace(input.SourcePath), strings.TrimSpace(input.InstallPath), boolToInt(input.Enabled), now, now)
 	if err != nil {
 		return Skill{}, err
 	}
@@ -170,11 +293,18 @@ func (s *SkillStore) UpdateSkill(ctx context.Context, userID, id string, input S
 	if err != nil {
 		return Skill{}, err
 	}
+	if strings.TrimSpace(input.Visibility) != "" && NormalizeResourceVisibility(input.Visibility) != strings.ToLower(strings.TrimSpace(input.Visibility)) {
+		return Skill{}, fmt.Errorf("visibility must be public or private")
+	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		name = existing.Name
 	}
 	description := strings.TrimSpace(input.Description)
+	visibility := existing.Visibility
+	if strings.TrimSpace(input.Visibility) != "" {
+		visibility = NormalizeResourceVisibility(input.Visibility)
+	}
 	enabled := existing.Enabled
 	if input.Enabled != nil {
 		enabled = *input.Enabled
@@ -182,9 +312,9 @@ func (s *SkillStore) UpdateSkill(ctx context.Context, userID, id string, input S
 	now := time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
 UPDATE skills
-SET name = ?, description = ?, enabled = ?, updated_at = ?
+SET name = ?, description = ?, visibility = ?, enabled = ?, updated_at = ?
 WHERE id = ? AND user_id = ?
-`, name, description, boolToInt(enabled), now, id, userID)
+`, name, description, visibility, boolToInt(enabled), now, id, userID)
 	if err != nil {
 		return Skill{}, err
 	}
@@ -199,7 +329,8 @@ func (s *SkillStore) DeleteSkill(ctx context.Context, userID, id string) error {
 func scanSkill(s scanner) (Skill, error) {
 	var item Skill
 	var enabled int
-	err := s.Scan(&item.ID, &item.UserID, &item.Name, &item.Description, &item.SourcePath, &item.InstallPath, &enabled, &item.CreatedAt, &item.UpdatedAt)
+	err := s.Scan(&item.ID, &item.UserID, &item.Name, &item.Description, &item.Visibility, &item.SourcePath, &item.InstallPath, &enabled, &item.CreatedAt, &item.UpdatedAt)
+	item.Visibility = NormalizeResourceVisibility(item.Visibility)
 	item.Enabled = enabled == 1
 	return item, err
 }

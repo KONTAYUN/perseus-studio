@@ -10,6 +10,7 @@ type ModelProvider struct {
 	ID                          string          `json:"id"`
 	UserID                      string          `json:"user_id"`
 	Name                        string          `json:"name"`
+	Visibility                  string          `json:"visibility"`
 	Protocol                    string          `json:"protocol"`
 	BaseURL                     string          `json:"base_url"`
 	APIKey                      string          `json:"-"`
@@ -32,19 +33,21 @@ type ModelProvider struct {
 }
 
 type SearchProvider struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Provider  string    `json:"provider"`
-	APIKey    string    `json:"-"`
-	MaskedKey string    `json:"masked_key"`
-	Enabled   bool      `json:"enabled"`
-	Priority  int       `json:"priority"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
+	Provider   string    `json:"provider"`
+	Visibility string    `json:"visibility"`
+	APIKey     string    `json:"-"`
+	MaskedKey  string    `json:"masked_key"`
+	Enabled    bool      `json:"enabled"`
+	Priority   int       `json:"priority"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type ModelProviderInput struct {
 	Name                        string `json:"name"`
+	Visibility                  string `json:"visibility"`
 	Protocol                    string `json:"protocol"`
 	BaseURL                     string `json:"base_url"`
 	APIKey                      string `json:"api_key"`
@@ -62,10 +65,11 @@ type ModelProviderInput struct {
 }
 
 type SearchProviderInput struct {
-	Provider string `json:"provider"`
-	APIKey   string `json:"api_key"`
-	Enabled  bool   `json:"enabled"`
-	Priority int    `json:"priority"`
+	Provider   string `json:"provider"`
+	Visibility string `json:"visibility"`
+	APIKey     string `json:"api_key"`
+	Enabled    bool   `json:"enabled"`
+	Priority   int    `json:"priority"`
 }
 
 type ConfigStore struct {
@@ -110,6 +114,9 @@ CREATE TABLE IF NOT EXISTS search_providers (
 		if err := AddColumnIfNotExists(ctx, s.db, tbl, "user_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
+		if err := AddColumnIfNotExists(ctx, s.db, tbl, "visibility", "TEXT NOT NULL DEFAULT 'private'"); err != nil {
+			return err
+		}
 	}
 	modelProviderColumns := []struct {
 		name string
@@ -132,8 +139,10 @@ CREATE TABLE IF NOT EXISTS search_providers (
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_model_providers_enabled_default ON model_providers(enabled, is_default);
 CREATE INDEX IF NOT EXISTS idx_model_providers_user_id ON model_providers(user_id);
+CREATE INDEX IF NOT EXISTS idx_model_providers_visibility_enabled ON model_providers(visibility, enabled);
 CREATE INDEX IF NOT EXISTS idx_search_providers_priority ON search_providers(priority);
 CREATE INDEX IF NOT EXISTS idx_search_providers_user_id ON search_providers(user_id);
+CREATE INDEX IF NOT EXISTS idx_search_providers_visibility_enabled ON search_providers(visibility, enabled);
 `
 	_, err := s.db.ExecContext(ctx, indexes)
 	return err

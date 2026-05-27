@@ -315,6 +315,7 @@ export default function useIdeState(options = {}) {
     ...settings,
     ...skillsState,
     ...chat,
+    currentUser: options.currentUser || null,
     activeTabPath: activeEditor.activeTabPath,
     activateTab: activeEditor.activateTab,
     addPanel,

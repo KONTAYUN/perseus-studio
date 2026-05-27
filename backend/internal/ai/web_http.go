@@ -57,7 +57,11 @@ func (e *ProviderResponseError) Error() string {
 }
 
 func (s *Service) pickSearchProvider(ctx context.Context, userID string) (store.SearchProvider, error) {
-	items, err := s.configs.ListSearchProviders(ctx, userID)
+	return s.pickSearchProviderForRole(ctx, userID, "admin")
+}
+
+func (s *Service) pickSearchProviderForRole(ctx context.Context, userID, role string) (store.SearchProvider, error) {
+	items, err := s.configs.ListSearchProvidersForUser(ctx, userID, normalizeRunUserRole(role))
 	if err != nil {
 		return store.SearchProvider{}, err
 	}
@@ -70,6 +74,10 @@ func (s *Service) pickSearchProvider(ctx context.Context, userID string) (store.
 }
 
 func (s *Service) webSearch(ctx context.Context, userID, query string, maxResults int) ([]WebSearchResult, string, error) {
+	return s.webSearchForRole(ctx, userID, "admin", query, maxResults)
+}
+
+func (s *Service) webSearchForRole(ctx context.Context, userID, role, query string, maxResults int) ([]WebSearchResult, string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, "", fmt.Errorf("query is required")
@@ -80,7 +88,7 @@ func (s *Service) webSearch(ctx context.Context, userID, query string, maxResult
 	if maxResults > 10 {
 		maxResults = 10
 	}
-	provider, err := s.pickSearchProvider(ctx, userID)
+	provider, err := s.pickSearchProviderForRole(ctx, userID, role)
 	if err != nil {
 		return nil, "", err
 	}
@@ -97,11 +105,15 @@ func (s *Service) webSearch(ctx context.Context, userID, query string, maxResult
 }
 
 func (s *Service) webExtract(ctx context.Context, userID, rawURL string) (WebExtractResult, error) {
+	return s.webExtractForRole(ctx, userID, "admin", rawURL)
+}
+
+func (s *Service) webExtractForRole(ctx context.Context, userID, role, rawURL string) (WebExtractResult, error) {
 	parsedURL, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
 		return WebExtractResult{}, fmt.Errorf("invalid url")
 	}
-	provider, err := s.pickSearchProvider(ctx, userID)
+	provider, err := s.pickSearchProviderForRole(ctx, userID, role)
 	if err != nil {
 		return WebExtractResult{}, err
 	}

@@ -1,10 +1,14 @@
 package ai
 
 func openAITools() []map[string]any {
-	return openAIToolsForLoadedToolsets(nil, true)
+	return openAIToolsForLoadedToolsets(nil, true, "admin")
 }
 
-func openAIToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool) []map[string]any {
+func openAIToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool, roles ...string) []map[string]any {
+	role := "admin"
+	if len(roles) > 0 {
+		role = normalizeRunUserRole(roles[0])
+	}
 	tools := []map[string]any{openAICompletionTool(), openAIQuestionTool()}
 	if includeLoader {
 		tools = append(tools, openAIToolsetLoaderTool())
@@ -19,7 +23,7 @@ func openAIToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool) []
 		tools = append(tools, openAIWebTools()...)
 	}
 	if loaded["skills"] {
-		tools = append(tools, openAISkillTools()...)
+		tools = append(tools, openAISkillToolsForRole(role)...)
 	}
 	if loaded["task"] {
 		tools = append(tools, openAIBackgroundTaskTool())
@@ -28,10 +32,14 @@ func openAIToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool) []
 }
 
 func anthropicTools() []map[string]any {
-	return anthropicToolsForLoadedToolsets(nil, true)
+	return anthropicToolsForLoadedToolsets(nil, true, "admin")
 }
 
-func anthropicToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool) []map[string]any {
+func anthropicToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool, roles ...string) []map[string]any {
+	role := "admin"
+	if len(roles) > 0 {
+		role = normalizeRunUserRole(roles[0])
+	}
 	tools := []map[string]any{anthropicCompletionTool(), anthropicQuestionTool()}
 	if includeLoader {
 		tools = append(tools, anthropicToolsetLoaderTool())
@@ -46,7 +54,7 @@ func anthropicToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool)
 		tools = append(tools, anthropicWebTools()...)
 	}
 	if loaded["skills"] {
-		tools = append(tools, anthropicSkillTools()...)
+		tools = append(tools, anthropicSkillToolsForRole(role)...)
 	}
 	if loaded["task"] {
 		tools = append(tools, anthropicBackgroundTaskTool())

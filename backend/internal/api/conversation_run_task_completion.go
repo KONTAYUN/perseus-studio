@@ -10,12 +10,13 @@ import (
 	"webide-backend/internal/tasks"
 )
 
-func (s *Server) completeConversationRunWithTask(ctx context.Context, userID, conversationID, userMessageID, modelProviderID, content, attachmentsJSON, runID string, taskRequest *ai.BackgroundTaskRequest) {
+func (s *Server) completeConversationRunWithTask(ctx context.Context, userID, userRole, conversationID, userMessageID, modelProviderID, content, attachmentsJSON, runID string, taskRequest *ai.BackgroundTaskRequest) {
 	payload, _ := json.Marshal(tasks.AIAgentPayload{
 		ConversationID:  conversationID,
 		UserMessageID:   userMessageID,
 		UserMessage:     content,
 		ModelProviderID: modelProviderID,
+		UserRole:        userRole,
 		Attachments:     json.RawMessage(attachmentsJSON),
 		CreatedFromChat: true,
 		Goal:            taskRequest.Goal,

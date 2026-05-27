@@ -129,6 +129,7 @@ export default function App() {
       />
     );
   }
+  const isAdmin = auth.user?.role === 'admin';
 
   return (
     <div
@@ -157,7 +158,7 @@ export default function App() {
         onAddPanel={ide.addPanel}
         onCloseDraggedPanel={ide.closeDraggedPanel}
         onPanelTrashOver={ide.setIsPanelTrashOver}
-        onOpenSettings={() => ide.setIsSettingsOpen(true)}
+        onOpenSettings={isAdmin ? () => ide.setIsSettingsOpen(true) : undefined}
         onOpenTasks={tasks.openTaskPanel}
         onToggleDarkMode={() => ide.setIsDarkMode((value) => !value)}
         onLogout={handleLogout}
@@ -173,7 +174,7 @@ export default function App() {
 
       <MainPanels ide={{ ...ide, tasks }} />
 
-      {ide.isSettingsOpen && (
+      {isAdmin && ide.isSettingsOpen && (
         <SettingsModal ide={ide} dialog={appDialog.api} onClose={() => ide.setIsSettingsOpen(false)} currentUser={auth.user} />
       )}
 

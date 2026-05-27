@@ -12,7 +12,7 @@ import (
 	"webide-backend/internal/usersvc"
 )
 
-func TestDiagnosticLogsAPIUsesCurrentUser(t *testing.T) {
+func TestDiagnosticLogsAPIRequiresAdmin(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
@@ -46,6 +46,7 @@ func TestDiagnosticLogsAPIUsesCurrentUser(t *testing.T) {
 	}
 
 	server := &Server{
+		users:       users,
 		diagnostics: diagnostics,
 		mux:         http.NewServeMux(),
 		sessions:    sessions,
@@ -56,17 +57,8 @@ func TestDiagnosticLogsAPIUsesCurrentUser(t *testing.T) {
 	attachTestSession(t, server, req, "token-a", userA)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Logs []store.DiagnosticLog `json:"logs"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("Unmarshal returned error: %v", err)
-	}
-	if len(payload.Logs) != 1 || payload.Logs[0].UserID != userA.ID {
-		t.Fatalf("expected only user-a logs, got %#v", payload.Logs)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected non-admin 403, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -205,14 +197,26 @@ func TestDiagnosticExportDoesNotIncludeSecrets(t *testing.T) {
 	}
 	server.register()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/diagnostics/export?limit=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/diagnostics/export?limit=10", nil)
 	attachTestSession(t, server, req, "token-a", userA)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected non-admin 403, got %d: %s", rec.Code, rec.Body.String())
 	}
-	text := rec.Body.String()
+
+	admin, err := users.CreateUser(t.Context(), "admin", "password", "admin")
+	if err != nil {
+		t.Fatalf("CreateUser admin returned error: %v", err)
+	}
+	adminReq := httptest.NewRequest(http.MethodGet, "/api/admin/diagnostics/export?limit=10", nil)
+	attachTestSession(t, server, adminReq, "admin-token-a", admin)
+	adminRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(adminRec, adminReq)
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("expected admin 200, got %d: %s", adminRec.Code, adminRec.Body.String())
+	}
+	text := adminRec.Body.String()
 	for _, forbidden := range []string{"sk-", "api_key", "prompt", "完整文件内容"} {
 		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) {
 			t.Fatalf("export contains forbidden fragment %q: %s", forbidden, text)
@@ -278,8 +282,8 @@ func TestDiagnosticLogsAPIDeleteSingleAndAdminClearAll(t *testing.T) {
 	attachTestSession(t, server, wrongOwnerReq, "user-a-token", userA)
 	wrongOwnerRec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(wrongOwnerRec, wrongOwnerReq)
-	if wrongOwnerRec.Code != http.StatusOK {
-		t.Fatalf("expected wrong owner delete to be idempotent 200, got %d: %s", wrongOwnerRec.Code, wrongOwnerRec.Body.String())
+	if wrongOwnerRec.Code != http.StatusForbidden {
+		t.Fatalf("expected non-admin delete 403, got %d: %s", wrongOwnerRec.Code, wrongOwnerRec.Body.String())
 	}
 	logs, err := diagnostics.List(t.Context(), store.DiagnosticLogQuery{UserID: userB.ID, Limit: 10})
 	if err != nil {
@@ -289,19 +293,19 @@ func TestDiagnosticLogsAPIDeleteSingleAndAdminClearAll(t *testing.T) {
 		t.Fatalf("wrong owner delete removed user-b log: %#v", logs)
 	}
 
-	deleteOwnReq := httptest.NewRequest(http.MethodDelete, "/api/diagnostics/logs/"+logA.ID, nil)
+	deleteOwnReq := httptest.NewRequest(http.MethodDelete, "/api/admin/diagnostics/logs/"+logA.ID, nil)
 	attachTestSession(t, server, deleteOwnReq, "user-a-token-2", userA)
 	deleteOwnRec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(deleteOwnRec, deleteOwnReq)
-	if deleteOwnRec.Code != http.StatusOK {
-		t.Fatalf("expected delete own 200, got %d: %s", deleteOwnRec.Code, deleteOwnRec.Body.String())
+	if deleteOwnRec.Code != http.StatusForbidden {
+		t.Fatalf("expected non-admin admin-route delete 403, got %d: %s", deleteOwnRec.Code, deleteOwnRec.Body.String())
 	}
 	logs, err = diagnostics.List(t.Context(), store.DiagnosticLogQuery{UserID: userA.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("List user-a returned error: %v", err)
 	}
-	if len(logs) != 0 {
-		t.Fatalf("expected user-a log deleted, got %#v", logs)
+	if len(logs) != 1 || logs[0].ID != logA.ID {
+		t.Fatalf("expected user-a log to remain, got %#v", logs)
 	}
 
 	adminDeleteReq := httptest.NewRequest(http.MethodDelete, "/api/admin/diagnostics/logs/"+logB.ID, nil)
@@ -315,8 +319,8 @@ func TestDiagnosticLogsAPIDeleteSingleAndAdminClearAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List all returned error: %v", err)
 	}
-	if len(logs) != 0 {
-		t.Fatalf("expected admin delete to remove remaining log, got %#v", logs)
+	if len(logs) != 1 || logs[0].ID != logA.ID {
+		t.Fatalf("expected admin single delete to remove only log-b, got %#v", logs)
 	}
 
 	if _, err := diagnostics.Append(t.Context(), store.DiagnosticLogInput{UserID: userA.ID, Stage: "a2", Level: "error"}); err != nil {

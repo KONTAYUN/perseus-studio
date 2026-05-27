@@ -72,7 +72,7 @@ backend/
       conversation_*        Message CRUD, tool-call ledger, scanners
       tasks.go              Task store types/schema/facade
       task_*                Task CRUD, logs, JSON/scanner helpers
-      skills.go             Skill metadata (per-user)
+      skills.go             Skill metadata with public/private visibility
     usersvc/                Per-user service factory
       factory.go            Caches workspace/skills services per user, manages user data dirs
     api/                    HTTP layer (net/http)
@@ -140,7 +140,7 @@ backend/
 
 1. `usersvc.Factory` provides per-user `workspace.Service` and `skills.Service` instances
 2. Each user's files stored under `<USER_DATA_ROOT>/<user_id>/workspace/`
-3. All DB queries (configs, conversations, tasks, skills) filtered by `user_id` column
+3. Workspace files, conversations, tasks, and uploads remain user-scoped. Model providers, search providers, and Skills are admin-managed resources with `private`/`public` visibility: private resources are admin-only, public enabled resources are usable by ordinary users.
 4. API middleware extracts `userID` from session and passes it to all service calls
 
 ### Agent Chat Run
@@ -160,7 +160,7 @@ All workspace files live under each user's workspace directory. Deletes move to 
 
 ### Skill System
 
-Skills are zip archives containing a `SKILL.md` front-matter file. Upload via `/api/skills/upload`, or install from a chat attachment. Skills are stored per-user and can be enabled/disabled per conversation.
+Skills are zip archives containing a `SKILL.md` front-matter file. Upload via `/api/skills/upload`, or install from a chat attachment. Skill installation and management is admin-only. Enabled public Skills are visible/usable by ordinary users; private Skills remain admin-only.
 
 ### Background Tasks
 
@@ -176,7 +176,7 @@ All state lives in `/data/` (Docker volume mount):
 - `app.db` — SQLite database (users, tasks, conversations, configs, skills metadata)
 - `users/<user_id>/workspace/` — Per-user workspace files
 - `users/<user_id>/uploads/` — Per-user chat attachment blobs
-- `users/<user_id>/skills/` — Per-user installed skill directories
+- `users/<user_id>/skills/` — Installed Skill directories owned by the installing admin/user record; DB visibility controls whether enabled Skills are shared
 
 ## Debug API
 

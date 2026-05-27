@@ -18,12 +18,12 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		items, err := skillsSvc.List(r.Context(), user.UserID)
+		items, err := skillsSvc.ListForUser(r.Context(), user.UserID, user.Role)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+		writeJSON(w, http.StatusOK, map[string]any{"items": skillsForResponse(user.Role, items)})
 	default:
 		http.NotFound(w, r)
 	}
@@ -31,7 +31,7 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSkillRoutes(w http.ResponseWriter, r *http.Request) {
 	user := MustUserFromContext(r.Context())
-	skillsSvc, err := s.factory.Skills(user.UserID)
+	userSkillsSvc, err := s.factory.Skills(user.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -48,12 +48,18 @@ func (s *Server) handleSkillRoutes(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+		if !s.requireAdminOrWriteForbidden(w, r) {
+			return
+		}
 		s.handleSkillUpload(w, r)
 		return
 	}
 	if parts[0] == "install-selected" {
 		if r.Method != http.MethodPost || len(parts) != 1 {
 			http.NotFound(w, r)
+			return
+		}
+		if !s.requireAdminOrWriteForbidden(w, r) {
 			return
 		}
 		s.handleSkillInstallSelected(w, r)
@@ -64,27 +70,58 @@ func (s *Server) handleSkillRoutes(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodGet:
-			item, err := skillsSvc.Get(r.Context(), user.UserID, id)
+			item, err := userSkillsSvc.GetForUser(r.Context(), user.UserID, user.Role, id)
 			if err != nil {
 				writeError(w, http.StatusNotFound, err.Error())
 				return
 			}
-			tree, _ := skillsSvc.DirectoryTree(r.Context(), user.UserID, id)
-			writeJSON(w, http.StatusOK, map[string]any{"skill": item, "tree": tree})
+			ownerSkillsSvc, err := s.factory.Skills(item.UserID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			tree, _ := ownerSkillsSvc.DirectoryTreeForUser(r.Context(), user.UserID, user.Role, id)
+			writeJSON(w, http.StatusOK, map[string]any{"skill": skillForResponse(user.Role, item), "tree": tree})
 		case http.MethodPatch:
+			if !s.requireAdminOrWriteForbidden(w, r) {
+				return
+			}
+			existing, err := userSkillsSvc.GetForUser(r.Context(), user.UserID, user.Role, id)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			ownerSkillsSvc, err := s.factory.Skills(existing.UserID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			var req store.SkillInput
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json body")
 				return
 			}
-			item, err := skillsSvc.Update(r.Context(), user.UserID, id, req)
+			item, err := ownerSkillsSvc.Update(r.Context(), existing.UserID, id, req)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 			writeJSON(w, http.StatusOK, item)
 		case http.MethodDelete:
-			if err := skillsSvc.Delete(r.Context(), user.UserID, id); err != nil {
+			if !s.requireAdminOrWriteForbidden(w, r) {
+				return
+			}
+			existing, err := userSkillsSvc.GetForUser(r.Context(), user.UserID, user.Role, id)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			ownerSkillsSvc, err := s.factory.Skills(existing.UserID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if err := ownerSkillsSvc.DeleteAny(r.Context(), id); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -100,7 +137,17 @@ func (s *Server) handleSkillRoutes(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		result, err := skillsSvc.ReadSkill(r.Context(), user.UserID, id, false)
+		item, err := userSkillsSvc.GetForUser(r.Context(), user.UserID, user.Role, id)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		ownerSkillsSvc, err := s.factory.Skills(item.UserID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		result, err := ownerSkillsSvc.ReadSkillForUser(r.Context(), user.UserID, user.Role, id, false)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
 			return

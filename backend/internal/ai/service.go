@@ -104,6 +104,7 @@ type Reply struct {
 
 type RunOptions struct {
 	UserID                      string
+	UserRole                    string
 	RunID                       string
 	TaskID                      string
 	ForceTool                   string
@@ -182,10 +183,11 @@ func (s *Service) GenerateTaskReply(ctx context.Context, conversationID, message
 }
 
 func (s *Service) generateReply(ctx context.Context, conversationID, messageID, modelProviderID string, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {
-	attachments = s.enrichSelectedSkillAttachments(ctx, opts.UserID, attachments)
+	opts.UserRole = normalizeRunUserRole(opts.UserRole)
+	attachments = s.enrichSelectedSkillAttachmentsForRole(ctx, opts.UserID, opts.UserRole, attachments)
 	opts.Attachments = attachments
 	opts.ThinkingMode = normalizeThinkingMode(opts.ThinkingMode)
-	provider, err := s.configs.GetModelProvider(ctx, opts.UserID, modelProviderID)
+	provider, err := s.configs.GetModelProviderForUser(ctx, opts.UserID, opts.UserRole, modelProviderID)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -204,7 +206,18 @@ func (s *Service) generateReply(ctx context.Context, conversationID, messageID, 
 	}
 }
 
+func normalizeRunUserRole(role string) string {
+	if role == "admin" {
+		return "admin"
+	}
+	return "user"
+}
+
 func (s *Service) enrichSelectedSkillAttachments(ctx context.Context, userID string, attachments []AttachmentPayload) []AttachmentPayload {
+	return s.enrichSelectedSkillAttachmentsForRole(ctx, userID, "admin", attachments)
+}
+
+func (s *Service) enrichSelectedSkillAttachmentsForRole(ctx context.Context, userID, role string, attachments []AttachmentPayload) []AttachmentPayload {
 	if s.factory == nil || userID == "" || len(attachments) == 0 {
 		return attachments
 	}
@@ -218,7 +231,21 @@ func (s *Service) enrichSelectedSkillAttachments(ctx context.Context, userID str
 		if next[index].Kind != "selected_skill" || next[index].SkillID == "" {
 			continue
 		}
-		result, err := skillsSvc.ReadSkill(ctx, userID, next[index].SkillID, true)
+		item, err := skillsSvc.GetForUser(ctx, userID, normalizeRunUserRole(role), next[index].SkillID)
+		if err != nil {
+			next[index].Note = fmt.Sprintf("用户选择了 Skill %q，但当前无法读取：%v", next[index].Name, err)
+			continue
+		}
+		ownerSkillsSvc := skillsSvc
+		if item.UserID != userID {
+			if ownerSvc, ownerErr := s.factory.Skills(item.UserID); ownerErr == nil {
+				ownerSkillsSvc = ownerSvc
+			} else {
+				next[index].Note = fmt.Sprintf("用户选择了 Skill %q，但当前无法读取：%v", next[index].Name, ownerErr)
+				continue
+			}
+		}
+		result, err := ownerSkillsSvc.ReadSkillForUser(ctx, userID, normalizeRunUserRole(role), next[index].SkillID, true)
 		if err != nil {
 			next[index].Note = fmt.Sprintf("用户选择了 Skill %q，但当前无法读取：%v", next[index].Name, err)
 			continue

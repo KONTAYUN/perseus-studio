@@ -37,7 +37,7 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 	case "attempt_completion":
 		return execAttemptCompletion(argumentsJSON)
 	case "load_perseus_toolset":
-		return execLoadPerseusToolset(argumentsJSON)
+		return execLoadPerseusToolsetForRole(argumentsJSON, opts.UserRole)
 	case "ask_followup_question":
 		return execAskFollowupQuestion(argumentsJSON)
 	case "inspect_workspace":
@@ -63,17 +63,17 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 	case "run_workspace_command":
 		return s.execRunWorkspaceCommand(ctx, opts.UserID, argumentsJSON)
 	case "perseus_search_web", "web_search":
-		return s.execWebSearch(ctx, opts.UserID, argumentsJSON)
+		return s.execWebSearchForRole(ctx, opts.UserID, opts.UserRole, argumentsJSON)
 	case "web_extract":
-		return s.execWebExtract(ctx, opts.UserID, argumentsJSON)
+		return s.execWebExtractForRole(ctx, opts.UserID, opts.UserRole, argumentsJSON)
 	case "list_skills":
-		return s.execListSkills(ctx, opts.UserID, argumentsJSON)
+		return s.execListSkillsForRole(ctx, opts.UserID, opts.UserRole, argumentsJSON)
 	case "read_skill":
-		return s.execReadSkill(ctx, opts.UserID, argumentsJSON)
+		return s.execReadSkillForRole(ctx, opts.UserID, opts.UserRole, argumentsJSON)
 	case "install_skill_from_attachment":
 		return s.execInstallSkillFromAttachment(ctx, opts.UserID, argumentsJSON, opts)
 	case "delete_skill":
-		return s.execDeleteSkill(ctx, opts.UserID, argumentsJSON)
+		return s.execDeleteSkillForRole(ctx, opts.UserID, opts.UserRole, argumentsJSON)
 	default:
 		return "", "", "正在使用工作区工具...", "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -128,6 +128,10 @@ func execAskFollowupQuestion(argumentsJSON string) (string, string, string, stri
 }
 
 func execLoadPerseusToolset(argumentsJSON string) (string, string, string, string, error) {
+	return execLoadPerseusToolsetForRole(argumentsJSON, "admin")
+}
+
+func execLoadPerseusToolsetForRole(argumentsJSON, role string) (string, string, string, string, error) {
 	var args struct {
 		Toolset string `json:"toolset"`
 	}
@@ -135,7 +139,7 @@ func execLoadPerseusToolset(argumentsJSON string) (string, string, string, strin
 		return "", "", "正在加载工具...", "", fmt.Errorf("invalid load_perseus_toolset arguments: %w", err)
 	}
 	args.Toolset = strings.TrimSpace(args.Toolset)
-	availableTools, ok := toolsForToolset(args.Toolset)
+	availableTools, ok := toolsForToolsetRole(args.Toolset, role)
 	if !ok {
 		return "", "", "正在加载工具...", "", fmt.Errorf("unknown toolset: %s", args.Toolset)
 	}

@@ -1260,12 +1260,13 @@ func TestGenerateReplyOpenAIWorkspaceReferencePlainTextDoesNotFinishEarly(t *tes
 	defer server.Close()
 
 	provider, err := env.configs.CreateModelProvider(ctx, testUserID, store.ModelProviderInput{
-		Name:     "Test OpenAI",
-		Protocol: "openai",
-		BaseURL:  server.URL,
-		APIKey:   "test-key",
-		ModelID:  "gpt-test",
-		Enabled:  true,
+		Name:       "Test OpenAI",
+		Visibility: store.ResourceVisibilityPublic,
+		Protocol:   "openai",
+		BaseURL:    server.URL,
+		APIKey:     "test-key",
+		ModelID:    "gpt-test",
+		Enabled:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateModelProvider returned error: %v", err)
@@ -2430,13 +2431,14 @@ func prepareOpenAIConversation(t *testing.T, ctx context.Context, env *testAIEnv
 	t.Helper()
 
 	provider, err := env.configs.CreateModelProvider(ctx, testUserID, store.ModelProviderInput{
-		Name:      "Test OpenAI",
-		Protocol:  "openai",
-		BaseURL:   baseURL,
-		APIKey:    "test-key",
-		ModelID:   "test-model",
-		Enabled:   true,
-		IsDefault: true,
+		Name:       "Test OpenAI",
+		Visibility: store.ResourceVisibilityPublic,
+		Protocol:   "openai",
+		BaseURL:    baseURL,
+		APIKey:     "test-key",
+		ModelID:    "test-model",
+		Enabled:    true,
+		IsDefault:  true,
 	})
 	if err != nil {
 		t.Fatalf("CreateModelProvider returned error: %v", err)
@@ -2476,13 +2478,14 @@ func prepareAnthropicConversation(t *testing.T, ctx context.Context, env *testAI
 	t.Helper()
 
 	provider, err := env.configs.CreateModelProvider(ctx, testUserID, store.ModelProviderInput{
-		Name:      "Test Anthropic",
-		Protocol:  "anthropic",
-		BaseURL:   baseURL,
-		APIKey:    "test-key",
-		ModelID:   "test-model",
-		Enabled:   true,
-		IsDefault: true,
+		Name:       "Test Anthropic",
+		Visibility: store.ResourceVisibilityPublic,
+		Protocol:   "anthropic",
+		BaseURL:    baseURL,
+		APIKey:     "test-key",
+		ModelID:    "test-model",
+		Enabled:    true,
+		IsDefault:  true,
 	})
 	if err != nil {
 		t.Fatalf("CreateModelProvider returned error: %v", err)

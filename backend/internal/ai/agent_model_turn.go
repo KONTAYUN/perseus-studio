@@ -121,9 +121,9 @@ func (r *agentRuntime) forceContextOverflowCompaction(ctx context.Context, round
 func (r *agentRuntime) tools() []map[string]any {
 	switch r.protocol {
 	case agentProtocolAnthropic:
-		return anthropicToolsForLoadedToolsets(r.loadedToolsets, false)
+		return anthropicToolsForLoadedToolsets(r.loadedToolsets, false, r.opts.UserRole)
 	default:
-		return openAIToolsForLoadedToolsets(r.loadedToolsets, false)
+		return openAIToolsForLoadedToolsets(r.loadedToolsets, false, r.opts.UserRole)
 	}
 }
 

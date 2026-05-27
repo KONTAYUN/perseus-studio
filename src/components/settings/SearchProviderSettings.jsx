@@ -18,6 +18,7 @@ import {
 
 const emptySearch = {
   provider: 'tavily',
+  visibility: 'private',
   api_key: '',
   enabled: true,
   priority: 100,
@@ -36,6 +37,7 @@ export default function SearchProviderSettings({ ide }) {
     setEditingId(item.id);
     setDraft({
       provider: item.provider,
+      visibility: item.visibility || 'private',
       api_key: '',
       enabled: item.enabled,
       priority: item.priority,
@@ -62,6 +64,7 @@ export default function SearchProviderSettings({ ide }) {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-bold capitalize text-gray-800 dark:text-gray-100">{item.provider}</span>
                     <Badge tone={item.enabled ? 'green' : 'gray'}>{item.enabled ? '启用' : '禁用'}</Badge>
+                    <Badge tone={item.visibility === 'public' ? 'blue' : 'gray'}>{item.visibility === 'public' ? '公开' : '私密'}</Badge>
                     <Badge tone="blue">优先级 {item.priority}</Badge>
                   </div>
                   <div className="mt-1 text-xs text-gray-400">Key: {item.masked_key || '未设置'}</div>
@@ -89,6 +92,15 @@ export default function SearchProviderSettings({ ide }) {
             >
               <option value="tavily">tavily</option>
               <option value="brave">brave</option>
+            </Select>
+          </Field>
+          <Field label="可见性">
+            <Select
+              value={draft.visibility || 'private'}
+              onChange={(e) => setDraft({ ...draft, visibility: e.target.value })}
+            >
+              <option value="private">私密（仅管理员）</option>
+              <option value="public">公开（所有用户）</option>
             </Select>
           </Field>
           <Field label={editingId ? 'API Key（留空保留旧 key）' : 'API Key'}>

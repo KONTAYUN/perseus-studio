@@ -55,11 +55,12 @@ func (s *Service) prepareMessagesWithConversationSummary(ctx context.Context, co
 	return injectConversationSummary(messages, summary.Summary, summary.UntilMessageID)
 }
 
-func (s *Service) CompactConversation(ctx context.Context, userID, conversationID, modelProviderID, reason, instructions string) (ConversationCompactionResult, error) {
+func (s *Service) CompactConversation(ctx context.Context, userID, userRole, conversationID, modelProviderID, reason, instructions string) (ConversationCompactionResult, error) {
 	if s.calls == nil || s.configs == nil {
 		return ConversationCompactionResult{}, fmt.Errorf("conversation compaction is not available")
 	}
-	provider, err := s.configs.GetModelProvider(ctx, userID, modelProviderID)
+	userRole = normalizeRunUserRole(userRole)
+	provider, err := s.configs.GetModelProviderForUser(ctx, userID, userRole, modelProviderID)
 	if err != nil {
 		return ConversationCompactionResult{}, err
 	}
@@ -71,7 +72,7 @@ func (s *Service) CompactConversation(ctx context.Context, userID, conversationI
 	if err != nil {
 		return ConversationCompactionResult{}, err
 	}
-	result := s.maybeRefreshConversationSummary(ctx, conversationID, provider, messages, current, RunOptions{UserID: userID}, runtimeProfileForProvider(provider), firstNonEmpty(reason, "manual"), instructions)
+	result := s.maybeRefreshConversationSummary(ctx, conversationID, provider, messages, current, RunOptions{UserID: userID, UserRole: userRole}, runtimeProfileForProvider(provider), firstNonEmpty(reason, "manual"), instructions)
 	if result.Reason == "manual" && result.Error != "" {
 		return result, fmt.Errorf("%s", result.Error)
 	}

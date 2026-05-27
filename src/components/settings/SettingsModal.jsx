@@ -8,6 +8,7 @@ import SearchProviderSettings from './SearchProviderSettings';
 import SkillSettings from './SkillSettings';
 
 export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
+  const isAdmin = currentUser?.role === 'admin';
   const [hasEntered, setHasEntered] = React.useState(false);
   const [isClosing, setIsClosing] = React.useState(false);
   const [settingsView, setSettingsView] = React.useState('main');
@@ -28,6 +29,8 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
     setIsClosing(true);
     window.setTimeout(onClose, 160);
   };
+
+  if (!isAdmin) return null;
 
   return (
     <div
@@ -81,7 +84,6 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
 
           {settingsView === 'main' && (
           <>
-          {currentUser?.role === 'admin' && (
           <SettingsSection>
             <SectionTitle icon={<Users size={15} />} title="用户管理" description="管理系统用户、角色和注册设置。" />
             <button
@@ -98,7 +100,6 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
               <Users size={18} className="text-blue-500" />
             </button>
           </SettingsSection>
-          )}
 
           <SettingsSection>
             <SectionTitle icon={<BookOpen size={15} />} title="Skills" description="安装和管理本地 Skill。AI 只会在需要时读取启用的 Skill。" />
@@ -125,7 +126,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
             <SectionTitle
               icon={<ClipboardList size={15} />}
               title="诊断日志"
-              description={currentUser?.role === 'admin' ? '汇总查看用户报错摘要，定位模型调用和工具执行问题。' : '查看最近模型调用和工具执行错误，导出后发给管理员排查。'}
+              description="汇总查看用户报错摘要，定位模型调用和工具执行问题。"
             />
             <button
               data-testid="open-diagnostics-settings"
@@ -136,7 +137,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
               <div>
                 <div className="font-bold text-gray-800 dark:text-gray-100">查看诊断日志</div>
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {currentUser?.role === 'admin' ? '管理员可查看全部用户最近报错，不包含 API Key、完整提示词或文件内容' : '仅包含最近错误摘要，不包含 API Key、完整提示词或文件内容'}
+                  管理员可查看全部用户最近报错，不包含 API Key、完整提示词或文件内容
                 </div>
               </div>
               <ClipboardList size={18} className="text-blue-500" />

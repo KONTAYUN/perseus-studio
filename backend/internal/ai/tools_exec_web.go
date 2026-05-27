@@ -7,6 +7,10 @@ import (
 )
 
 func (s *Service) execWebSearch(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	return s.execWebSearchForRole(ctx, userID, "admin", argumentsJSON)
+}
+
+func (s *Service) execWebSearchForRole(ctx context.Context, userID, role, argumentsJSON string) (string, string, string, string, error) {
 	var args struct {
 		Query      string `json:"query"`
 		MaxResults int    `json:"max_results"`
@@ -14,7 +18,7 @@ func (s *Service) execWebSearch(ctx context.Context, userID, argumentsJSON strin
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在联网搜索...", "", fmt.Errorf("invalid tool arguments")
 	}
-	results, provider, err := s.webSearch(ctx, userID, args.Query, args.MaxResults)
+	results, provider, err := s.webSearchForRole(ctx, userID, role, args.Query, args.MaxResults)
 	if err != nil {
 		return "", "", "正在联网搜索...", "", err
 	}
@@ -24,13 +28,17 @@ func (s *Service) execWebSearch(ctx context.Context, userID, argumentsJSON strin
 }
 
 func (s *Service) execWebExtract(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	return s.execWebExtractForRole(ctx, userID, "admin", argumentsJSON)
+}
+
+func (s *Service) execWebExtractForRole(ctx context.Context, userID, role, argumentsJSON string) (string, string, string, string, error) {
 	var args struct {
 		URL string `json:"url"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在读取网页...", "", fmt.Errorf("invalid tool arguments")
 	}
-	result, err := s.webExtract(ctx, userID, args.URL)
+	result, err := s.webExtractForRole(ctx, userID, role, args.URL)
 	if err != nil {
 		return "", "", "正在读取网页...", args.URL, err
 	}

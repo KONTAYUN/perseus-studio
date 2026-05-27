@@ -62,7 +62,7 @@ export default function SkillSettings({ ide, dialog, onBack }) {
       confirmLabel: '保存名称',
     });
     if (!nextName || nextName.trim() === item.name) return;
-    await ide.updateSkill(item.id, { name: nextName.trim(), description: item.description, enabled: item.enabled });
+    await ide.updateSkill(item.id, { name: nextName.trim(), description: item.description, visibility: item.visibility, enabled: item.enabled });
     if (selectedSkillId === item.id) {
       const detail = await ide.getSkill(item.id);
       setSelectedSkillDetail(detail);
@@ -87,7 +87,20 @@ export default function SkillSettings({ ide, dialog, onBack }) {
   };
 
   const toggleSkill = async (item) => {
-    await ide.updateSkill(item.id, { name: item.name, description: item.description, enabled: !item.enabled });
+    await ide.updateSkill(item.id, { name: item.name, description: item.description, visibility: item.visibility, enabled: !item.enabled });
+    if (selectedSkillId === item.id) {
+      const detail = await ide.getSkill(item.id);
+      setSelectedSkillDetail(detail);
+    }
+  };
+
+  const toggleVisibility = async (item) => {
+    await ide.updateSkill(item.id, {
+      name: item.name,
+      description: item.description,
+      visibility: item.visibility === 'public' ? 'private' : 'public',
+      enabled: item.enabled,
+    });
     if (selectedSkillId === item.id) {
       const detail = await ide.getSkill(item.id);
       setSelectedSkillDetail(detail);
@@ -102,6 +115,7 @@ export default function SkillSettings({ ide, dialog, onBack }) {
         preview={skillPreview}
         onBack={() => setView('list')}
         onToggle={toggleSkill}
+        onToggleVisibility={toggleVisibility}
         onRename={renameSkill}
         onDelete={deleteSkill}
       />
@@ -120,6 +134,7 @@ export default function SkillSettings({ ide, dialog, onBack }) {
       onInstallCandidates={installCandidates}
       onOpenDetail={openDetail}
       onToggle={toggleSkill}
+      onToggleVisibility={toggleVisibility}
       onRename={renameSkill}
       onDelete={deleteSkill}
     />
@@ -137,6 +152,7 @@ function SkillsListView({
   onInstallCandidates,
   onOpenDetail,
   onToggle,
+  onToggleVisibility,
   onRename,
   onDelete,
 }) {
@@ -210,6 +226,7 @@ function SkillsListView({
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-bold text-gray-800 dark:text-gray-100">{item.name}</span>
                   <Badge tone={item.enabled ? 'green' : 'gray'}>{item.enabled ? '启用' : '禁用'}</Badge>
+                  <Badge tone={item.visibility === 'public' ? 'blue' : 'gray'}>{item.visibility === 'public' ? '公开' : '私密'}</Badge>
                 </div>
                 <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{item.description || '暂无简介'}</div>
                 <div className="mt-1 text-xs text-gray-400">更新 {formatDate(item.updated_at)}</div>
@@ -218,6 +235,9 @@ function SkillsListView({
                 <IconButton title={item.enabled ? '禁用' : '启用'} onClick={() => onToggle(item)}>
                   <Check size={14} />
                 </IconButton>
+                <Button type="button" variant="ghost" size="xs" onClick={() => onToggleVisibility(item)}>
+                  {item.visibility === 'public' ? '设为私密' : '设为公开'}
+                </Button>
                 <IconButton title="重命名" onClick={() => onRename(item)}>
                   <Pencil size={14} />
                 </IconButton>
@@ -233,7 +253,7 @@ function SkillsListView({
   );
 }
 
-function SkillDetailView({ skill, tree, preview, onBack, onToggle, onRename, onDelete }) {
+function SkillDetailView({ skill, tree, preview, onBack, onToggle, onToggleVisibility, onRename, onDelete }) {
   if (!skill) {
     return (
       <SettingsSection className="settings-view-enter">
@@ -254,6 +274,9 @@ function SkillDetailView({ skill, tree, preview, onBack, onToggle, onRename, onD
           <IconButton title={skill.enabled ? '禁用' : '启用'} onClick={() => onToggle(skill)}>
             <Check size={14} />
           </IconButton>
+          <Button type="button" variant="ghost" size="xs" onClick={() => onToggleVisibility(skill)}>
+            {skill.visibility === 'public' ? '设为私密' : '设为公开'}
+          </Button>
           <IconButton title="重命名" onClick={() => onRename(skill)}>
             <Pencil size={14} />
           </IconButton>
@@ -267,6 +290,7 @@ function SkillDetailView({ skill, tree, preview, onBack, onToggle, onRename, onD
         <div className="flex min-w-0 items-center gap-2">
           <h3 className="truncate text-lg font-bold text-gray-800 dark:text-gray-100">{skill.name}</h3>
           <Badge tone={skill.enabled ? 'green' : 'gray'}>{skill.enabled ? '启用' : '禁用'}</Badge>
+          <Badge tone={skill.visibility === 'public' ? 'blue' : 'gray'}>{skill.visibility === 'public' ? '公开' : '私密'}</Badge>
         </div>
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{skill.description || '暂无简介'}</p>
         <div className="mt-3 space-y-1 text-xs text-gray-400">

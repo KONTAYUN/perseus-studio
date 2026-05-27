@@ -13,7 +13,7 @@ import (
 	"webide-backend/internal/store"
 )
 
-func (s *Server) executeConversationRun(userID, conversationID, userMessageID, modelProviderID, content, attachmentsJSON string, attachmentPayloads []ai.AttachmentPayload, thinkingMode, runID string) {
+func (s *Server) executeConversationRun(userID, userRole, conversationID, userMessageID, modelProviderID, content, attachmentsJSON string, attachmentPayloads []ai.AttachmentPayload, thinkingMode, runID string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.registerRunCancel(runID, cancel)
 	defer func() {
@@ -233,6 +233,7 @@ func (s *Server) executeConversationRun(userID, conversationID, userMessageID, m
 	}
 	reply, err := s.ai.GenerateReply(ctx, conversationID, userMessageID, modelProviderID, items, attachmentPayloads, ai.RunOptions{
 		UserID:       userID,
+		UserRole:     userRole,
 		RunID:        runID,
 		ThinkingMode: thinkingMode,
 		Log:          logEvent,
@@ -283,7 +284,7 @@ func (s *Server) executeConversationRun(userID, conversationID, userMessageID, m
 	}
 
 	if reply.BackgroundTask != nil {
-		s.completeConversationRunWithTask(ctx, userID, conversationID, userMessageID, modelProviderID, content, attachmentsJSON, runID, reply.BackgroundTask)
+		s.completeConversationRunWithTask(ctx, userID, userRole, conversationID, userMessageID, modelProviderID, content, attachmentsJSON, runID, reply.BackgroundTask)
 		return
 	}
 

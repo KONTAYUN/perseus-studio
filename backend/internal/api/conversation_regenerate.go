@@ -12,6 +12,10 @@ import (
 )
 
 func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Request, userID, conversationID string) {
+	user := MustUserFromContext(r.Context())
+	if user.UserID == "" {
+		user.UserID = userID
+	}
 	var req regenerateConversationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json body")
@@ -65,11 +69,16 @@ func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "model_provider_id is required")
 		return
 	}
+	if _, err := s.configs.GetModelProviderForUser(r.Context(), userID, user.Role, conversation.SelectedModelProviderID); err != nil {
+		writeError(w, http.StatusBadRequest, "selected model is not available")
+		return
+	}
 	attachmentPayloads := payloadsFromStoredMessageAttachments(lastUser)
 	segments := &assistantSegmentBuffer{}
 
 	reply, err := s.ai.GenerateReply(r.Context(), conversationID, lastUser.ID, conversation.SelectedModelProviderID, history, attachmentPayloads, ai.RunOptions{
 		UserID:       userID,
+		UserRole:     user.Role,
 		ThinkingMode: req.ThinkingMode,
 		Event: func(eventType, level string, payload map[string]any) {
 			switch eventType {
@@ -113,6 +122,7 @@ func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Requ
 			UserMessageID:   lastUser.ID,
 			UserMessage:     strings.TrimSpace(lastUser.Content),
 			ModelProviderID: conversation.SelectedModelProviderID,
+			UserRole:        user.Role,
 			Attachments:     json.RawMessage(lastUser.AttachmentsJSON),
 			CreatedFromChat: true,
 			Goal:            taskRequest.Goal,

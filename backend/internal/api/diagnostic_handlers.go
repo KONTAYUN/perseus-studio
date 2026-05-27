@@ -21,6 +21,10 @@ type diagnosticUserSummary struct {
 
 func (s *Server) handleDiagnosticLogs(w http.ResponseWriter, r *http.Request) {
 	user := MustUserFromContext(r.Context())
+	if !s.requireAdmin(r) {
+		writeError(w, http.StatusForbidden, "admin required")
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		logs, err := s.diagnostics.List(r.Context(), diagnosticQueryFromRequest(r, user.UserID, 50))
@@ -46,6 +50,10 @@ func (s *Server) handleDiagnosticLogRoutes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	user := MustUserFromContext(r.Context())
+	if !s.requireAdmin(r) {
+		writeError(w, http.StatusForbidden, "admin required")
+		return
+	}
 	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/diagnostics/logs/"), "/")
 	if id == "" || strings.Contains(id, "/") {
 		http.NotFound(w, r)
@@ -116,6 +124,10 @@ func (s *Server) handleDiagnosticExport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	user := MustUserFromContext(r.Context())
+	if !s.requireAdmin(r) {
+		writeError(w, http.StatusForbidden, "admin required")
+		return
+	}
 	logs, err := s.diagnostics.List(r.Context(), diagnosticQueryFromRequest(r, user.UserID, 100))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

@@ -54,7 +54,7 @@ func (s *Service) DebugModelToolTest(ctx context.Context, userID string) (DebugT
 }
 
 func (s *Service) pickPreferredModelProvider(ctx context.Context, userID string) (store.ModelProvider, error) {
-	items, err := s.configs.ListModelProviders(ctx, userID)
+	items, err := s.configs.ListModelProvidersForUser(ctx, userID, "admin")
 	if err != nil {
 		return store.ModelProvider{}, err
 	}

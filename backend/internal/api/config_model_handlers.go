@@ -12,13 +12,16 @@ func (s *Server) handleModelProviders(w http.ResponseWriter, r *http.Request) {
 	user := MustUserFromContext(r.Context())
 	switch r.Method {
 	case http.MethodGet:
-		items, err := s.configs.ListModelProviders(r.Context(), user.UserID)
+		items, err := s.configs.ListModelProvidersForUser(r.Context(), user.UserID, user.Role)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+		writeJSON(w, http.StatusOK, map[string]any{"items": modelProvidersForResponse(user.Role, items)})
 	case http.MethodPost:
+		if !s.requireAdminOrWriteForbidden(w, r) {
+			return
+		}
 		var req store.ModelProviderInput
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid json body")
@@ -36,7 +39,6 @@ func (s *Server) handleModelProviders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleModelProviderRoutes(w http.ResponseWriter, r *http.Request) {
-	user := MustUserFromContext(r.Context())
 	rest := strings.TrimPrefix(r.URL.Path, "/api/model-providers/")
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -50,7 +52,10 @@ func (s *Server) handleModelProviderRoutes(w http.ResponseWriter, r *http.Reques
 			http.NotFound(w, r)
 			return
 		}
-		item, err := s.configs.SetDefaultModelProvider(r.Context(), user.UserID, id)
+		if !s.requireAdminOrWriteForbidden(w, r) {
+			return
+		}
+		item, err := s.configs.SetDefaultModelProviderAny(r.Context(), id)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -66,19 +71,35 @@ func (s *Server) handleModelProviderRoutes(w http.ResponseWriter, r *http.Reques
 
 	switch r.Method {
 	case http.MethodPatch:
+		if !s.requireAdminOrWriteForbidden(w, r) {
+			return
+		}
+		existing, err := s.configs.GetModelProviderAny(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		var req store.ModelProviderInput
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid json body")
 			return
 		}
-		item, err := s.configs.UpdateModelProvider(r.Context(), user.UserID, id, req)
+		item, err := s.configs.UpdateModelProvider(r.Context(), existing.UserID, id, req)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, item)
 	case http.MethodDelete:
-		if err := s.configs.DeleteModelProvider(r.Context(), user.UserID, id); err != nil {
+		if !s.requireAdminOrWriteForbidden(w, r) {
+			return
+		}
+		existing, err := s.configs.GetModelProviderAny(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.configs.DeleteModelProvider(r.Context(), existing.UserID, id); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -89,9 +110,11 @@ func (s *Server) handleModelProviderRoutes(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleDiscoverModelProviders(w http.ResponseWriter, r *http.Request) {
-	user := MustUserFromContext(r.Context())
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.requireAdminOrWriteForbidden(w, r) {
 		return
 	}
 	var req discoverModelsRequest
@@ -104,7 +127,7 @@ func (s *Server) handleDiscoverModelProviders(w http.ResponseWriter, r *http.Req
 	req.APIKey = strings.TrimSpace(req.APIKey)
 
 	if req.ProviderID != "" && req.APIKey == "" {
-		existing, err := s.configs.GetModelProvider(r.Context(), user.UserID, req.ProviderID)
+		existing, err := s.configs.GetModelProviderAny(r.Context(), req.ProviderID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -127,9 +150,11 @@ func (s *Server) handleDiscoverModelProviders(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleTestModelProvider(w http.ResponseWriter, r *http.Request) {
-	user := MustUserFromContext(r.Context())
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.requireAdminOrWriteForbidden(w, r) {
 		return
 	}
 	var req testModelProviderRequest
@@ -142,7 +167,7 @@ func (s *Server) handleTestModelProvider(w http.ResponseWriter, r *http.Request)
 	req.APIKey = strings.TrimSpace(req.APIKey)
 	req.ModelID = strings.TrimSpace(req.ModelID)
 	if req.ProviderID != "" && req.APIKey == "" {
-		existing, err := s.configs.GetModelProvider(r.Context(), user.UserID, req.ProviderID)
+		existing, err := s.configs.GetModelProviderAny(r.Context(), req.ProviderID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

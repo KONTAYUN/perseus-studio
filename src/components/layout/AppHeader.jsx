@@ -39,6 +39,7 @@ export default function AppHeader({
   const editorPanelCount = panels.filter((panel) => panel.type === 'editor').length;
   const panelLimitReached = panels.length >= MAX_TOTAL_PANELS;
   const editorLimitReached = editorPanelCount >= MAX_EDITOR_PANELS;
+  const showSettings = typeof onOpenSettings === 'function';
   const addPanelOptions = [
     ['fileTree', '文件树', !hasFileTreePanel && !panelLimitReached],
     ['editor', '编辑器', !panelLimitReached && !editorLimitReached],
@@ -198,13 +199,15 @@ export default function AppHeader({
           {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
         </button>
 
-        <button
-          data-testid="settings-button"
-          onClick={onOpenSettings}
-          className="motion-button ui-icon-button h-9 w-9"
-        >
-          <Settings size={18} />
-        </button>
+        {showSettings && (
+          <button
+            data-testid="settings-button"
+            onClick={onOpenSettings}
+            className="motion-button ui-icon-button h-9 w-9"
+          >
+            <Settings size={18} />
+          </button>
+        )}
         <button
           onClick={onLogout}
           className="motion-button ui-icon-button ui-icon-button-danger h-9 w-9"

@@ -142,7 +142,7 @@ Profiles may tune history size, attachment size, tool result size, command outpu
 Current minimum safety:
 
 - per-user workspace root
-- per-user Skills
+- admin-managed model/search/Skill resources with public/private visibility
 - path sanitization
 - command cwd restricted to workspace
 - dangerous command rejection

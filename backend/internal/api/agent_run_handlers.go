@@ -218,7 +218,11 @@ func (s *Server) resumeAgentRun(ctx context.Context, userID, runID string) (stor
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
 	}
-	go s.executeConversationRun(userID, run.ConversationID, userMessage.ID, run.ModelProviderID, userMessage.Content, userMessage.AttachmentsJSON, attachmentPayloads, "", runID)
+	user := MustUserFromContext(ctx)
+	if user.UserID == "" {
+		user.UserID = userID
+	}
+	go s.executeConversationRun(userID, user.Role, run.ConversationID, userMessage.ID, run.ModelProviderID, userMessage.Content, userMessage.AttachmentsJSON, attachmentPayloads, "", runID)
 	return resumed, event, nil
 }
 

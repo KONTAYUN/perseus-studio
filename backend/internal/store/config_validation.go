@@ -5,9 +5,26 @@ import (
 	"strings"
 )
 
+const (
+	ResourceVisibilityPrivate = "private"
+	ResourceVisibilityPublic  = "public"
+)
+
+func NormalizeResourceVisibility(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ResourceVisibilityPublic:
+		return ResourceVisibilityPublic
+	default:
+		return ResourceVisibilityPrivate
+	}
+}
+
 func validateModelProvider(input ModelProviderInput, requireKey bool) error {
 	if strings.TrimSpace(input.Name) == "" {
 		return fmt.Errorf("name is required")
+	}
+	if strings.TrimSpace(input.Visibility) != "" && NormalizeResourceVisibility(input.Visibility) != strings.ToLower(strings.TrimSpace(input.Visibility)) {
+		return fmt.Errorf("visibility must be public or private")
 	}
 	if input.Protocol != "openai" && input.Protocol != "anthropic" {
 		return fmt.Errorf("protocol must be openai or anthropic")
@@ -50,6 +67,9 @@ func validateSearchProvider(input SearchProviderInput, requireKey bool) error {
 	if input.Provider != "tavily" && input.Provider != "brave" {
 		return fmt.Errorf("provider must be tavily or brave")
 	}
+	if strings.TrimSpace(input.Visibility) != "" && NormalizeResourceVisibility(input.Visibility) != strings.ToLower(strings.TrimSpace(input.Visibility)) {
+		return fmt.Errorf("visibility must be public or private")
+	}
 	if requireKey && input.APIKey == "" {
 		return fmt.Errorf("api_key is required")
 	}
@@ -66,6 +86,7 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 		&item.ID,
 		&item.UserID,
 		&item.Name,
+		&item.Visibility,
 		&item.Protocol,
 		&item.BaseURL,
 		&item.APIKey,
@@ -85,6 +106,7 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 	)
 	item.Enabled = enabled == 1
 	item.IsDefault = isDefault == 1
+	item.Visibility = NormalizeResourceVisibility(item.Visibility)
 	item.AutoCompactEnabled = autoCompactEnabled == 1
 	item.PruneToolOutputsEnabled = pruneToolOutputsEnabled == 1
 	item.ReasoningCapability = NormalizeReasoningCapability(item.ReasoningCapability)
@@ -129,7 +151,8 @@ func normalizeModelProviderContextSettings(input ModelProviderInput) modelProvid
 func scanSearchProvider(s scanner) (SearchProvider, error) {
 	var item SearchProvider
 	var enabled int
-	err := s.Scan(&item.ID, &item.UserID, &item.Provider, &item.APIKey, &enabled, &item.Priority, &item.CreatedAt, &item.UpdatedAt)
+	err := s.Scan(&item.ID, &item.UserID, &item.Provider, &item.Visibility, &item.APIKey, &enabled, &item.Priority, &item.CreatedAt, &item.UpdatedAt)
+	item.Visibility = NormalizeResourceVisibility(item.Visibility)
 	item.Enabled = enabled == 1
 	item.MaskedKey = maskKey(item.APIKey)
 	return item, err
