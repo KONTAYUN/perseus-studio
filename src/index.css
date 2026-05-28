@@ -5,6 +5,7 @@
 @import './styles/controls.css';
 @import './styles/chat.css';
 @import './styles/chat-composer.css';
+@import './styles/chat-composer-queue.css';
 @import './styles/editor.css';
 @import './styles/file-tree.css';
 @import './styles/settings.css';

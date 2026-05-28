@@ -60,7 +60,7 @@ WHERE s.token = ?`, token)
 		}
 		return Session{}, false, err
 	}
-	if now.After(session.Expires) || disabled != 0 {
+	if now.After(session.Expires) || disabled != 0 || session.Role == UserRolePending {
 		if err := s.DeleteSession(ctx, token); err != nil {
 			return Session{}, false, err
 		}

@@ -9,22 +9,28 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 	var attempt completionAttempt
 	if err := json.Unmarshal([]byte(argumentsJSON), &attempt); err != nil {
 		r.recordToolError()
+		r.discardStreamedCompletionResult()
 		return r.toolErrorJSON("attempt_completion", "invalid attempt_completion arguments: "+err.Error()), true, false
 	}
+	attempt.Result = strings.TrimSpace(attempt.Result)
 	attempt.Summary = strings.TrimSpace(attempt.Summary)
-	if attempt.Summary == "" {
+	if attempt.Result == "" {
 		r.recordToolError()
-		return r.toolErrorJSON("attempt_completion", "summary is required"), true, false
+		r.discardStreamedCompletionResult()
+		return r.toolErrorJSON("attempt_completion", "result is required and must contain the final user-visible answer, not only a summary"), true, false
 	}
+	r.lastToolFailed = false
 	if r.performedMutation {
 		if len(attempt.ChangedPaths) == 0 {
 			r.recordToolError()
+			r.discardStreamedCompletionResult()
 			reason := "workspace 变更任务完成时必须在 changed_paths 中列出已验证的变更路径。"
 			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
 			return r.toolErrorJSON("attempt_completion", reason), true, false
 		}
 		if missing := r.completionPathsMissingMutations(attempt.ChangedPaths); len(missing) > 0 {
 			r.recordToolError()
+			r.discardStreamedCompletionResult()
 			reason := "attempt_completion 的 changed_paths 没有覆盖本轮已验证的 workspace 变更：" + strings.Join(missing, ", ")
 			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason, "missing_paths": missing})
 			return r.toolErrorJSON("attempt_completion", reason), true, false
@@ -32,17 +38,24 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 	}
 	if rejected := r.completionRejection(); rejected != "" {
 		r.recordToolError()
+		r.discardStreamedCompletionResult()
 		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": rejected})
 		return r.toolErrorJSON("attempt_completion", rejected), true, false
 	}
-	content := attempt.Summary
+	content := attempt.Result
 	if strings.TrimSpace(attempt.Notes) != "" {
 		content += "\n\n" + strings.TrimSpace(attempt.Notes)
 	}
 	r.completedContent = content
 	r.finalizeActiveAssistantMessage(content)
 	emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
-	return mustJSON(map[string]any{"summary": attempt.Summary, "changed_paths": attempt.ChangedPaths, "failed_items": attempt.FailedItems, "notes": attempt.Notes}), false, true
+	return mustJSON(map[string]any{"result": attempt.Result, "summary": attempt.Summary, "changed_paths": attempt.ChangedPaths, "failed_items": attempt.FailedItems, "notes": attempt.Notes}), false, true
+}
+
+func (r *agentRuntime) discardStreamedCompletionResult() {
+	if r != nil && r.opts.OnCompletionResultDiscard != nil {
+		r.opts.OnCompletionResultDiscard()
+	}
 }
 
 func (r *agentRuntime) completionRejection() string {

@@ -59,14 +59,15 @@ type agentRuntime struct {
 }
 
 type agentModelTurn struct {
-	Content            string
-	FinishReason       string
-	ToolCalls          []agentToolCall
-	OpenAIMessage      openAIMessage
-	AnthropicRaw       []map[string]any
-	Streamed           bool
-	PublicTextStreamed bool
-	Usage              ProviderUsage
+	Content                  string
+	FinishReason             string
+	ToolCalls                []agentToolCall
+	OpenAIMessage            openAIMessage
+	AnthropicRaw             []map[string]any
+	Streamed                 bool
+	PublicTextStreamed       bool
+	CompletionResultStreamed bool
+	Usage                    ProviderUsage
 }
 
 type agentToolCall struct {
@@ -77,6 +78,7 @@ type agentToolCall struct {
 }
 
 type completionAttempt struct {
+	Result       string   `json:"result"`
 	Summary      string   `json:"summary"`
 	ChangedPaths []string `json:"changed_paths"`
 	FailedItems  []string `json:"failed_items"`

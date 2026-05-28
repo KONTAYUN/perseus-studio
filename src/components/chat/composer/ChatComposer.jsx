@@ -111,7 +111,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
         </div>
       )}
       <div
-        className={`composer-shell motion-soft-focus pointer-events-auto relative overflow-visible border bg-white/88 px-4 py-2.5 backdrop-blur-2xl dark:bg-[#171719]/92 max-[640px]:px-3 ${ide.getInputGlowStyle()}`}
+        className={`composer-shell motion-soft-focus pointer-events-auto relative overflow-visible border bg-white/88 backdrop-blur-2xl dark:bg-[#171719]/92 ${ide.getInputGlowStyle()}`}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onClick={(e) => {
@@ -134,13 +134,11 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
           attachmentInputRef={attachmentInputRef}
           inputRef={chatInputRef}
           isSkillMenuOpen={isSkillMenuOpen}
+          panelId={panelId}
           setIsSkillMenuOpen={setIsSkillMenuOpen}
           submitChatMessage={submitChatMessage}
           isSendDisabled={isSendDisabled}
         />
-      </div>
-      <div className="text-center mt-2.5 text-[11px] text-gray-400 dark:text-gray-500 font-medium">
-        支持按 Enter 发送。后台任务将持续为您服务。
       </div>
     </div>
   );

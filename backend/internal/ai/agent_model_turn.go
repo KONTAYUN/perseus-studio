@@ -138,7 +138,32 @@ func (r *agentRuntime) toolChoice() providerToolChoice {
 }
 
 func (r *agentRuntime) requiresToolThisTurn() bool {
-	return r.requiresCompletion || r.toolLoopActive || r.opts.ForceTool != "" || r.opts.TaskID != ""
+	if r.opts.TaskID != "" {
+		return true
+	}
+	if r.pendingForcedTool() != "" {
+		return true
+	}
+	if (strings.TrimSpace(r.opts.ForceTool) != "" || r.requiresCompletion || r.toolLoopActive) && !r.readyForTextCompletion() {
+		return true
+	}
+	return false
+}
+
+func (r *agentRuntime) readyForTextCompletion() bool {
+	if r == nil {
+		return false
+	}
+	if r.lastToolFailed {
+		return false
+	}
+	if r.performedMutation {
+		return r.hasSuccessfulWorkspaceMutation()
+	}
+	if !r.requiresCompletion && !r.toolLoopActive && strings.TrimSpace(r.opts.ForceTool) == "" {
+		return false
+	}
+	return len(r.events) > 0
 }
 
 func (r *agentRuntime) pendingForcedTool() string {

@@ -130,3 +130,42 @@ func TestSessionStoreDropsDisabledUserSession(t *testing.T) {
 		t.Fatalf("expected active admin session")
 	}
 }
+
+func TestSessionStoreDropsPendingUserSession(t *testing.T) {
+	ctx := t.Context()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+	users := NewUserStore(db)
+	if err := users.Migrate(ctx); err != nil {
+		t.Fatalf("users.Migrate returned error: %v", err)
+	}
+	user, err := users.CreateUser(ctx, "pending-user", "password", UserRolePending)
+	if err != nil {
+		t.Fatalf("CreateUser returned error: %v", err)
+	}
+	sessions := NewSessionStore(db)
+	if err := sessions.Migrate(ctx); err != nil {
+		t.Fatalf("sessions.Migrate returned error: %v", err)
+	}
+	if err := sessions.CreateSession(ctx, "token-pending", user.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+
+	_, ok, err := sessions.GetSession(ctx, "token-pending", time.Now())
+	if err != nil {
+		t.Fatalf("GetSession returned error: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected pending user session to be rejected")
+	}
+	_, ok, err = sessions.GetSession(ctx, "token-pending", time.Now())
+	if err != nil {
+		t.Fatalf("second GetSession returned error: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected pending user session to be removed")
+	}
+}

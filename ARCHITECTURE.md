@@ -53,7 +53,8 @@ src/                        React frontend (Vite + Tailwind)
     motion.css              Shared animation and interaction primitives
     controls.css            Shared button/icon/segmented/switch rules
     chat.css                Chat messages and chat progress surfaces
-    chat-composer.css       Composer shell, action dock, pending input, follow-up panel
+    chat-composer.css       Composer shell, input, action bar, model status, scroll-to-bottom control
+    chat-composer-queue.css Pending input, running steer, and follow-up panels above the composer
     editor.css              Editor tabs/drop/textarea rules
     file-tree.css           File tree rows, labels, drag indicators
     settings.css            Settings modal/card/view animation rules

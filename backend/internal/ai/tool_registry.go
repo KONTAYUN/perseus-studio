@@ -81,6 +81,7 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 
 func execAttemptCompletion(argumentsJSON string) (string, string, string, string, error) {
 	var args struct {
+		Result       string   `json:"result"`
 		Summary      string   `json:"summary"`
 		ChangedPaths []string `json:"changed_paths"`
 		FailedItems  []string `json:"failed_items"`
@@ -89,12 +90,14 @@ func execAttemptCompletion(argumentsJSON string) (string, string, string, string
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在完成任务...", "", fmt.Errorf("invalid attempt_completion arguments")
 	}
+	args.Result = strings.TrimSpace(args.Result)
 	args.Summary = strings.TrimSpace(args.Summary)
 	args.Notes = strings.TrimSpace(args.Notes)
-	if args.Summary == "" {
-		return "", "", "正在完成任务...", "", fmt.Errorf("summary is required")
+	if args.Result == "" {
+		return "", "", "正在完成任务...", "", fmt.Errorf("result is required")
 	}
 	payload := map[string]any{
+		"result":        args.Result,
 		"summary":       args.Summary,
 		"changed_paths": args.ChangedPaths,
 		"failed_items":  args.FailedItems,

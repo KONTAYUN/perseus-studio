@@ -7,11 +7,11 @@ export default function ComposerAttachments({ attachments, onRemove }) {
   if (attachments.length === 0) return null;
 
   return (
-    <div className="mb-2 flex flex-wrap gap-2 px-1.5 pt-0.5">
+    <div className="composer-attachments">
       {attachments.map((item) => (
         <div
           key={item.id}
-          className="motion-chip flex max-w-full items-center gap-2 rounded-2xl border border-gray-200/70 bg-gray-50/70 px-3 py-1.5 text-xs text-gray-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-gray-300"
+          className="motion-chip composer-attachment-chip"
         >
           <File size={13} className="shrink-0 text-blue-500" />
           <span className="max-w-[180px] truncate">{item.name}</span>

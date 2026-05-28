@@ -8,7 +8,7 @@ import {
   thinkingModeOptionsForModel,
 } from '../../../hooks/modelReasoningUtils';
 
-export default function ModelMenu({ ide, panelId }) {
+export default function ModelMenu({ ide, panelId, variant = 'header' }) {
   const modelButtonRef = React.useRef(null);
   const modelSubmenuButtonRef = React.useRef(null);
   const [isModelSubmenuOpen, setIsModelSubmenuOpen] = React.useState(false);
@@ -18,6 +18,9 @@ export default function ModelMenu({ ide, panelId }) {
   const currentThinkingLabel = thinkingModeLabelForModel(currentThinkingMode, selectedModel);
   const hasNativeReasoning = supportsNativeReasoning(selectedModel);
   const setThinkingMode = ide.setThinkingMode;
+  const isComposerVariant = variant === 'composer';
+  const buttonTestId = isComposerVariant ? 'composer-model-button' : 'chat-model-button';
+  const menuTestId = isComposerVariant ? 'composer-model-menu' : 'chat-model-menu';
 
   React.useEffect(() => {
     if (!ide.isModelMenuOpen) setIsModelSubmenuOpen(false);
@@ -34,17 +37,22 @@ export default function ModelMenu({ ide, panelId }) {
     <div className="relative min-w-0 max-w-full">
       <button
         ref={modelButtonRef}
-        data-testid="chat-model-button"
+        data-testid={buttonTestId}
         onClick={(e) => {
           e.stopPropagation();
           ide.setActivePanel(panelId);
           ide.setIsModelMenuOpen(!ide.isModelMenuOpen);
         }}
-        className="motion-button flex min-w-0 max-w-full items-center justify-center gap-1.5 overflow-hidden rounded-lg px-1.5 py-1 text-sm font-semibold text-gray-800 hover:text-blue-500 dark:text-gray-200 dark:hover:text-blue-400"
+        className={
+          isComposerVariant
+            ? 'motion-button composer-model-button'
+            : 'motion-button flex min-w-0 max-w-full items-center justify-center gap-1.5 overflow-hidden rounded-lg px-1.5 py-1 text-sm font-semibold text-gray-800 hover:text-blue-500 dark:text-gray-200 dark:hover:text-blue-400'
+        }
       >
-        <span className="block min-w-0 truncate text-center">
-          {selectedModel?.name || '未配置模型'}{hasNativeReasoning ? ` · ${currentThinkingLabel}` : ''}
+        <span className="block min-w-0 truncate text-center composer-model-name">
+          {selectedModel?.name || '未配置模型'}
         </span>
+        {hasNativeReasoning && <span className="composer-model-thinking">{currentThinkingLabel}</span>}
         <ChevronDown size={14} className="flex-shrink-0 text-gray-400" />
       </button>
 
@@ -56,7 +64,7 @@ export default function ModelMenu({ ide, panelId }) {
         maxHeight={520}
         open={ide.isModelMenuOpen}
         onClose={() => ide.setIsModelMenuOpen(false)}
-        testId="chat-model-menu"
+        testId={menuTestId}
         className="!overflow-visible p-1.5"
       >
         {ide.enabledModels.length === 0 ? (

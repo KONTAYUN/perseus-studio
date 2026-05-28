@@ -1,5 +1,6 @@
 import React from 'react';
 import { Paperclip, Send, Square } from 'lucide-react';
+import ModelMenu from './ModelMenu';
 
 export default function ComposerActionDock({
   attachmentInputRef,
@@ -8,6 +9,8 @@ export default function ComposerActionDock({
   isSendDisabled,
   onSend,
   onStop,
+  ide,
+  panelId,
 }) {
   const handleAttachmentClick = React.useCallback((e) => {
     e.stopPropagation();
@@ -25,7 +28,7 @@ export default function ComposerActionDock({
 
   return (
     <div className="composer-action-dock">
-      <div className="composer-tool-cluster pointer-events-none flex items-center backdrop-blur-xl">
+      <div className="composer-action-left">
         <button
           data-testid="chat-attachment-button"
           onClick={handleAttachmentClick}
@@ -34,6 +37,9 @@ export default function ComposerActionDock({
         >
           <Paperclip size={16} />
         </button>
+      </div>
+      <div className="composer-action-right">
+        <ModelMenu ide={ide} panelId={panelId} variant="composer" />
         <button
           data-testid="chat-send-button"
           onClick={handlePrimaryAction}

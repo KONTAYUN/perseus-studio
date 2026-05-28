@@ -1,4 +1,4 @@
-import { API_BASE_URL, apiGet, apiPost } from '../api/client';
+import { API_BASE_URL, apiGet, apiPost } from '../api/client.js';
 import {
   agentEventText,
   appendRunProgressItem,
@@ -79,6 +79,10 @@ export async function waitForAgentRunStream({
   let fallbackStarted = false;
   let sawAssistantCompletion = false;
   let loadingTimer = null;
+  let lastEventSeq = Number(afterSeq) || 0;
+  let reconnectAttempts = 0;
+  let eventChain = Promise.resolve();
+  const queuedEventSeqs = new Set();
   const closeSource = () => {
     if (source) {
       source.close();
@@ -261,6 +265,11 @@ export async function waitForAgentRunStream({
           )
         );
       }
+    } else if (item?.type === 'assistant_message_discarded') {
+      const messageId = payload.message_id;
+      if (messageId) {
+        setVisibleConversationMessages((current) => current.filter((messageItem) => messageItem.id !== messageId));
+      }
     } else if (item?.type === 'tool_call_completed') {
       if (payload.tool_name === 'ask_followup_question') {
         applyFollowupQuestion(payload);
@@ -310,6 +319,11 @@ export async function waitForAgentRunStream({
     throw new Error('执行仍在进行，但事件流连接中断，请刷新会话查看结果');
   };
 
+  const runQueued = (handler, reject) => {
+    eventChain = eventChain.then(handler, handler);
+    eventChain.catch(reject);
+  };
+
   loadingTimer = window.setInterval(() => {
     if (settled) return;
     setVisibleConversationMessages((current) =>
@@ -318,44 +332,61 @@ export async function waitForAgentRunStream({
   }, 80);
 
   await new Promise((resolve, reject) => {
-    const streamPath = `${API_BASE_URL}/api/agent-runs/${encodeURIComponent(runId)}/stream${
-      afterSeq ? `?after_seq=${encodeURIComponent(afterSeq)}` : ''
-    }`;
-    source = new EventSource(streamPath, {
-      withCredentials: true,
-    });
-    control.abort = () => {
-      closeSource();
-      settled = true;
-      apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {
-        source: 'stop_button',
-        reason: 'user_requested_stop',
-      }).catch((error) => {
-        console.error('cancelAgentRun failed', error);
+    const openStream = () => {
+      if (settled) return;
+      const resumeSeq = lastEventSeq > 0 ? lastEventSeq : Number(afterSeq) || 0;
+      const streamPath = `${API_BASE_URL}/api/agent-runs/${encodeURIComponent(runId)}/stream${
+        resumeSeq ? `?after_seq=${encodeURIComponent(resumeSeq)}` : ''
+      }`;
+      source = new EventSource(streamPath, {
+        withCredentials: true,
       });
-      const error = new DOMException('Aborted', 'AbortError');
-      reject(error);
-    };
-    source.addEventListener('run', (event) => {
-      Promise.resolve(handleRun(JSON.parse(event.data)))
-        .then(() => {
+      control.abort = () => {
+        closeSource();
+        settled = true;
+        apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {
+          source: 'stop_button',
+          reason: 'user_requested_stop',
+        }).catch((error) => {
+          console.error('cancelAgentRun failed', error);
+        });
+        const error = new DOMException('Aborted', 'AbortError');
+        reject(error);
+      };
+      source.addEventListener('run', (event) => {
+        runQueued(async () => {
+          await handleRun(JSON.parse(event.data));
           if (settled) resolve();
-        })
-        .catch(reject);
-    });
-    source.addEventListener('event', (event) => {
-      Promise.resolve(handleEvent(JSON.parse(event.data)))
-        .then(() => {
+        }, reject);
+      });
+      source.addEventListener('event', (event) => {
+        const item = JSON.parse(event.data);
+        if (item?.seq) {
+          if (item.seq <= lastEventSeq || queuedEventSeqs.has(item.seq)) return;
+          queuedEventSeqs.add(item.seq);
+        }
+        runQueued(async () => {
+          await handleEvent(item);
+          reconnectAttempts = 0;
+          if (item?.seq) {
+            lastEventSeq = Math.max(lastEventSeq, item.seq);
+            queuedEventSeqs.delete(item.seq);
+          }
           if (settled) resolve();
-        })
-        .catch(reject);
-    });
-    source.onerror = () => {
-      closeSource();
-      if (!fallbackStarted && !settled) {
+        }, reject);
+      });
+      source.onerror = () => {
+        closeSource();
+        if (settled || fallbackStarted) return;
+        if (reconnectAttempts < 3) {
+          reconnectAttempts += 1;
+          window.setTimeout(openStream, Math.min(500 * reconnectAttempts, 1500));
+          return;
+        }
         pollUntilDone().then(resolve).catch(reject);
-      }
+      };
     };
+    openStream();
   });
 }
 

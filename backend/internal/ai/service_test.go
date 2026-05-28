@@ -264,6 +264,66 @@ func TestHandleFollowupQuestionRejectsEmptyQuestion(t *testing.T) {
 	}
 }
 
+func TestHandleCompletionAttemptRequiresUserVisibleResult(t *testing.T) {
+	runtime := &agentRuntime{}
+	result, isError, completed := runtime.handleCompletionAttempt(`{"summary":"已整理完整步骤。"}`)
+	if !isError || completed {
+		t.Fatalf("expected summary-only completion to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
+	}
+	if !strings.Contains(result, "result is required") {
+		t.Fatalf("expected result requirement in tool error, got %s", result)
+	}
+
+	result, isError, completed = runtime.handleCompletionAttempt(`{"result":"1. 登录服务器\n2. 停止 Hermes 容器","summary":"清理步骤"}`)
+	if isError || !completed {
+		t.Fatalf("expected result completion to succeed, isError=%v completed=%v result=%s", isError, completed, result)
+	}
+	if runtime.completedContent != "1. 登录服务器\n2. 停止 Hermes 容器" {
+		t.Fatalf("unexpected completed content: %q", runtime.completedContent)
+	}
+}
+
+func TestHandleCompletionAttemptCanRecoverAfterCompletionArgumentError(t *testing.T) {
+	runtime := &agentRuntime{}
+	if _, isError, completed := runtime.handleCompletionAttempt(`{"summary":"已整理完整步骤。"}`); !isError || completed {
+		t.Fatalf("expected first bad completion attempt to be rejected")
+	}
+	if _, isError, completed := runtime.handleCompletionAttempt(`{"result":"这是修正后的完整交付。"}`); isError || !completed {
+		t.Fatalf("expected corrected completion attempt to succeed, isError=%v completed=%v", isError, completed)
+	}
+}
+
+func TestHandleCompletionAttemptDiscardsStreamedPreviewWhenRejected(t *testing.T) {
+	var discarded int
+	runtime := &agentRuntime{
+		performedMutation: true,
+		opts: RunOptions{
+			OnCompletionResultDiscard: func() {
+				discarded++
+			},
+		},
+	}
+	_, isError, completed := runtime.handleCompletionAttempt(`{"result":"已完成。","changed_paths":[]}`)
+	if !isError || completed {
+		t.Fatalf("expected completion to be rejected, isError=%v completed=%v", isError, completed)
+	}
+	if discarded != 1 {
+		t.Fatalf("expected streamed completion preview to be discarded once, got %d", discarded)
+	}
+}
+
+func TestAttemptCompletionSchemaRequiresResult(t *testing.T) {
+	params := completionParams()
+	required, _ := params["required"].([]string)
+	if len(required) != 1 || required[0] != "result" {
+		t.Fatalf("attempt_completion must require result, got %#v", params["required"])
+	}
+	props, _ := params["properties"].(map[string]any)
+	if _, ok := props["result"]; !ok {
+		t.Fatalf("attempt_completion properties missing result: %#v", props)
+	}
+}
+
 func TestAgentRecoveryDefaultsFollowMatureRetryPolicy(t *testing.T) {
 	t.Setenv("PERSEUS_AGENT_MAX_CHECKPOINT_RESUMES", "")
 	if got := agentMaxCheckpointResumes(); got != 2 {
@@ -1030,11 +1090,11 @@ func TestAttachmentsRequireToolLoop(t *testing.T) {
 	if !attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "workspace_file", Path: "draft.txt", Text: "preview"}}) {
 		t.Fatal("expected workspace file reference with preview to activate tool loop")
 	}
-	if !attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}}) {
-		t.Fatal("expected current file reference to activate tool loop")
+	if attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}}) {
+		t.Fatal("did not expect passive current file context to activate tool loop")
 	}
-	if !attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "editor_panels_context"}}) {
-		t.Fatal("expected editor panels context to activate tool loop")
+	if attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "editor_panels_context"}}) {
+		t.Fatal("did not expect passive editor panels context to activate tool loop")
 	}
 	if attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "text", Name: "note.txt"}}) {
 		t.Fatal("did not expect plain text attachment to activate tool loop")
@@ -1103,10 +1163,11 @@ func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	}
 }
 
-func TestHandleNoToolTurnRejectsPlainTextWhenToolLoopActive(t *testing.T) {
+func TestHandleNoToolTurnRejectsPlainTextBeforeToolSucceeds(t *testing.T) {
 	runtime := &agentRuntime{
-		toolLoopActive: true,
-		transcript:     newAgentTranscript(),
+		requiresCompletion: true,
+		toolLoopActive:     true,
+		transcript:         newAgentTranscript(),
 	}
 	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
 		Content:      "我先建文件夹，再写内容。",
@@ -1127,8 +1188,52 @@ func TestHandleNoToolTurnRejectsPlainTextWhenToolLoopActive(t *testing.T) {
 	}
 }
 
-func TestRuntimeToolChoiceRequiresToolsForActiveToolLoop(t *testing.T) {
-	runtime := &agentRuntime{toolLoopActive: true}
+func TestHandleNoToolTurnAllowsTextCompletionAfterVerifiedTool(t *testing.T) {
+	runtime := &agentRuntime{
+		requiresCompletion: true,
+		toolLoopActive:     true,
+		transcript:         newAgentTranscript(),
+		events: []ToolEvent{{
+			ToolName: "read_workspace_text",
+			Status:   "success",
+			Path:     "demo.txt",
+		}},
+	}
+	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
+		Content:      "已读取 demo.txt，下面是整理后的结论。",
+		FinishReason: "stop",
+	})
+	if err != nil || !ok {
+		t.Fatalf("expected text completion after verified tool, ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(reply.Content, "整理后的结论") {
+		t.Fatalf("unexpected reply: %#v", reply)
+	}
+	if runtime.completedContent != reply.Content {
+		t.Fatalf("expected completed content to be recorded, got %q", runtime.completedContent)
+	}
+}
+
+func TestRuntimeToolChoiceAllowsTextAfterVerifiedTool(t *testing.T) {
+	runtime := &agentRuntime{
+		requiresCompletion: true,
+		toolLoopActive:     true,
+		events: []ToolEvent{{
+			ToolName: "read_workspace_text",
+			Status:   "success",
+			Path:     "demo.txt",
+		}},
+	}
+	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceAuto {
+		t.Fatalf("expected auto tool choice after verified tool so final text can stream, got %#v", choice)
+	}
+	if got := openAIProviderToolChoice(runtime.toolChoice()); got != "auto" {
+		t.Fatalf("expected OpenAI auto tool choice after verified tool, got %#v", got)
+	}
+}
+
+func TestRuntimeToolChoiceRequiresToolsBeforeVerifiedTool(t *testing.T) {
+	runtime := &agentRuntime{requiresCompletion: true, toolLoopActive: true}
 	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceRequired {
 		t.Fatalf("expected required tool choice, got %#v", choice)
 	}
@@ -1262,8 +1367,14 @@ func TestRuntimeForceToolOnlyBeforeFirstToolAttempt(t *testing.T) {
 		t.Fatalf("expected specific OpenAI tool choice before first attempt, got %#v", got)
 	}
 	runtime.toolCalls = 1
+	runtime.requiresCompletion = true
 	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceRequired {
-		t.Fatalf("expected required-any after first forced tool attempt, got %#v", choice)
+		t.Fatalf("expected required-any after first forced attempt before verified result, got %#v", choice)
+	}
+	runtime.events = []ToolEvent{{ToolName: "save_workspace_file", Status: "success", ChangedPaths: []string{"demo.txt"}}}
+	runtime.performedMutation = true
+	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceAuto {
+		t.Fatalf("expected auto after verified forced tool result so final text can stream, got %#v", choice)
 	}
 }
 

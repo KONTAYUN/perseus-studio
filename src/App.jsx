@@ -16,6 +16,7 @@ export default function App() {
   const [loginUsername, setLoginUsername] = React.useState('');
   const [loginPassword, setLoginPassword] = React.useState('');
   const [loginError, setLoginError] = React.useState('');
+  const [loginNotice, setLoginNotice] = React.useState('');
   const [isLoggingIn, setIsLoggingIn] = React.useState(false);
   const [isRegisterMode, setIsRegisterMode] = React.useState(false);
   const appDialog = useAppDialog();
@@ -77,6 +78,7 @@ export default function App() {
   async function handleSubmit(event) {
     event.preventDefault();
     setLoginError('');
+    setLoginNotice('');
     setIsLoggingIn(true);
     try {
       const endpoint = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
@@ -85,9 +87,15 @@ export default function App() {
         setAuth({ loading: false, authenticated: true, user: data.user, hasUsers: true, registrationOpen: false });
         setLoginUsername('');
         setLoginPassword('');
+      } else if (data.pending) {
+        setAuth((current) => ({ ...current, loading: false, authenticated: false, hasUsers: true }));
+        setIsRegisterMode(false);
+        setLoginPassword('');
+        setLoginNotice('账号已创建，等待管理员激活后即可登录。');
       }
     } catch (error) {
-      setLoginError(error.message || (isRegisterMode ? '注册失败' : '登录失败'));
+      const message = authErrorMessage(error.message, isRegisterMode);
+      setLoginError(message);
     } finally {
       setIsLoggingIn(false);
     }
@@ -98,6 +106,7 @@ export default function App() {
     setAuth((current) => ({ ...current, authenticated: false, user: null }));
     setLoginUsername('');
     setLoginPassword('');
+    setLoginNotice('');
     checkAuth();
   }
 
@@ -115,6 +124,7 @@ export default function App() {
         username={loginUsername}
         password={loginPassword}
         error={loginError}
+        notice={loginNotice}
         isLoggingIn={isLoggingIn}
         isRegisterMode={isRegisterMode}
         registrationOpen={auth.registrationOpen}
@@ -125,6 +135,7 @@ export default function App() {
         onToggleMode={() => {
           setIsRegisterMode((v) => !v);
           setLoginError('');
+          setLoginNotice('');
         }}
       />
     );
@@ -184,7 +195,7 @@ export default function App() {
   );
 }
 
-function LoginScreen({ username, password, error, isLoggingIn, isRegisterMode, registrationOpen, hasUsers, onUsernameChange, onPasswordChange, onSubmit, onToggleMode }) {
+function LoginScreen({ username, password, error, notice, isLoggingIn, isRegisterMode, registrationOpen, hasUsers, onUsernameChange, onPasswordChange, onSubmit, onToggleMode }) {
   const isFirstUser = !hasUsers;
   const title = isFirstUser ? '创建管理员账号' : isRegisterMode ? '注册账号' : '登录';
   const subtitle = isFirstUser ? '首次使用，请创建一个管理员账号。' : isRegisterMode ? '注册新账号加入 Perseus Studio。' : '请输入用户名和密码。';
@@ -217,6 +228,7 @@ function LoginScreen({ username, password, error, isLoggingIn, isRegisterMode, r
           placeholder="密码"
           autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
         />
+        {notice && <div className="mt-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</div>}
         {error && <div className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</div>}
         <Button
           type="submit"
@@ -265,4 +277,10 @@ function getTaskConversationId(task) {
   } catch {
     return '';
   }
+}
+
+function authErrorMessage(message, isRegisterMode) {
+  if (message === 'account is pending approval') return '账号正在等待管理员激活。';
+  if (message === 'account is disabled') return '账号已被禁用。';
+  return message || (isRegisterMode ? '注册失败' : '登录失败');
 }

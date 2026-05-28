@@ -13,6 +13,7 @@ const cssImportOrder = [
   './styles/controls.css',
   './styles/chat.css',
   './styles/chat-composer.css',
+  './styles/chat-composer-queue.css',
   './styles/editor.css',
   './styles/file-tree.css',
   './styles/settings.css',

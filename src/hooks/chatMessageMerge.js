@@ -30,7 +30,7 @@ export function mergeConversationSnapshotPreservingActive(currentMessages, snaps
       merged.push(item);
     }
   }
-  return merged.sort(compareMessagesByCreatedAt);
+  return merged;
 }
 
 function shouldKeepActiveMessageContent(current, snapshot) {
@@ -40,11 +40,4 @@ function shouldKeepActiveMessageContent(current, snapshot) {
   if (currentContent === '') return false;
   const snapshotContent = String(snapshot.content || '');
   return currentContent.length >= snapshotContent.length || !snapshotContent.startsWith(currentContent);
-}
-
-function compareMessagesByCreatedAt(a, b) {
-  const aTime = Date.parse(a?.created_at || '') || 0;
-  const bTime = Date.parse(b?.created_at || '') || 0;
-  if (aTime !== bTime) return aTime - bTime;
-  return String(a?.id || '').localeCompare(String(b?.id || ''));
 }

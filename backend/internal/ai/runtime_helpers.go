@@ -101,7 +101,7 @@ func missingWorkspaceMutationError() error {
 func attachmentsRequireToolLoop(attachments []AttachmentPayload) bool {
 	for _, attachment := range attachments {
 		switch attachment.Kind {
-		case "workspace_file", "current_file", "editor_panels_context":
+		case "workspace_file":
 			return true
 		}
 	}

@@ -66,13 +66,24 @@ export function mergeCommittedRunStart(
       ...nextMessages[existingShellIndex],
       ...shell,
     };
-    if (existingShellIndex !== nextMessages.length - 1) {
-      const [existingShellMessage] = nextMessages.splice(existingShellIndex, 1);
-      nextMessages.push(existingShellMessage);
-    }
-  } else {
-    nextMessages.push(shell);
+    return moveRunMessageAfterAnchor(nextMessages, existingShellIndex, committedUser.id, shell.runId);
   }
+  return insertRunMessageAfterAnchor(nextMessages, shell, committedUser.id, shell.runId);
+}
+
+export function insertRunMessageAfterAnchor(messages, message, userMessageId = '', runId = '') {
+  const nextMessages = [...(messages || [])];
+  const insertIndex = runAnchorInsertIndex(nextMessages, userMessageId, runId);
+  nextMessages.splice(insertIndex, 0, message);
+  return nextMessages;
+}
+
+export function moveRunMessageAfterAnchor(messages, messageIndex, userMessageId = '', runId = '') {
+  const nextMessages = [...(messages || [])];
+  if (messageIndex < 0 || messageIndex >= nextMessages.length) return nextMessages;
+  const [message] = nextMessages.splice(messageIndex, 1);
+  const insertIndex = runAnchorInsertIndex(nextMessages, userMessageId, runId);
+  nextMessages.splice(insertIndex, 0, message);
   return nextMessages;
 }
 
@@ -210,21 +221,19 @@ export function appendRunTerminalMessage(messages, latestRun) {
   if (!isRecoverableTerminalRun(latestRun)) return messages || [];
   if ((messages || []).some((item) => item.resumableRunId === latestRun.id)) return messages || [];
   const message = String(latestRun.error_message || '').trim() || '上一轮任务没有正常完成，可继续本轮。';
-  return [
-    ...(messages || []),
-    {
-      id: `run_error_${latestRun.id}`,
-      conversation_id: latestRun.conversation_id,
-      role: 'assistant',
-      content: latestRun.status === 'canceled' ? '这轮任务已停止，可继续本轮。' : message,
-      attachments: [],
-      created_at: latestRun.completed_at || latestRun.updated_at || new Date().toISOString(),
-      pending: false,
-      error: true,
-      resumableRunId: latestRun.id,
-      diagnosticLogId: latestRun.diagnostic_log_id || '',
-    },
-  ];
+  return insertRunMessageAfterAnchor(messages, {
+    id: `run_error_${latestRun.id}`,
+    conversation_id: latestRun.conversation_id,
+    role: 'assistant',
+    content: latestRun.status === 'canceled' ? '这轮任务已停止，可继续本轮。' : message,
+    attachments: [],
+    created_at: latestRun.completed_at || latestRun.updated_at || new Date().toISOString(),
+    pending: false,
+    error: true,
+    runId: latestRun.id,
+    resumableRunId: latestRun.id,
+    diagnosticLogId: latestRun.diagnostic_log_id || '',
+  }, latestRun.user_message_id, latestRun.id);
 }
 
 export function hasStreamingAssistantMessage(items) {
@@ -290,6 +299,24 @@ function removeRunStartPlaceholders(messages, { optimisticUserId, thinkingId, co
 
 function findCommittedUserIndex(messages, committedUser) {
   return (messages || []).findIndex((item) => item.id === committedUser.id);
+}
+
+function runAnchorInsertIndex(messages, userMessageId = '', runId = '') {
+  const items = messages || [];
+  const anchorIndex = items.findIndex((item) => item?.id === userMessageId);
+  if (anchorIndex < 0) return items.length;
+  let insertIndex = anchorIndex + 1;
+  while (insertIndex < items.length && isMessageAnchoredToRun(items[insertIndex], runId)) {
+    insertIndex += 1;
+  }
+  return insertIndex;
+}
+
+function isMessageAnchoredToRun(item, runId = '') {
+  if (!item || item.role !== 'assistant') return false;
+  if (runId && (item.runId === runId || item.resumableRunId === runId)) return true;
+  if (!item.runId && !item.resumableRunId && item.kind !== 'run_shell') return true;
+  return false;
 }
 
 function isRecoverableTerminalRun(run) {

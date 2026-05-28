@@ -297,9 +297,9 @@ Rules:
 - The composer shell uses `--radius-composer`, soft translucency, and stable icon controls.
 - The focused composer shell uses `composer-shell-active`; do not add `ring-*` to the composer shell.
 - Composer text input must remain full width so the scrollbar stays at the far right edge of the composer.
-- The chat composer uses an autosizing textarea plus a fixed lower-right action dock. Do not reintroduce manual `scrollHeight` resizing, dynamic `paddingRight`/`paddingBottom` logic, or a full-height right-side dock column.
-- Composer action buttons belong in `composer-action-dock`; they must stay fixed to the lower right of the composer shell and must not vertically track the textarea center as it grows.
-- The action dock is a translucent floating glass layer; text may pass underneath it. Do not add text-flow avoidance, contenteditable mirrors, or dynamic button-safe padding to route text around the dock.
+- The chat composer uses an autosizing textarea plus a Codex-style bottom action bar. Do not reintroduce manual `scrollHeight` resizing, dynamic `paddingRight`/`paddingBottom` logic, or a full-height right-side dock column.
+- Composer actions belong in `composer-action-dock`: attachments sit lower left, model/reasoning status sits near the lower right, and send/stop sits at the far lower right. The buttons must stay fixed to the composer shell bottom and must not vertically track the textarea center as it grows.
+- The bottom action bar is part of the composer shell. Text and attachment previews sit above it using stable padding, not contenteditable mirrors or dynamic text measurement.
 - Composer implementation lives under `src/components/chat/composer/`; future input, action dock, attachment, reference, skill menu, and follow-up question work should stay in the matching subcomponent instead of expanding the wrapper.
 - Composer CSS lives in `src/styles/chat-composer.css`; keep shell, textarea, action dock, pending input, scroll-to-bottom, and follow-up question classes together.
 - Context usage/compaction status should be visible but quiet.

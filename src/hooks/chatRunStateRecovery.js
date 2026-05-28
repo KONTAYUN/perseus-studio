@@ -2,7 +2,9 @@ import {
   appendRunTerminalMessage,
   buildAssistantRunShell,
   buildProgressItem,
+  insertRunMessageAfterAnchor,
   isRunShellMessage,
+  moveRunMessageAfterAnchor,
   nextLoadingStatus,
   normalizeConversationMessage,
 } from './chatStateUtils.js';
@@ -68,11 +70,10 @@ export function applyLatestRunState(messages, latestRun, events = [], options = 
         ...shell,
       };
     });
-    return moveMessageToEnd(nextMessages, shellIndex);
+    return moveRunMessageAfterAnchor(nextMessages, shellIndex, userMessageId, latestRun.id);
   }
 
-  const inserted = appendMessageToEnd(normalized, shell);
-  return inserted;
+  return insertRunMessageAfterAnchor(normalized, shell, userMessageId, latestRun.id);
 }
 
 function isActiveRun(run) {
@@ -135,20 +136,6 @@ function isRunSnapshotLoadingType(type = '') {
     type === 'completion_rejected' ||
     type === 'local_persistence_failed'
   );
-}
-
-function appendMessageToEnd(messages, message) {
-  const next = [...(messages || [])];
-  next.push(message);
-  return next;
-}
-
-function moveMessageToEnd(messages, messageIndex) {
-  const next = [...(messages || [])];
-  if (messageIndex < 0 || messageIndex >= next.length) return next;
-  const [message] = next.splice(messageIndex, 1);
-  next.push(message);
-  return next;
 }
 
 function runStageLoadingText(stage = '') {

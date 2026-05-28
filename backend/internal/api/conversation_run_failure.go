@@ -4,17 +4,21 @@ import (
 	"context"
 	"log"
 	"strings"
+	"time"
 
 	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
 )
 
 func (s *Server) failConversationRun(ctx context.Context, userID, conversationID, messageID, runID string, err error) {
+	s.failConversationRunStartedAt(ctx, userID, conversationID, messageID, runID, err, time.Time{})
+}
+
+func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conversationID, messageID, runID string, err error, startedAt time.Time) {
 	message := ai.UserFacingErrorMessage(err)
 	if message == "" {
 		message = "执行失败"
 	}
-	diagnosticID := ai.DiagnosticIDFromError(err)
 	status := store.AgentRunFailed
 	stage := "failed"
 	eventType := "run_failed"
@@ -25,6 +29,12 @@ func (s *Server) failConversationRun(ctx context.Context, userID, conversationID
 		eventType = "run_canceled"
 		level = "warn"
 		message = "执行已取消"
+	}
+	diagnosticID := ""
+	if status != store.AgentRunCanceled {
+		diagnosticID = s.ensureRunFailureDiagnostic(ctx, userID, conversationID, messageID, runID, err, startedAt)
+	} else {
+		diagnosticID = ai.DiagnosticIDFromError(err)
 	}
 	eventCtx := ctx
 	if ctx.Err() != nil {

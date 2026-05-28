@@ -31,6 +31,23 @@ test('appendRunTerminalMessage restores recoverable failed run state', () => {
   assert.equal(appendRunTerminalMessage(messages, { id: 'run-1', conversation_id: 'conv-1', user_message_id: 'u1', status: 'failed' }).length, 3);
 });
 
+test('appendRunTerminalMessage anchors failed run under its user message', () => {
+  const messages = appendRunTerminalMessage([
+    { id: 'u1', role: 'user', content: '第一轮', conversation_id: 'conv-1' },
+    { id: 'u2', role: 'user', content: '第二轮', conversation_id: 'conv-1' },
+    { id: 'a2', role: 'assistant', content: '第二轮回复', conversation_id: 'conv-1', runId: 'run-2' },
+  ], {
+    id: 'run-1',
+    conversation_id: 'conv-1',
+    user_message_id: 'u1',
+    status: 'failed',
+    error_message: '模型没有返回可执行工具调用',
+  });
+
+  assert.deepEqual(messages.map((item) => item.id), ['u1', 'run_error_run-1', 'u2', 'a2']);
+  assert.equal(messages[1].error, true);
+});
+
 test('applyLatestRunState restores running live tool progress from persisted events', () => {
   const messages = applyLatestRunState([
     { id: 'u1', role: 'user', content: '写续集', conversation_id: 'conv-1' },
@@ -182,4 +199,22 @@ test('applyLatestRunState keeps completed assistant segments immutable and ancho
   assert.equal(messages[1].content, '第一段已经完成');
   assert.equal(messages[2].content, '第二段已经完成');
   assert.equal(messages[3].kind, 'run_shell');
+});
+
+test('applyLatestRunState anchors restored shell before later conversation turns', () => {
+  const messages = applyLatestRunState([
+    { id: 'u1', role: 'user', content: '第一轮', conversation_id: 'conv-1' },
+    { id: 'a1', role: 'assistant', content: '第一段', conversation_id: 'conv-1', runId: 'run-1' },
+    { id: 'u2', role: 'user', content: '第二轮', conversation_id: 'conv-1' },
+    { id: 'a2', role: 'assistant', content: '第二轮回复', conversation_id: 'conv-1', runId: 'run-2' },
+  ], {
+    id: 'run-1',
+    conversation_id: 'conv-1',
+    user_message_id: 'u1',
+    status: 'running',
+    stage: 'calling_model',
+  }, []);
+
+  assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'run_active_run-1', 'u2', 'a2']);
+  assert.equal(messages[2].pending, true);
 });

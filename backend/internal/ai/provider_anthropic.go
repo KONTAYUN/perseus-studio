@@ -107,9 +107,14 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
 			}
 		}
+		var emitCompletionResult func(string)
+		if req.Opts.OnCompletionResultDelta != nil {
+			emitCompletionResult = req.Opts.OnCompletionResultDelta
+		}
 		turn, err := parseAnthropicStreamWithOptions(streamBody, providerStreamParseOptions{
-			EmitText:            emitText,
-			RevealTextAfterTool: requiresTool,
+			EmitText:                  emitText,
+			EmitCompletionResultDelta: emitCompletionResult,
+			RevealTextAfterTool:       requiresTool,
 		})
 		if emitText != nil && strings.TrimSpace(turn.Content) != "" && (!requiresTool || len(turn.ToolCalls) > 0) {
 			turn.PublicTextStreamed = true
@@ -118,6 +123,10 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			if partial, ok := partialTurnFromStreamError(err); ok {
 				if emitText != nil && strings.TrimSpace(partial.Content) != "" && (!requiresTool || len(partial.ToolCalls) > 0) {
 					partial.PublicTextStreamed = true
+				}
+				if !partial.CompletionResultStreamed && emitCompletionResult != nil {
+					emitStreamedCompletionResultFromToolCalls(partial.ToolCalls, emitCompletionResult)
+					partial.CompletionResultStreamed = true
 				}
 				log.Printf("[ai] anthropic stream_partial_tool_recovered conversation=%s endpoint=%s tool_calls=%d error=%v", req.ConversationID, endpoint, len(partial.ToolCalls), err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_partial_tool_recovered", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
@@ -153,6 +162,9 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			}
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)
+		}
+		if !turn.CompletionResultStreamed && emitCompletionResult != nil {
+			emitStreamedCompletionResultFromToolCalls(turn.ToolCalls, emitCompletionResult)
 		}
 		closeStream()
 		if isEmptyModelTurn(turn) {

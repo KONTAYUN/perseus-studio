@@ -8,14 +8,15 @@ import (
 )
 
 type anthropicStreamBlock struct {
-	ID          string
-	Type        string
-	Name        string
-	Text        strings.Builder
-	Thinking    strings.Builder
-	Signature   string
-	Data        string
-	PartialJSON strings.Builder
+	ID               string
+	Type             string
+	Name             string
+	Text             strings.Builder
+	Thinking         strings.Builder
+	Signature        string
+	Data             string
+	PartialJSON      strings.Builder
+	CompletionResult partialJSONFieldStreamer
 }
 
 func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn, error) {
@@ -25,10 +26,19 @@ func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn
 func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOptions) (agentModelTurn, error) {
 	var content strings.Builder
 	deltas := newToolGatedStreamDeltaEmitter(opts)
+	completionDeltas := newStreamDeltaEmitter(opts.EmitCompletionResultDelta)
 	visibleText := newProviderVisibleTextFilter()
 	blocks := map[int]*anthropicStreamBlock{}
 	finishReason := ""
 	usage := ProviderUsage{}
+	completionResultStreamed := false
+	emitCompletionResult := func(text string) {
+		if text == "" || opts.EmitCompletionResultDelta == nil {
+			return
+		}
+		completionResultStreamed = true
+		completionDeltas.Add(text)
+	}
 	err := readSSEEvents(body, func(event sseEvent) error {
 		data := strings.TrimSpace(event.Data)
 		if data == "" || data == "[DONE]" {
@@ -89,6 +99,9 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 			case "input_json_delta":
 				partial, _ := delta["partial_json"].(string)
 				block.PartialJSON.WriteString(partial)
+				// Cline streams attempt_completion.result while the tool block is
+				// still partial; do the same for Anthropic input_json_delta.
+				block.CompletionResult.EmitNewDelta(block.Name, block.PartialJSON.String(), emitCompletionResult)
 			case "thinking_delta":
 				thinking, _ := delta["thinking"].(string)
 				if thinking != "" {
@@ -118,9 +131,11 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 	})
 	closeProviderVisibleText(&content, deltas, visibleText)
 	deltas.Flush()
+	completionDeltas.Flush()
 	if err != nil {
 		turn := buildAnthropicStreamTurn(content.String(), finishReason, blocks)
 		turn.Usage = usage
+		turn.CompletionResultStreamed = completionResultStreamed
 		if hasCompleteToolCalls(turn) {
 			return agentModelTurn{}, &partialStreamTurnError{turn: turn, err: err}
 		}
@@ -128,6 +143,7 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 	}
 	turn := buildAnthropicStreamTurn(content.String(), finishReason, blocks)
 	turn.Usage = usage
+	turn.CompletionResultStreamed = completionResultStreamed
 	return turn, nil
 }
 

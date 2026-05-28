@@ -151,12 +151,15 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		allowReg, _ := s.users.IsRegistrationAllowed(r.Context())
+		defaultRole, _ := s.users.DefaultUserRole(r.Context())
 		writeJSON(w, http.StatusOK, map[string]any{
 			"allow_registration": allowReg,
+			"default_user_role":  defaultRole,
 		})
 	case http.MethodPatch:
 		var req struct {
 			AllowRegistration *bool `json:"allow_registration"`
+			DefaultUserRole   string `json:"default_user_role"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid json body")
@@ -168,9 +171,17 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if strings.TrimSpace(req.DefaultUserRole) != "" {
+			if err := s.users.SetDefaultUserRole(r.Context(), req.DefaultUserRole); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		allowReg, _ := s.users.IsRegistrationAllowed(r.Context())
+		defaultRole, _ := s.users.DefaultUserRole(r.Context())
 		writeJSON(w, http.StatusOK, map[string]any{
 			"allow_registration": allowReg,
+			"default_user_role":  defaultRole,
 		})
 	default:
 		http.NotFound(w, r)

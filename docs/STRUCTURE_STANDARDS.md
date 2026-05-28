@@ -43,13 +43,14 @@ When a file grows too large, split it by the responsibility it already contains.
 - `src/styles/motion.css`: animation keyframes/classes, motion primitives, shared interactive control motion.
 - `src/styles/controls.css`: shared interactive control geometry and states.
 - `src/styles/chat.css`: chat messages, assistant progress, recovery notices, and chat-only message surfaces.
-- `src/styles/chat-composer.css`: composer shell, action dock, pending input queue, follow-up question panel, and scroll-to-bottom control.
+- `src/styles/chat-composer.css`: composer shell, input, bottom action bar, model status, and scroll-to-bottom control.
+- `src/styles/chat-composer-queue.css`: pending input queue, running steer previews, and follow-up question panels above the composer.
 - `src/styles/editor.css`: editor tabs, editor textarea, editor drop states.
 - `src/styles/file-tree.css`: file tree rows, file labels, inline rename/drop indicators.
 - `src/styles/settings.css`: settings modal/card/view-specific transitions.
 - `src/styles/utilities.css`: narrow global utility overrides that do not fit a domain.
 
-Composer visual contract: fixed lower-right translucent/blur action dock, current button position preserved, text may pass underneath it, no Pretext/contenteditable/mirror layer, and no dynamic text-avoidance padding.
+Composer visual contract: Codex-style bottom action bar inside the composer shell, with attachments on the lower left, model/reasoning status near the lower right, and send/stop on the far lower right. Text and attachment previews sit above the action bar. No Pretext/contenteditable/mirror layer and no dynamic text-measurement avoidance logic.
 
 ## Backend Boundaries
 

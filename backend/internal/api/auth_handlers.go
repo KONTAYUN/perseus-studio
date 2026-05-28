@@ -79,13 +79,29 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
-	role := "user"
+	role, err := s.users.DefaultUserRole(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if count == 0 {
-		role = "admin"
+		role = store.UserRoleAdmin
 	}
 	user, err := s.users.CreateUser(r.Context(), req.Username, req.Password, role)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if user.Role == store.UserRolePending {
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"authenticated": false,
+			"pending":       true,
+			"user": map[string]any{
+				"id":       user.ID,
+				"username": user.Username,
+				"role":     user.Role,
+			},
+		})
 		return
 	}
 	s.createSessionAndRespond(r.Context(), w, user)

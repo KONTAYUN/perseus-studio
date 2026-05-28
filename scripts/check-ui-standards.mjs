@@ -69,7 +69,7 @@ const rawAbsolutePopoverAllowlist = new Map([
     'Composer slash-skill autocomplete stays local to the composer so typing can continue while suggestions are visible.',
   ],
   [
-    'src/components/chat/panel/ModelMenu.jsx',
+    'src/components/chat/composer/ModelMenu.jsx',
     'Model provider submenu is a nested second-level menu inside the anchored model menu.',
   ],
   [

@@ -27,11 +27,13 @@ export {
   buildProgressItem,
   hasActiveRunShell,
   hasStreamingAssistantMessage,
+  insertRunMessageAfterAnchor,
   isRunShellMessage,
   mapPendingAssistant,
   mergeAssistantMessageCompleted,
   mergeAssistantMessageStarted,
   mergeCommittedRunStart,
+  moveRunMessageAfterAnchor,
 } from './chatRunMessageState.js';
 
 export { normalizeConversationMessage };

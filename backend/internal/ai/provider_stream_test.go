@@ -145,6 +145,76 @@ func TestParseOpenAIStreamReturnsPartialCompleteToolCallOnTransportError(t *test
 	}
 }
 
+func TestParseOpenAIStreamStreamsAttemptCompletionResultFromToolArguments(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"done_1","type":"function","function":{"name":"attempt_completion","arguments":"{\"result\":\"第一段"}}]}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"继续，第二段\\n第三段\",\"summary\":\"完成\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitCompletionResultDelta: func(text string) {
+			deltas = append(deltas, text)
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if !turn.CompletionResultStreamed {
+		t.Fatalf("expected completion result streamed")
+	}
+	if strings.Join(deltas, "") != "第一段继续，第二段\n第三段" {
+		t.Fatalf("unexpected completion deltas: %#v", deltas)
+	}
+	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].Name != "attempt_completion" {
+		t.Fatalf("unexpected tool calls: %#v", turn.ToolCalls)
+	}
+}
+
+func TestEmitStreamedCompletionResultFromToolCallsSplitsLargeFallback(t *testing.T) {
+	result := strings.Repeat("你", 600)
+	var deltas []string
+	streamed := emitStreamedCompletionResultFromToolCalls([]agentToolCall{{
+		Name:          "attempt_completion",
+		ArgumentsJSON: `{"result":"` + result + `"}`,
+	}}, func(text string) {
+		deltas = append(deltas, text)
+	})
+	if !streamed {
+		t.Fatalf("expected fallback completion result to stream")
+	}
+	if len(deltas) != 3 {
+		t.Fatalf("expected large fallback to split into 3 chunks, got %d: %#v", len(deltas), deltas)
+	}
+	if strings.Join(deltas, "") != result {
+		t.Fatalf("fallback chunks did not preserve content")
+	}
+}
+
+func TestParseOpenAIStreamDoesNotLeakNonCompletionToolArguments(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"read_1","type":"function","function":{"name":"read_workspace_text","arguments":"{\"result\":\"not public\",\"path\":\"a.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitCompletionResultDelta: func(text string) {
+			deltas = append(deltas, text)
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if turn.CompletionResultStreamed || len(deltas) != 0 {
+		t.Fatalf("non-completion tool arguments leaked: streamed=%v deltas=%#v", turn.CompletionResultStreamed, deltas)
+	}
+}
+
 func TestParseOpenAIStreamRemovesVisibleReasoningTagsAcrossChunks(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"content":"<thin"}}]}`,
@@ -217,6 +287,44 @@ func TestParseAnthropicStreamAccumulatesTextAndToolUse(t *testing.T) {
 	}
 	if len(turn.AnthropicRaw) != 2 {
 		t.Fatalf("expected raw text and tool blocks, got %#v", turn.AnthropicRaw)
+	}
+}
+
+func TestParseAnthropicStreamStreamsAttemptCompletionResultFromToolArguments(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_done","name":"attempt_completion","input":{}}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"result\":\"第一段"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"继续，第二段\",\"summary\":\"完成\"}"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseAnthropicStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitCompletionResultDelta: func(text string) {
+			deltas = append(deltas, text)
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if !turn.CompletionResultStreamed {
+		t.Fatalf("expected completion result streamed")
+	}
+	if strings.Join(deltas, "") != "第一段继续，第二段" {
+		t.Fatalf("unexpected completion deltas: %#v", deltas)
+	}
+	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].Name != "attempt_completion" {
+		t.Fatalf("unexpected tool calls: %#v", turn.ToolCalls)
 	}
 }
 

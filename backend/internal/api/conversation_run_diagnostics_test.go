@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,5 +88,137 @@ func TestCancelAgentRunRecordsSourceAndReason(t *testing.T) {
 	}
 	if payload["source"] != "stop_button" || payload["reason"] != "user_requested_stop" {
 		t.Fatalf("unexpected cancel payload: %#v", payload)
+	}
+}
+
+func TestFailConversationRunCreatesDiagnosticForLocalRunFailure(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+	configs := store.NewConfigStore(db)
+	if err := configs.Migrate(context.Background()); err != nil {
+		t.Fatalf("configs.Migrate returned error: %v", err)
+	}
+	provider, err := configs.CreateModelProvider(context.Background(), "admin-1", store.ModelProviderInput{
+		Name:       "GLM",
+		Visibility: store.ResourceVisibilityPublic,
+		Protocol:   "openai",
+		BaseURL:    "https://api.example.test/v1",
+		APIKey:     "secret-key",
+		ModelID:    "glm-test",
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatalf("CreateModelProvider returned error: %v", err)
+	}
+	runs := store.NewAgentRunStore(db)
+	if err := runs.Migrate(context.Background()); err != nil {
+		t.Fatalf("runs.Migrate returned error: %v", err)
+	}
+	run, err := runs.CreateRun(context.Background(), store.CreateAgentRunInput{
+		ID:              "run-local-fail",
+		UserID:          "user-1",
+		ConversationID:  "conv-1",
+		UserMessageID:   "msg-1",
+		ModelProviderID: provider.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	if _, err := runs.UpdateRun(context.Background(), "user-1", run.ID, store.UpdateAgentRunInput{Status: store.AgentRunRunning, Stage: "calling_model", SetStartedAt: true}); err != nil {
+		t.Fatalf("UpdateRun returned error: %v", err)
+	}
+	diagnostics := store.NewDiagnosticStore(db)
+	if err := diagnostics.Migrate(context.Background()); err != nil {
+		t.Fatalf("diagnostics.Migrate returned error: %v", err)
+	}
+	server := &Server{
+		configs:     configs,
+		diagnostics: diagnostics,
+		runs:        runs,
+		runBroker:   tasks.NewBroker(),
+	}
+
+	server.failConversationRunStartedAt(context.Background(), "user-1", "conv-1", "msg-1", run.ID, errors.New("模型没有返回可执行工具调用或 attempt_completion，workspace 任务未执行完成"), time.Now().Add(-2*time.Second))
+
+	updated, err := runs.GetRun(context.Background(), "user-1", run.ID)
+	if err != nil {
+		t.Fatalf("GetRun returned error: %v", err)
+	}
+	if !updated.DiagnosticLogID.Valid || updated.DiagnosticLogID.String == "" {
+		t.Fatalf("expected run diagnostic id, got %#v", updated.DiagnosticLogID)
+	}
+	logs, err := diagnostics.List(context.Background(), store.DiagnosticLogQuery{UserID: "user-1", Limit: 10})
+	if err != nil {
+		t.Fatalf("diagnostics.List returned error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected one diagnostic log, got %#v", logs)
+	}
+	if logs[0].Stage != "run_failed:calling_model" {
+		t.Fatalf("unexpected stage: %q", logs[0].Stage)
+	}
+	if logs[0].ModelProviderID != provider.ID || logs[0].ModelID != "glm-test" || logs[0].Protocol != "openai" || logs[0].BaseURLHost != "api.example.test" {
+		t.Fatalf("provider metadata missing from diagnostic: %#v", logs[0])
+	}
+	if strings.Contains(logs[0].ErrorMessage, "secret-key") || strings.Contains(logs[0].RequestSummary, "secret-key") {
+		t.Fatalf("diagnostic leaked API key: %#v", logs[0])
+	}
+	var summary map[string]any
+	if err := json.Unmarshal([]byte(logs[0].RequestSummary), &summary); err != nil {
+		t.Fatalf("invalid request summary: %v", err)
+	}
+	if summary["failure_class"] != "agent_runtime_no_tool_completion" || summary["run_stage"] != "calling_model" {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+}
+
+func TestFailConversationRunDoesNotCreateDiagnosticForCanceledRun(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+	runs := store.NewAgentRunStore(db)
+	if err := runs.Migrate(context.Background()); err != nil {
+		t.Fatalf("runs.Migrate returned error: %v", err)
+	}
+	run, err := runs.CreateRun(context.Background(), store.CreateAgentRunInput{
+		ID:              "run-canceled",
+		UserID:          "user-1",
+		ConversationID:  "conv-1",
+		UserMessageID:   "msg-1",
+		ModelProviderID: "provider-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	diagnostics := store.NewDiagnosticStore(db)
+	if err := diagnostics.Migrate(context.Background()); err != nil {
+		t.Fatalf("diagnostics.Migrate returned error: %v", err)
+	}
+	server := &Server{
+		diagnostics: diagnostics,
+		runs:        runs,
+		runBroker:   tasks.NewBroker(),
+	}
+
+	server.failConversationRun(context.Background(), "user-1", "conv-1", "msg-1", run.ID, context.Canceled)
+
+	logs, err := diagnostics.List(context.Background(), store.DiagnosticLogQuery{UserID: "user-1", Limit: 10})
+	if err != nil {
+		t.Fatalf("diagnostics.List returned error: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("expected no diagnostic for user cancellation, got %#v", logs)
+	}
+	updated, err := runs.GetRun(context.Background(), "user-1", run.ID)
+	if err != nil {
+		t.Fatalf("GetRun returned error: %v", err)
+	}
+	if updated.DiagnosticLogID.Valid {
+		t.Fatalf("expected no diagnostic id for cancellation, got %#v", updated.DiagnosticLogID)
 	}
 }

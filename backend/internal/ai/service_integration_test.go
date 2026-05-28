@@ -41,7 +41,7 @@ func TestGenerateReplyOpenAICreateFileAfterReminder(t *testing.T) {
 			assertOpenAIWriteToolsPresent(t, payload)
 			writeOpenAIToolCall(t, w, "call_create_1", "save_workspace_file", `{"path":"ai-test.txt","content":"hello from ai","mode":"create"}`)
 		case 2:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已创建 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已创建 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -131,7 +131,7 @@ func TestGenerateReplyOpenAIToolLoopUpgradesFromChatToWorkspaceRoundLimit(t *tes
 			writeOpenAIToolCall(t, w, fmt.Sprintf("call_inspect_%d", count), "inspect_workspace", `{"path":"","max_depth":1}`)
 			return
 		}
-		writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已完成长工具任务。"}`)
+		writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已完成长工具任务。"}`)
 	}))
 	defer server.Close()
 
@@ -554,24 +554,26 @@ func TestGenerateReplyOpenAIToolLoopRequiresToolAndSuppressesInvalidText(t *test
 		}
 
 		count := requestCount.Add(1)
-		assertOpenAIToolChoiceRequired(t, payload)
 		switch count {
 		case 1:
+			assertOpenAIToolChoiceRequired(t, payload)
 			writeOpenAIStreamText(t, w, "好，我先看一下 workspace。")
 		case 2:
+			assertOpenAIToolChoiceRequired(t, payload)
 			assertLastUserReminderContains(t, payload, "没有继续调用工具")
 			writeOpenAIToolCall(t, w, "call_inspect_1", "inspect_workspace", `{"path":"","max_depth":1}`)
 		case 3:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已查看工作区。"} `)
+			assertOpenAIToolChoiceAuto(t, payload)
+			writeOpenAIStreamText(t, w, "已查看工作区。")
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
 	}))
 	defer server.Close()
 
-	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看当前文件")
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看引用文件")
 	var streamed strings.Builder
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "demo.txt"}}, RunOptions{
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "workspace_file", Path: "demo.txt"}}, RunOptions{
 		UserID: testUserID,
 		Event: func(eventType, level string, payload map[string]any) {
 			if eventType == "model_delta" {
@@ -595,7 +597,7 @@ func TestGenerateReplyOpenAIToolLoopRequiresToolAndSuppressesInvalidText(t *test
 	}
 }
 
-func TestGenerateReplyOpenAIRequiredToolStreamsPlanWhenToolCallFollows(t *testing.T) {
+func TestGenerateReplyOpenAIStreamsFinalTextAfterToolResult(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 
@@ -613,21 +615,22 @@ func TestGenerateReplyOpenAIRequiredToolStreamsPlanWhenToolCallFollows(t *testin
 		}
 
 		count := requestCount.Add(1)
-		assertOpenAIToolChoiceRequired(t, payload)
 		switch count {
 		case 1:
+			assertOpenAIToolChoiceRequired(t, payload)
 			writeOpenAIStreamTextAndToolCall(t, w, "我先查看工作区，再决定下一步。", "call_inspect_1", "inspect_workspace", `{"path":"","max_depth":1}`)
 		case 2:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已查看工作区。"} `)
+			assertOpenAIToolChoiceAuto(t, payload)
+			writeOpenAIStreamText(t, w, "已查看工作区。下面是整理后的结论。")
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
 	}))
 	defer server.Close()
 
-	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看当前文件")
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看引用文件")
 	var streamed strings.Builder
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "demo.txt"}}, RunOptions{
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "workspace_file", Path: "demo.txt"}}, RunOptions{
 		UserID: testUserID,
 		Event: func(eventType, level string, payload map[string]any) {
 			if eventType == "model_delta" {
@@ -646,7 +649,51 @@ func TestGenerateReplyOpenAIRequiredToolStreamsPlanWhenToolCallFollows(t *testin
 	if !strings.Contains(streamed.String(), "我先查看工作区") {
 		t.Fatalf("expected same-turn plan text to stream after tool call appeared, got %q", streamed.String())
 	}
-	if !strings.Contains(reply.Content, "已查看工作区") {
+	if !strings.Contains(streamed.String(), "下面是整理后的结论") {
+		t.Fatalf("expected final content to stream as assistant text, got %q", streamed.String())
+	}
+	if !strings.Contains(reply.Content, "下面是整理后的结论") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+}
+
+func TestGenerateReplyCurrentFileContextDoesNotForceToolLoop(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+
+		if count := requestCount.Add(1); count != 1 {
+			t.Fatalf("unexpected request count: %d", count)
+		}
+		assertOpenAIToolChoiceAuto(t, payload)
+		writeOpenAIStreamText(t, w, "收到，你已经登录成功。下一步执行 pwd 确认当前目录。")
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "我已经成功登陆上了")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{
+		{Kind: "current_file", Path: "v14.7.md"},
+		{Kind: "editor_panels_context", EditorPanels: []EditorPanelContext{{PositionLabel: "current", ActiveFilePath: "v14.7.md"}}},
+	}, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if requestCount.Load() != 1 {
+		t.Fatalf("expected one ordinary chat request, got %d", requestCount.Load())
+	}
+	if !strings.Contains(reply.Content, "下一步") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
 }
@@ -710,7 +757,7 @@ func TestAgentRuntimeExecutesOnlyOneToolPerModelTurn(t *testing.T) {
 				{id: "call_save_1", name: "save_workspace_file", args: `{"path":"a.txt","content":"after","mode":"overwrite"}`},
 			})
 		case 2:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已读取文件。"} `)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已读取文件。"} `)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -718,7 +765,7 @@ func TestAgentRuntimeExecutesOnlyOneToolPerModelTurn(t *testing.T) {
 	defer server.Close()
 
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "处理文件")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "a.txt"}}, RunOptions{UserID: testUserID})
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "workspace_file", Path: "a.txt"}}, RunOptions{UserID: testUserID})
 	if err != nil {
 		t.Fatalf("GenerateReply returned error: %v", err)
 	}
@@ -774,7 +821,7 @@ func TestAgentRuntimeSkipsStaleToolTurnWhenSteerArrivesBeforeToolExecution(t *te
 					}
 				}
 			}
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已按新引导停止旧保存。"} `)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已按新引导停止旧保存。"} `)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -796,7 +843,7 @@ func TestAgentRuntimeSkipsStaleToolTurnWhenSteerArrivesBeforeToolExecution(t *te
 		t.Fatalf("UpdateRun returned error: %v", err)
 	}
 	go func() {
-		_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "a.txt"}}, RunOptions{UserID: testUserID, RunID: run.ID})
+		_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "workspace_file", Path: "a.txt"}}, RunOptions{UserID: testUserID, RunID: run.ID})
 		done <- err
 	}()
 
@@ -869,7 +916,7 @@ func TestGenerateReplyOpenAIWriteExistingFile(t *testing.T) {
 			assertOpenAIWriteToolsPresent(t, payload)
 			writeOpenAIToolCall(t, w, "call_write_1", "save_workspace_file", `{"path":"ai-test.txt","content":"after","mode":"overwrite"}`)
 		case 2:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已修改 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已修改 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -910,7 +957,7 @@ func TestGenerateReplyOpenAIEditWorkspaceTextEmitsWorkspaceChanged(t *testing.T)
 		case 1:
 			writeOpenAIToolCall(t, w, "call_edit_1", "edit_workspace_text", `{"path":"ai-test.txt","old_text":"before","new_text":"after"}`)
 		case 2:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已编辑 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已编辑 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count")
 		}
@@ -1090,7 +1137,7 @@ func TestGenerateReplyOpenAIMkdirWorkspace(t *testing.T) {
 			assertOpenAIWriteToolsPresent(t, payload)
 			writeOpenAIToolCall(t, w, "call_mkdir_1", "manage_workspace_path", `{"action":"mkdir","path":"ai-folder"}`)
 		case 2:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已创建 ai-folder。","changed_paths":["ai-folder"]}`)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已创建 ai-folder。","changed_paths":["ai-folder"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -1145,7 +1192,7 @@ func TestGenerateReplyOpenAIDeleteAfterReadRequiresMutationTool(t *testing.T) {
 		case 2:
 			writeOpenAIToolCall(t, w, "call_delete_1", "manage_workspace_path", `{"action":"trash","path":"delete-me.txt"}`)
 		case 3:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已将 delete-me.txt 移入回收站。","changed_paths":["回收站/delete-me.txt"]}`)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已将 delete-me.txt 移入回收站。","changed_paths":["回收站/delete-me.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -1252,7 +1299,7 @@ func TestGenerateReplyOpenAIWorkspaceReferencePlainTextDoesNotFinishEarly(t *tes
 			assertLastUserReminderContains(t, payload, "没有继续调用工具")
 			writeOpenAIToolCall(t, w, "call_read_1", "read_workspace_text", `{"path":"draft.txt"}`)
 		case 3:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已读取 draft.txt 并确认后续步骤。","notes":"尚未写入文件。"} `)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已读取 draft.txt 并确认后续步骤。","notes":"尚未写入文件。"} `)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -1358,7 +1405,7 @@ func TestGenerateReplyEmitsMultipleAssistantSegments(t *testing.T) {
 				},
 			})
 		case 3:
-			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"summary":"已创建 novel-project 并写入 chapter-1.txt。","changed_paths":["novel-project","novel-project/chapter-1.txt"]}`)
+			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建 novel-project 并写入 chapter-1.txt。","changed_paths":["novel-project","novel-project/chapter-1.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -1481,7 +1528,7 @@ func TestGenerateReplyOpenAIToolArgumentErrorFeedsBackAndRecovers(t *testing.T) 
 			}
 			writeOpenAIToolCall(t, w, "good_args", "save_workspace_file", `{"path":"bad.txt","content":"hello","mode":"create"}`)
 		case 3:
-			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"summary":"已创建 bad.txt。","changed_paths":["bad.txt"]}`)
+			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建 bad.txt。","changed_paths":["bad.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -1531,7 +1578,7 @@ func TestGenerateReplyOpenAIDeduplicatesRepeatedMutationToolCall(t *testing.T) {
 			if !strings.Contains(lastToolContent, "already_applied") {
 				t.Fatalf("expected duplicate mutation to return already_applied, got %s", lastToolContent)
 			}
-			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"summary":"已创建 dedupe.txt。","changed_paths":["dedupe.txt"]}`)
+			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建 dedupe.txt。","changed_paths":["dedupe.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
 		}
@@ -1651,7 +1698,7 @@ func TestGenerateReplyOpenAIFallsBackToNonStreamWhenFinalStreamBreaks(t *testing
 			if payload["stream"] != false {
 				t.Fatalf("expected same-turn fallback to disable stream, got %#v", payload["stream"])
 			}
-			writeOpenAIToolCall(t, w, "done_after_fallback", "attempt_completion", `{"summary":"已通过非流式降级完成。","changed_paths":["verified-stream-fallback.txt"]}`)
+			writeOpenAIToolCall(t, w, "done_after_fallback", "attempt_completion", `{"result":"已通过非流式降级完成。","changed_paths":["verified-stream-fallback.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", requestCount.Load())
 		}
@@ -1875,7 +1922,7 @@ func TestGenerateReplyCheckpointResumeAfterTransientProviderError(t *testing.T) 
 									"type": "function",
 									"function": map[string]any{
 										"name":      "attempt_completion",
-										"arguments": `{"summary":"已从断点继续并完成。","notes":"没有重复读取已成功的文件。"}`,
+										"arguments": `{"result":"已从断点继续并完成。","notes":"没有重复读取已成功的文件。"}`,
 									},
 								},
 							},
@@ -2032,7 +2079,7 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 			if !strings.Contains(string(raw), "上一轮模型供应商连接中断") {
 				t.Fatalf("expected checkpoint recovery reminder in request %d: %s", requestCount.Load(), string(raw))
 			}
-			writeOpenAIToolCall(t, w, "done_after_resume", "attempt_completion", `{"summary":"已从断点继续并完成。"}`)
+			writeOpenAIToolCall(t, w, "done_after_resume", "attempt_completion", `{"result":"已从断点继续并完成。"}`)
 		default:
 			t.Fatalf("unexpected request count: %d", requestCount.Load())
 		}
@@ -2078,7 +2125,7 @@ func TestReadWorkspaceTextDoesNotEmitWorkspaceChanged(t *testing.T) {
 		case 1:
 			writeOpenAIToolCall(t, w, "call_read_1", "read_workspace_text", `{"path":"draft.txt"}`)
 		case 2:
-			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"summary":"已读取 draft.txt。"}`)
+			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已读取 draft.txt。"}`)
 		default:
 			t.Fatalf("unexpected request count")
 		}
@@ -2301,7 +2348,7 @@ func TestGenerateReplyAnthropicFallsBackToNonStreamWhenFinalStreamBreaks(t *test
 					"id":   "done_after_fallback",
 					"name": "attempt_completion",
 					"input": map[string]any{
-						"summary":       "已通过非流式降级完成。",
+						"result":        "已通过非流式降级完成。",
 						"changed_paths": []string{"anthropic-verified-stream-fallback.txt"},
 					},
 				}},
@@ -2375,7 +2422,7 @@ func TestGenerateReplyRecordsProvider400ToolRequestSummary(t *testing.T) {
 			t.Fatalf("expected stream=true on provider request, got %#v", payload["stream"])
 		}
 		if payload["tool_choice"] != "required" {
-			t.Fatalf("expected required tool_choice, got %#v", payload["tool_choice"])
+			t.Fatalf("expected required tool_choice for explicit workspace-file tool loop, got %#v", payload["tool_choice"])
 		}
 		names := openAIToolNamesFromPayload(t, payload)
 		if !names["attempt_completion"] || !names["ask_followup_question"] {
@@ -2387,8 +2434,8 @@ func TestGenerateReplyRecordsProvider400ToolRequestSummary(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看当前文件")
-	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "current_file", Path: "demo.txt"}}, RunOptions{UserID: testUserID})
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看引用文件")
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "workspace_file", Path: "demo.txt"}}, RunOptions{UserID: testUserID})
 	if err == nil {
 		t.Fatal("expected GenerateReply error")
 	}
@@ -2573,7 +2620,7 @@ func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any)
 	content, _ := first["content"].(string)
 	for _, fragment := range []string{
 		"标准 Agent Loop",
-		"最后调用 attempt_completion",
+		"工具工作完成后，可以用普通 assistant 正文交付最终结果",
 		"find_workspace_files 按名称/路径/glob 找文件",
 		"save_workspace_file 创建或整文件覆盖文本文件",
 		"run_workspace_command 在 workspace 内运行命令",
@@ -2664,6 +2711,13 @@ func assertOpenAIToolChoiceRequired(t *testing.T, payload map[string]any) {
 	t.Helper()
 	if payload["tool_choice"] != "required" {
 		t.Fatalf("expected tool_choice=required, got %#v", payload["tool_choice"])
+	}
+}
+
+func assertOpenAIToolChoiceAuto(t *testing.T, payload map[string]any) {
+	t.Helper()
+	if payload["tool_choice"] != "auto" {
+		t.Fatalf("expected tool_choice=auto, got %#v", payload["tool_choice"])
 	}
 }
 

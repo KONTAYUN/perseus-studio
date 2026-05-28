@@ -46,6 +46,12 @@ func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn
 		emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
 		return Reply{Content: content, ToolEvents: r.events}, true, nil
 	}
+	if content != "" && r.readyForTextCompletion() {
+		r.completedContent = content
+		r.finalizeActiveAssistantMessage(content)
+		emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
+		return Reply{Content: content, ToolEvents: r.events}, true, nil
+	}
 	r.invalidTurns++
 	if content == "" {
 		r.service.recordProviderDiagnostic(ctx, r.opts, r.provider, r.conversationID, r.messageID, "provider_empty_response", "warn", 0, fmt.Errorf("empty model response"))

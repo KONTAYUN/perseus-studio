@@ -28,10 +28,11 @@ type openAIStreamChunk struct {
 }
 
 type openAIStreamToolBuilder struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments strings.Builder
+	ID               string
+	Type             string
+	Name             string
+	Arguments        strings.Builder
+	CompletionResult partialJSONFieldStreamer
 }
 
 type partialStreamTurnError struct {
@@ -71,8 +72,9 @@ type streamDeltaEmitter struct {
 }
 
 type providerStreamParseOptions struct {
-	EmitText            func(string)
-	RevealTextAfterTool bool
+	EmitText                  func(string)
+	EmitCompletionResultDelta func(string)
+	RevealTextAfterTool       bool
 }
 
 type toolGatedStreamDeltaEmitter struct {
@@ -162,9 +164,18 @@ func (e *toolGatedStreamDeltaEmitter) Flush() {
 func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOptions) (agentModelTurn, error) {
 	var content strings.Builder
 	deltas := newToolGatedStreamDeltaEmitter(opts)
+	completionDeltas := newStreamDeltaEmitter(opts.EmitCompletionResultDelta)
 	visibleText := newProviderVisibleTextFilter()
 	toolBuilders := map[int]*openAIStreamToolBuilder{}
 	finishReason := ""
+	completionResultStreamed := false
+	emitCompletionResult := func(text string) {
+		if text == "" || opts.EmitCompletionResultDelta == nil {
+			return
+		}
+		completionResultStreamed = true
+		completionDeltas.Add(text)
+	}
 	err := readSSEEvents(body, func(event sseEvent) error {
 		data := strings.TrimSpace(event.Data)
 		if data == "" || data == "[DONE]" {
@@ -200,20 +211,27 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 				if item.Function.Arguments != "" {
 					builder.Arguments.WriteString(item.Function.Arguments)
 				}
+				// Cline streams attempt_completion.result while the tool block is
+				// still partial; do the same for native tool-call arguments.
+				builder.CompletionResult.EmitNewDelta(builder.Name, builder.Arguments.String(), emitCompletionResult)
 			}
 		}
 		return nil
 	})
 	closeProviderVisibleText(&content, deltas, visibleText)
 	deltas.Flush()
+	completionDeltas.Flush()
 	if err != nil {
 		turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)
+		turn.CompletionResultStreamed = completionResultStreamed
 		if hasCompleteToolCalls(turn) {
 			return agentModelTurn{}, &partialStreamTurnError{turn: turn, err: err}
 		}
 		return agentModelTurn{}, err
 	}
-	return buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders), nil
+	turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)
+	turn.CompletionResultStreamed = completionResultStreamed
+	return turn, nil
 }
 
 func buildOpenAIStreamTurn(content string, finishReason string, toolBuilders map[int]*openAIStreamToolBuilder) agentModelTurn {

@@ -51,3 +51,46 @@ func (b *assistantSegmentBuffer) Flush(finalContent string) {
 	}
 	b.current.Reset()
 }
+
+func splitAssistantDelta(text string, maxRunes int) []string {
+	if text == "" {
+		return nil
+	}
+	if maxRunes <= 0 {
+		maxRunes = 512
+	}
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return []string{text}
+	}
+	chunks := make([]string, 0, (len(runes)/maxRunes)+1)
+	for start := 0; start < len(runes); start += maxRunes {
+		end := start + maxRunes
+		if end > len(runes) {
+			end = len(runes)
+		}
+		chunks = append(chunks, string(runes[start:end]))
+	}
+	return chunks
+}
+
+func missingAssistantFinalDelta(currentContent string, finalContent string) string {
+	finalContent = strings.TrimSpace(finalContent)
+	if finalContent == "" {
+		return ""
+	}
+	if strings.TrimSpace(currentContent) == finalContent {
+		return ""
+	}
+	if currentContent == "" {
+		return finalContent
+	}
+	if strings.HasPrefix(finalContent, currentContent) {
+		return finalContent[len(currentContent):]
+	}
+	trimmedCurrent := strings.TrimSpace(currentContent)
+	if trimmedCurrent != "" && strings.HasPrefix(finalContent, trimmedCurrent) {
+		return finalContent[len(trimmedCurrent):]
+	}
+	return ""
+}

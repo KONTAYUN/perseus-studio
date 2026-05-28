@@ -11,6 +11,7 @@ export default function ComposerInput({
   attachmentInputRef,
   inputRef,
   isSkillMenuOpen,
+  panelId,
   setIsSkillMenuOpen,
   submitChatMessage,
   isSendDisabled,
@@ -91,6 +92,8 @@ export default function ComposerInput({
         hasDraft={!!ide.chatInput.trim()}
         onSend={submitChatMessage}
         onStop={ide.stopChatGeneration}
+        ide={ide}
+        panelId={panelId}
       />
     </div>
   );

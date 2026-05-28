@@ -21,7 +21,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		s.unregisterRunCancel(runID)
 	}()
 	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunRunning, "calling_model", store.UpdateAgentRunInput{SetStartedAt: true}); err != nil {
-		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, time.Now())
 		return
 	}
 	eventCtx := ctx
@@ -37,7 +37,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		Level:          "info",
 		Payload:        map[string]any{"message": "run started"},
 	}); err != nil {
-		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, time.Now())
 		return
 	}
 
@@ -114,6 +114,8 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 	var activeAssistantSegment int
 	var activeAssistantContent strings.Builder
 	var latestAssistantMessage store.Message
+	var completionPreviewMessageID string
+	var completionPreviewSegment int
 
 	startActiveAssistantMessage := func() {
 		if getPersistenceErr() != nil {
@@ -188,13 +190,23 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		})
 	}
 
+	appendActiveAssistantDeltaChunks := func(delta string) {
+		replayAssistantDeltaChunks(ctx, delta, appendActiveAssistantDelta)
+	}
+
+	streamMissingAssistantFinalContent := func(finalContent string) {
+		finalContent = strings.TrimSpace(finalContent)
+		if finalContent == "" {
+			return
+		}
+		appendActiveAssistantDeltaChunks(missingAssistantFinalDelta(activeAssistantContent.String(), finalContent))
+	}
+
 	finalizeActiveAssistantMessage := func(finalContent string) {
 		if getPersistenceErr() != nil {
 			return
 		}
-		if activeAssistantMessageID == "" && strings.TrimSpace(finalContent) != "" {
-			appendActiveAssistantDelta(finalContent)
-		}
+		streamMissingAssistantFinalContent(finalContent)
 		if activeAssistantMessageID == "" {
 			return
 		}
@@ -226,9 +238,57 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		activeAssistantContent.Reset()
 	}
 
+	appendCompletionResultDelta := func(delta string) {
+		if getPersistenceErr() != nil {
+			return
+		}
+		if delta == "" {
+			return
+		}
+		if activeAssistantMessageID == "" {
+			startActiveAssistantMessage()
+			completionPreviewMessageID = activeAssistantMessageID
+			completionPreviewSegment = activeAssistantSegment
+		}
+		appendActiveAssistantDeltaChunks(delta)
+	}
+
+	discardCompletionResultPreview := func() {
+		if getPersistenceErr() != nil || completionPreviewMessageID == "" {
+			return
+		}
+		messageID := completionPreviewMessageID
+		segmentIndex := completionPreviewSegment
+		completionPreviewMessageID = ""
+		completionPreviewSegment = 0
+		if activeAssistantMessageID == messageID {
+			activeAssistantMessageID = ""
+			activeAssistantContent.Reset()
+		}
+		if err := s.conversations.DeleteMessage(ctx, userID, conversationID, messageID); err != nil {
+			log.Printf("[ai] completion preview discard failed conversation=%s run=%s message=%s error=%v", conversationID, runID, messageID, err)
+			recordPersistenceErr("completion_preview_discard_failed", err)
+			return
+		}
+		log.Printf("[ai] completion preview discarded conversation=%s run=%s message=%s", conversationID, runID, messageID)
+		safeAppendEvent("append_completion_preview_discarded_event", ctx, store.AgentEventInput{
+			RunID:          runID,
+			UserID:         userID,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Type:           "assistant_message_discarded",
+			Level:          "info",
+			Payload: map[string]any{
+				"message_id":    messageID,
+				"segment_index": segmentIndex,
+				"reason":        "completion_rejected",
+			},
+		})
+	}
+
 	items, err := s.conversations.ListMessages(ctx, userID, conversationID)
 	if err != nil {
-		s.failConversationRun(ctx, userID, conversationID, userMessageID, runID, err)
+		s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
 	reply, err := s.ai.GenerateReply(ctx, conversationID, userMessageID, modelProviderID, items, attachmentPayloads, ai.RunOptions{
@@ -239,9 +299,11 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		Log:          logEvent,
 		Event: func(eventType, level string, payload map[string]any) {
 			if eventType == "model_delta" {
-				appendActiveAssistantDelta(eventPayloadString(payload, "text"))
+				appendActiveAssistantDeltaChunks(eventPayloadString(payload, "text"))
 			} else if eventType == "model_message_completed" {
 				finalizeActiveAssistantMessage(eventPayloadString(payload, "content"))
+				completionPreviewMessageID = ""
+				completionPreviewSegment = 0
 			}
 			if getPersistenceErr() != nil {
 				return
@@ -271,15 +333,20 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			})
 		},
 		OnAssistantToolBoundary: func() {
+			if activeAssistantMessageID != "" && activeAssistantMessageID == completionPreviewMessageID {
+				return
+			}
 			finalizeActiveAssistantMessage("")
 		},
+		OnCompletionResultDelta:   appendCompletionResultDelta,
+		OnCompletionResultDiscard: discardCompletionResultPreview,
 	})
 	if err != nil {
-		s.failConversationRun(ctx, userID, conversationID, userMessageID, runID, err)
+		s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
 	if err := getPersistenceErr(); err != nil {
-		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
 
@@ -294,7 +361,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			rawToolEvents, _ := json.Marshal(reply.ToolEvents)
 			updated, updateErr := s.conversations.UpdateMessageAttachments(ctx, userID, latestAssistantMessage.ID, string(rawToolEvents))
 			if updateErr != nil {
-				s.failConversationRun(ctx, userID, conversationID, userMessageID, runID, updateErr)
+				s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, updateErr, runStartedAt)
 				return
 			}
 			latestAssistantMessage = updated
@@ -311,7 +378,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 					"tool_events":       reply.ToolEvents,
 				},
 			}); err != nil {
-				s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+				s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 				return
 			}
 		}
@@ -323,12 +390,12 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			assistantAttachments = string(rawToolEvents)
 		}
 		if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunRunning, "saving_message", store.UpdateAgentRunInput{}); err != nil {
-			s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 			return
 		}
 		assistantMessage, err = s.conversations.AppendMessage(ctx, userID, conversationID, "assistant", reply.Content, assistantAttachments)
 		if err != nil {
-			s.failConversationRun(ctx, userID, conversationID, userMessageID, runID, err)
+			s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 			return
 		}
 		if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
@@ -344,25 +411,25 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 				"tool_events":       reply.ToolEvents,
 			},
 		}); err != nil {
-			s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 			return
 		}
 	}
 	if reply.IncompleteReason == ai.IncompleteReasonBudgetExhausted {
 		if err := s.completeConversationRunWithBudgetExhaustion(ctx, userID, conversationID, userMessageID, runID, assistantMessage, reply); err != nil {
-			s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 		}
 		return
 	}
 	if err := s.ai.ClearRunCheckpoints(ctx, ai.RunOptions{UserID: userID, RunID: runID}); err != nil {
-		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
 	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunSucceeded, "completed", store.UpdateAgentRunInput{
 		AssistantMessageID: assistantMessage.ID,
 		SetCompletedAt:     true,
 	}); err != nil {
-		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
 	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
@@ -374,7 +441,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		Level:          "info",
 		Payload:        map[string]any{"message": "run completed"},
 	}); err != nil {
-		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, Ban, CheckCircle, KeyRound, Plus, ShieldCheck, Trash2, Users } from 'lucide-react';
+import { ArrowLeft, Ban, CheckCircle, KeyRound, Plus, ShieldCheck, Trash2, UserCheck, Users } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../../api/client';
 import {
   Badge,
@@ -23,6 +23,7 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [allowRegistration, setAllowRegistration] = React.useState(true);
+  const [defaultUserRole, setDefaultUserRole] = React.useState('pending');
   const [createForm, setCreateForm] = React.useState({ username: '', password: '', role: 'user' });
   const [isCreating, setIsCreating] = React.useState(false);
   const [resetPasswordId, setResetPasswordId] = React.useState('');
@@ -36,6 +37,7 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
       ]);
       setUsers(usersData.items || []);
       setAllowRegistration(settingsData.allow_registration);
+      setDefaultUserRole(settingsData.default_user_role || 'pending');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -61,9 +63,9 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
     }
   }
 
-  async function handleToggleRole(user) {
-    const newRole = user.role === 'admin' ? 'user' : 'admin';
-    const action = newRole === 'user' ? '降级为普通用户' : '提升为管理员';
+  async function handleChangeRole(user, newRole) {
+    if (!newRole || newRole === user.role) return;
+    const action = roleActionLabel(newRole);
     const ok = await dialog?.confirm?.({
       title: '变更用户角色',
       message: `确认将 ${user.username} ${action}？角色变更后该用户需要重新登录。`,
@@ -77,6 +79,11 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  async function handleToggleRole(user) {
+    const newRole = user.role === 'admin' ? 'user' : 'admin';
+    await handleChangeRole(user, newRole);
   }
 
   async function handleToggleDisabled(user) {
@@ -137,6 +144,17 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
     }
   }
 
+  async function handleDefaultRoleChange(role) {
+    setError('');
+    try {
+      const settings = await apiPatch('/api/admin/settings', { default_user_role: role });
+      setDefaultUserRole(settings.default_user_role || role);
+      setAllowRegistration(settings.allow_registration);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   const isSelf = (user) => user.id === currentUser?.id;
 
   if (loading) {
@@ -167,18 +185,32 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
         </div>
       )}
 
-      <div className="settings-card mb-5 flex items-center justify-between rounded-2xl border border-gray-100 bg-white/80 p-4 dark:border-white/10 dark:bg-[#2C2C2E]/75">
-        <div>
-          <div className="text-sm font-bold text-gray-800 dark:text-gray-100">允许新用户注册</div>
-          <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            {allowRegistration ? '任何人可在登录页注册新账号' : '仅管理员可创建新用户'}
+      <div className="settings-card mb-5 space-y-4 rounded-2xl border border-gray-100 bg-white/80 p-4 dark:border-white/10 dark:bg-[#2C2C2E]/75">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-sm font-bold text-gray-800 dark:text-gray-100">允许新用户注册</div>
+            <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              {allowRegistration ? '任何人可在登录页注册新账号' : '仅管理员可创建新用户'}
+            </div>
           </div>
+          <Switch
+            checked={allowRegistration}
+            onChange={handleToggleRegistration}
+            title={allowRegistration ? '关闭注册' : '开启注册'}
+          />
         </div>
-        <Switch
-          checked={allowRegistration}
-          onChange={handleToggleRegistration}
-          title={allowRegistration ? '关闭注册' : '开启注册'}
-        />
+        <div className="border-t border-gray-100 pt-4 dark:border-white/10">
+          <Field label="新用户默认角色">
+            <Select
+              value={defaultUserRole}
+              onChange={(e) => handleDefaultRoleChange(e.target.value)}
+            >
+              <option value="pending">待激活</option>
+              <option value="user">用户</option>
+              <option value="admin">管理员</option>
+            </Select>
+          </Field>
+        </div>
       </div>
 
       <div className="mb-3 text-xs font-bold text-gray-500 dark:text-gray-400">
@@ -194,7 +226,7 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
                   <span className="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">
                     {user.username}
                   </span>
-                  <Badge tone={user.role === 'admin' ? 'blue' : 'gray'}>{user.role}</Badge>
+                  <Badge tone={roleTone(user.role)}>{roleLabel(user.role)}</Badge>
                   {user.disabled ? <Badge tone="red">已禁用</Badge> : null}
                   {isSelf(user) && <Badge tone="green">当前</Badge>}
                 </div>
@@ -234,11 +266,18 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
               </div>
               <CardActions>
                 <IconButton
-                  title={user.role === 'admin' ? '降级为 user' : '提升为 admin'}
+                  title={user.role === 'admin' ? '降级为用户' : '提升为管理员'}
                   onClick={() => handleToggleRole(user)}
                   disabled={isSelf(user)}
                 >
                   <ShieldCheck size={15} />
+                </IconButton>
+                <IconButton
+                  title={user.role === 'pending' ? '激活为用户' : '设为待激活'}
+                  onClick={() => handleChangeRole(user, user.role === 'pending' ? 'user' : 'pending')}
+                  disabled={isSelf(user)}
+                >
+                  <UserCheck size={15} />
                 </IconButton>
                 <IconButton
                   title={user.disabled ? '启用用户' : '禁用用户'}
@@ -292,8 +331,9 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
                 value={createForm.role}
                 onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value }))}
               >
-                <option value="user">user</option>
-                <option value="admin">admin</option>
+                <option value="pending">待激活</option>
+                <option value="user">用户</option>
+                <option value="admin">管理员</option>
               </Select>
             </Field>
             <Button
@@ -310,4 +350,22 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
       </div>
     </SettingsSection>
   );
+}
+
+function roleLabel(role) {
+  if (role === 'admin') return '管理员';
+  if (role === 'pending') return '待激活';
+  return '用户';
+}
+
+function roleTone(role) {
+  if (role === 'admin') return 'blue';
+  if (role === 'pending') return 'yellow';
+  return 'gray';
+}
+
+function roleActionLabel(role) {
+  if (role === 'admin') return '提升为管理员';
+  if (role === 'pending') return '设为待激活';
+  return '激活为用户';
 }

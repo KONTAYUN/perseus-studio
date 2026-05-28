@@ -2,7 +2,6 @@ import React from 'react';
 import { Home, PanelTop, Plus } from 'lucide-react';
 import ContextUsageBadge from './ContextUsageBadge';
 import ConversationMenu from './ConversationMenu';
-import ModelMenu from './ModelMenu';
 
 export default function ChatPanelHeader({ ide, onRenameConversation, panelId }) {
   return (
@@ -24,7 +23,6 @@ export default function ChatPanelHeader({ ide, onRenameConversation, panelId }) 
       </div>
 
       <div className="flex min-w-0 justify-center">
-        <ModelMenu ide={ide} panelId={panelId} />
       </div>
 
       <div className="flex min-w-0 items-center justify-end gap-1">

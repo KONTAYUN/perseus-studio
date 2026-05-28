@@ -10,6 +10,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const (
+	UserRolePending = "pending"
+	UserRoleUser    = "user"
+	UserRoleAdmin   = "admin"
+)
+
 type User struct {
 	ID           string    `json:"id"`
 	Username     string    `json:"username"`
@@ -58,7 +64,7 @@ func (s *UserStore) CountUsers(ctx context.Context) (int, error) {
 
 func (s *UserStore) CountAdmins(ctx context.Context) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0`).Scan(&count)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = ? AND disabled = 0`, UserRoleAdmin).Scan(&count)
 	return count, err
 }
 
@@ -70,8 +76,8 @@ func (s *UserStore) CreateUser(ctx context.Context, username, password, role str
 	if password == "" {
 		return User{}, fmt.Errorf("password is required")
 	}
-	if role != "admin" && role != "user" {
-		return User{}, fmt.Errorf("role must be admin or user")
+	if !IsValidUserRole(role) {
+		return User{}, fmt.Errorf("role must be pending, user or admin")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -99,6 +105,9 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 	}
 	if user.Disabled {
 		return User{}, fmt.Errorf("account is disabled")
+	}
+	if user.Role == UserRolePending {
+		return User{}, fmt.Errorf("account is pending approval")
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return User{}, fmt.Errorf("invalid username or password")
@@ -140,10 +149,10 @@ FROM users ORDER BY created_at ASC`)
 }
 
 func (s *UserStore) UpdateRole(ctx context.Context, id, role string) error {
-	if role != "admin" && role != "user" {
-		return fmt.Errorf("role must be admin or user")
+	if !IsValidUserRole(role) {
+		return fmt.Errorf("role must be pending, user or admin")
 	}
-	if role == "user" {
+	if role != UserRoleAdmin {
 		if err := s.ensureNotLastAdmin(ctx, id); err != nil {
 			return err
 		}
@@ -250,12 +259,42 @@ func (s *UserStore) SetRegistrationAllowed(ctx context.Context, allowed bool) er
 	return s.SetSetting(ctx, "allow_registration", v)
 }
 
+func (s *UserStore) DefaultUserRole(ctx context.Context) (string, error) {
+	val, err := s.GetSetting(ctx, "default_user_role")
+	if err != nil {
+		return "", err
+	}
+	if val == "" {
+		return UserRolePending, nil
+	}
+	if !IsValidUserRole(val) {
+		return UserRolePending, nil
+	}
+	return val, nil
+}
+
+func (s *UserStore) SetDefaultUserRole(ctx context.Context, role string) error {
+	if !IsValidUserRole(role) {
+		return fmt.Errorf("role must be pending, user or admin")
+	}
+	return s.SetSetting(ctx, "default_user_role", role)
+}
+
+func IsValidUserRole(role string) bool {
+	switch role {
+	case UserRolePending, UserRoleUser, UserRoleAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *UserStore) ensureNotLastAdmin(ctx context.Context, id string) error {
 	user, err := s.GetUser(ctx, id)
 	if err != nil {
 		return err
 	}
-	if user.Role != "admin" {
+	if user.Role != UserRoleAdmin {
 		return nil
 	}
 	count, err := s.CountAdmins(ctx)

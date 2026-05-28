@@ -116,6 +116,8 @@ type RunOptions struct {
 	OnAssistantMessageDelta     func(messageID string, delta string)
 	OnAssistantMessageCompleted func(messageID string, finalContent string, segmentIndex int)
 	OnAssistantToolBoundary     func()
+	OnCompletionResultDelta     func(delta string)
+	OnCompletionResultDiscard   func()
 	OnProviderAttempt           func()
 }
 

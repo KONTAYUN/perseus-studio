@@ -191,6 +191,80 @@ test('conversation snapshot merge accepts terminal snapshots after stream state 
   assert.equal(merged[0].pending, false);
 });
 
+test('conversation snapshot merge does not reorder active local run state by timestamp', () => {
+  const merged = mergeConversationSnapshotPreservingActive([
+    {
+      id: 'u1',
+      role: 'user',
+      content: '第一轮',
+      created_at: '2026-05-21T00:00:00Z',
+    },
+    {
+      id: 'run_error_run-1',
+      role: 'assistant',
+      content: '上一轮失败',
+      error: true,
+      resumableRunId: 'run-1',
+      created_at: '2026-05-21T00:00:05Z',
+    },
+    {
+      id: 'u2',
+      role: 'user',
+      content: '第二轮',
+      created_at: '2026-05-21T00:00:01Z',
+    },
+  ], [
+    {
+      id: 'u1',
+      role: 'user',
+      content: '第一轮',
+      created_at: '2026-05-21T00:00:00Z',
+    },
+    {
+      id: 'u2',
+      role: 'user',
+      content: '第二轮',
+      created_at: '2026-05-21T00:00:01Z',
+    },
+  ]);
+
+  assert.deepEqual(merged.map((item) => item.id), ['u1', 'run_error_run-1', 'u2']);
+});
+
+test('conversation snapshot merge appends new snapshot messages without timestamp resorting', () => {
+  const merged = mergeConversationSnapshotPreservingActive([
+    {
+      id: 'u1',
+      role: 'user',
+      content: '第一轮',
+      created_at: '2026-05-21T00:00:00Z',
+    },
+    {
+      id: 'run_error_run-1',
+      role: 'assistant',
+      content: '上一轮失败',
+      error: true,
+      resumableRunId: 'run-1',
+      created_at: '2026-05-21T00:00:05Z',
+    },
+  ], [
+    {
+      id: 'u1',
+      role: 'user',
+      content: '第一轮',
+      created_at: '2026-05-21T00:00:00Z',
+    },
+    {
+      id: 'u2',
+      role: 'user',
+      content: '第二轮',
+      created_at: '2026-05-21T00:00:01Z',
+    },
+  ]);
+
+  assert.deepEqual(merged.map((item) => item.id), ['u1', 'run_error_run-1', 'u2']);
+});
+
 test('committed user message anchors the assistant run shell after branch reloads', () => {
   const merged = mergeCommittedRunStart(
     [
