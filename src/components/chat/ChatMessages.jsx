@@ -7,11 +7,13 @@ import { RUN_STEER_STATUS, runSteerStatusLabel } from '../../hooks/chatSteerItem
 const STEER_FAILURE_BUTTON_CLASS = 'border-white/20 bg-white/10 text-blue-50 hover:bg-white/15 hover:text-white dark:border-white/15 dark:bg-white/10';
 
 export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBottomInset }) {
+  const isHomeEmpty = !ide.currentConversationId && ide.conversationMessages.length === 0 && !ide.chatError && !ide.agentRecoveryNotice?.text;
+  const bottomInset = isHomeEmpty ? 0 : messagesBottomInset;
   return (
     <div
       ref={messagesRef}
       className="chat-messages-scroll relative z-10 flex-1 space-y-1 overflow-y-auto overflow-x-hidden bg-gradient-to-b from-transparent to-gray-50/30 p-4 dark:to-black/10 custom-scrollbar scrollbar-rounded-clip"
-      style={{ paddingBottom: `${messagesBottomInset}px` }}
+      style={{ paddingBottom: `${bottomInset}px` }}
     >
       {ide.chatError && (
         <div className="chat-error-card min-w-0 max-w-full overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
@@ -66,11 +68,13 @@ export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBott
           />
         ))
       )}
-      <div
-        ref={bottomRef}
-        className="h-px"
-        style={{ scrollMarginBottom: `${messagesBottomInset}px` }}
-      />
+      {!isHomeEmpty && (
+        <div
+          ref={bottomRef}
+          className="h-px"
+          style={{ scrollMarginBottom: `${bottomInset}px` }}
+        />
+      )}
     </div>
   );
 }
@@ -366,7 +370,7 @@ function EmptyChatState({ ide }) {
   const recentConversations = ide.conversations.slice(0, 4);
 
   return (
-    <div className="flex min-h-[360px] h-full items-center justify-center px-2">
+    <div className="flex h-full items-center justify-center px-2 pb-28">
       <div className="empty-chat-card w-full max-w-md rounded-3xl border border-gray-100 bg-white/72 p-5 text-center backdrop-blur-xl dark:border-white/10 dark:bg-[#252527]/72">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-500 dark:bg-blue-500/15 dark:text-blue-300">
           <MessageSquare size={22} />
@@ -432,18 +436,5 @@ function EmptyChatState({ ide }) {
         )}
       </div>
     </div>
-  );
-}
-
-function TypingIndicator({ text }) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span>{text}</span>
-      <span className="inline-flex gap-1">
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" />
-      </span>
-    </span>
   );
 }

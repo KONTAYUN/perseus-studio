@@ -1,6 +1,6 @@
 /* Chat composer */
 .composer-shell {
-  border-radius: var(--radius-composer);
+  border-radius: var(--radius-panel);
   padding: 8px 7px 7px 14px;
   transition:
     border-color 460ms var(--ease-apple),
