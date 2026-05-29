@@ -19,6 +19,9 @@ export default function ChatPanelHeader({ ide, onRenameConversation, panelId }) 
         <ContextUsageBadge
           usage={ide.contextUsage}
           notice={ide.contextCompactionNotice}
+          canCompact={Boolean(ide.currentConversationId)}
+          compactDisabled={Boolean(ide.isChatSending)}
+          onCompact={() => ide.compactCurrentConversation?.('')}
         />
       </div>
 

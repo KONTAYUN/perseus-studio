@@ -1,5 +1,5 @@
 import React from 'react';
-import { Archive, ChevronDown, History, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, History, Pencil, Trash2 } from 'lucide-react';
 import { formatDate } from '../chatUtils';
 import { AnchoredPopover, Button } from '../../ui';
 
@@ -44,44 +44,29 @@ export default function ConversationMenu({ ide, onRenameConversation, variant = 
       >
         {({ position }) => (
           <>
-            <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5 dark:border-white/10">
-              <div>
+            <div className="flex min-w-0 items-start justify-between gap-3 border-b border-gray-100 px-3 py-2.5 dark:border-white/10">
+              <div className="min-w-0">
                 <div className="text-sm font-bold text-gray-800 dark:text-gray-100">历史会话</div>
-                <div className="text-[11px] text-gray-400">
+                <div className="truncate text-[11px] text-gray-400">
                   {currentConversation?.title || '当前没有选中会话'}
                 </div>
               </div>
               <Button
                 type="button"
+                data-testid="conversation-menu-create-button"
                 onClick={(e) => {
                   e.stopPropagation();
                   ide.createNewConversation();
                 }}
                 size="xs"
+                className="shrink-0 whitespace-nowrap"
               >
                 新建
               </Button>
             </div>
-            {ide.currentConversationId && (
-              <div className="border-b border-gray-100 p-1.5 dark:border-white/10">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    ide.compactCurrentConversation?.('');
-                    ide.setIsConversationMenuOpen(false);
-                  }}
-                  disabled={ide.isChatSending}
-                  className="motion-row flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200 dark:hover:bg-blue-500/15 dark:hover:text-blue-200"
-                >
-                  <Archive size={14} className="shrink-0" />
-                  <span className="min-w-0 flex-1">压缩上下文</span>
-                </button>
-              </div>
-            )}
             <div
               className="overflow-y-auto p-1.5 custom-scrollbar scrollbar-rounded-clip"
-              style={{ maxHeight: Math.max(160, position.maxHeight - (ide.currentConversationId ? 104 : 56)) }}
+              style={{ maxHeight: Math.max(160, position.maxHeight - 56) }}
             >
               {ide.conversations.length === 0 ? (
                 <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
