@@ -444,4 +444,5 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
+	s.maybeGenerateConversationTitleAsync(userID, userRole, conversationID, userMessageID, assistantMessage.ID, modelProviderID, content, assistantMessage.Content, runID)
 }

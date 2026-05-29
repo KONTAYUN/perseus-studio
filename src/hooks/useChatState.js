@@ -267,6 +267,7 @@ export default function useChatState({
         setContextCompactionNotice,
         setContextUsage,
         setConversationMessages,
+        setConversations,
         setRunSteerItems,
         setRunSteerNotice,
         thinkingId,

@@ -82,4 +82,5 @@ func (s *Server) completeConversationRunWithTask(ctx context.Context, userID, us
 		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
 		return
 	}
+	s.maybeGenerateConversationTitleAsync(userID, userRole, conversationID, userMessageID, assistantMessage.ID, modelProviderID, content, assistantMessage.Content, runID)
 }

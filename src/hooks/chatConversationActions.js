@@ -262,7 +262,7 @@ function latestRunRecoveryEventTypes(run) {
   if (!run?.id) return [];
   const steerTypes = ['agent_steer_received', 'agent_steer_applied'];
   if (run.status !== 'running' && run.status !== 'queued') {
-    return steerTypes;
+    return ['conversation_title_updated', ...steerTypes];
   }
   return [
     'assistant_message_started',
@@ -283,6 +283,7 @@ function latestRunRecoveryEventTypes(run) {
     'agent_budget_exhausted',
     'agent_budget_summary_started',
     'agent_budget_summary_failed',
+    'conversation_title_updated',
     'completion_rejected',
     'local_persistence_failed',
     ...steerTypes,

@@ -23,6 +23,11 @@ export default function ChatPanelHeader({ ide, onRenameConversation, panelId }) 
       </div>
 
       <div className="flex min-w-0 justify-center">
+        <ConversationMenu
+          ide={ide}
+          onRenameConversation={onRenameConversation}
+          variant="title"
+        />
       </div>
 
       <div className="flex min-w-0 items-center justify-end gap-1">
@@ -50,7 +55,6 @@ export default function ChatPanelHeader({ ide, onRenameConversation, panelId }) 
         >
           <Plus size={15} />
         </button>
-        <ConversationMenu ide={ide} onRenameConversation={onRenameConversation} />
       </div>
     </div>
   );

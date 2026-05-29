@@ -1,28 +1,40 @@
 import React from 'react';
-import { Archive, History, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Archive, ChevronDown, History, Pencil, Trash2 } from 'lucide-react';
 import { formatDate } from '../chatUtils';
 import { AnchoredPopover, Button } from '../../ui';
 
-export default function ConversationMenu({ ide, onRenameConversation }) {
+export default function ConversationMenu({ ide, onRenameConversation, variant = 'icon' }) {
   const conversationButtonRef = React.useRef(null);
   const currentConversation = ide.conversations.find((item) => item.id === ide.currentConversationId);
+  const isTitleVariant = variant === 'title';
+  const title = currentConversation?.title?.trim() || '新对话';
 
   return (
-    <div className="relative">
+    <div className={isTitleVariant ? 'relative min-w-0 max-w-full' : 'relative'}>
       <button
+        type="button"
         ref={conversationButtonRef}
         data-testid="conversation-history-button"
         onClick={(e) => {
           e.stopPropagation();
           ide.setIsConversationMenuOpen(!ide.isConversationMenuOpen);
         }}
-        className="motion-button ui-icon-button h-8 w-8"
-        title="历史会话"
+        className={isTitleVariant ? 'motion-button chat-conversation-title-anchor' : 'motion-button ui-icon-button h-8 w-8'}
+        title={isTitleVariant ? '打开历史会话' : '历史会话'}
+        aria-label={isTitleVariant ? '打开历史会话' : '历史会话'}
       >
-        <History size={15} />
+        {isTitleVariant ? (
+          <>
+            <span className="chat-conversation-title-text">{title}</span>
+            <ChevronDown size={14} strokeWidth={2} className="chat-conversation-title-chevron" aria-hidden="true" />
+          </>
+        ) : (
+          <History size={15} />
+        )}
       </button>
       <AnchoredPopover
         anchorRef={conversationButtonRef}
+        align={isTitleVariant ? 'center' : 'end'}
         width={320}
         minWidth={260}
         maxHeight={520}

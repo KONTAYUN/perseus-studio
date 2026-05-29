@@ -13,6 +13,7 @@ type Conversation struct {
 	ID                      string    `json:"id"`
 	UserID                  string    `json:"user_id"`
 	Title                   string    `json:"title"`
+	TitleSource             string    `json:"title_source"`
 	SelectedModelProviderID string    `json:"selected_model_provider_id"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
@@ -118,6 +119,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL,
+  title_source TEXT NOT NULL DEFAULT 'default',
   selected_model_provider_id TEXT NOT NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL
@@ -184,6 +186,9 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 	if err := AddColumnIfNotExists(ctx, s.db, "conversations", "summary_text", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := AddColumnIfNotExists(ctx, s.db, "conversations", "title_source", "TEXT NOT NULL DEFAULT 'default'"); err != nil {
+		return err
+	}
 	if err := AddColumnIfNotExists(ctx, s.db, "conversations", "summary_until_message_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -225,7 +230,7 @@ CREATE INDEX IF NOT EXISTS idx_tool_calls_operation_hash ON tool_calls(user_id, 
 
 func (s *ConversationStore) ListConversations(ctx context.Context, userID string) ([]Conversation, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, user_id, title, selected_model_provider_id, created_at, updated_at
+SELECT id, user_id, title, title_source, selected_model_provider_id, created_at, updated_at
 FROM conversations
 WHERE user_id = ?
 ORDER BY updated_at DESC
@@ -250,13 +255,15 @@ func (s *ConversationStore) CreateConversation(ctx context.Context, input Create
 	now := time.Now().UTC()
 	id := nextStoreID("conv", now)
 	title := strings.TrimSpace(input.Title)
+	titleSource := "manual"
 	if title == "" {
 		title = "新对话"
+		titleSource = "default"
 	}
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO conversations (id, user_id, title, selected_model_provider_id, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-`, id, input.UserID, title, input.SelectedModelProviderID, now, now)
+INSERT INTO conversations (id, user_id, title, title_source, selected_model_provider_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`, id, input.UserID, title, titleSource, input.SelectedModelProviderID, now, now)
 	if err != nil {
 		return Conversation{}, err
 	}
@@ -265,7 +272,7 @@ VALUES (?, ?, ?, ?, ?, ?)
 
 func (s *ConversationStore) GetConversation(ctx context.Context, userID, id string) (Conversation, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, user_id, title, selected_model_provider_id, created_at, updated_at
+SELECT id, user_id, title, title_source, selected_model_provider_id, created_at, updated_at
 FROM conversations
 WHERE id = ? AND user_id = ?
 `, id, userID)
@@ -334,9 +341,9 @@ func (s *ConversationStore) BranchConversation(ctx context.Context, userID, conv
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO conversations (id, user_id, title, selected_model_provider_id, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-`, newID, userID, title, source.SelectedModelProviderID, now, now); err != nil {
+INSERT INTO conversations (id, user_id, title, title_source, selected_model_provider_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`, newID, userID, title, "manual", source.SelectedModelProviderID, now, now); err != nil {
 		return Conversation{}, nil, err
 	}
 
@@ -376,8 +383,39 @@ WHERE id = ? AND user_id = ?
 func (s *ConversationStore) UpdateConversationTitle(ctx context.Context, userID, id, title string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE conversations
-SET title = ?
+SET title = ?,
+    title_source = 'manual',
+    updated_at = ?
 WHERE id = ? AND user_id = ?
-`, strings.TrimSpace(title), id, userID)
+`, strings.TrimSpace(title), time.Now().UTC(), id, userID)
 	return err
+}
+
+func (s *ConversationStore) UpdateConversationAutoTitle(ctx context.Context, userID, id, title string) (Conversation, bool, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return Conversation{}, false, nil
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE conversations
+SET title = ?,
+    title_source = 'auto',
+    updated_at = ?
+WHERE id = ? AND user_id = ? AND title_source IN ('', 'default', 'auto')
+`, title, time.Now().UTC(), id, userID)
+	if err != nil {
+		return Conversation{}, false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return Conversation{}, false, err
+	}
+	if rows == 0 {
+		return Conversation{}, false, nil
+	}
+	item, err := s.GetConversation(ctx, userID, id)
+	if err != nil {
+		return Conversation{}, false, err
+	}
+	return item, true, nil
 }

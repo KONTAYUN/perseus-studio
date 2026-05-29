@@ -48,6 +48,7 @@ export async function waitForAgentRunStream({
   setContextCompactionNotice,
   setContextUsage,
   setConversationMessages,
+  setConversations,
   setRunSteerItems,
   setRunSteerNotice,
   thinkingId,
@@ -104,6 +105,12 @@ export async function waitForAgentRunStream({
       await onAssistantToolEvents?.(lastAssistant?.attachments || []);
     } catch (error) {
       console.error('refreshFromLatestAssistantMessage failed', error);
+    }
+  };
+  const refreshConversationsAfterTitleGeneration = async () => {
+    for (const delay of [1000, 3000, 6000, 10000, 15000, 15000]) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay));
+      await loadConversations();
     }
   };
   control.abort = () => {
@@ -173,6 +180,9 @@ export async function waitForAgentRunStream({
   const finish = async () => {
     closeSource();
     await loadConversations();
+    refreshConversationsAfterTitleGeneration().catch((error) => {
+      console.error('refreshConversationsAfterTitleGeneration failed', error);
+    });
     if (fallbackStarted || !sawAssistantCompletion) {
       await refreshFromLatestAssistantMessage();
     }
@@ -305,6 +315,21 @@ export async function waitForAgentRunStream({
         stage: payload.stage || '',
         incompleteReason: payload.incomplete_reason || '',
       });
+    } else if (item?.type === 'conversation_title_updated') {
+      if (payload.conversation) {
+        setConversations?.((current) =>
+          current.map((conversation) =>
+            conversation.id === payload.conversation.id ? { ...conversation, ...payload.conversation } : conversation
+          )
+        );
+      } else if (payload.title) {
+        setConversations?.((current) =>
+          current.map((conversation) =>
+            conversation.id === conversationID ? { ...conversation, title: payload.title } : conversation
+          )
+        );
+      }
+      await loadConversations();
     }
   };
 

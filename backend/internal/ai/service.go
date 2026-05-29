@@ -102,6 +102,10 @@ type Reply struct {
 	Budget           *BudgetExhaustionInfo  `json:"budget,omitempty"`
 }
 
+type ConversationTitleResult struct {
+	Title string `json:"title"`
+}
+
 type RunOptions struct {
 	UserID                      string
 	UserRole                    string

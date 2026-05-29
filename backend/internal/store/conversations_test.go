@@ -180,6 +180,54 @@ func TestConversationSummaryIsUserScopedAndPersistent(t *testing.T) {
 	}
 }
 
+func TestConversationAutoTitleDoesNotOverrideManualTitle(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	store := NewConversationStore(db)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+	conversation, err := store.CreateConversation(ctx, CreateConversationInput{
+		UserID:                  "user-a",
+		SelectedModelProviderID: "model-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation returned error: %v", err)
+	}
+	if conversation.TitleSource != "default" {
+		t.Fatalf("expected default title source, got %q", conversation.TitleSource)
+	}
+	updated, ok, err := store.UpdateConversationAutoTitle(ctx, "user-a", conversation.ID, "项目部署压测")
+	if err != nil {
+		t.Fatalf("UpdateConversationAutoTitle returned error: %v", err)
+	}
+	if !ok || updated.Title != "项目部署压测" || updated.TitleSource != "auto" {
+		t.Fatalf("expected auto title update, ok=%t updated=%#v", ok, updated)
+	}
+	if err := store.UpdateConversationTitle(ctx, "user-a", conversation.ID, "手动标题"); err != nil {
+		t.Fatalf("UpdateConversationTitle returned error: %v", err)
+	}
+	_, ok, err = store.UpdateConversationAutoTitle(ctx, "user-a", conversation.ID, "自动覆盖")
+	if err != nil {
+		t.Fatalf("second UpdateConversationAutoTitle returned error: %v", err)
+	}
+	if ok {
+		t.Fatalf("auto title should not override manual title")
+	}
+	got, err := store.GetConversation(ctx, "user-a", conversation.ID)
+	if err != nil {
+		t.Fatalf("GetConversation returned error: %v", err)
+	}
+	if got.Title != "手动标题" || got.TitleSource != "manual" {
+		t.Fatalf("manual title should remain, got %#v", got)
+	}
+}
+
 func TestAgentRunResumeClearsTerminalStateAndListsEventsAfterSeq(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))

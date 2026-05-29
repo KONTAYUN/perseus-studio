@@ -17,7 +17,10 @@ func firstNonEmptyString(values ...string) string {
 
 func scanConversation(s scanner) (Conversation, error) {
 	var item Conversation
-	err := s.Scan(&item.ID, &item.UserID, &item.Title, &item.SelectedModelProviderID, &item.CreatedAt, &item.UpdatedAt)
+	err := s.Scan(&item.ID, &item.UserID, &item.Title, &item.TitleSource, &item.SelectedModelProviderID, &item.CreatedAt, &item.UpdatedAt)
+	if item.TitleSource == "" {
+		item.TitleSource = "default"
+	}
 	return item, err
 }
 

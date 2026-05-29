@@ -242,13 +242,6 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		if conversation.Title == "" || conversation.Title == "新对话" {
-			title := buildConversationTitle(content)
-			if title != "" {
-				_ = s.conversations.UpdateConversationTitle(r.Context(), user.UserID, conversationID, title)
-			}
-		}
-
 		userMessage, err := s.conversations.AppendMessage(r.Context(), user.UserID, conversationID, "user", strings.TrimSpace(content), string(attachmentsJSON))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -305,16 +298,4 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 	default:
 		http.NotFound(w, r)
 	}
-}
-
-func buildConversationTitle(content string) string {
-	text := strings.TrimSpace(content)
-	if text == "" {
-		return ""
-	}
-	runes := []rune(text)
-	if len(runes) > 20 {
-		return string(runes[:20])
-	}
-	return text
 }
