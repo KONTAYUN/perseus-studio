@@ -1552,6 +1552,51 @@ func TestGenerateReplyOpenAIToolArgumentErrorFeedsBackAndRecovers(t *testing.T) 
 	}
 }
 
+func TestGenerateReplyOpenAIRepeatedEmptySaveArgumentsStopsLoop(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		_, _ = io.ReadAll(r.Body)
+		count := requestCount.Add(1)
+		writeOpenAIToolCall(t, w, fmt.Sprintf("bad_empty_%d", count), "save_workspace_file", `{}`)
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "请创建 loop.txt，内容写 hello")
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err == nil {
+		t.Fatal("expected repeated invalid tool call loop to stop")
+	}
+	if requestCount.Load() != agentMaxConsecutiveToolErrs {
+		t.Fatalf("expected stop after %d invalid tool turns, got %d", agentMaxConsecutiveToolErrs, requestCount.Load())
+	}
+	if _, readErr := env.files.ReadFile("loop.txt"); readErr == nil {
+		t.Fatal("invalid save tool arguments should not create a file")
+	}
+	logs, listErr := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
+	if listErr != nil {
+		t.Fatalf("diagnostics.List returned error: %v", listErr)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected diagnostic logs for invalid tool arguments")
+	}
+	foundInvalidToolArgs := false
+	for _, item := range logs {
+		if item.Stage == "tool_call:save_workspace_file" && strings.Contains(item.RequestSummary, `"failure_class":"tool_invalid_arguments"`) {
+			foundInvalidToolArgs = true
+			if item.Level != "warn" {
+				t.Fatalf("invalid tool arguments should be warn, got %s", item.Level)
+			}
+		}
+	}
+	if !foundInvalidToolArgs {
+		t.Fatalf("expected tool_invalid_arguments diagnostic, got %#v", logs)
+	}
+}
+
 func TestGenerateReplyOpenAIDeduplicatesRepeatedMutationToolCall(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()

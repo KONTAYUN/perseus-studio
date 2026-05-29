@@ -766,6 +766,94 @@ func TestToolDiagnosticClassifiesExpectedToolFailures(t *testing.T) {
 	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"search_provider_not_configured"`) {
 		t.Fatalf("unexpected search diagnostic: %#v", diag)
 	}
+
+	diag = buildToolDiagnostic("save_workspace_file", `{}`, "", 0, fmt.Errorf("invalid tool arguments: mode is required"))
+	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"tool_invalid_arguments"`) {
+		t.Fatalf("unexpected invalid arguments diagnostic: %#v", diag)
+	}
+}
+
+func TestValidateToolCallRejectsMissingRequiredSaveArguments(t *testing.T) {
+	runtime := &agentRuntime{
+		protocol:       agentProtocolOpenAI,
+		loadedToolsets: allAgentToolsets(true),
+	}
+
+	errText := runtime.validateToolCall(agentToolCall{
+		ID:            "call_1",
+		Name:          "save_workspace_file",
+		ArgumentsJSON: `{}`,
+	})
+	if !strings.Contains(errText, "path is required") {
+		t.Fatalf("expected missing path validation error, got %q", errText)
+	}
+}
+
+func TestValidateToolCallRejectsEmptyStreamedArguments(t *testing.T) {
+	runtime := &agentRuntime{
+		protocol:       agentProtocolOpenAI,
+		loadedToolsets: allAgentToolsets(true),
+	}
+
+	errText := runtime.validateToolCall(agentToolCall{
+		ID:            "call_1",
+		Name:          "save_workspace_file",
+		ArgumentsJSON: "",
+	})
+	if !strings.Contains(errText, "tool arguments are required") {
+		t.Fatalf("expected empty arguments validation error, got %q", errText)
+	}
+}
+
+func TestNormalizeToolCallAllowsEmptyArgumentsWhenSchemaHasNoRequiredFields(t *testing.T) {
+	call := agentToolCall{
+		ID:            "call_1",
+		Name:          "list_skills",
+		ArgumentsJSON: "",
+	}
+	runtime := &agentRuntime{
+		protocol:       agentProtocolOpenAI,
+		loadedToolsets: allAgentToolsets(true),
+	}
+
+	if errText := runtime.normalizeAndValidateToolCall(&call); errText != "" {
+		t.Fatalf("expected empty list_skills arguments to be normalized, got %q", errText)
+	}
+	if call.ArgumentsJSON != "{}" {
+		t.Fatalf("expected empty arguments normalized to {}, got %q", call.ArgumentsJSON)
+	}
+}
+
+func TestValidateToolCallRejectsInvalidSaveMode(t *testing.T) {
+	runtime := &agentRuntime{
+		protocol:       agentProtocolOpenAI,
+		loadedToolsets: allAgentToolsets(true),
+	}
+
+	errText := runtime.validateToolCall(agentToolCall{
+		ID:            "call_1",
+		Name:          "save_workspace_file",
+		ArgumentsJSON: `{"path":"demo.txt","content":"x","mode":"append"}`,
+	})
+	if !strings.Contains(errText, "mode must be one of") {
+		t.Fatalf("expected enum validation error, got %q", errText)
+	}
+}
+
+func TestValidateToolCallAllowsEmptySaveContent(t *testing.T) {
+	runtime := &agentRuntime{
+		protocol:       agentProtocolOpenAI,
+		loadedToolsets: allAgentToolsets(true),
+	}
+
+	errText := runtime.validateToolCall(agentToolCall{
+		ID:            "call_1",
+		Name:          "save_workspace_file",
+		ArgumentsJSON: `{"path":"empty.txt","content":"","mode":"create"}`,
+	})
+	if errText != "" {
+		t.Fatalf("empty file content should be valid save arguments, got %q", errText)
+	}
 }
 
 func TestBudgetToolResultForModelTruncatesCommandOutput(t *testing.T) {

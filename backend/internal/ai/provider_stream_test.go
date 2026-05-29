@@ -145,6 +145,25 @@ func TestParseOpenAIStreamReturnsPartialCompleteToolCallOnTransportError(t *test
 	}
 }
 
+func TestParseOpenAIStreamPreservesEmptyToolArgumentsAsInvalid(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"save_workspace_file"}}]},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	turn, err := parseOpenAIStream(strings.NewReader(stream), nil)
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if len(turn.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %#v", turn.ToolCalls)
+	}
+	if turn.ToolCalls[0].ArgumentsJSON != "" {
+		t.Fatalf("empty streamed arguments must stay empty for validation, got %q", turn.ToolCalls[0].ArgumentsJSON)
+	}
+}
+
 func TestParseOpenAIStreamStreamsAttemptCompletionResultFromToolArguments(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"done_1","type":"function","function":{"name":"attempt_completion","arguments":"{\"result\":\"第一段"}}]}}]}`,
@@ -287,6 +306,30 @@ func TestParseAnthropicStreamAccumulatesTextAndToolUse(t *testing.T) {
 	}
 	if len(turn.AnthropicRaw) != 2 {
 		t.Fatalf("expected raw text and tool blocks, got %#v", turn.AnthropicRaw)
+	}
+}
+
+func TestParseAnthropicStreamPreservesEmptyToolArgumentsAsInvalid(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"save_workspace_file","input":{}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	turn, err := parseAnthropicStream(strings.NewReader(stream), nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if len(turn.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %#v", turn.ToolCalls)
+	}
+	if turn.ToolCalls[0].ArgumentsJSON != "" {
+		t.Fatalf("empty streamed arguments must stay empty for validation, got %q", turn.ToolCalls[0].ArgumentsJSON)
 	}
 }
 

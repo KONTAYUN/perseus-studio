@@ -139,6 +139,8 @@ func localRunFailureClass(err error) string {
 	}
 	text := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(text, "工具调用连续失败") || strings.Contains(text, "同一个工具调用连续失败"):
+		return "agent_runtime_tool_error_loop"
 	case strings.Contains(text, "模型没有返回可执行工具调用") || strings.Contains(text, "workspace 任务未执行完成"):
 		return "agent_runtime_no_tool_completion"
 	case strings.Contains(text, "模型没有调用所需的 workspace 变更工具"):

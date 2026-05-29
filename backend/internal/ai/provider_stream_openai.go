@@ -247,9 +247,6 @@ func buildOpenAIStreamTurn(content string, finishReason string, toolBuilders map
 				id = "stream_tool_" + strconv.Itoa(index)
 			}
 			args := strings.TrimSpace(builder.Arguments.String())
-			if args == "" {
-				args = "{}"
-			}
 			turn.ToolCalls = append(turn.ToolCalls, agentToolCall{
 				ID:            id,
 				Name:          builder.Name,

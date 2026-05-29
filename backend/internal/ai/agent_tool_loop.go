@@ -63,6 +63,22 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 				return nil, false, err
 			}
 		}
+		if isError && r.shouldStopAfterToolError() {
+			results := append([]TranscriptToolResult(nil), results...)
+			r.appendToolResults(results)
+			if err := r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint()); err != nil {
+				return nil, false, err
+			}
+			emitToolLifecycleEvent(r.opts, "tool_error_loop_stopped", "error", map[string]any{
+				"reason":                    "too many consecutive tool errors",
+				"consecutive_tool_errors":   r.consecutiveToolErrors,
+				"repeated_tool_error_count": r.repeatedToolErrorCount,
+				"tool_name":                 call.Name,
+				"tool_call_id":              call.ID,
+				"arguments_summary":         summarizeToolArguments(call.ArgumentsJSON),
+			})
+			return nil, false, fmt.Errorf("%s", r.repeatedToolErrorMessage())
+		}
 	}
 	r.appendToolResults(results)
 	if err := r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint()); err != nil {
@@ -100,15 +116,17 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	if call.ID == "" {
 		call.ID = fmt.Sprintf("tool_%d", r.toolCalls)
 	}
-	if errText := r.validateToolCall(call); errText != "" {
-		r.recordToolError()
+	if errText := r.normalizeAndValidateToolCall(&call); errText != "" {
+		r.recordToolError(call.Name, call.ArgumentsJSON, errText)
+		event := r.invalidToolCallEvent(ctx, call, errText)
+		r.events = append(r.events, event)
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
 	}
 	if r.allowTask && call.Name == "start_background_task" {
 		r.requiresCompletion = true
 		request, err := parseBackgroundTaskRequest(call.ArgumentsJSON, lastUserMessageContent(r.messages))
 		if err != nil {
-			r.recordToolError()
+			r.recordToolError(call.Name, call.ArgumentsJSON, err.Error())
 			return r.toolErrorJSON(call.Name, err.Error()), true, nil, false, nil
 		}
 		return "", false, &request, false, nil
@@ -122,7 +140,7 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		return content, isError, nil, completed, nil
 	}
 	if errText := r.validateSelectedReferenceScope(call); errText != "" {
-		r.recordToolError()
+		r.recordToolError(call.Name, call.ArgumentsJSON, errText)
 		emitToolLifecycleEvent(r.opts, "tool_scope_rejected", "warn", map[string]any{
 			"tool_call_id": call.ID,
 			"tool_name":    call.Name,
@@ -183,10 +201,9 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		}
 	}
 	if event.Status == "success" {
-		r.lastToolFailed = false
-		r.consecutiveToolErrors = 0
+		r.clearToolErrors()
 	} else {
-		r.recordToolError()
+		r.recordToolError(call.Name, call.ArgumentsJSON, event.Error)
 	}
 	emitToolLifecycleEvent(r.opts, "tool_result_returned", eventLevel(event.Status), map[string]any{
 		"tool_call_id": call.ID,
@@ -225,24 +242,82 @@ func (r *agentRuntime) alreadyAppliedToolResult(call agentToolCall, previous Too
 	return mustJSON(payload), previous
 }
 
+func (r *agentRuntime) invalidToolCallEvent(ctx context.Context, call agentToolCall, message string) ToolEvent {
+	targetSummary := toolTargetSummary(call.Name, call.ArgumentsJSON)
+	err := invalidToolArgumentsError(message)
+	if r.service != nil {
+		r.service.recordToolDiagnostic(ctx, r.opts, r.conversationID, r.messageID, call.Name, call.ArgumentsJSON, targetSummary, 0, err)
+	}
+	event := ToolEvent{
+		ToolCallID:    call.ID,
+		ToolName:      call.Name,
+		Label:         userFriendlyToolLabel(call.Name),
+		Status:        "failed",
+		TargetSummary: targetSummary,
+		Error:         err.Error(),
+	}
+	if event.Label == "" {
+		event.Label = "工具参数无效"
+	}
+	emitToolLifecycleEvent(r.opts, "tool_call_failed", "warn", map[string]any{
+		"tool_call_id":      call.ID,
+		"tool_name":         call.Name,
+		"status":            "failed",
+		"label":             event.Label,
+		"error":             err.Error(),
+		"arguments_summary": summarizeToolArguments(call.ArgumentsJSON),
+		"target_summary":    targetSummary,
+		"recovery_hint":     toolFailureRecoveryHint(call.Name, err.Error()),
+		"verification":      ToolVerification{Status: "skipped", Message: "tool arguments failed validation before execution"},
+	})
+	return event
+}
+
 func (r *agentRuntime) validateToolCall(call agentToolCall) string {
+	_, errText := r.normalizedToolArguments(call)
+	return errText
+}
+
+func (r *agentRuntime) normalizeAndValidateToolCall(call *agentToolCall) string {
+	if call == nil {
+		return "tool call is required"
+	}
+	argumentsJSON, errText := r.normalizedToolArguments(*call)
+	if errText != "" {
+		return errText
+	}
+	call.ArgumentsJSON = argumentsJSON
+	return ""
+}
+
+func (r *agentRuntime) normalizedToolArguments(call agentToolCall) (string, string) {
 	if strings.TrimSpace(call.Name) == "" {
-		return "tool name is required"
+		return "", "tool name is required"
 	}
 	if !r.isKnownTool(call.Name) {
-		return fmt.Sprintf("unknown or unavailable tool %q", call.Name)
+		return "", fmt.Sprintf("unknown or unavailable tool %q", call.Name)
 	}
-	if strings.TrimSpace(call.ArgumentsJSON) == "" {
-		call.ArgumentsJSON = "{}"
+	schema := toolInputSchema(call.Name, r.tools())
+	argumentsJSON := strings.TrimSpace(call.ArgumentsJSON)
+	if argumentsJSON == "" {
+		if toolSchemaAllowsEmptyArguments(schema) {
+			argumentsJSON = "{}"
+		} else {
+			return "", "tool arguments are required and must match the tool schema"
+		}
 	}
 	var decoded any
-	if err := json.Unmarshal([]byte(call.ArgumentsJSON), &decoded); err != nil {
-		return "tool arguments must be valid JSON: " + err.Error()
+	if err := json.Unmarshal([]byte(argumentsJSON), &decoded); err != nil {
+		return "", "tool arguments must be valid JSON: " + err.Error()
 	}
-	if _, ok := decoded.(map[string]any); !ok {
-		return "tool arguments must be a JSON object"
+	object, ok := decoded.(map[string]any)
+	if !ok {
+		return "", "tool arguments must be a JSON object"
 	}
-	return ""
+	if errText := validateToolArgumentsAgainstSchema(call.Name, object, r.tools()); errText != "" {
+		return "", errText
+	}
+	return argumentsJSON, ""
 }
 
 func (r *agentRuntime) isKnownTool(name string) bool {

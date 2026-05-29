@@ -47,7 +47,9 @@ func toolFailureClass(toolName string, err error) string {
 	}
 	text := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(text, "invalid tool arguments"):
+	case strings.Contains(text, "invalid tool arguments") ||
+		strings.Contains(text, "tool arguments are required") ||
+		strings.Contains(text, "tool arguments must be"):
 		return "tool_invalid_arguments"
 	case strings.Contains(text, "all requested files failed to read"):
 		return "workspace_batch_read_all_failed"

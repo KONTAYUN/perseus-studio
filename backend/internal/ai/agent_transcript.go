@@ -194,6 +194,8 @@ type AgentRuntimeCheckpoint struct {
 	InvalidTurns              int                  `json:"invalid_turns"`
 	ToolCalls                 int                  `json:"tool_calls"`
 	ConsecutiveToolErrors     int                  `json:"consecutive_tool_errors"`
+	RepeatedToolErrorKey      string               `json:"repeated_tool_error_key,omitempty"`
+	RepeatedToolErrorCount    int                  `json:"repeated_tool_error_count,omitempty"`
 	LoadedToolsets            map[string]bool      `json:"loaded_toolsets"`
 	RequiresCompletion        bool                 `json:"requires_completion"`
 	ToolLoopActive            bool                 `json:"tool_loop_active"`
@@ -214,6 +216,8 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 		InvalidTurns:              r.invalidTurns,
 		ToolCalls:                 r.toolCalls,
 		ConsecutiveToolErrors:     r.consecutiveToolErrors,
+		RepeatedToolErrorKey:      r.repeatedToolErrorKey,
+		RepeatedToolErrorCount:    r.repeatedToolErrorCount,
 		LoadedToolsets:            map[string]bool{},
 		RequiresCompletion:        r.requiresCompletion,
 		ToolLoopActive:            r.toolLoopActive,
@@ -243,6 +247,8 @@ func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
 	r.invalidTurns = checkpoint.InvalidTurns
 	r.toolCalls = checkpoint.ToolCalls
 	r.consecutiveToolErrors = checkpoint.ConsecutiveToolErrors
+	r.repeatedToolErrorKey = checkpoint.RepeatedToolErrorKey
+	r.repeatedToolErrorCount = checkpoint.RepeatedToolErrorCount
 	r.loadedToolsets = map[string]bool{}
 	for key, value := range checkpoint.LoadedToolsets {
 		r.loadedToolsets[key] = value

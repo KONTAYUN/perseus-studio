@@ -40,6 +40,8 @@ type agentRuntime struct {
 	invalidTurns              int
 	toolCalls                 int
 	consecutiveToolErrors     int
+	repeatedToolErrorKey      string
+	repeatedToolErrorCount    int
 	loadedToolsets            map[string]bool
 	requiresCompletion        bool
 	toolLoopActive            bool

@@ -173,12 +173,47 @@ func (r *agentRuntime) fail(message string, cause error) (Reply, error) {
 	return Reply{}, err
 }
 
-func (r *agentRuntime) recordToolError() {
+func (r *agentRuntime) recordToolError(toolName, argumentsJSON, message string) {
 	r.lastToolFailed = true
 	r.consecutiveToolErrors++
+	key := repeatedToolErrorKey(toolName, argumentsJSON, message)
+	if key != "" && key == r.repeatedToolErrorKey {
+		r.repeatedToolErrorCount++
+	} else {
+		r.repeatedToolErrorKey = key
+		r.repeatedToolErrorCount = 1
+	}
 	if r.consecutiveToolErrors >= agentMaxConsecutiveToolErrs {
 		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": "too many consecutive tool errors"})
 	}
+}
+
+func (r *agentRuntime) clearToolErrors() {
+	r.lastToolFailed = false
+	r.consecutiveToolErrors = 0
+	r.repeatedToolErrorKey = ""
+	r.repeatedToolErrorCount = 0
+}
+
+func (r *agentRuntime) shouldStopAfterToolError() bool {
+	return r.consecutiveToolErrors >= agentMaxConsecutiveToolErrs ||
+		r.repeatedToolErrorCount >= agentMaxConsecutiveToolErrs
+}
+
+func repeatedToolErrorKey(toolName, argumentsJSON, message string) string {
+	toolName = strings.TrimSpace(toolName)
+	message = strings.TrimSpace(message)
+	if toolName == "" || message == "" {
+		return ""
+	}
+	return toolName + "\x00" + mutationOperationHash(toolName, argumentsJSON) + "\x00" + message
+}
+
+func (r *agentRuntime) repeatedToolErrorMessage() string {
+	if r.repeatedToolErrorCount >= agentMaxConsecutiveToolErrs {
+		return fmt.Sprintf("同一个工具调用连续失败 %d 次，已停止继续重试，避免重复写入错误日志。请检查模型供应商的工具调用参数输出是否完整。", r.repeatedToolErrorCount)
+	}
+	return fmt.Sprintf("工具调用连续失败 %d 次，已停止继续重试，避免重复写入错误日志。请检查模型供应商的工具调用参数输出是否完整。", r.consecutiveToolErrors)
 }
 
 func (r *agentRuntime) toolErrorJSON(toolName, message string) string {

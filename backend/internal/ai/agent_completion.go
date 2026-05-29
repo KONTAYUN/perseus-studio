@@ -8,36 +8,37 @@ import (
 func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bool, bool) {
 	var attempt completionAttempt
 	if err := json.Unmarshal([]byte(argumentsJSON), &attempt); err != nil {
-		r.recordToolError()
+		r.recordToolError("attempt_completion", argumentsJSON, "invalid attempt_completion arguments: "+err.Error())
 		r.discardStreamedCompletionResult()
 		return r.toolErrorJSON("attempt_completion", "invalid attempt_completion arguments: "+err.Error()), true, false
 	}
 	attempt.Result = strings.TrimSpace(attempt.Result)
 	attempt.Summary = strings.TrimSpace(attempt.Summary)
 	if attempt.Result == "" {
-		r.recordToolError()
+		errText := "result is required and must contain the final user-visible answer, not only a summary"
+		r.recordToolError("attempt_completion", argumentsJSON, errText)
 		r.discardStreamedCompletionResult()
-		return r.toolErrorJSON("attempt_completion", "result is required and must contain the final user-visible answer, not only a summary"), true, false
+		return r.toolErrorJSON("attempt_completion", errText), true, false
 	}
-	r.lastToolFailed = false
+	r.clearToolErrors()
 	if r.performedMutation {
 		if len(attempt.ChangedPaths) == 0 {
-			r.recordToolError()
-			r.discardStreamedCompletionResult()
 			reason := "workspace 变更任务完成时必须在 changed_paths 中列出已验证的变更路径。"
+			r.recordToolError("attempt_completion", argumentsJSON, reason)
+			r.discardStreamedCompletionResult()
 			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
 			return r.toolErrorJSON("attempt_completion", reason), true, false
 		}
 		if missing := r.completionPathsMissingMutations(attempt.ChangedPaths); len(missing) > 0 {
-			r.recordToolError()
-			r.discardStreamedCompletionResult()
 			reason := "attempt_completion 的 changed_paths 没有覆盖本轮已验证的 workspace 变更：" + strings.Join(missing, ", ")
+			r.recordToolError("attempt_completion", argumentsJSON, reason)
+			r.discardStreamedCompletionResult()
 			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason, "missing_paths": missing})
 			return r.toolErrorJSON("attempt_completion", reason), true, false
 		}
 	}
 	if rejected := r.completionRejection(); rejected != "" {
-		r.recordToolError()
+		r.recordToolError("attempt_completion", argumentsJSON, rejected)
 		r.discardStreamedCompletionResult()
 		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": rejected})
 		return r.toolErrorJSON("attempt_completion", rejected), true, false

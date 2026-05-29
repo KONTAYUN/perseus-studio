@@ -50,7 +50,7 @@ func (s *Service) execSaveWorkspaceFile(ctx context.Context, userID, argumentsJS
 		}
 		return mustJSON(workspaceToolPayload("save_workspace_file", result.Path, payload)), fmt.Sprintf("overwrote file %s", result.Path), "正在保存文件...", result.Path, nil
 	default:
-		return "", "", "正在保存文件...", args.Path, fmt.Errorf("mode must be create or overwrite")
+		return "", "", "正在保存文件...", args.Path, fmt.Errorf("invalid tool arguments: mode must be create or overwrite")
 	}
 }
 

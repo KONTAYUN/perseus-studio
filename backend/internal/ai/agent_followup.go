@@ -13,12 +13,12 @@ func (r *agentRuntime) handleFollowupQuestion(toolCallID, argumentsJSON string) 
 	startedAt := time.Now()
 	var attempt followupQuestionAttempt
 	if err := json.Unmarshal([]byte(argumentsJSON), &attempt); err != nil {
-		r.recordToolError()
+		r.recordToolError("ask_followup_question", argumentsJSON, "invalid ask_followup_question arguments: "+err.Error())
 		return r.toolErrorJSON("ask_followup_question", "invalid ask_followup_question arguments: "+err.Error()), true, false
 	}
 	attempt.Question = strings.TrimSpace(attempt.Question)
 	if attempt.Question == "" {
-		r.recordToolError()
+		r.recordToolError("ask_followup_question", argumentsJSON, "question is required")
 		return r.toolErrorJSON("ask_followup_question", "question is required"), true, false
 	}
 	attempt.Reason = strings.TrimSpace(attempt.Reason)
@@ -46,7 +46,7 @@ func (r *agentRuntime) handleFollowupQuestion(toolCallID, argumentsJSON string) 
 			StartedAt:      startedAt,
 		})
 		if recordErr != nil {
-			r.recordToolError()
+			r.recordToolError("ask_followup_question", argumentsJSON, "local tool ledger start failed: "+recordErr.Error())
 			diagID := r.service.recordLocalPersistenceDiagnostic(context.Background(), r.opts, r.conversationID, r.messageID, "tool_ledger_start_failed", recordErr)
 			emitToolLifecycleEvent(r.opts, "local_persistence_failed", "error", map[string]any{
 				"tool_call_id":      toolCallID,
@@ -93,7 +93,7 @@ func (r *agentRuntime) handleFollowupQuestion(toolCallID, argumentsJSON string) 
 			ResultJSON:    resultPayload,
 		})
 		if recordErr != nil {
-			r.recordToolError()
+			r.recordToolError("ask_followup_question", argumentsJSON, "local tool ledger completion failed: "+recordErr.Error())
 			diagID := r.service.recordLocalPersistenceDiagnostic(context.Background(), r.opts, r.conversationID, r.messageID, "tool_ledger_complete_failed", recordErr)
 			emitToolLifecycleEvent(r.opts, "local_persistence_failed", "error", map[string]any{
 				"tool_call_id":      toolCallID,

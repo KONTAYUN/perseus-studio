@@ -175,9 +175,6 @@ func buildAnthropicStreamTurn(content string, finishReason string, blocks map[in
 			}
 		case "tool_use":
 			args := strings.TrimSpace(block.PartialJSON.String())
-			if args == "" {
-				args = "{}"
-			}
 			var input map[string]any
 			_ = json.Unmarshal([]byte(args), &input)
 			if input == nil {
