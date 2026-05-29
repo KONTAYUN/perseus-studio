@@ -123,10 +123,12 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
       const openLeft = placement === 'left' ? leftSpace >= resolvedWidth || leftSpace >= rightSpace : rightSpace < resolvedWidth && leftSpace > rightSpace;
       const sideLeft = openLeft ? rect.left - gap - resolvedWidth : rect.right + gap;
       const left = Math.min(Math.max(sideLeft, margin), viewportWidth - resolvedWidth - margin);
-      const availableAtAnchor = Math.max(0, viewportHeight - rect.top - margin);
-      const resolvedMaxHeight = resolveMaxHeight(availableAtAnchor, maxHeight, 120);
+      const availableHeight = Math.max(0, viewportHeight - margin * 2);
+      const resolvedMaxHeight = resolveMaxHeight(availableHeight, maxHeight, 120);
       const placementHeight = resolvePlacementHeight(popoverHeight, resolvedMaxHeight, estimatedHeight);
-      const top = Math.min(Math.max(rect.top, margin), viewportHeight - placementHeight - margin);
+      const anchorMiddle = rect.top + rect.height / 2;
+      const centeredTop = anchorMiddle - placementHeight / 2;
+      const top = Math.min(Math.max(centeredTop, margin), viewportHeight - placementHeight - margin);
 
       setPosition({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight });
       return;
