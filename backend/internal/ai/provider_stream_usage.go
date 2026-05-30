@@ -2,8 +2,11 @@ package ai
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
+
+const recommendedWorkspaceChunkChars = 4000
 
 func updateProviderUsageFromAny(usage *ProviderUsage, value any) {
 	if usage == nil || value == nil {
@@ -66,12 +69,118 @@ func hasIncompleteToolCallArguments(turn agentModelTurn) bool {
 	return false
 }
 
+func annotateStreamToolDiagnostics(summary *ProviderRequestSummary, turn agentModelTurn) {
+	if summary == nil {
+		return
+	}
+	summary.StreamFinishReason = strings.TrimSpace(turn.FinishReason)
+	summary.StreamUsage = turn.Usage
+	summary.StreamToolCalls = streamToolCallLogs(turn.ToolCalls)
+}
+
+func streamToolCallLogs(calls []agentToolCall) []StreamToolCallLog {
+	if len(calls) == 0 {
+		return nil
+	}
+	items := make([]StreamToolCallLog, 0, len(calls))
+	for index, call := range calls {
+		args := strings.TrimSpace(call.ArgumentsJSON)
+		item := StreamToolCallLog{
+			Index:          index,
+			ID:             strings.TrimSpace(call.ID),
+			Name:           strings.TrimSpace(call.Name),
+			ArgumentsChars: len([]rune(args)),
+			ArgumentsBytes: len([]byte(args)),
+			ArgumentsHead:  truncateRunes(args, 240),
+			ArgumentsTail:  truncateRunes(tailRunes(args, 240), 240),
+			TargetSummary:  toolTargetSummary(call.Name, args),
+		}
+		var decoded map[string]any
+		if args == "" {
+			item.ArgumentsJSONError = "empty arguments"
+		} else if err := json.Unmarshal([]byte(args), &decoded); err != nil {
+			item.ArgumentsJSONError = err.Error()
+			item.TargetSummary = pathSummary(partialJSONStringField(args, "path"))
+			item.ContentChars = len([]rune(partialJSONStringField(args, "content")))
+		} else {
+			item.ArgumentsJSONValid = true
+			if content, ok := decoded["content"].(string); ok {
+				item.ContentChars = len([]rune(content))
+			}
+		}
+		if item.Name == "save_workspace_file" && (!item.ArgumentsJSONValid || item.ContentChars > recommendedWorkspaceChunkChars) {
+			item.LooksLikeLongWrite = true
+			item.RecommendedTool = "write_workspace_chunk"
+			item.RecommendedChunkSize = recommendedWorkspaceChunkChars
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func partialJSONStringField(value, field string) string {
+	if strings.TrimSpace(value) == "" || strings.TrimSpace(field) == "" {
+		return ""
+	}
+	index := strings.Index(value, strconv.Quote(field))
+	if index < 0 {
+		return ""
+	}
+	rest := value[index+len(strconv.Quote(field)):]
+	colon := strings.Index(rest, ":")
+	if colon < 0 {
+		return ""
+	}
+	rest = strings.TrimSpace(rest[colon+1:])
+	if !strings.HasPrefix(rest, `"`) {
+		return ""
+	}
+	rest = rest[1:]
+	escaped := false
+	for index, ch := range rest {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			return unquotePartialJSONString(rest[:index])
+		}
+	}
+	return unquotePartialJSONString(rest)
+}
+
+func unquotePartialJSONString(value string) string {
+	if value == "" {
+		return ""
+	}
+	decoded, err := strconv.Unquote(`"` + value + `"`)
+	if err == nil {
+		return decoded
+	}
+	return strings.ReplaceAll(value, `\"`, `"`)
+}
+
 func hasCompleteToolCallArguments(call agentToolCall) bool {
 	if strings.TrimSpace(call.Name) == "" || strings.TrimSpace(call.ArgumentsJSON) == "" {
 		return false
 	}
 	var decoded any
 	return json.Unmarshal([]byte(call.ArgumentsJSON), &decoded) == nil
+}
+
+func tailRunes(value string, maxLen int) string {
+	if maxLen <= 0 || value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxLen {
+		return value
+	}
+	return string(runes[len(runes)-maxLen:])
 }
 
 func intFromAny(value any) int {

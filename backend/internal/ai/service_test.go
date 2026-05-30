@@ -57,6 +57,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_files")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "save_workspace_file")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "write_workspace_chunk")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "organize_workspace_matches")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "run_workspace_command")
@@ -73,6 +74,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_files")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "save_workspace_file")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "write_workspace_chunk")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "organize_workspace_matches")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "run_workspace_command")
@@ -418,6 +420,45 @@ func TestExecuteToolWriteWorkspaceFile(t *testing.T) {
 	}
 	if payload["version_id"] == "" {
 		t.Fatalf("expected version_id in result payload")
+	}
+}
+
+func TestExecuteToolWriteWorkspaceChunkAppendsLongFile(t *testing.T) {
+	service, db, _, files := newTestAIService(t)
+
+	if _, _, _, path, err := service.executeTool(context.Background(), "write_workspace_chunk", `{"path":"drafts/long.txt","content":"第一段\n","mode":"create","chunk_index":1}`, RunOptions{UserID: testUserID}); err != nil {
+		t.Fatalf("create chunk returned error: %v", err)
+	} else if path != "drafts/long.txt" {
+		t.Fatalf("unexpected create path: %s", path)
+	}
+	if _, _, _, path, err := service.executeTool(context.Background(), "write_workspace_chunk", `{"path":"drafts/long.txt","content":"第二段","mode":"append","chunk_index":2}`, RunOptions{UserID: testUserID}); err != nil {
+		t.Fatalf("append chunk returned error: %v", err)
+	} else if path != "drafts/long.txt" {
+		t.Fatalf("unexpected append path: %s", path)
+	}
+
+	readResult, err := files.ReadFile("drafts/long.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if readResult.Content != "第一段\n第二段" {
+		t.Fatalf("unexpected file content: %q", readResult.Content)
+	}
+	var versionCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM file_versions WHERE path = ?`, "drafts/long.txt").Scan(&versionCount); err != nil {
+		t.Fatalf("query file_versions returned error: %v", err)
+	}
+	if versionCount != 1 {
+		t.Fatalf("expected append to create one prior version, got %d", versionCount)
+	}
+}
+
+func TestExecuteToolWriteWorkspaceChunkRequiresFirstChunkIndexForCreate(t *testing.T) {
+	service, _, _, _ := newTestAIService(t)
+
+	_, _, _, _, err := service.executeTool(context.Background(), "write_workspace_chunk", `{"path":"drafts/long.txt","content":"第一段","mode":"create","chunk_index":2}`, RunOptions{UserID: testUserID})
+	if err == nil || err.Error() != "invalid tool arguments: create chunk_index must be 1" {
+		t.Fatalf("expected first chunk validation error, got %v", err)
 	}
 }
 
@@ -864,6 +905,70 @@ func TestValidateToolCallAllowsEmptySaveContent(t *testing.T) {
 	}
 }
 
+func TestExecuteToolSaveWorkspaceFileRejectsOversizedContent(t *testing.T) {
+	service, _, _, _ := newTestAIService(t)
+	raw := mustJSON(map[string]any{
+		"path":    "long.txt",
+		"content": strings.Repeat("长", recommendedWorkspaceChunkChars+1),
+		"mode":    "create",
+	})
+
+	_, _, _, _, err := service.executeTool(context.Background(), "save_workspace_file", raw, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "use write_workspace_chunk") {
+		t.Fatalf("expected oversized content execution guard, got %v", err)
+	}
+}
+
+func TestValidateToolCallRejectsMissingChunkIndex(t *testing.T) {
+	runtime := &agentRuntime{
+		protocol:       agentProtocolOpenAI,
+		loadedToolsets: allAgentToolsets(true),
+	}
+
+	errText := runtime.validateToolCall(agentToolCall{
+		ID:            "call_1",
+		Name:          "write_workspace_chunk",
+		ArgumentsJSON: `{"path":"long.txt","content":"x","mode":"append"}`,
+	})
+	if !strings.Contains(errText, "chunk_index is required") {
+		t.Fatalf("expected chunk_index validation error, got %q", errText)
+	}
+}
+
+func TestSelectedReferenceScopeAllowsAppendingEarlierGeneratedChunkFile(t *testing.T) {
+	runtime := &agentRuntime{
+		attachments: []AttachmentPayload{{Kind: "workspace_file", Path: "source.txt"}},
+		events: []ToolEvent{{
+			ToolName:     "write_workspace_chunk",
+			Status:       "success",
+			Path:         "drafts/output.txt",
+			ChangedPaths: []string{"drafts/output.txt"},
+		}},
+	}
+
+	errText := runtime.validateSelectedReferenceScope(agentToolCall{
+		Name:          "write_workspace_chunk",
+		ArgumentsJSON: `{"path":"drafts/output.txt","content":"next","mode":"append","chunk_index":2}`,
+	})
+	if errText != "" {
+		t.Fatalf("expected append to generated output to stay in scope, got %q", errText)
+	}
+}
+
+func TestSelectedReferenceScopeRejectsAppendingUnrelatedChunkFile(t *testing.T) {
+	runtime := &agentRuntime{
+		attachments: []AttachmentPayload{{Kind: "workspace_file", Path: "source.txt"}},
+	}
+
+	errText := runtime.validateSelectedReferenceScope(agentToolCall{
+		Name:          "write_workspace_chunk",
+		ArgumentsJSON: `{"path":"drafts/output.txt","content":"next","mode":"append","chunk_index":2}`,
+	})
+	if !strings.Contains(errText, "outside the user's selected workspace file references") {
+		t.Fatalf("expected unrelated append to be rejected, got %q", errText)
+	}
+}
+
 func TestBudgetToolResultForModelTruncatesCommandOutput(t *testing.T) {
 	raw := mustJSON(map[string]any{
 		"command":   "find . -type f",
@@ -1152,6 +1257,7 @@ func TestPickSearchProviderUsesPriority(t *testing.T) {
 func TestSideEffectToolsRequireCompletionAfterUse(t *testing.T) {
 	for _, name := range []string{
 		"save_workspace_file",
+		"write_workspace_chunk",
 		"manage_workspace_path",
 		"organize_workspace_matches",
 		"install_skill_from_attachment",
@@ -1658,7 +1764,7 @@ func TestProviderFailureClassDoesNotGuessRequiredToolChoice(t *testing.T) {
 		ToolChoice:      "required",
 		RequiresTool:    true,
 		ReasoningEffort: "medium",
-		ToolsCount:      19,
+		ToolsCount:      20,
 	}
 	if got := providerFailureClass(err, summary); got != "provider_bad_request_with_reasoning" {
 		t.Fatalf("expected generic bad request with reasoning, got %q", got)
@@ -1674,7 +1780,7 @@ func TestProviderFailureClassUsesRequiredOnlyWhenProviderSaysSo(t *testing.T) {
 	summary := ProviderRequestSummary{
 		ToolChoice:   "required",
 		RequiresTool: true,
-		ToolsCount:   19,
+		ToolsCount:   20,
 	}
 	if got := providerFailureClass(err, summary); got != "provider_rejected_required_tool_choice" {
 		t.Fatalf("expected explicit required rejection, got %q", got)

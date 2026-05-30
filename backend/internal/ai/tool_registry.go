@@ -54,6 +54,8 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 		return s.execEditWorkspaceText(ctx, opts.UserID, argumentsJSON)
 	case "save_workspace_file":
 		return s.execSaveWorkspaceFile(ctx, opts.UserID, argumentsJSON)
+	case "write_workspace_chunk":
+		return s.execWriteWorkspaceChunk(ctx, opts.UserID, argumentsJSON)
 	case "manage_workspace_path":
 		return s.execManageWorkspacePath(ctx, opts.UserID, argumentsJSON)
 	case "organize_workspace_matches":

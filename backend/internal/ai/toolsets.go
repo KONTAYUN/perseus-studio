@@ -21,6 +21,7 @@ func toolsForToolsetRole(toolset, role string) ([]string, bool) {
 			"read_workspace_files",
 			"edit_workspace_text",
 			"save_workspace_file",
+			"write_workspace_chunk",
 			"manage_workspace_path",
 			"organize_workspace_matches",
 		}, true

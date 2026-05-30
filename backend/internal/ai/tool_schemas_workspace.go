@@ -9,6 +9,7 @@ func openAIWorkspaceTools() []map[string]any {
 		openAIFunctionTool("read_workspace_files", "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams()),
 		openAIFunctionTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
 		openAIFunctionTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
+		openAIFunctionTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content.", workspaceChunkWriteParams()),
 		openAIFunctionTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
 		openAIFunctionTool("organize_workspace_matches", "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams()),
 	}
@@ -23,6 +24,7 @@ func anthropicWorkspaceTools() []map[string]any {
 		anthropicTool("read_workspace_files", "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams()),
 		anthropicTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
 		anthropicTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
+		anthropicTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content.", workspaceChunkWriteParams()),
 		anthropicTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
 		anthropicTool("organize_workspace_matches", "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams()),
 	}
@@ -145,12 +147,38 @@ func workspaceSaveParams() map[string]any {
 		"type":     "object",
 		"required": []string{"path", "content", "mode"},
 		"properties": map[string]any{
-			"path":    map[string]any{"type": "string", "description": "Workspace-relative file path."},
-			"content": map[string]any{"type": "string", "description": "Full text content to save."},
+			"path": map[string]any{"type": "string", "description": "Workspace-relative file path."},
+			"content": map[string]any{
+				"type":        "string",
+				"description": "Full short text content to save. For longer content, use write_workspace_chunk.",
+			},
 			"mode": map[string]any{
 				"type":        "string",
 				"enum":        []string{"create", "overwrite"},
 				"description": "Use create only when the file must not already exist. Use overwrite only for an existing file.",
+			},
+		},
+	}
+}
+
+func workspaceChunkWriteParams() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"path", "content", "mode", "chunk_index"},
+		"properties": map[string]any{
+			"path": map[string]any{"type": "string", "description": "Workspace-relative text file path."},
+			"content": map[string]any{
+				"type":        "string",
+				"description": "One text chunk to write. Keep each chunk under about 4000 characters.",
+			},
+			"chunk_index": map[string]any{
+				"type":        "integer",
+				"description": "1-based chunk number. The first create/overwrite chunk must be 1; each append increments it.",
+			},
+			"mode": map[string]any{
+				"type":        "string",
+				"enum":        []string{"create", "overwrite", "append"},
+				"description": "Use create for the first chunk of a new file, overwrite for the first chunk of an existing file, and append for each following chunk.",
 			},
 		},
 	}

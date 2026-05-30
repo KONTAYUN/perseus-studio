@@ -161,6 +161,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		}
 		if hasIncompleteToolCallArguments(turn) {
 			req.Snapshot.Summary.StreamToolArgsState = "incomplete_json"
+			annotateStreamToolDiagnostics(&req.Snapshot.Summary, turn)
 			err := fmt.Errorf("provider stream returned incomplete tool call arguments")
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_incomplete_tool_arguments", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)

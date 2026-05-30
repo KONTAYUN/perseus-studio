@@ -2468,6 +2468,62 @@ func TestGenerateReplyAnthropicFallsBackToNonStreamWhenFinalStreamBreaks(t *test
 	}
 }
 
+func TestGenerateReplyAnthropicIncompleteToolArgumentsDiagnosticNamesTool(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: content_block_start\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_truncated_1\",\"name\":\"save_workspace_file\",\"input\":{}}}\n\n")
+		fmt.Fprint(w, "event: content_block_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"机甲少女/机甲少女11-22集修改版.txt\\\", \\\"mode\\\": \\\"create\\\", \\\"content\\\":\\\"第一段\"}}\n\n")
+		fmt.Fprint(w, "event: message_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":8192}}\n\n")
+		fmt.Fprint(w, "event: message_stop\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareAnthropicConversation(t, ctx, env, server.URL, "请后台生成长文件")
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err == nil {
+		t.Fatal("expected incomplete tool arguments error")
+	}
+	logs, listErr := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
+	if listErr != nil {
+		t.Fatalf("diagnostics.List returned error: %v", listErr)
+	}
+	if len(logs) == 0 || logs[0].Stage != "provider_stream_incomplete_tool_arguments" {
+		t.Fatalf("expected incomplete tool diagnostic, got %#v", logs)
+	}
+	var summary ProviderRequestSummary
+	if err := json.Unmarshal([]byte(logs[0].RequestSummary), &summary); err != nil {
+		t.Fatalf("request summary should unmarshal: %v\n%s", err, logs[0].RequestSummary)
+	}
+	if summary.StreamToolArgsState != "incomplete_json" || summary.StreamFinishReason != "max_tokens" {
+		t.Fatalf("unexpected stream summary: %#v", summary)
+	}
+	if summary.StreamUsage.OutputTokens != 8192 {
+		t.Fatalf("expected output token usage, got %#v", summary.StreamUsage)
+	}
+	if len(summary.StreamToolCalls) != 1 {
+		t.Fatalf("expected stream tool call details, got %#v", summary.StreamToolCalls)
+	}
+	call := summary.StreamToolCalls[0]
+	if call.Name != "save_workspace_file" || call.ID != "toolu_truncated_1" {
+		t.Fatalf("unexpected stream tool call summary: %#v", call)
+	}
+	if call.TargetSummary != "机甲少女/机甲少女11-22集修改版.txt" {
+		t.Fatalf("expected target path in diagnostic, got %#v", call)
+	}
+	if call.ArgumentsJSONValid || call.ArgumentsJSONError == "" || !call.LooksLikeLongWrite || call.RecommendedTool != "write_workspace_chunk" {
+		t.Fatalf("expected invalid long-write details, got %#v", call)
+	}
+}
+
 func TestGenerateReplyRecordsDiagnosticForNonJSON(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -2763,6 +2819,7 @@ func assertOpenAIWriteToolsPresent(t *testing.T, payload map[string]any) {
 
 	mutationTools := []string{
 		"save_workspace_file",
+		"write_workspace_chunk",
 		"manage_workspace_path",
 		"organize_workspace_matches",
 	}
@@ -2802,7 +2859,8 @@ func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any)
 		"标准 Agent Loop",
 		"工具工作完成后，可以用普通 assistant 正文交付最终结果",
 		"find_workspace_files 按名称/路径/glob 找文件",
-		"save_workspace_file 创建或整文件覆盖文本文件",
+		"save_workspace_file 创建或整文件覆盖短文本文件",
+		"write_workspace_chunk 分块创建/覆盖/追加长文本文件",
 		"run_workspace_command 在 workspace 内运行命令",
 		"不可以永久删除文件",
 		"不可以访问 workspace 之外的路径",

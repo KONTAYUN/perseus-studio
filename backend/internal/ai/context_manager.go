@@ -38,6 +38,9 @@ type ProviderRequestSummary struct {
 	UnsupportedOpenAIParams   []string             `json:"unsupported_openai_params,omitempty"`
 	OutputMaxTokens           int                  `json:"output_max_tokens,omitempty"`
 	StreamToolArgsState       string               `json:"stream_tool_args_state,omitempty"`
+	StreamFinishReason        string               `json:"stream_finish_reason,omitempty"`
+	StreamUsage               ProviderUsage        `json:"stream_usage,omitempty"`
+	StreamToolCalls           []StreamToolCallLog  `json:"stream_tool_calls,omitempty"`
 	LoadedToolsets            []string             `json:"loaded_toolsets,omitempty"`
 	ForcedTool                string               `json:"forced_tool,omitempty"`
 	FailureClass              string               `json:"failure_class,omitempty"`
@@ -87,6 +90,23 @@ type ProviderToolLog struct {
 	Properties       []string `json:"properties,omitempty"`
 	UnsupportedPaths []string `json:"unsupported_paths,omitempty"`
 	SchemaDigest     string   `json:"schema_digest,omitempty"`
+}
+
+type StreamToolCallLog struct {
+	Index                int    `json:"index"`
+	ID                   string `json:"id,omitempty"`
+	Name                 string `json:"name,omitempty"`
+	ArgumentsChars       int    `json:"arguments_chars,omitempty"`
+	ArgumentsBytes       int    `json:"arguments_bytes,omitempty"`
+	ArgumentsJSONValid   bool   `json:"arguments_json_valid"`
+	ArgumentsJSONError   string `json:"arguments_json_error,omitempty"`
+	ArgumentsHead        string `json:"arguments_head,omitempty"`
+	ArgumentsTail        string `json:"arguments_tail,omitempty"`
+	TargetSummary        string `json:"target_summary,omitempty"`
+	ContentChars         int    `json:"content_chars,omitempty"`
+	LooksLikeLongWrite   bool   `json:"looks_like_long_write,omitempty"`
+	RecommendedTool      string `json:"recommended_tool,omitempty"`
+	RecommendedChunkSize int    `json:"recommended_chunk_size,omitempty"`
 }
 
 func (s ProviderRequestSummary) JSON() string {

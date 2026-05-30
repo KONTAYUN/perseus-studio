@@ -111,6 +111,40 @@ func (s *Service) WriteExistingTextFile(ctx context.Context, path, content, sour
 	return s.WriteBytes(ctx, cleanPath, []byte(content), source)
 }
 
+func (s *Service) AppendTextFile(ctx context.Context, path, content, source string) (FileWriteResult, error) {
+	cleanPath, absPath, err := s.sanitizePath(path)
+	if err != nil {
+		return FileWriteResult{}, err
+	}
+	if isAnyTrashPath(cleanPath) {
+		return FileWriteResult{}, trashManagedOnlyError()
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return FileWriteResult{}, fmt.Errorf("file does not exist")
+		}
+		return FileWriteResult{}, err
+	}
+	if info.IsDir() {
+		return FileWriteResult{}, fmt.Errorf("path is a directory")
+	}
+	if !isTextPath(cleanPath) {
+		return FileWriteResult{}, fmt.Errorf("only text files can be written")
+	}
+	raw, err := os.ReadFile(absPath)
+	if err != nil {
+		return FileWriteResult{}, err
+	}
+	if source == "" {
+		source = "ai_append"
+	}
+	next := make([]byte, 0, len(raw)+len(content))
+	next = append(next, raw...)
+	next = append(next, []byte(content)...)
+	return s.WriteBytes(ctx, cleanPath, next, source)
+}
+
 func (s *Service) EditTextFile(ctx context.Context, path, oldText, newText, source string, replaceAll bool) (FileWriteResult, int, error) {
 	cleanPath, absPath, err := s.sanitizePath(path)
 	if err != nil {

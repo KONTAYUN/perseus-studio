@@ -172,6 +172,7 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 		}
 		if hasIncompleteToolCallArguments(turn) {
 			req.Snapshot.Summary.StreamToolArgsState = "incomplete_json"
+			annotateStreamToolDiagnostics(&req.Snapshot.Summary, turn)
 			err := fmt.Errorf("provider stream returned incomplete tool call arguments; max_tokens=%d", anthropicAgentMaxTokens)
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_incomplete_tool_arguments", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)

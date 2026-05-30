@@ -361,6 +361,28 @@ func TestParseAnthropicStreamDetectsTruncatedToolArguments(t *testing.T) {
 	if !hasIncompleteToolCallArguments(turn) {
 		t.Fatalf("expected truncated JSON to be detected as incomplete provider output, got %#v", turn.ToolCalls[0])
 	}
+	var summary ProviderRequestSummary
+	summary.StreamToolArgsState = "incomplete_json"
+	annotateStreamToolDiagnostics(&summary, turn)
+	if summary.StreamFinishReason != "max_tokens" {
+		t.Fatalf("expected max_tokens finish reason in diagnostics, got %q", summary.StreamFinishReason)
+	}
+	if len(summary.StreamToolCalls) != 1 {
+		t.Fatalf("expected one stream tool call diagnostic, got %#v", summary.StreamToolCalls)
+	}
+	item := summary.StreamToolCalls[0]
+	if item.Name != "save_workspace_file" || item.ID != "toolu_1" {
+		t.Fatalf("unexpected stream tool call diagnostic: %#v", item)
+	}
+	if item.TargetSummary != "机甲少女/机甲少女11-22集修改版.txt" {
+		t.Fatalf("expected partial path extraction, got %#v", item)
+	}
+	if item.ArgumentsJSONValid || item.ArgumentsJSONError == "" {
+		t.Fatalf("expected invalid JSON details, got %#v", item)
+	}
+	if !item.LooksLikeLongWrite || item.RecommendedTool != "write_workspace_chunk" {
+		t.Fatalf("expected long-write recommendation, got %#v", item)
+	}
 }
 
 func TestParseAnthropicStreamStreamsAttemptCompletionResultFromToolArguments(t *testing.T) {

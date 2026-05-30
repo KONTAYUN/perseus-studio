@@ -19,11 +19,35 @@ func (r *agentRuntime) validateSelectedReferenceScope(call agentToolCall) string
 		return ""
 	}
 	for _, candidate := range candidates {
+		if call.Name == "write_workspace_chunk" && r.pathChangedEarlierInRun(candidate) {
+			continue
+		}
 		if !scope.allows(candidate) {
 			return fmt.Sprintf("tool target %q is outside the user's selected workspace file references. Treat phrases like “这几集/这些文件/选中的” as the selected references only. If you need to include this extra file or a whole folder/series, call ask_followup_question to confirm before continuing.", candidate)
 		}
 	}
 	return ""
+}
+
+func (r *agentRuntime) pathChangedEarlierInRun(path string) bool {
+	if r == nil {
+		return false
+	}
+	normalized := normalizeWorkspaceEventPath(path)
+	if normalized == "" {
+		return false
+	}
+	for _, event := range r.events {
+		if event.Status != "success" || !isWorkspaceMutationTool(event.ToolName) {
+			continue
+		}
+		for _, candidate := range append([]string{event.Path, event.NewPath}, event.ChangedPaths...) {
+			if normalizeWorkspaceEventPath(candidate) == normalized {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type selectedReferenceScope struct {
@@ -77,6 +101,7 @@ var selectedScopeToolExtractors = map[string]func(string) ([]string, bool){
 	"edit_workspace_text":        extractSinglePathScopeTarget,
 	"read_workspace_files":       extractBatchReadScopeTargets,
 	"save_workspace_file":        extractSaveScopeTarget,
+	"write_workspace_chunk":      extractSaveScopeTarget,
 	"manage_workspace_path":      extractManagePathScopeTarget,
 	"organize_workspace_matches": extractOrganizeScopeTarget,
 }
