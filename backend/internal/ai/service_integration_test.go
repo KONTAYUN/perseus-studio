@@ -2602,11 +2602,13 @@ func TestGenerateReplyRecordsProvider400ToolRequestSummary(t *testing.T) {
 		t.Fatalf("request_summary should be JSON: %v\n%s", err, logs[0].RequestSummary)
 	}
 	expected := map[string]any{
-		"request_kind":  "chat_completions",
-		"stream":        true,
-		"tool_choice":   "required",
-		"requires_tool": true,
-		"failure_class": "provider_rejected_required_tool_choice",
+		"request_kind":             "chat_completions",
+		"stream":                   true,
+		"tool_choice":              "required",
+		"requires_tool":            true,
+		"failure_class":            "provider_rejected_required_tool_choice",
+		"has_tools":                true,
+		"has_required_tool_choice": true,
 	}
 	for key, value := range expected {
 		if summary[key] != value {
@@ -2615,6 +2617,9 @@ func TestGenerateReplyRecordsProvider400ToolRequestSummary(t *testing.T) {
 	}
 	if got, _ := summary["tools_count"].(float64); got < 2 {
 		t.Fatalf("expected tools_count >= 2, got %#v in %#v", summary["tools_count"], summary)
+	}
+	if summary["provider_host"] == "" || summary["model_id"] == "" {
+		t.Fatalf("expected provider host and model id in summary: %#v", summary)
 	}
 	toolNames, ok := summary["tool_names"].([]any)
 	if !ok || !containsAnyStringValue(toolNames, "attempt_completion") || !containsAnyStringValue(toolNames, "ask_followup_question") {
@@ -2678,6 +2683,12 @@ func TestGenerateReplyProvider400DoesNotGuessRequiredToolChoice(t *testing.T) {
 	}
 	if bytes, _ := summary["payload_bytes"].(float64); bytes <= 0 {
 		t.Fatalf("expected payload_bytes in diagnostic summary: %#v", summary)
+	}
+	if summary["has_tools"] != true || summary["has_required_tool_choice"] != true {
+		t.Fatalf("expected tool presence and required tool choice diagnostics: %#v", summary)
+	}
+	if summary["provider_host"] == "" || summary["model_id"] == "" {
+		t.Fatalf("expected provider host and model id in diagnostic summary: %#v", summary)
 	}
 	messageShapes, ok := summary["message_shapes"].([]any)
 	if !ok || len(messageShapes) == 0 {

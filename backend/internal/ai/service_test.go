@@ -59,6 +59,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "save_workspace_file")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "write_workspace_chunk")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "finalize_workspace_write")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "organize_workspace_matches")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "run_workspace_command")
@@ -77,6 +78,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "save_workspace_file")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "write_workspace_chunk")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "finalize_workspace_write")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "organize_workspace_matches")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "run_workspace_command")
@@ -452,6 +454,125 @@ func TestExecuteToolWriteWorkspaceChunkAppendsLongFile(t *testing.T) {
 	}
 	if versionCount != 1 {
 		t.Fatalf("expected append to create one prior version, got %d", versionCount)
+	}
+}
+
+func TestAgentRuntimeChunkWriteFinalizeSuccess(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	runtime := &agentRuntime{
+		service:          service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   "conv_chunk_success",
+		messageID:        "msg_chunk_success",
+		opts:             RunOptions{UserID: testUserID},
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		chunkWrites:      map[string]workspaceChunkWriteState{},
+	}
+
+	calls := []agentToolCall{
+		{ID: "chunk_1", Name: "write_workspace_chunk", ArgumentsJSON: `{"path":"drafts/long.txt","content":"一\n","mode":"create","chunk_index":1}`},
+		{ID: "chunk_2", Name: "write_workspace_chunk", ArgumentsJSON: `{"path":"drafts/long.txt","content":"二\n","mode":"append","chunk_index":2}`},
+		{ID: "chunk_3", Name: "write_workspace_chunk", ArgumentsJSON: `{"path":"drafts/long.txt","content":"三","mode":"append","chunk_index":3}`},
+		{ID: "finalize_1", Name: "finalize_workspace_write", ArgumentsJSON: `{"path":"drafts/long.txt","expected_chunks":3,"expected_lines":3,"expected_chars":5}`},
+	}
+	for _, call := range calls {
+		content, isError, request, completed, err := runtime.processOneToolCall(context.Background(), call)
+		if err != nil || isError || request != nil || completed {
+			t.Fatalf("call %s failed: content=%s isError=%v request=%v completed=%v err=%v", call.Name, content, isError, request, completed, err)
+		}
+		if call.Name == "write_workspace_chunk" && !strings.Contains(content, `"needs_finalize":true`) {
+			t.Fatalf("chunk result should tell model to finalize, got %s", content)
+		}
+	}
+	if _, ok := runtime.chunkWrites["drafts/long.txt"]; ok {
+		t.Fatalf("expected finalize to clear chunk write state")
+	}
+	readResult, err := files.ReadFile("drafts/long.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if readResult.Content != "一\n二\n三" {
+		t.Fatalf("unexpected file content: %q", readResult.Content)
+	}
+	if last := runtime.events[len(runtime.events)-1]; last.ToolName != "finalize_workspace_write" || last.Status != "success" || last.Path != "drafts/long.txt" {
+		t.Fatalf("unexpected final event: %#v", last)
+	}
+}
+
+func TestAgentRuntimeChunkWriteRejectsOutOfOrderAppend(t *testing.T) {
+	service, _, _, _ := newTestAIService(t)
+	runtime := &agentRuntime{
+		service:          service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   "conv_chunk_order",
+		messageID:        "msg_chunk_order",
+		opts:             RunOptions{UserID: testUserID},
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		chunkWrites: map[string]workspaceChunkWriteState{
+			"drafts/long.txt": {Path: "drafts/long.txt", ChunksWritten: 1, TotalChars: 2},
+		},
+	}
+
+	content, isError, _, _, err := runtime.processOneToolCall(context.Background(), agentToolCall{
+		ID:            "chunk_3",
+		Name:          "write_workspace_chunk",
+		ArgumentsJSON: `{"path":"drafts/long.txt","content":"三","mode":"append","chunk_index":3}`,
+	})
+	if err != nil || !isError || !strings.Contains(content, "chunk_index must be 2") {
+		t.Fatalf("expected out-of-order chunk error, content=%s isError=%v err=%v", content, isError, err)
+	}
+}
+
+func TestAgentRuntimeFinalizeRejectsMissingChunkState(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "drafts/long.txt", "一\n二"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	runtime := &agentRuntime{
+		service:          service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   "conv_finalize_missing",
+		messageID:        "msg_finalize_missing",
+		opts:             RunOptions{UserID: testUserID},
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		chunkWrites:      map[string]workspaceChunkWriteState{},
+	}
+
+	content, isError, _, _, err := runtime.processOneToolCall(context.Background(), agentToolCall{
+		ID:            "finalize_1",
+		Name:          "finalize_workspace_write",
+		ArgumentsJSON: `{"path":"drafts/long.txt","expected_chunks":1,"expected_lines":2,"expected_chars":3}`,
+	})
+	if err != nil || !isError || !strings.Contains(content, "no chunked write state") {
+		t.Fatalf("expected missing chunk state error, content=%s isError=%v err=%v", content, isError, err)
+	}
+}
+
+func TestExecuteFinalizeWorkspaceWriteRejectsMismatchedCounts(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "drafts/long.txt", "一\n二"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	result, _, _, _, err := service.executeTool(context.Background(), "finalize_workspace_write", `{"path":"drafts/long.txt","expected_chunks":1,"expected_lines":3,"expected_chars":3}`, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "expected_lines mismatch") {
+		t.Fatalf("expected line mismatch error, got result=%s err=%v", result, err)
+	}
+	if !strings.Contains(result, `"actual_lines":2`) || !strings.Contains(result, `"expected_lines":3`) {
+		t.Fatalf("expected structured mismatch payload, got %s", result)
+	}
+
+	result, _, _, _, err = service.executeTool(context.Background(), "finalize_workspace_write", `{"path":"drafts/long.txt","expected_chunks":1,"expected_lines":2,"expected_chars":4}`, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "expected_chars mismatch") {
+		t.Fatalf("expected char mismatch error, got result=%s err=%v", result, err)
+	}
+
+	result, _, _, _, err = service.executeTool(context.Background(), "finalize_workspace_write", `{"path":"drafts/long.txt","expected_chunks":1,"expected_lines":2,"expected_chars":3,"final_hash":"bad"}`, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "final_hash mismatch") {
+		t.Fatalf("expected hash mismatch error, got result=%s err=%v", result, err)
 	}
 }
 
@@ -1340,6 +1461,7 @@ func TestSideEffectToolsRequireCompletionAfterUse(t *testing.T) {
 	for _, name := range []string{
 		"save_workspace_file",
 		"write_workspace_chunk",
+		"finalize_workspace_write",
 		"replace_workspace_lines",
 		"manage_workspace_path",
 		"organize_workspace_matches",
@@ -1430,7 +1552,7 @@ func TestSelectedWorkspaceReferencesConstrainReadAndMutationScope(t *testing.T) 
 
 func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	loaded := map[string]bool{"workspace": true}
-	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "edit_workspace_text", "replace_workspace_lines"} {
+	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "edit_workspace_text", "replace_workspace_lines", "write_workspace_chunk", "finalize_workspace_write"} {
 		assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
 		assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
 	}
@@ -1443,6 +1565,9 @@ func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	if group := toolGroup("replace_workspace_lines"); group != ToolGroupEdit {
 		t.Fatalf("expected replace_workspace_lines edit group, got %q", group)
 	}
+	if group := toolGroup("finalize_workspace_write"); group != ToolGroupEdit {
+		t.Fatalf("expected finalize_workspace_write edit group, got %q", group)
+	}
 	if group := toolGroup("read_workspace_files"); group != ToolGroupRead {
 		t.Fatalf("expected read_workspace_files read group, got %q", group)
 	}
@@ -1451,6 +1576,9 @@ func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	}
 	if !isWorkspaceMutationTool("replace_workspace_lines") {
 		t.Fatal("expected replace_workspace_lines to be a workspace mutation")
+	}
+	if !isWorkspaceMutationTool("finalize_workspace_write") {
+		t.Fatal("expected finalize_workspace_write to be a workspace mutation")
 	}
 }
 

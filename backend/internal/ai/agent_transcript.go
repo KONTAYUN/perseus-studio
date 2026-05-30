@@ -186,24 +186,25 @@ func cloneMapAnySlice(input []map[string]any) []map[string]any {
 }
 
 type AgentRuntimeCheckpoint struct {
-	Transcript                *AgentTranscript     `json:"transcript"`
-	Events                    []ToolEvent          `json:"events"`
-	AppliedMutations          map[string]ToolEvent `json:"applied_mutations"`
-	PerformedMutation         bool                 `json:"performed_mutation"`
-	LastToolFailed            bool                 `json:"last_tool_failed"`
-	InvalidTurns              int                  `json:"invalid_turns"`
-	ToolCalls                 int                  `json:"tool_calls"`
-	ConsecutiveToolErrors     int                  `json:"consecutive_tool_errors"`
-	RepeatedToolErrorKey      string               `json:"repeated_tool_error_key,omitempty"`
-	RepeatedToolErrorCount    int                  `json:"repeated_tool_error_count,omitempty"`
-	LoadedToolsets            map[string]bool      `json:"loaded_toolsets"`
-	RequiresCompletion        bool                 `json:"requires_completion"`
-	ToolLoopActive            bool                 `json:"tool_loop_active"`
-	LastProviderFinishReason  string               `json:"last_provider_finish_reason"`
-	LastProviderEmptyResponse bool                 `json:"last_provider_empty_response"`
-	CompletedContent          string               `json:"completed_content"`
-	CurrentRound              int                  `json:"current_round"`
-	Seq                       int64                `json:"seq,omitempty"`
+	Transcript                *AgentTranscript                    `json:"transcript"`
+	Events                    []ToolEvent                         `json:"events"`
+	AppliedMutations          map[string]ToolEvent                `json:"applied_mutations"`
+	ChunkWrites               map[string]workspaceChunkWriteState `json:"chunk_writes,omitempty"`
+	PerformedMutation         bool                                `json:"performed_mutation"`
+	LastToolFailed            bool                                `json:"last_tool_failed"`
+	InvalidTurns              int                                 `json:"invalid_turns"`
+	ToolCalls                 int                                 `json:"tool_calls"`
+	ConsecutiveToolErrors     int                                 `json:"consecutive_tool_errors"`
+	RepeatedToolErrorKey      string                              `json:"repeated_tool_error_key,omitempty"`
+	RepeatedToolErrorCount    int                                 `json:"repeated_tool_error_count,omitempty"`
+	LoadedToolsets            map[string]bool                     `json:"loaded_toolsets"`
+	RequiresCompletion        bool                                `json:"requires_completion"`
+	ToolLoopActive            bool                                `json:"tool_loop_active"`
+	LastProviderFinishReason  string                              `json:"last_provider_finish_reason"`
+	LastProviderEmptyResponse bool                                `json:"last_provider_empty_response"`
+	CompletedContent          string                              `json:"completed_content"`
+	CurrentRound              int                                 `json:"current_round"`
+	Seq                       int64                               `json:"seq,omitempty"`
 }
 
 func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
@@ -211,6 +212,7 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 		Transcript:                r.transcript.Clone(),
 		Events:                    append([]ToolEvent(nil), r.events...),
 		AppliedMutations:          map[string]ToolEvent{},
+		ChunkWrites:               map[string]workspaceChunkWriteState{},
 		PerformedMutation:         r.performedMutation,
 		LastToolFailed:            r.lastToolFailed,
 		InvalidTurns:              r.invalidTurns,
@@ -229,6 +231,9 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 	for key, value := range r.appliedMutations {
 		checkpoint.AppliedMutations[key] = value
 	}
+	for key, value := range r.chunkWrites {
+		checkpoint.ChunkWrites[key] = value
+	}
 	for key, value := range r.loadedToolsets {
 		checkpoint.LoadedToolsets[key] = value
 	}
@@ -241,6 +246,10 @@ func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
 	r.appliedMutations = map[string]ToolEvent{}
 	for key, value := range checkpoint.AppliedMutations {
 		r.appliedMutations[key] = value
+	}
+	r.chunkWrites = map[string]workspaceChunkWriteState{}
+	for key, value := range checkpoint.ChunkWrites {
+		r.chunkWrites[key] = value
 	}
 	r.performedMutation = checkpoint.PerformedMutation
 	r.lastToolFailed = checkpoint.LastToolFailed
@@ -265,6 +274,7 @@ func initialRuntimeCheckpoint(messages []store.Message, attachments []Attachment
 	return AgentRuntimeCheckpoint{
 		Transcript:         newAgentTranscript(),
 		AppliedMutations:   map[string]ToolEvent{},
+		ChunkWrites:        map[string]workspaceChunkWriteState{},
 		LoadedToolsets:     allAgentToolsets(allowTask),
 		RequiresCompletion: requiresCompletion,
 		ToolLoopActive:     requiresCompletion || attachmentsRequireToolLoop(attachments),

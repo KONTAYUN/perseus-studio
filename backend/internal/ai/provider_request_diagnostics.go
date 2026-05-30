@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,8 +24,42 @@ func annotatePayloadDiagnostics(summary *ProviderRequestSummary, payload map[str
 	summary.ToolSchemaWarnings = toolSchemaWarnings(tools, provider.Protocol)
 	summary.ToolSchemaItems = toolSchemaItems(tools, provider.Protocol)
 	summary.UnsupportedOpenAIParams = unsupportedOpenAIParams(provider, payload, policy)
+	summary.ProviderHost = providerHost(provider.BaseURL)
+	summary.ModelID = strings.TrimSpace(provider.ModelID)
+	summary.HasTools = len(tools) > 0
+	summary.HasRequiredToolChoice = payloadHasRequiredToolChoice(payload["tool_choice"])
+	summary.HasReasoningParams = payloadHasReasoningParams(payload)
 	summary.ReasoningProfileSource = policy.Profile.Source
 	summary.ReasoningProfileLevels = append([]string(nil), policy.Profile.Levels...)
+}
+
+func providerHost(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Host == "" {
+		return strings.TrimSpace(rawURL)
+	}
+	return parsed.Host
+}
+
+func payloadHasRequiredToolChoice(value any) bool {
+	switch item := value.(type) {
+	case string:
+		return strings.EqualFold(strings.TrimSpace(item), "required")
+	case map[string]any:
+		return strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "any")
+	default:
+		return false
+	}
+}
+
+func payloadHasReasoningParams(payload map[string]any) bool {
+	if _, ok := payload["reasoning_effort"]; ok {
+		return true
+	}
+	if _, ok := payload["thinking"]; ok {
+		return true
+	}
+	return false
 }
 
 func payloadByteSize(payload map[string]any) int {

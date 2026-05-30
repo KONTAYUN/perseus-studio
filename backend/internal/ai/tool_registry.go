@@ -58,12 +58,14 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 		return s.execSaveWorkspaceFile(ctx, opts.UserID, argumentsJSON)
 	case "write_workspace_chunk":
 		return s.execWriteWorkspaceChunk(ctx, opts.UserID, argumentsJSON)
+	case "finalize_workspace_write":
+		return s.execFinalizeWorkspaceWrite(ctx, opts.UserID, argumentsJSON)
 	case "manage_workspace_path":
 		return s.execManageWorkspacePath(ctx, opts.UserID, argumentsJSON)
 	case "organize_workspace_matches":
 		return s.execOrganizeWorkspaceMatches(ctx, opts.UserID, argumentsJSON)
 	case "list_workspace_files", "read_workspace_file", "create_workspace_file", "write_workspace_file", "mkdir_workspace", "rename_workspace_path", "move_workspace_path", "delete_workspace_path":
-		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, save_workspace_file, manage_workspace_path, or organize_workspace_matches", name)
+		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, save_workspace_file, write_workspace_chunk, finalize_workspace_write, manage_workspace_path, or organize_workspace_matches", name)
 	case "run_workspace_command":
 		return s.execRunWorkspaceCommand(ctx, opts.UserID, argumentsJSON)
 	case "perseus_search_web", "web_search":

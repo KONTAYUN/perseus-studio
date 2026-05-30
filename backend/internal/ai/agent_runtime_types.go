@@ -35,6 +35,7 @@ type agentRuntime struct {
 
 	events                    []ToolEvent
 	appliedMutations          map[string]ToolEvent
+	chunkWrites               map[string]workspaceChunkWriteState
 	performedMutation         bool
 	lastToolFailed            bool
 	invalidTurns              int
@@ -77,6 +78,14 @@ type agentToolCall struct {
 	Name           string
 	ArgumentsJSON  string
 	AnthropicInput map[string]any
+}
+
+type workspaceChunkWriteState struct {
+	Path          string `json:"path"`
+	ChunksWritten int    `json:"chunks_written"`
+	TotalChars    int    `json:"total_chars"`
+	CurrentHash   string `json:"current_hash,omitempty"`
+	VersionID     string `json:"version_id,omitempty"`
 }
 
 type completionAttempt struct {

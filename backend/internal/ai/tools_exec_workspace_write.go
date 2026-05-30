@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -110,17 +112,109 @@ func (s *Service) execWriteWorkspaceChunk(ctx context.Context, userID, arguments
 		return "", "", "正在分块写入文件...", args.Path, fmt.Errorf("invalid tool arguments: mode must be create, overwrite, or append")
 	}
 	payload := map[string]any{
-		"operation":     result.operation,
-		"path":          result.write.Path,
-		"hash":          result.write.Hash,
-		"version_id":    result.write.VersionID,
-		"size":          result.write.Size,
-		"chunk_chars":   len([]rune(args.Content)),
-		"chunk_index":   args.ChunkIndex,
-		"changed_paths": result.write.ChangedPaths,
-		"next_hint":     "Continue with write_workspace_chunk mode=append for the next chunk, or call attempt_completion when the file is complete.",
+		"operation":      result.operation,
+		"path":           result.write.Path,
+		"hash":           result.write.Hash,
+		"version_id":     result.write.VersionID,
+		"size":           result.write.Size,
+		"chunk_chars":    len([]rune(args.Content)),
+		"chunk_index":    args.ChunkIndex,
+		"needs_finalize": true,
+		"changed_paths":  result.write.ChangedPaths,
+		"next_hint":      "Continue with write_workspace_chunk mode=append for the next chunk, then call finalize_workspace_write before attempt_completion.",
 	}
 	return mustJSON(workspaceToolPayload("write_workspace_chunk", result.write.Path, payload)), fmt.Sprintf("%s chunk %d in %s (%d chars)", result.operation, args.ChunkIndex, result.write.Path, len([]rune(args.Content))), "正在分块写入文件...", result.write.Path, nil
+}
+
+func (s *Service) execFinalizeWorkspaceWrite(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", "正在校验长文件写入...", "", err
+	}
+	var args struct {
+		Path           string `json:"path"`
+		ExpectedChunks int    `json:"expected_chunks"`
+		ExpectedLines  int    `json:"expected_lines"`
+		ExpectedChars  int    `json:"expected_chars"`
+		FinalHash      string `json:"final_hash"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", "", "正在校验长文件写入...", "", fmt.Errorf("invalid tool arguments")
+	}
+	if args.ExpectedChunks <= 0 {
+		return "", "", "正在校验长文件写入...", args.Path, fmt.Errorf("invalid tool arguments: expected_chunks must be a positive integer")
+	}
+	if args.ExpectedLines <= 0 {
+		return "", "", "正在校验长文件写入...", args.Path, fmt.Errorf("invalid tool arguments: expected_lines must be a positive integer")
+	}
+	if args.ExpectedChars < 0 {
+		return "", "", "正在校验长文件写入...", args.Path, fmt.Errorf("invalid tool arguments: expected_chars must be a non-negative integer")
+	}
+	read, err := files.ReadFile(args.Path)
+	if err != nil {
+		return "", "", "正在校验长文件写入...", args.Path, err
+	}
+	actualChars := len([]rune(read.Content))
+	actualLines := countWorkspaceTextLines(read.Content)
+	if actualLines != args.ExpectedLines {
+		return finalizeWorkspaceWriteMismatch("expected_lines", read.Path, map[string]any{
+			"actual_lines":   actualLines,
+			"expected_lines": args.ExpectedLines,
+		})
+	}
+	if actualChars != args.ExpectedChars {
+		return finalizeWorkspaceWriteMismatch("expected_chars", read.Path, map[string]any{
+			"actual_chars":   actualChars,
+			"expected_chars": args.ExpectedChars,
+		})
+	}
+	hash := read.Hash
+	if hash == "" {
+		hash = hashWorkspaceText(read.Content)
+	}
+	if strings.TrimSpace(args.FinalHash) != "" && !strings.EqualFold(strings.TrimSpace(args.FinalHash), hash) {
+		return finalizeWorkspaceWriteMismatch("final_hash", read.Path, map[string]any{
+			"actual_hash":   hash,
+			"expected_hash": strings.TrimSpace(args.FinalHash),
+		})
+	}
+	payload := workspaceToolPayload("finalize_workspace_write", read.Path, map[string]any{
+		"operation":       "finalize_write",
+		"path":            read.Path,
+		"chunks_verified": args.ExpectedChunks,
+		"lines":           actualLines,
+		"chars":           actualChars,
+		"hash":            hash,
+		"size":            read.Size,
+		"changed_paths":   []string{read.Path},
+		"next_hint":       "The long file write was finalized and verified. It is now safe to call attempt_completion if the task is otherwise complete.",
+	})
+	return mustJSON(payload), fmt.Sprintf("finalized %s (%d chunks, %d lines, %d chars)", read.Path, args.ExpectedChunks, actualLines, actualChars), "正在校验长文件写入...", read.Path, nil
+}
+
+func finalizeWorkspaceWriteMismatch(kind, path string, values map[string]any) (string, string, string, string, error) {
+	message := "write finalization failed: " + kind + " mismatch"
+	payload := map[string]any{
+		"error":         message,
+		"path":          path,
+		"recovery_hint": "Read the file or continue appending missing chunks before claiming completion.",
+	}
+	for key, value := range values {
+		payload[key] = value
+	}
+	return mustJSON(payload), message, "正在校验长文件写入...", path, fmt.Errorf("%s", message)
+}
+
+func countWorkspaceTextLines(text string) int {
+	if text == "" {
+		return 1
+	}
+	return strings.Count(text, "\n") + 1
+}
+
+func hashWorkspaceText(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
 
 type workspaceWriteResult struct {

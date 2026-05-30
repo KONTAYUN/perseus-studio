@@ -10,7 +10,8 @@ func openAIWorkspaceTools() []map[string]any {
 		openAIFunctionTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
 		openAIFunctionTool("replace_workspace_lines", "Replace a 1-based inclusive line range in an existing text file. Prefer this for scripts, long documents, duplicate headings, or larger rewrites after reading the target line range.", workspaceReplaceLinesParams()),
 		openAIFunctionTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
-		openAIFunctionTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content.", workspaceChunkWriteParams()),
+		openAIFunctionTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content. After the last chunk, call finalize_workspace_write.", workspaceChunkWriteParams()),
+		openAIFunctionTool("finalize_workspace_write", "Finalize and verify a long chunked workspace write. Use after write_workspace_chunk for long documents, scripts, reports, or generated files before claiming completion.", workspaceFinalizeWriteParams()),
 		openAIFunctionTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
 		openAIFunctionTool("organize_workspace_matches", "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams()),
 	}
@@ -26,7 +27,8 @@ func anthropicWorkspaceTools() []map[string]any {
 		anthropicTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
 		anthropicTool("replace_workspace_lines", "Replace a 1-based inclusive line range in an existing text file. Prefer this for scripts, long documents, duplicate headings, or larger rewrites after reading the target line range.", workspaceReplaceLinesParams()),
 		anthropicTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
-		anthropicTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content.", workspaceChunkWriteParams()),
+		anthropicTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content. After the last chunk, call finalize_workspace_write.", workspaceChunkWriteParams()),
+		anthropicTool("finalize_workspace_write", "Finalize and verify a long chunked workspace write. Use after write_workspace_chunk for long documents, scripts, reports, or generated files before claiming completion.", workspaceFinalizeWriteParams()),
 		anthropicTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
 		anthropicTool("organize_workspace_matches", "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams()),
 	}
@@ -194,6 +196,35 @@ func workspaceChunkWriteParams() map[string]any {
 				"type":        "string",
 				"enum":        []string{"create", "overwrite", "append"},
 				"description": "Use create for the first chunk of a new file, overwrite for the first chunk of an existing file, and append for each following chunk.",
+			},
+		},
+	}
+}
+
+func workspaceFinalizeWriteParams() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"path", "expected_chunks", "expected_lines", "expected_chars"},
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Workspace-relative text file path previously written with write_workspace_chunk.",
+			},
+			"expected_chunks": map[string]any{
+				"type":        "integer",
+				"description": "Total number of write_workspace_chunk calls expected for this file in the current run.",
+			},
+			"expected_lines": map[string]any{
+				"type":        "integer",
+				"description": "Expected final line count of the file.",
+			},
+			"expected_chars": map[string]any{
+				"type":        "integer",
+				"description": "Expected final character count of the file.",
+			},
+			"final_hash": map[string]any{
+				"type":        "string",
+				"description": "Optional expected final sha256 hash of the file content.",
 			},
 		},
 	}

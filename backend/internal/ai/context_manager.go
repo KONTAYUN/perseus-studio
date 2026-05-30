@@ -36,6 +36,11 @@ type ProviderRequestSummary struct {
 	ToolSchemaWarnings        []string             `json:"tool_schema_warnings,omitempty"`
 	ToolSchemaItems           []ProviderToolLog    `json:"tool_schema_items,omitempty"`
 	UnsupportedOpenAIParams   []string             `json:"unsupported_openai_params,omitempty"`
+	ProviderHost              string               `json:"provider_host,omitempty"`
+	ModelID                   string               `json:"model_id,omitempty"`
+	HasTools                  bool                 `json:"has_tools,omitempty"`
+	HasRequiredToolChoice     bool                 `json:"has_required_tool_choice,omitempty"`
+	HasReasoningParams        bool                 `json:"has_reasoning_params,omitempty"`
 	OutputMaxTokens           int                  `json:"output_max_tokens,omitempty"`
 	StreamToolArgsState       string               `json:"stream_tool_args_state,omitempty"`
 	StreamFinishReason        string               `json:"stream_finish_reason,omitempty"`

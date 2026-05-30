@@ -148,6 +148,12 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		})
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
 	}
+	if errText := r.validateChunkWriteToolCall(call); errText != "" {
+		r.recordToolError(call.Name, call.ArgumentsJSON, errText)
+		event := r.invalidToolCallEvent(ctx, call, errText)
+		r.events = append(r.events, event)
+		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
+	}
 	r.toolLoopActive = true
 	if toolRequiresCompletionAfterUse(call.Name) {
 		r.requiresCompletion = true
@@ -199,6 +205,8 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		if operationHash != "" {
 			r.appliedMutations[operationHash] = event
 		}
+		r.recordChunkWriteSuccess(call, &event)
+		result = r.annotateChunkWriteResult(call, result)
 	}
 	if event.Status == "success" {
 		r.clearToolErrors()

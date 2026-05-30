@@ -29,6 +29,10 @@ func toolFailureRecoveryHint(toolName, errorText string) string {
 			return "The target file does not exist. If the user wanted a new file, retry save_workspace_file with mode=create; otherwise inspect/read the correct existing file before overwriting."
 		}
 		return "Read the target file again if needed, adjust the save arguments, then retry. Do not report success until save_workspace_file succeeds."
+	case "write_workspace_chunk":
+		return "Continue the chunk sequence in order, keeping each chunk short. Do not claim the long file is complete until finalize_workspace_write succeeds."
+	case "finalize_workspace_write":
+		return "Read the file or continue appending missing chunks before claiming completion. Retry finalize_workspace_write only after expected chunks, lines, chars, and hash match the final file."
 	case "manage_workspace_path":
 		return "Verify the target path with inspect_workspace before retrying. If the request is ambiguous or destructive, ask the user to confirm the exact target."
 	case "organize_workspace_matches":

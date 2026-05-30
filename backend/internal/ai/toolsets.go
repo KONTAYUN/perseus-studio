@@ -23,6 +23,7 @@ func toolsForToolsetRole(toolset, role string) ([]string, bool) {
 			"replace_workspace_lines",
 			"save_workspace_file",
 			"write_workspace_chunk",
+			"finalize_workspace_write",
 			"manage_workspace_path",
 			"organize_workspace_matches",
 		}, true
