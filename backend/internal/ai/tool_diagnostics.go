@@ -51,6 +51,8 @@ func toolFailureClass(toolName string, err error) string {
 		strings.Contains(text, "tool arguments are required") ||
 		strings.Contains(text, "tool arguments must be"):
 		return "tool_invalid_arguments"
+	case strings.Contains(text, "unsupported file type"):
+		return "workspace_unsupported_file_type"
 	case strings.Contains(text, "all requested files failed to read"):
 		return "workspace_batch_read_all_failed"
 	case errors.Is(err, fs.ErrNotExist) || strings.Contains(text, "no such file or directory") || strings.Contains(text, "file does not exist"):
@@ -79,6 +81,7 @@ func toolFailureClass(toolName string, err error) string {
 func toolDiagnosticLevel(failureClass string) string {
 	switch failureClass {
 	case "workspace_path_not_found",
+		"workspace_unsupported_file_type",
 		"workspace_batch_read_all_failed",
 		"search_provider_not_configured",
 		"web_extract_unavailable",

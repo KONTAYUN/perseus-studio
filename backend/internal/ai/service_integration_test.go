@@ -2519,6 +2519,59 @@ func TestGenerateReplyRecordsProvider400ToolRequestSummary(t *testing.T) {
 	}
 }
 
+func TestGenerateReplyProvider400DoesNotGuessRequiredToolChoice(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if payload["tool_choice"] != "required" {
+			t.Fatalf("expected required tool_choice, got %#v", payload["tool_choice"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"openai_error","type":"bad_response_status_code","code":"bad_response_status_code"}`))
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "看看引用文件")
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{Kind: "workspace_file", Path: "demo.txt"}}, RunOptions{UserID: testUserID})
+	if err == nil {
+		t.Fatal("expected GenerateReply error")
+	}
+	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("diagnostics.List returned error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 diagnostic log, got %#v", logs)
+	}
+	var summary map[string]any
+	if err := json.Unmarshal([]byte(logs[0].RequestSummary), &summary); err != nil {
+		t.Fatalf("request_summary should be JSON: %v\n%s", err, logs[0].RequestSummary)
+	}
+	if summary["failure_class"] == "provider_rejected_required_tool_choice" {
+		t.Fatalf("must not guess required tool_choice rejection from generic 400: %#v", summary)
+	}
+	if summary["failure_class"] != "provider_bad_request_with_tools" {
+		t.Fatalf("expected provider_bad_request_with_tools, got %#v in %#v", summary["failure_class"], summary)
+	}
+	if _, ok := summary["payload_keys"].([]any); !ok {
+		t.Fatalf("expected payload_keys in diagnostic summary: %#v", summary)
+	}
+	if digest, _ := summary["tool_schema_digest"].(string); digest == "" {
+		t.Fatalf("expected tool_schema_digest in diagnostic summary: %#v", summary)
+	}
+}
+
 func prepareOpenAIConversation(t *testing.T, ctx context.Context, env *testAIEnv, baseURL, prompt string) (store.ModelProvider, store.Conversation, store.Message, []store.Message) {
 	t.Helper()
 

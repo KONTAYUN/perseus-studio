@@ -1,6 +1,9 @@
 package store
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 const (
 	ReasoningCapabilityAuto              = "auto"
@@ -218,8 +221,10 @@ func sourceBackedAutoThinkingProfile(provider ModelProvider) ThinkingProfile {
 	modelID := normalizeModelID(provider.ModelID)
 	switch protocol {
 	case "openai":
-		if profile, ok := staticOpenAIThinkingProfiles[modelID]; ok {
-			return profile
+		if isOfficialOpenAIBaseURL(provider.BaseURL) {
+			if profile, ok := staticOpenAIThinkingProfiles[modelID]; ok {
+				return profile
+			}
 		}
 	case "anthropic":
 		if _, ok := staticAnthropicAdaptiveModels[modelID]; ok {
@@ -227,6 +232,19 @@ func sourceBackedAutoThinkingProfile(provider ModelProvider) ThinkingProfile {
 		}
 	}
 	return noThinkingProfile(ThinkingProfileSourceNone)
+}
+
+func IsOfficialOpenAIBaseURL(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "api.openai.com"
+}
+
+func isOfficialOpenAIBaseURL(value string) bool {
+	return IsOfficialOpenAIBaseURL(value)
 }
 
 func normalizeModelID(value string) string {

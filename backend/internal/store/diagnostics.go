@@ -136,7 +136,7 @@ func (s *DiagnosticStore) Append(ctx context.Context, input DiagnosticLogInput) 
 		ContentType:     trimDiagnosticField(input.ContentType, 200),
 		ErrorMessage:    trimDiagnosticField(input.ErrorMessage, 1000),
 		ResponseSnippet: trimDiagnosticField(input.ResponseSnippet, 500),
-		RequestSummary:  trimDiagnosticField(input.RequestSummary, 1200),
+		RequestSummary:  trimDiagnosticField(input.RequestSummary, 8000),
 		DurationMS:      input.DurationMS,
 		CreatedAt:       now,
 	}

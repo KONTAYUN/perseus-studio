@@ -23,9 +23,17 @@ type ProviderRequestSummary struct {
 	ThinkingMode              string   `json:"thinking_mode,omitempty"`
 	ReasoningSupport          string   `json:"reasoning_support,omitempty"`
 	ReasoningEffort           string   `json:"reasoning_effort,omitempty"`
+	ReasoningProfileSource    string   `json:"reasoning_profile_source,omitempty"`
+	ReasoningProfileLevels    []string `json:"reasoning_profile_levels,omitempty"`
 	ToolsCount                int      `json:"tools_count,omitempty"`
 	ToolNames                 []string `json:"tool_names,omitempty"`
 	ParallelToolCalls         *bool    `json:"parallel_tool_calls,omitempty"`
+	PayloadKeys               []string `json:"payload_keys,omitempty"`
+	ToolSchemaDigest          string   `json:"tool_schema_digest,omitempty"`
+	ToolSchemaWarnings        []string `json:"tool_schema_warnings,omitempty"`
+	UnsupportedOpenAIParams   []string `json:"unsupported_openai_params,omitempty"`
+	OutputMaxTokens           int      `json:"output_max_tokens,omitempty"`
+	StreamToolArgsState       string   `json:"stream_tool_args_state,omitempty"`
 	LoadedToolsets            []string `json:"loaded_toolsets,omitempty"`
 	ForcedTool                string   `json:"forced_tool,omitempty"`
 	FailureClass              string   `json:"failure_class,omitempty"`

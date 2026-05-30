@@ -98,6 +98,28 @@ test('assistant message merges keep live progress while pending and clear it on 
   assert.deepEqual(completed[0].progressItems, []);
 });
 
+test('assistant message start removes duplicate shell for the same run when persisted streaming draft already exists', () => {
+  const started = mergeAssistantMessageStarted([
+    { id: 'u1', role: 'user', content: '继续', conversation_id: 'conv-1' },
+    { id: 'a1', role: 'assistant', status: 'streaming', content: '', pending: true, activeMessageId: 'a1', conversation_id: 'conv-1' },
+    buildAssistantRunShell({
+      id: 'run-1',
+      conversationId: 'conv-1',
+      runId: 'run-1',
+    }),
+  ], 'temp-assistant', {
+    id: 'a1',
+    role: 'assistant',
+    status: 'streaming',
+    content: '',
+    conversation_id: 'conv-1',
+  }, { runId: 'run-1' });
+
+  assert.deepEqual(started.map((item) => item.id), ['u1', 'a1']);
+  assert.equal(started[1].pending, true);
+  assert.equal(started[1].runId, 'run-1');
+});
+
 test('assistant segments from the same run stay as separate immutable messages', () => {
   const first = mergeAssistantMessageCompleted(
     mergeAssistantMessageStarted(

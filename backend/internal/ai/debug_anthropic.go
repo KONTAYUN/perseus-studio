@@ -28,7 +28,7 @@ func (s *Service) debugAnthropicToolTest(ctx context.Context, provider store.Mod
 		},
 		"tools":       tools,
 		"tool_choice": toolChoice,
-		"max_tokens":  1024,
+		"max_tokens":  anthropicAgentMaxTokens,
 		"system":      systemText,
 	}
 

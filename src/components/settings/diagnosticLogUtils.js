@@ -16,7 +16,10 @@ export function formatRequestSummary(value) {
 export function diagnosticShortJudgement(item) {
   const summary = parseRequestSummary(item?.request_summary);
   const failureClass = summary?.failure_class || '';
-  if (failureClass === 'provider_rejected_required_tool_choice') return '上游拒绝强制工具调用';
+  if (failureClass === 'provider_rejected_required_tool_choice') return '上游明确拒绝 required 工具调用';
+  if (failureClass === 'provider_rejected_unsupported_model_params') return '上游拒绝不兼容模型参数';
+  if (failureClass === 'provider_bad_request_with_reasoning') return '上游拒绝推理参数请求';
+  if (failureClass === 'provider_incomplete_tool_arguments') return '上游工具参数流被截断';
   if (failureClass === 'provider_bad_request_with_tools') return '上游拒绝工具调用请求';
   if (failureClass === 'provider_bad_request_without_tools') return '上游拒绝普通请求';
   if (failureClass === 'user_or_client_canceled') return '用户或浏览器取消请求';

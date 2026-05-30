@@ -154,6 +154,30 @@ test('restored run shell is replaced by later assistant start using run id', () 
   assert.equal(next[1].pending, true);
 });
 
+test('restoring a running conversation reuses persisted streaming assistant instead of adding a second loader', () => {
+  const messages = applyLatestRunState([
+    { id: 'u1', role: 'user', content: '看一下附件', conversation_id: 'conv-1' },
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+      conversation_id: 'conv-1',
+    },
+  ], {
+    id: 'run-1',
+    conversation_id: 'conv-1',
+    user_message_id: 'u1',
+    status: 'running',
+    stage: 'calling_model',
+  }, []);
+
+  assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1']);
+  assert.equal(messages[1].pending, true);
+  assert.equal(messages[1].runId, 'run-1');
+  assert.equal(messages[1].activeMessageId, 'a1');
+});
+
 test('applyLatestRunState keeps completed assistant segments immutable and anchors the shell after the user message', () => {
   const messages = applyLatestRunState([
     { id: 'u1', role: 'user', content: '继续', conversation_id: 'conv-1', created_at: '2026-05-21T00:00:00Z' },

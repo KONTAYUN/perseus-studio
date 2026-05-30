@@ -19,7 +19,19 @@ test('diagnosticShortJudgement summarizes provider request failures', () => {
     diagnosticShortJudgement({
       request_summary: '{"failure_class":"provider_rejected_required_tool_choice"}',
     }),
-    '上游拒绝强制工具调用'
+    '上游明确拒绝 required 工具调用'
+  );
+  assert.equal(
+    diagnosticShortJudgement({
+      request_summary: '{"failure_class":"provider_bad_request_with_reasoning"}',
+    }),
+    '上游拒绝推理参数请求'
+  );
+  assert.equal(
+    diagnosticShortJudgement({
+      request_summary: '{"failure_class":"provider_incomplete_tool_arguments"}',
+    }),
+    '上游工具参数流被截断'
   );
   assert.equal(
     diagnosticShortJudgement({

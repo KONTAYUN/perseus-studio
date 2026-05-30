@@ -182,6 +182,15 @@ func (s *Server) handleTestModelProvider(w http.ResponseWriter, r *http.Request)
 		if req.ModelID == "" {
 			req.ModelID = existing.ModelID
 		}
+		if strings.TrimSpace(req.ReasoningCapability) == "" {
+			req.ReasoningCapability = existing.ReasoningCapability
+		}
+		if strings.TrimSpace(req.ReasoningCapabilitySource) == "" {
+			req.ReasoningCapabilitySource = existing.ReasoningCapabilitySource
+		}
+		if strings.TrimSpace(req.ReasoningProfileLevels) == "" {
+			req.ReasoningProfileLevels = existing.ReasoningProfileLevels
+		}
 	}
 	report := runModelProviderTest(r, req)
 	writeJSON(w, http.StatusOK, report)

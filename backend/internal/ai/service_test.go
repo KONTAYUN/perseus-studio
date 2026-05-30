@@ -771,6 +771,14 @@ func TestToolDiagnosticClassifiesExpectedToolFailures(t *testing.T) {
 	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"tool_invalid_arguments"`) {
 		t.Fatalf("unexpected invalid arguments diagnostic: %#v", diag)
 	}
+
+	diag = buildToolDiagnostic("read_workspace_text", `{"path":"demo.docx"}`, "demo.docx", 5, fmt.Errorf("unsupported file type"))
+	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_unsupported_file_type"`) {
+		t.Fatalf("unexpected unsupported file diagnostic: %#v", diag)
+	}
+	if !strings.Contains(diag.RequestSummary, "only reads supported plain-text files") {
+		t.Fatalf("expected unsupported file recovery hint, got %#v", diag)
+	}
 }
 
 func TestValidateToolCallRejectsMissingRequiredSaveArguments(t *testing.T) {
@@ -1378,7 +1386,7 @@ func TestNativeReasoningPolicyDoesNotSendUnknownModelParams(t *testing.T) {
 func TestNativeReasoningPolicyUsesSourceBackedOpenAIModelTable(t *testing.T) {
 	provider := store.ModelProvider{
 		Protocol:            "openai",
-		BaseURL:             "https://example.com/v1",
+		BaseURL:             "https://api.openai.com/v1",
 		ModelID:             "gpt-5.4",
 		ReasoningCapability: store.ReasoningCapabilityAuto,
 	}
@@ -1386,6 +1394,20 @@ func TestNativeReasoningPolicyUsesSourceBackedOpenAIModelTable(t *testing.T) {
 	policy := applyOpenAIReasoningPayload(payload, provider, ThinkingModeExpert)
 	if policy.Support != store.ReasoningSupportOpenAI || payload["reasoning_effort"] != "xhigh" {
 		t.Fatalf("expected source-backed OpenAI model reasoning params, policy=%#v payload=%#v", policy, payload)
+	}
+}
+
+func TestNativeReasoningPolicyDoesNotApplyOfficialOpenAITableToCompatibleProxy(t *testing.T) {
+	provider := store.ModelProvider{
+		Protocol:            "openai",
+		BaseURL:             "https://api.jellix.top/v1",
+		ModelID:             "gpt-5.5",
+		ReasoningCapability: store.ReasoningCapabilityAuto,
+	}
+	payload := map[string]any{}
+	policy := applyOpenAIReasoningPayload(payload, provider, ThinkingModeExpert)
+	if policy.Support != store.ReasoningSupportNone || len(payload) != 0 {
+		t.Fatalf("expected OpenAI-compatible proxy to omit official reasoning params unless discovered/explicit, policy=%#v payload=%#v", policy, payload)
 	}
 }
 
@@ -1623,6 +1645,39 @@ func TestProviderFailureClassSeparatesConfigFromTransientHTTP(t *testing.T) {
 	}
 	if got := providerFailureClass(fmt.Errorf(`Post "https://pomo.zanbi.fun/v1/chat/completions": dial tcp: lookup pomo.zanbi.fun on 127.0.0.11:53: no such host`), ProviderRequestSummary{}); got != "provider_dns_lookup_failed" {
 		t.Fatalf("expected provider_dns_lookup_failed, got %q", got)
+	}
+}
+
+func TestProviderFailureClassDoesNotGuessRequiredToolChoice(t *testing.T) {
+	err := &ProviderResponseError{
+		StatusCode:      http.StatusBadRequest,
+		Message:         "模型供应商请求失败（HTTP 400）：openai_error",
+		ResponseSnippet: `{"message":"openai_error","type":"bad_response_status_code","code":"bad_response_status_code"}`,
+	}
+	summary := ProviderRequestSummary{
+		ToolChoice:      "required",
+		RequiresTool:    true,
+		ReasoningEffort: "medium",
+		ToolsCount:      19,
+	}
+	if got := providerFailureClass(err, summary); got != "provider_bad_request_with_reasoning" {
+		t.Fatalf("expected generic bad request with reasoning, got %q", got)
+	}
+}
+
+func TestProviderFailureClassUsesRequiredOnlyWhenProviderSaysSo(t *testing.T) {
+	err := &ProviderResponseError{
+		StatusCode:      http.StatusBadRequest,
+		Message:         "tool_choice required is not supported by this provider",
+		ResponseSnippet: `{"error":{"message":"tool_choice required is not supported by this provider"}}`,
+	}
+	summary := ProviderRequestSummary{
+		ToolChoice:   "required",
+		RequiresTool: true,
+		ToolsCount:   19,
+	}
+	if got := providerFailureClass(err, summary); got != "provider_rejected_required_tool_choice" {
+		t.Fatalf("expected explicit required rejection, got %q", got)
 	}
 }
 

@@ -331,6 +331,36 @@ func TestParseAnthropicStreamPreservesEmptyToolArgumentsAsInvalid(t *testing.T) 
 	if turn.ToolCalls[0].ArgumentsJSON != "" {
 		t.Fatalf("empty streamed arguments must stay empty for validation, got %q", turn.ToolCalls[0].ArgumentsJSON)
 	}
+	if !hasIncompleteToolCallArguments(turn) {
+		t.Fatalf("expected empty tool arguments to be treated as incomplete provider output")
+	}
+}
+
+func TestParseAnthropicStreamDetectsTruncatedToolArguments(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"save_workspace_file","input":{}}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"机甲少女/机甲少女11-22集修改版.txt\", \"mode\": \"create\""}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	turn, err := parseAnthropicStream(strings.NewReader(stream), nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if len(turn.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %#v", turn.ToolCalls)
+	}
+	if !hasIncompleteToolCallArguments(turn) {
+		t.Fatalf("expected truncated JSON to be detected as incomplete provider output, got %#v", turn.ToolCalls[0])
+	}
 }
 
 func TestParseAnthropicStreamStreamsAttemptCompletionResultFromToolArguments(t *testing.T) {

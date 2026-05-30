@@ -12,6 +12,8 @@ import (
 	"webide-backend/internal/store"
 )
 
+const anthropicAgentMaxTokens = 8192
+
 func (s *Service) generateAnthropic(ctx context.Context, conversationID, messageID string, provider store.ModelProvider, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {
 	return s.runAnthropicAgent(ctx, conversationID, messageID, provider, messages, attachments, opts)
 }
@@ -36,10 +38,11 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 	}
 	payload := map[string]any{
 		"model":      req.Provider.ModelID,
-		"max_tokens": 1024,
+		"max_tokens": anthropicAgentMaxTokens,
 		"messages":   req.Snapshot.AnthropicMessages,
 		"stream":     true,
 	}
+	req.Snapshot.Summary.OutputMaxTokens = anthropicAgentMaxTokens
 	reasoningPolicy := applyAnthropicReasoningPayload(payload, req.Provider, req.Opts.ThinkingMode)
 	req.Snapshot.Summary.ReasoningSupport = reasoningPolicy.Support
 	req.Snapshot.Summary.ReasoningEffort = reasoningPolicy.AnthropicEffort
@@ -57,6 +60,7 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 	if req.Snapshot.AnthropicSystem != "" {
 		payload["system"] = req.Snapshot.AnthropicSystem
 	}
+	annotatePayloadDiagnostics(&req.Snapshot.Summary, payload, req.Tools, req.Provider, reasoningPolicy)
 	log.Printf("[ai] request conversation=%s provider=%s protocol=%s base_url=%s model=%s tools_count=%d tools=%s tool_choice=%v round=%d",
 		req.ConversationID, req.Provider.Name, req.Provider.Protocol, req.Provider.BaseURL, req.Provider.ModelID, len(toolNames), strings.Join(toolNames, ","), payload["tool_choice"], req.Snapshot.Summary.Round,
 	)
@@ -165,6 +169,12 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 		}
 		if !turn.CompletionResultStreamed && emitCompletionResult != nil {
 			emitStreamedCompletionResultFromToolCalls(turn.ToolCalls, emitCompletionResult)
+		}
+		if hasIncompleteToolCallArguments(turn) {
+			req.Snapshot.Summary.StreamToolArgsState = "incomplete_json"
+			err := fmt.Errorf("provider stream returned incomplete tool call arguments; max_tokens=%d", anthropicAgentMaxTokens)
+			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_incomplete_tool_arguments", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
+			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
 		closeStream()
 		if isEmptyModelTurn(turn) {

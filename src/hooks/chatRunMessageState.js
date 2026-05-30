@@ -118,13 +118,14 @@ export function mergeAssistantMessageStarted(messages, thinkingId, assistantMess
   }
   const nextAssistant = {
     ...assistant,
+    kind: assistant.kind === 'run_shell' ? 'assistant_segment' : (assistant.kind || 'assistant_segment'),
     runId,
     pending: true,
     activeMessageId: assistant.id,
     progressItems: [],
   };
   if (existingAssistant) {
-    return normalizedMessages.map((item) =>
+    return removePendingRunShells(normalizedMessages, thinkingId, runId).map((item) =>
       item?.id === assistant.id
         ? {
             ...item,
@@ -155,13 +156,16 @@ export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMe
   const normalizedMessages = messages || [];
   const nextAssistant = {
     ...assistant,
+    kind: assistant.kind === 'run_shell' ? 'assistant_segment' : (assistant.kind || 'assistant_segment'),
     runId,
     pending: false,
     activeMessageId: '',
     progressItems: [],
   };
   if (normalizedMessages.some((item) => item?.id === assistant.id)) {
-    return normalizedMessages.map((item) => (item?.id === assistant.id ? { ...item, ...nextAssistant } : item));
+    return removePendingRunShells(normalizedMessages, thinkingId, runId).map((item) =>
+      item?.id === assistant.id ? { ...item, ...nextAssistant } : item
+    );
   }
   const shellIndex = findPendingRunShellIndex(normalizedMessages, thinkingId, runId);
   if (shellIndex >= 0) {
@@ -339,6 +343,10 @@ function findPendingRunShellIndex(messages, thinkingId = '', runId = '') {
     if (isPendingRunShell(items[index], thinkingId, runId)) return index;
   }
   return -1;
+}
+
+function removePendingRunShells(messages, thinkingId = '', runId = '') {
+  return (messages || []).filter((item) => !isPendingRunShell(item, thinkingId, runId));
 }
 
 function findPendingAssistantIndex(messages, runId = '') {

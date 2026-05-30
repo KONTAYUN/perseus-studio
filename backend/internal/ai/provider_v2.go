@@ -147,9 +147,17 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"thinking_mode":                summary.ThinkingMode,
 		"reasoning_support":            summary.ReasoningSupport,
 		"reasoning_effort":             summary.ReasoningEffort,
+		"reasoning_profile_source":     summary.ReasoningProfileSource,
+		"reasoning_profile_levels":     summary.ReasoningProfileLevels,
 		"tools_count":                  summary.ToolsCount,
 		"tool_names":                   summary.ToolNames,
 		"parallel_tool_calls":          summary.ParallelToolCalls,
+		"payload_keys":                 summary.PayloadKeys,
+		"tool_schema_digest":           summary.ToolSchemaDigest,
+		"tool_schema_warnings":         summary.ToolSchemaWarnings,
+		"unsupported_openai_params":    summary.UnsupportedOpenAIParams,
+		"output_max_tokens":            summary.OutputMaxTokens,
+		"stream_tool_args_state":       summary.StreamToolArgsState,
 		"loaded_toolsets":              summary.LoadedToolsets,
 		"forced_tool":                  summary.ForcedTool,
 		"failure_class":                summary.FailureClass,
@@ -212,8 +220,14 @@ func providerFailureClass(err error, summary ProviderRequestSummary) string {
 			return failureClass
 		}
 		if providerErr.StatusCode == http.StatusBadRequest {
-			if summary.RequiresTool && summary.ToolChoice == "required" {
+			if providerRejectedRequiredToolChoice(providerErr, err) {
 				return "provider_rejected_required_tool_choice"
+			}
+			if len(summary.UnsupportedOpenAIParams) > 0 {
+				return "provider_rejected_unsupported_model_params"
+			}
+			if summary.ReasoningEffort != "" {
+				return "provider_bad_request_with_reasoning"
 			}
 			if summary.ToolsCount > 0 {
 				return "provider_bad_request_with_tools"
@@ -228,10 +242,24 @@ func providerFailureClass(err error, summary ProviderRequestSummary) string {
 	if isCheckpointRecoverableProviderError(err) {
 		return "provider_transient_transport"
 	}
+	if strings.Contains(strings.ToLower(err.Error()), "incomplete tool call arguments") {
+		return "provider_incomplete_tool_arguments"
+	}
 	if failureClass := providerTransportFailureClass(err); failureClass != "" {
 		return failureClass
 	}
 	return ""
+}
+
+func providerRejectedRequiredToolChoice(providerErr *ProviderResponseError, err error) bool {
+	text := strings.ToLower(strings.Join([]string{providerErr.Message, providerErr.ResponseSnippet, errString(err)}, "\n"))
+	return strings.Contains(text, "tool_choice") &&
+		strings.Contains(text, "required") &&
+		(strings.Contains(text, "not support") ||
+			strings.Contains(text, "unsupported") ||
+			strings.Contains(text, "invalid") ||
+			strings.Contains(text, "not allowed") ||
+			strings.Contains(text, "must be"))
 }
 
 func providerResponseFailureClass(providerErr *ProviderResponseError, err error) string {
@@ -240,6 +268,8 @@ func providerResponseFailureClass(providerErr *ProviderResponseError, err error)
 	}
 	text := strings.ToLower(strings.Join([]string{providerErr.Message, providerErr.ResponseSnippet, errString(err)}, "\n"))
 	switch {
+	case strings.Contains(text, "incomplete tool call arguments"):
+		return "provider_incomplete_tool_arguments"
 	case strings.Contains(text, "model_not_found") ||
 		strings.Contains(text, "model not found") ||
 		strings.Contains(text, "no available channel for model") ||

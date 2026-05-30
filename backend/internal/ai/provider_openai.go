@@ -49,6 +49,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		payload["tool_choice"] = openAIProviderToolChoice(req.ToolChoice)
 		payload["parallel_tool_calls"] = false
 	}
+	annotatePayloadDiagnostics(&req.Snapshot.Summary, payload, req.Tools, req.Provider, reasoningPolicy)
 	log.Printf("[ai] request conversation=%s provider=%s protocol=%s base_url=%s model=%s tools_count=%d tools=%s tool_choice=%v round=%d",
 		req.ConversationID, req.Provider.Name, req.Provider.Protocol, req.Provider.BaseURL, req.Provider.ModelID, len(toolNames), strings.Join(toolNames, ","), payload["tool_choice"], req.Snapshot.Summary.Round,
 	)
@@ -157,6 +158,12 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		}
 		if !turn.CompletionResultStreamed && emitCompletionResult != nil {
 			emitStreamedCompletionResultFromToolCalls(turn.ToolCalls, emitCompletionResult)
+		}
+		if hasIncompleteToolCallArguments(turn) {
+			req.Snapshot.Summary.StreamToolArgsState = "incomplete_json"
+			err := fmt.Errorf("provider stream returned incomplete tool call arguments")
+			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_incomplete_tool_arguments", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
+			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
 		closeStream()
 		return turn, nil

@@ -10,6 +10,9 @@ func toolFailureRecoveryHint(toolName, errorText string) string {
 	case "search_workspace_text":
 		return "Search returned matching lines. Read the relevant file/range before editing unless the exact replacement is already fully clear."
 	case "read_workspace_text", "read_workspace_files":
+		if strings.Contains(lowerError, "unsupported file type") {
+			return "This workspace tool only reads supported plain-text files. Do not retry the same binary/document path with read_workspace_text; explain that this file type is not readable by the current workspace text tools unless the user provides text content or a supported text export."
+		}
 		if strings.Contains(lowerError, "not exist") || strings.Contains(lowerError, "no such") || strings.Contains(lowerError, "不存在") {
 			return "One or more file paths may be wrong or stale. Inspect or find the workspace paths, then retry reading. Do not claim you read files until the read tool succeeds."
 		}

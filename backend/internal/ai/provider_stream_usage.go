@@ -42,15 +42,36 @@ func int64FromAny(value any) int64 {
 
 func hasCompleteToolCalls(turn agentModelTurn) bool {
 	for _, call := range turn.ToolCalls {
-		if strings.TrimSpace(call.Name) == "" || strings.TrimSpace(call.ArgumentsJSON) == "" {
-			continue
-		}
-		var decoded any
-		if err := json.Unmarshal([]byte(call.ArgumentsJSON), &decoded); err == nil {
+		if hasCompleteToolCallArguments(call) {
 			return true
 		}
 	}
 	return false
+}
+
+func hasIncompleteToolCallArguments(turn agentModelTurn) bool {
+	for _, call := range turn.ToolCalls {
+		if strings.TrimSpace(call.Name) == "" {
+			continue
+		}
+		args := strings.TrimSpace(call.ArgumentsJSON)
+		if args == "" {
+			return true
+		}
+		var decoded any
+		if err := json.Unmarshal([]byte(args), &decoded); err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCompleteToolCallArguments(call agentToolCall) bool {
+	if strings.TrimSpace(call.Name) == "" || strings.TrimSpace(call.ArgumentsJSON) == "" {
+		return false
+	}
+	var decoded any
+	return json.Unmarshal([]byte(call.ArgumentsJSON), &decoded) == nil
 }
 
 func intFromAny(value any) int {

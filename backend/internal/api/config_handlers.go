@@ -24,11 +24,14 @@ type discoveredModel struct {
 }
 
 type testModelProviderRequest struct {
-	ProviderID string `json:"provider_id"`
-	Protocol   string `json:"protocol"`
-	BaseURL    string `json:"base_url"`
-	APIKey     string `json:"api_key"`
-	ModelID    string `json:"model_id"`
+	ProviderID                string `json:"provider_id"`
+	Protocol                  string `json:"protocol"`
+	BaseURL                   string `json:"base_url"`
+	APIKey                    string `json:"api_key"`
+	ModelID                   string `json:"model_id"`
+	ReasoningCapability       string `json:"reasoning_capability,omitempty"`
+	ReasoningCapabilitySource string `json:"reasoning_capability_source,omitempty"`
+	ReasoningProfileLevels    string `json:"reasoning_profile_levels,omitempty"`
 }
 
 type modelProviderTestResult struct {

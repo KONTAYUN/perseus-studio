@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"webide-backend/internal/store"
 )
 
 func runModelProviderTest(r *http.Request, req testModelProviderRequest) modelProviderTestReport {
@@ -34,6 +36,7 @@ func runModelProviderTest(r *http.Request, req testModelProviderRequest) modelPr
 		{"stream", "流式回复", testProviderStream},
 		{"tool_call", "工具调用", testProviderToolCall},
 		{"forced_tool_call", "强制工具调用", testProviderForcedToolCall},
+		{"required_tool_call", "强制任意工具调用", testProviderRequiredToolCall},
 		{"stream_tool_call", "流式工具调用", testProviderStreamToolCall},
 	}
 	for _, item := range tests {
@@ -133,6 +136,23 @@ func testProviderForcedToolCall(ctx context.Context, req testModelProviderReques
 	return fmt.Errorf("供应商不支持或没有遵守 forced tool_choice")
 }
 
+func testProviderRequiredToolCall(ctx context.Context, req testModelProviderRequest) error {
+	body := providerTestPayload(req, false, true)
+	if req.Protocol == "anthropic" {
+		body["tool_choice"] = map[string]any{"type": "any"}
+	} else {
+		body["tool_choice"] = "required"
+	}
+	raw, err := providerTestRequest(ctx, req, body)
+	if err != nil {
+		return err
+	}
+	if providerTestHasToolCall(req.Protocol, raw) {
+		return nil
+	}
+	return fmt.Errorf("供应商不支持或没有遵守 required/any tool_choice")
+}
+
 func testProviderStreamToolCall(ctx context.Context, req testModelProviderRequest) error {
 	body := providerTestPayload(req, true, true)
 	raw, err := providerTestRequest(ctx, req, body)
@@ -152,7 +172,7 @@ func providerTestPayload(req testModelProviderRequest, stream, withTool bool) ma
 	if req.Protocol == "anthropic" {
 		payload := map[string]any{
 			"model":      req.ModelID,
-			"max_tokens": 128,
+			"max_tokens": 512,
 			"stream":     stream,
 			"system":     "You are running a short capability check. Keep responses tiny.",
 			"messages": []map[string]any{{
@@ -186,7 +206,34 @@ func providerTestPayload(req testModelProviderRequest, stream, withTool bool) ma
 			{"role": "user", "content": "Use the perseus_test_echo tool with text ok. Do not answer normally."},
 		}
 	}
+	applyProviderTestReasoningPayload(payload, req)
 	return payload
+}
+
+func applyProviderTestReasoningPayload(payload map[string]any, req testModelProviderRequest) {
+	capability := store.NormalizeReasoningCapability(req.ReasoningCapability)
+	if capability != store.ReasoningCapabilityOpenAIReasoning || req.Protocol != "openai" {
+		return
+	}
+	levels := store.ParseReasoningProfileLevels(req.ReasoningProfileLevels)
+	effort := "medium"
+	if len(levels) > 0 {
+		effort = providerTestReasoningEffort(levels[0])
+	}
+	payload["reasoning_effort"] = effort
+}
+
+func providerTestReasoningEffort(level string) string {
+	switch store.NormalizeThinkingProfileLevel(level) {
+	case "light":
+		return "low"
+	case "deep":
+		return "high"
+	case "expert":
+		return "xhigh"
+	default:
+		return "medium"
+	}
 }
 
 func providerOpenAITestTool() map[string]any {

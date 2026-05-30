@@ -40,15 +40,16 @@ export function applyLatestRunState(messages, latestRun, events = [], options = 
     ? normalized.findIndex((item) => item.id === snapshot.activeMessageId)
     : -1;
   if (activeMessageIndex >= 0) {
+    const activeMessageID = snapshot.activeMessageId;
     const nextMessages = normalized
       .filter((item) => !isRunShellMessage(item, { thinkingId: shellId, runId: latestRun.id }))
       .map((item) => {
-      if (item.id !== snapshot.activeMessageId) return item;
+      if (item.id !== activeMessageID) return item;
       return {
         ...item,
         pending: true,
         runId: latestRun.id,
-        activeMessageId: item.id,
+        activeMessageId: activeMessageID,
         progressItems: snapshot.progressItems,
         loadingState: {
           text: snapshot.loadingText,
@@ -59,6 +60,29 @@ export function applyLatestRunState(messages, latestRun, events = [], options = 
       };
       });
     return nextMessages;
+  }
+
+  const persistedActiveIndex = findPersistedStreamingAssistantIndex(normalized, userMessageId, latestRun.id);
+  if (persistedActiveIndex >= 0) {
+    const activeMessageID = normalized[persistedActiveIndex].id;
+    return normalized
+      .filter((item, index) => index === persistedActiveIndex || !isRunShellMessage(item, { thinkingId: shellId, runId: latestRun.id }))
+      .map((item) => {
+        if (item.id !== activeMessageID) return item;
+        return {
+          ...item,
+          pending: true,
+          runId: latestRun.id,
+          activeMessageId: activeMessageID,
+          progressItems: item.progressItems || snapshot.progressItems,
+          loadingState: item.loadingState || {
+            text: snapshot.loadingText,
+            visibleText: snapshot.loadingText,
+            stage: 'holding',
+            activeSince: Date.now(),
+          },
+        };
+      });
   }
 
   const shellIndex = normalized.findIndex((item) => isRunShellMessage(item, { thinkingId: shellId, runId: latestRun.id }));
@@ -155,4 +179,26 @@ function runStageLoadingText(stage = '') {
     default:
       return '';
   }
+}
+
+function findPersistedStreamingAssistantIndex(messages = [], userMessageId = '', runId = '') {
+  if (!userMessageId) return -1;
+  const userIndex = messages.findIndex((item) => item?.id === userMessageId);
+  if (userIndex < 0) return -1;
+  let activeIndex = -1;
+  for (let index = userIndex + 1; index < messages.length; index += 1) {
+    const item = messages[index];
+    if (item?.role === 'user') break;
+    if (isPersistedStreamingAssistant(item, runId)) {
+      activeIndex = index;
+    }
+  }
+  return activeIndex;
+}
+
+function isPersistedStreamingAssistant(item, runId = '') {
+  if (!item || item.role !== 'assistant') return false;
+  if (item.kind === 'run_shell') return false;
+  if (runId && item.runId && item.runId !== runId) return false;
+  return item.status === 'streaming' || Boolean(item.activeMessageId);
 }

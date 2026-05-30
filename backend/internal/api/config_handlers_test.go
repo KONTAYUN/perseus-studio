@@ -222,7 +222,7 @@ func TestModelProviderReasoningAutoUsesSourceBackedOpenAIModels(t *testing.T) {
 	item, err := configs.CreateModelProvider(ctx, "u1", store.ModelProviderInput{
 		Name:     "OpenAI GPT",
 		Protocol: "openai",
-		BaseURL:  "https://example.com/v1",
+		BaseURL:  "https://api.openai.com/v1",
 		APIKey:   "key",
 		ModelID:  "gpt-5.4",
 		Enabled:  true,
@@ -232,6 +232,33 @@ func TestModelProviderReasoningAutoUsesSourceBackedOpenAIModels(t *testing.T) {
 	}
 	if item.ReasoningCapability != "auto" || item.ReasoningSupport != "openai" || item.ThinkingProfile.Source != store.ThinkingProfileSourceModelsDev {
 		t.Fatalf("expected source-backed OpenAI model to support native reasoning, got %#v", item)
+	}
+}
+
+func TestModelProviderReasoningAutoDoesNotUseOpenAITableForCompatibleProxy(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+	configs := store.NewConfigStore(db)
+	ctx := context.Background()
+	if err := configs.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+	item, err := configs.CreateModelProvider(ctx, "u1", store.ModelProviderInput{
+		Name:     "Proxy GPT",
+		Protocol: "openai",
+		BaseURL:  "https://api.jellix.top/v1",
+		APIKey:   "key",
+		ModelID:  "gpt-5.5",
+		Enabled:  true,
+	})
+	if err != nil {
+		t.Fatalf("CreateModelProvider returned error: %v", err)
+	}
+	if item.ReasoningCapability != "auto" || item.ReasoningSupport != "none" {
+		t.Fatalf("expected compatible proxy to avoid official OpenAI reasoning params unless discovered/explicit, got %#v", item)
 	}
 }
 
