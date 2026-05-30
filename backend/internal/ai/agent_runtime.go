@@ -243,9 +243,9 @@ func userFriendlyToolLabel(toolName string) string {
 		return "已查看工作区"
 	case "read_workspace_text", "read_workspace_files":
 		return "已读取文件"
-	case "edit_workspace_lines", "edit_workspace_text", "replace_workspace_lines":
+	case "edit_workspace_text", "replace_workspace_lines":
 		return "已编辑文件"
-	case "write_workspace_text", "save_workspace_file", "write_workspace_chunk":
+	case "save_workspace_file", "write_workspace_chunk":
 		return "已保存文件"
 	case "manage_workspace_path":
 		return "已管理路径"

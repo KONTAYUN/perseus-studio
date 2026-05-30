@@ -55,8 +55,10 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "search_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_files")
-	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "edit_workspace_lines")
-	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "write_workspace_text")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "save_workspace_file")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "write_workspace_chunk")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "organize_workspace_matches")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "run_workspace_command")
@@ -71,8 +73,10 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "search_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_files")
-	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "edit_workspace_lines")
-	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "write_workspace_text")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "save_workspace_file")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "write_workspace_chunk")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "organize_workspace_matches")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "run_workspace_command")
@@ -82,10 +86,6 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "install_skill_from_attachment")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "delete_skill")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "ask_followup_question")
-	for _, replaced := range []string{"edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk"} {
-		assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), replaced)
-		assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), replaced)
-	}
 }
 
 func TestOrdinaryUserSkillToolSchemaIsReadOnly(t *testing.T) {
@@ -187,7 +187,7 @@ func TestToolEventLabelsUseCompletedVoice(t *testing.T) {
 	if label := userFriendlyToolLabel("read_workspace_files"); label != "已读取文件" {
 		t.Fatalf("expected completed batch read label, got %q", label)
 	}
-	if label := userFriendlyToolLabel("write_workspace_text"); label != "已保存文件" {
+	if label := userFriendlyToolLabel("save_workspace_file"); label != "已保存文件" {
 		t.Fatalf("expected completed save label, got %q", label)
 	}
 	if label := userFriendlyToolLabel("ask_followup_question"); label != "已询问用户" {
@@ -195,8 +195,8 @@ func TestToolEventLabelsUseCompletedVoice(t *testing.T) {
 	}
 
 	runtime := &agentRuntime{}
-	_, event := runtime.alreadyAppliedToolResult(agentToolCall{ID: "call_1", Name: "write_workspace_text"}, ToolEvent{
-		ToolName: "write_workspace_text",
+	_, event := runtime.alreadyAppliedToolResult(agentToolCall{ID: "call_1", Name: "save_workspace_file"}, ToolEvent{
+		ToolName: "save_workspace_file",
 		Status:   "success",
 	})
 	if event.Label != "已保存文件" {
@@ -455,41 +455,6 @@ func TestExecuteToolWriteWorkspaceChunkAppendsLongFile(t *testing.T) {
 	}
 }
 
-func TestExecuteToolWriteWorkspaceTextCreateOverwriteAppend(t *testing.T) {
-	service, db, _, files := newTestAIService(t)
-
-	if _, _, _, path, err := service.executeTool(context.Background(), "write_workspace_text", `{"path":"drafts/text.txt","content":"第一段\n","mode":"create"}`, RunOptions{UserID: testUserID}); err != nil {
-		t.Fatalf("create text returned error: %v", err)
-	} else if path != "drafts/text.txt" {
-		t.Fatalf("unexpected create path: %s", path)
-	}
-	if _, _, _, path, err := service.executeTool(context.Background(), "write_workspace_text", `{"path":"drafts/text.txt","content":"第二段","mode":"append"}`, RunOptions{UserID: testUserID}); err != nil {
-		t.Fatalf("append text returned error: %v", err)
-	} else if path != "drafts/text.txt" {
-		t.Fatalf("unexpected append path: %s", path)
-	}
-	if _, _, _, path, err := service.executeTool(context.Background(), "write_workspace_text", `{"path":"drafts/text.txt","content":"最终版","mode":"overwrite"}`, RunOptions{UserID: testUserID}); err != nil {
-		t.Fatalf("overwrite text returned error: %v", err)
-	} else if path != "drafts/text.txt" {
-		t.Fatalf("unexpected overwrite path: %s", path)
-	}
-
-	readResult, err := files.ReadFile("drafts/text.txt")
-	if err != nil {
-		t.Fatalf("ReadFile returned error: %v", err)
-	}
-	if readResult.Content != "最终版" {
-		t.Fatalf("unexpected file content: %q", readResult.Content)
-	}
-	var versionCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM file_versions WHERE path = ?`, "drafts/text.txt").Scan(&versionCount); err != nil {
-		t.Fatalf("query file_versions returned error: %v", err)
-	}
-	if versionCount != 2 {
-		t.Fatalf("expected append and overwrite to create two prior versions, got %d", versionCount)
-	}
-}
-
 func TestExecuteToolReplaceWorkspaceLinesUsesLineRange(t *testing.T) {
 	service, db, _, files := newTestAIService(t)
 	if _, err := files.CreateFile(context.Background(), "script.txt", "第19集\n旧A\n旧B\n第19集\n保留\n"); err != nil {
@@ -526,34 +491,6 @@ func TestExecuteToolReplaceWorkspaceLinesUsesLineRange(t *testing.T) {
 	}
 }
 
-func TestExecuteToolEditWorkspaceLinesSupportsLineOperations(t *testing.T) {
-	service, _, _, files := newTestAIService(t)
-	if _, err := files.CreateFile(context.Background(), "script.txt", "一\n二\n三\n"); err != nil {
-		t.Fatalf("CreateFile returned error: %v", err)
-	}
-
-	if _, _, _, _, err := service.executeTool(context.Background(), "edit_workspace_lines", `{"path":"script.txt","action":"replace","start_line":2,"end_line":2,"new_text":"二改\n"}`, RunOptions{UserID: testUserID}); err != nil {
-		t.Fatalf("replace returned error: %v", err)
-	}
-	if _, _, _, _, err := service.executeTool(context.Background(), "edit_workspace_lines", `{"path":"script.txt","action":"insert_before","start_line":1,"new_text":"零\n"}`, RunOptions{UserID: testUserID}); err != nil {
-		t.Fatalf("insert_before returned error: %v", err)
-	}
-	if _, _, _, _, err := service.executeTool(context.Background(), "edit_workspace_lines", `{"path":"script.txt","action":"insert_after","start_line":4,"new_text":"四\n"}`, RunOptions{UserID: testUserID}); err != nil {
-		t.Fatalf("insert_after returned error: %v", err)
-	}
-	if _, _, _, _, err := service.executeTool(context.Background(), "edit_workspace_lines", `{"path":"script.txt","action":"delete","start_line":3,"end_line":3}`, RunOptions{UserID: testUserID}); err != nil {
-		t.Fatalf("delete returned error: %v", err)
-	}
-
-	readResult, err := files.ReadFile("script.txt")
-	if err != nil {
-		t.Fatalf("ReadFile returned error: %v", err)
-	}
-	if readResult.Content != "零\n一\n三\n四\n" {
-		t.Fatalf("unexpected file content: %q", readResult.Content)
-	}
-}
-
 func TestExecuteToolReplaceWorkspaceLinesRejectsInvalidRange(t *testing.T) {
 	service, _, _, files := newTestAIService(t)
 	if _, err := files.CreateFile(context.Background(), "script.txt", "一\n二\n"); err != nil {
@@ -585,7 +522,7 @@ func TestExecuteToolWriteWorkspaceFileMarkdown(t *testing.T) {
 		t.Fatalf("CreateFile returned error: %v", err)
 	}
 
-	if _, _, _, path, err := service.executeTool(context.Background(), "write_workspace_text", `{"path":"notes/test.md","content":"# Updated","mode":"overwrite"}`, RunOptions{UserID: testUserID}); err != nil {
+	if _, _, _, path, err := service.executeTool(context.Background(), "save_workspace_file", `{"path":"notes/test.md","content":"# Updated","mode":"overwrite"}`, RunOptions{UserID: testUserID}); err != nil {
 		t.Fatalf("executeTool returned error: %v", err)
 	} else if path != "notes/test.md" {
 		t.Fatalf("unexpected path: %s", path)
@@ -930,7 +867,7 @@ func TestToolDiagnosticClassifiesExpectedToolFailures(t *testing.T) {
 	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_exact_edit_unstable"`) {
 		t.Fatalf("unexpected exact edit diagnostic: %#v", diag)
 	}
-	if !strings.Contains(diag.RequestSummary, `"old_text_chars":3`) || !strings.Contains(diag.RequestSummary, "edit_workspace_lines") {
+	if !strings.Contains(diag.RequestSummary, `"old_text_chars":3`) || !strings.Contains(diag.RequestSummary, "replace_workspace_lines") {
 		t.Fatalf("expected edit argument details and line replacement hint, got %#v", diag)
 	}
 
@@ -951,7 +888,7 @@ func TestValidateToolCallRejectsMissingRequiredSaveArguments(t *testing.T) {
 
 	errText := runtime.validateToolCall(agentToolCall{
 		ID:            "call_1",
-		Name:          "write_workspace_text",
+		Name:          "save_workspace_file",
 		ArgumentsJSON: `{}`,
 	})
 	if !strings.Contains(errText, "path is required") {
@@ -967,7 +904,7 @@ func TestValidateToolCallRejectsEmptyStreamedArguments(t *testing.T) {
 
 	errText := runtime.validateToolCall(agentToolCall{
 		ID:            "call_1",
-		Name:          "write_workspace_text",
+		Name:          "save_workspace_file",
 		ArgumentsJSON: "",
 	})
 	if !strings.Contains(errText, "tool arguments are required") {
@@ -1002,8 +939,8 @@ func TestValidateToolCallRejectsInvalidSaveMode(t *testing.T) {
 
 	errText := runtime.validateToolCall(agentToolCall{
 		ID:            "call_1",
-		Name:          "write_workspace_text",
-		ArgumentsJSON: `{"path":"demo.txt","content":"x","mode":"invalid"}`,
+		Name:          "save_workspace_file",
+		ArgumentsJSON: `{"path":"demo.txt","content":"x","mode":"append"}`,
 	})
 	if !strings.Contains(errText, "mode must be one of") {
 		t.Fatalf("expected enum validation error, got %q", errText)
@@ -1018,7 +955,7 @@ func TestValidateToolCallAllowsEmptySaveContent(t *testing.T) {
 
 	errText := runtime.validateToolCall(agentToolCall{
 		ID:            "call_1",
-		Name:          "write_workspace_text",
+		Name:          "save_workspace_file",
 		ArgumentsJSON: `{"path":"empty.txt","content":"","mode":"create"}`,
 	})
 	if errText != "" {
@@ -1034,9 +971,25 @@ func TestExecuteToolSaveWorkspaceFileRejectsOversizedContent(t *testing.T) {
 		"mode":    "create",
 	})
 
-	_, _, _, _, err := service.executeTool(context.Background(), "write_workspace_text", raw, RunOptions{UserID: testUserID})
-	if err == nil || !strings.Contains(err.Error(), "multiple write_workspace_text calls") {
+	_, _, _, _, err := service.executeTool(context.Background(), "save_workspace_file", raw, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "use write_workspace_chunk") {
 		t.Fatalf("expected oversized content execution guard, got %v", err)
+	}
+}
+
+func TestValidateToolCallRejectsMissingChunkIndex(t *testing.T) {
+	runtime := &agentRuntime{
+		protocol:       agentProtocolOpenAI,
+		loadedToolsets: allAgentToolsets(true),
+	}
+
+	errText := runtime.validateToolCall(agentToolCall{
+		ID:            "call_1",
+		Name:          "write_workspace_chunk",
+		ArgumentsJSON: `{"path":"long.txt","content":"x","mode":"append"}`,
+	})
+	if !strings.Contains(errText, "chunk_index is required") {
+		t.Fatalf("expected chunk_index validation error, got %q", errText)
 	}
 }
 
@@ -1044,7 +997,7 @@ func TestSelectedReferenceScopeAllowsAppendingEarlierGeneratedChunkFile(t *testi
 	runtime := &agentRuntime{
 		attachments: []AttachmentPayload{{Kind: "workspace_file", Path: "source.txt"}},
 		events: []ToolEvent{{
-			ToolName:     "write_workspace_text",
+			ToolName:     "write_workspace_chunk",
 			Status:       "success",
 			Path:         "drafts/output.txt",
 			ChangedPaths: []string{"drafts/output.txt"},
@@ -1052,8 +1005,8 @@ func TestSelectedReferenceScopeAllowsAppendingEarlierGeneratedChunkFile(t *testi
 	}
 
 	errText := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "write_workspace_text",
-		ArgumentsJSON: `{"path":"drafts/output.txt","content":"next","mode":"append"}`,
+		Name:          "write_workspace_chunk",
+		ArgumentsJSON: `{"path":"drafts/output.txt","content":"next","mode":"append","chunk_index":2}`,
 	})
 	if errText != "" {
 		t.Fatalf("expected append to generated output to stay in scope, got %q", errText)
@@ -1066,8 +1019,8 @@ func TestSelectedReferenceScopeRejectsAppendingUnrelatedChunkFile(t *testing.T) 
 	}
 
 	errText := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "write_workspace_text",
-		ArgumentsJSON: `{"path":"drafts/output.txt","content":"next","mode":"append"}`,
+		Name:          "write_workspace_chunk",
+		ArgumentsJSON: `{"path":"drafts/output.txt","content":"next","mode":"append","chunk_index":2}`,
 	})
 	if !strings.Contains(errText, "outside the user's selected workspace file references") {
 		t.Fatalf("expected unrelated append to be rejected, got %q", errText)
@@ -1194,10 +1147,10 @@ func TestBudgetToolResultForModelPreservesBatchReadItemsShape(t *testing.T) {
 
 func TestToolTargetSummaryAvoidsContentAndKeepsSafeTarget(t *testing.T) {
 	saveArgs := `{"path":"drafts/chapter-1.md","content":"secret long content","mode":"overwrite"}`
-	if got := toolTargetSummary("write_workspace_text", saveArgs); got != "drafts/chapter-1.md" {
+	if got := toolTargetSummary("save_workspace_file", saveArgs); got != "drafts/chapter-1.md" {
 		t.Fatalf("unexpected save target summary: %q", got)
 	}
-	if strings.Contains(toolTargetSummary("write_workspace_text", saveArgs), "secret") {
+	if strings.Contains(toolTargetSummary("save_workspace_file", saveArgs), "secret") {
 		t.Fatal("target summary leaked file content")
 	}
 	if got := toolTargetSummary("read_workspace_files", `{"paths":["a.md","b.md","c.md"]}`); got != "3 个文件" {
@@ -1385,8 +1338,9 @@ func TestPickSearchProviderUsesPriority(t *testing.T) {
 
 func TestSideEffectToolsRequireCompletionAfterUse(t *testing.T) {
 	for _, name := range []string{
-		"write_workspace_text",
-		"edit_workspace_lines",
+		"save_workspace_file",
+		"write_workspace_chunk",
+		"replace_workspace_lines",
 		"manage_workspace_path",
 		"organize_workspace_matches",
 		"install_skill_from_attachment",
@@ -1449,7 +1403,7 @@ func TestSelectedWorkspaceReferencesConstrainReadAndMutationScope(t *testing.T) 
 		t.Fatalf("expected outside-scope read to be rejected, got %q", got)
 	}
 	if got := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "write_workspace_text",
+		Name:          "save_workspace_file",
 		ArgumentsJSON: `{"path":"白凌传·造化篇（续）/第三十一集.txt","content":"x","mode":"overwrite"}`,
 	}); got != "" {
 		t.Fatalf("expected selected overwrite to be allowed, got %q", got)
@@ -1467,7 +1421,7 @@ func TestSelectedWorkspaceReferencesConstrainReadAndMutationScope(t *testing.T) 
 		t.Fatalf("expected same-basename file in another folder to be rejected, got %q", got)
 	}
 	if got := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "write_workspace_text",
+		Name:          "save_workspace_file",
 		ArgumentsJSON: `{"path":"白凌传·造化篇（续）/优化说明.txt","content":"x","mode":"create"}`,
 	}); got != "" {
 		t.Fatalf("expected new output file creation to be allowed, got %q", got)
@@ -1476,31 +1430,27 @@ func TestSelectedWorkspaceReferencesConstrainReadAndMutationScope(t *testing.T) 
 
 func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	loaded := map[string]bool{"workspace": true}
-	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "edit_workspace_lines", "write_workspace_text"} {
+	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "edit_workspace_text", "replace_workspace_lines"} {
 		assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
 		assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
-	}
-	for _, name := range []string{"edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk"} {
-		assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
-		assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
 	}
 	if group := toolGroup("find_workspace_files"); group != ToolGroupSearch {
 		t.Fatalf("expected find_workspace_files search group, got %q", group)
 	}
-	if group := toolGroup("edit_workspace_lines"); group != ToolGroupEdit {
-		t.Fatalf("expected edit_workspace_lines edit group, got %q", group)
+	if group := toolGroup("edit_workspace_text"); group != ToolGroupEdit {
+		t.Fatalf("expected edit_workspace_text edit group, got %q", group)
 	}
-	if group := toolGroup("write_workspace_text"); group != ToolGroupEdit {
-		t.Fatalf("expected write_workspace_text edit group, got %q", group)
+	if group := toolGroup("replace_workspace_lines"); group != ToolGroupEdit {
+		t.Fatalf("expected replace_workspace_lines edit group, got %q", group)
 	}
 	if group := toolGroup("read_workspace_files"); group != ToolGroupRead {
 		t.Fatalf("expected read_workspace_files read group, got %q", group)
 	}
-	if !isWorkspaceMutationTool("edit_workspace_lines") {
-		t.Fatal("expected edit_workspace_lines to be a workspace mutation")
+	if !isWorkspaceMutationTool("edit_workspace_text") {
+		t.Fatal("expected edit_workspace_text to be a workspace mutation")
 	}
-	if !isWorkspaceMutationTool("write_workspace_text") {
-		t.Fatal("expected write_workspace_text to be a workspace mutation")
+	if !isWorkspaceMutationTool("replace_workspace_lines") {
+		t.Fatal("expected replace_workspace_lines to be a workspace mutation")
 	}
 }
 
@@ -1714,8 +1664,8 @@ func TestAnthropicReasoningUsesAutoToolChoice(t *testing.T) {
 }
 
 func TestRuntimeForceToolOnlyBeforeFirstToolAttempt(t *testing.T) {
-	runtime := &agentRuntime{opts: RunOptions{ForceTool: "write_workspace_text"}}
-	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceForced || choice.ToolName != "write_workspace_text" {
+	runtime := &agentRuntime{opts: RunOptions{ForceTool: "save_workspace_file"}}
+	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceForced || choice.ToolName != "save_workspace_file" {
 		t.Fatalf("expected forced save tool choice before tool attempt, got %#v", choice)
 	}
 	if got := openAIProviderToolChoice(runtime.toolChoice()); fmt.Sprint(got) == "required" {
@@ -1726,7 +1676,7 @@ func TestRuntimeForceToolOnlyBeforeFirstToolAttempt(t *testing.T) {
 	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceRequired {
 		t.Fatalf("expected required-any after first forced attempt before verified result, got %#v", choice)
 	}
-	runtime.events = []ToolEvent{{ToolName: "write_workspace_text", Status: "success", ChangedPaths: []string{"demo.txt"}}}
+	runtime.events = []ToolEvent{{ToolName: "save_workspace_file", Status: "success", ChangedPaths: []string{"demo.txt"}}}
 	runtime.performedMutation = true
 	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceAuto {
 		t.Fatalf("expected auto after verified forced tool result so final text can stream, got %#v", choice)
@@ -1737,7 +1687,7 @@ func TestRecoverableFinalResponseErrorFailsInsteadOfFakeSuccess(t *testing.T) {
 	runtime := &agentRuntime{
 		performedMutation: true,
 		events: []ToolEvent{{
-			ToolName:     "write_workspace_text",
+			ToolName:     "save_workspace_file",
 			Status:       "success",
 			Path:         "demo.txt",
 			ChangedPaths: []string{"demo.txt"},
@@ -1759,13 +1709,13 @@ func TestCompletionPathsMustCoverEachWorkspaceMutation(t *testing.T) {
 		performedMutation: true,
 		events: []ToolEvent{
 			{
-				ToolName:     "write_workspace_text",
+				ToolName:     "save_workspace_file",
 				Status:       "success",
 				Path:         "episodes/31.txt",
 				ChangedPaths: []string{"episodes/31.txt"},
 			},
 			{
-				ToolName:     "write_workspace_text",
+				ToolName:     "save_workspace_file",
 				Status:       "success",
 				Path:         "episodes/32.txt",
 				ChangedPaths: []string{"episodes/32.txt"},
@@ -1929,7 +1879,7 @@ func TestProviderFailureClassUsesRequiredOnlyWhenProviderSaysSo(t *testing.T) {
 func TestExecuteToolWriteWorkspaceFileRejectsMissingFile(t *testing.T) {
 	service, _, _, _ := newTestAIService(t)
 
-	_, _, _, _, err := service.executeTool(context.Background(), "write_workspace_text", `{"path":"missing.txt","content":"x","mode":"overwrite"}`, RunOptions{UserID: testUserID})
+	_, _, _, _, err := service.executeTool(context.Background(), "save_workspace_file", `{"path":"missing.txt","content":"x","mode":"overwrite"}`, RunOptions{UserID: testUserID})
 	if err == nil || err.Error() != "file does not exist" {
 		t.Fatalf("expected missing file error, got %v", err)
 	}
@@ -1938,7 +1888,7 @@ func TestExecuteToolWriteWorkspaceFileRejectsMissingFile(t *testing.T) {
 func TestExecuteToolWriteWorkspaceFileRejectsPathEscape(t *testing.T) {
 	service, _, _, _ := newTestAIService(t)
 
-	_, _, _, _, err := service.executeTool(context.Background(), "write_workspace_text", `{"path":"../bad.txt","content":"x","mode":"overwrite"}`, RunOptions{UserID: testUserID})
+	_, _, _, _, err := service.executeTool(context.Background(), "save_workspace_file", `{"path":"../bad.txt","content":"x","mode":"overwrite"}`, RunOptions{UserID: testUserID})
 	if err == nil || err.Error() != "path escapes workspace" {
 		t.Fatalf("expected path escape error, got %v", err)
 	}

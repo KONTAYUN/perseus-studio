@@ -194,33 +194,29 @@ func (s *Service) EditTextFile(ctx context.Context, path, oldText, newText, sour
 }
 
 func (s *Service) ReplaceTextFileLines(ctx context.Context, path string, startLine, endLine int, newText, source string) (LineReplaceResult, error) {
-	return s.EditTextFileLines(ctx, path, "replace", startLine, endLine, newText, source)
-}
-
-func (s *Service) EditTextFileLines(ctx context.Context, path, action string, startLine, endLine int, newText, source string) (LineEditResult, error) {
 	cleanPath, absPath, err := s.sanitizePath(path)
 	if err != nil {
-		return LineEditResult{}, err
+		return LineReplaceResult{}, err
 	}
 	if isAnyTrashPath(cleanPath) {
-		return LineEditResult{}, trashManagedOnlyError()
+		return LineReplaceResult{}, trashManagedOnlyError()
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return LineEditResult{}, fmt.Errorf("file does not exist")
+			return LineReplaceResult{}, fmt.Errorf("file does not exist")
 		}
-		return LineEditResult{}, err
+		return LineReplaceResult{}, err
 	}
 	if info.IsDir() {
-		return LineEditResult{}, fmt.Errorf("path is a directory")
+		return LineReplaceResult{}, fmt.Errorf("path is a directory")
 	}
 	if !isTextPath(cleanPath) {
-		return LineEditResult{}, fmt.Errorf("only text files can be edited")
+		return LineReplaceResult{}, fmt.Errorf("only text files can be edited")
 	}
 	raw, err := os.ReadFile(absPath)
 	if err != nil {
-		return LineEditResult{}, err
+		return LineReplaceResult{}, err
 	}
 	content := string(raw)
 	lines := strings.SplitAfter(content, "\n")
@@ -228,70 +224,35 @@ func (s *Service) EditTextFileLines(ctx context.Context, path, action string, st
 		lines = []string{""}
 	}
 	totalBefore := countTextLines(content)
-	action = strings.ToLower(strings.TrimSpace(action))
-	if action == "" {
-		action = "replace"
-	}
 	if startLine <= 0 {
-		return LineEditResult{}, fmt.Errorf("invalid tool arguments: start_line must be a positive integer")
+		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: start_line must be a positive integer")
 	}
-	if action == "replace" || action == "delete" {
-		if endLine <= 0 {
-			return LineEditResult{}, fmt.Errorf("invalid tool arguments: end_line must be a positive integer")
-		}
-		if startLine > endLine {
-			return LineEditResult{}, fmt.Errorf("invalid tool arguments: start_line must be less than or equal to end_line")
-		}
-		if startLine > len(lines) {
-			return LineEditResult{}, fmt.Errorf("line range starts after end of file")
-		}
-		if endLine > len(lines) {
-			return LineEditResult{}, fmt.Errorf("line range ends after end of file")
-		}
+	if endLine <= 0 {
+		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: end_line must be a positive integer")
 	}
-	var nextContent string
-	switch action {
-	case "replace":
-		nextContent = strings.Join(lines[:startLine-1], "") + newText + strings.Join(lines[endLine:], "")
-	case "delete":
-		newText = ""
-		nextContent = strings.Join(lines[:startLine-1], "") + strings.Join(lines[endLine:], "")
-	case "insert_before":
-		if startLine > len(lines)+1 {
-			return LineEditResult{}, fmt.Errorf("line range starts after end of file")
-		}
-		nextContent = strings.Join(lines[:startLine-1], "") + newText + strings.Join(lines[startLine-1:], "")
-		endLine = startLine - 1
-	case "insert_after":
-		if startLine > len(lines) {
-			return LineEditResult{}, fmt.Errorf("line range starts after end of file")
-		}
-		nextContent = strings.Join(lines[:startLine], "") + newText + strings.Join(lines[startLine:], "")
-		endLine = startLine
-	default:
-		return LineEditResult{}, fmt.Errorf("invalid tool arguments: action must be replace, insert_before, insert_after, or delete")
+	if startLine > endLine {
+		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: start_line must be less than or equal to end_line")
 	}
+	if startLine > len(lines) {
+		return LineReplaceResult{}, fmt.Errorf("line range starts after end of file")
+	}
+	if endLine > len(lines) {
+		return LineReplaceResult{}, fmt.Errorf("line range ends after end of file")
+	}
+	nextContent := strings.Join(lines[:startLine-1], "") + newText + strings.Join(lines[endLine:], "")
 	if source == "" {
 		source = "ai_line_replace"
 	}
 	writeResult, err := s.WriteBytes(ctx, cleanPath, []byte(nextContent), source)
 	if err != nil {
-		return LineEditResult{}, err
+		return LineReplaceResult{}, err
 	}
-	return LineEditResult{
+	return LineReplaceResult{
 		WriteResult:      writeResult,
-		Operation:        action,
 		StartLine:        startLine,
 		EndLine:          endLine,
-		InsertedLines:    countInsertedTextLines(newText),
+		InsertedLines:    countTextLines(newText),
 		TotalLinesBefore: totalBefore,
 		TotalLinesAfter:  countTextLines(nextContent),
 	}, nil
-}
-
-func countInsertedTextLines(text string) int {
-	if text == "" {
-		return 0
-	}
-	return countTextLines(text)
 }

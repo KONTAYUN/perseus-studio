@@ -23,7 +23,7 @@ func (s *Service) execSaveWorkspaceFile(ctx context.Context, userID, argumentsJS
 		return "", "", "正在保存文件...", "", fmt.Errorf("invalid tool arguments")
 	}
 	if len([]rune(args.Content)) > recommendedWorkspaceChunkChars {
-		return "", "", "正在保存文件...", args.Path, fmt.Errorf("invalid tool arguments: content must be at most %d characters; use write_workspace_text append chunks for longer text", recommendedWorkspaceChunkChars)
+		return "", "", "正在保存文件...", args.Path, fmt.Errorf("invalid tool arguments: content must be at most %d characters; use write_workspace_chunk for longer text", recommendedWorkspaceChunkChars)
 	}
 	switch strings.ToLower(strings.TrimSpace(args.Mode)) {
 	case "create":
@@ -118,7 +118,7 @@ func (s *Service) execWriteWorkspaceChunk(ctx context.Context, userID, arguments
 		"chunk_chars":   len([]rune(args.Content)),
 		"chunk_index":   args.ChunkIndex,
 		"changed_paths": result.write.ChangedPaths,
-		"next_hint":     "Continue with write_workspace_text mode=append for the next chunk, or call attempt_completion when the file is complete.",
+		"next_hint":     "Continue with write_workspace_chunk mode=append for the next chunk, or call attempt_completion when the file is complete.",
 	}
 	return mustJSON(workspaceToolPayload("write_workspace_chunk", result.write.Path, payload)), fmt.Sprintf("%s chunk %d in %s (%d chars)", result.operation, args.ChunkIndex, result.write.Path, len([]rune(args.Content))), "正在分块写入文件...", result.write.Path, nil
 }
@@ -126,59 +126,6 @@ func (s *Service) execWriteWorkspaceChunk(ctx context.Context, userID, arguments
 type workspaceWriteResult struct {
 	operation string
 	write     workspace.FileWriteResult
-}
-
-func (s *Service) execWriteWorkspaceText(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在写入文件...", "", err
-	}
-	var args struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-		Mode    string `json:"mode"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在写入文件...", "", fmt.Errorf("invalid tool arguments")
-	}
-	if len([]rune(args.Content)) > recommendedWorkspaceChunkChars {
-		return "", "", "正在写入文件...", args.Path, fmt.Errorf("invalid tool arguments: content must be at most %d characters; split long text into multiple write_workspace_text calls with mode=append", recommendedWorkspaceChunkChars)
-	}
-	mode := strings.ToLower(strings.TrimSpace(args.Mode))
-	var result workspaceWriteResult
-	switch mode {
-	case "create":
-		writeResult, err := files.CreateTextFile(ctx, args.Path, args.Content, "ai_text_create")
-		if err != nil {
-			return "", "", "正在写入文件...", args.Path, err
-		}
-		result = workspaceWriteResult{operation: "create", write: writeResult}
-	case "overwrite":
-		writeResult, err := files.WriteExistingTextFile(ctx, args.Path, args.Content, "ai_text_overwrite")
-		if err != nil {
-			return "", "", "正在写入文件...", args.Path, err
-		}
-		result = workspaceWriteResult{operation: "overwrite", write: writeResult}
-	case "append":
-		writeResult, err := files.AppendTextFile(ctx, args.Path, args.Content, "ai_text_append")
-		if err != nil {
-			return "", "", "正在写入文件...", args.Path, err
-		}
-		result = workspaceWriteResult{operation: "append", write: writeResult}
-	default:
-		return "", "", "正在写入文件...", args.Path, fmt.Errorf("invalid tool arguments: mode must be create, overwrite, or append")
-	}
-	payload := map[string]any{
-		"operation":     result.operation,
-		"path":          result.write.Path,
-		"hash":          result.write.Hash,
-		"version_id":    result.write.VersionID,
-		"size":          result.write.Size,
-		"content_chars": len([]rune(args.Content)),
-		"changed_paths": result.write.ChangedPaths,
-		"next_hint":     "The text write was applied and verified. Continue with write_workspace_text mode=append for more content, or call attempt_completion when complete.",
-	}
-	return mustJSON(workspaceToolPayload("write_workspace_text", result.write.Path, payload)), fmt.Sprintf("%s text in %s (%d chars)", result.operation, result.write.Path, len([]rune(args.Content))), "正在写入文件...", result.write.Path, nil
 }
 
 func (s *Service) execEditWorkspaceText(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
@@ -210,58 +157,6 @@ func (s *Service) execEditWorkspaceText(ctx context.Context, userID, argumentsJS
 		"next_hint":     "The edit was applied and verified. Continue with another precise edit if needed, otherwise call attempt_completion.",
 	})
 	return mustJSON(payload), fmt.Sprintf("edited %s (%d replacement(s))", result.Path, replacements), "正在编辑文件...", result.Path, nil
-}
-
-func (s *Service) execEditWorkspaceLines(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
-	files, err := s.factory.Workspace(userID)
-	if err != nil {
-		return "", "", "正在按行编辑文件...", "", err
-	}
-	var args struct {
-		Path      string `json:"path"`
-		Action    string `json:"action"`
-		StartLine int    `json:"start_line"`
-		EndLine   int    `json:"end_line"`
-		NewText   string `json:"new_text"`
-	}
-	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在按行编辑文件...", "", fmt.Errorf("invalid tool arguments")
-	}
-	action := strings.ToLower(strings.TrimSpace(args.Action))
-	switch action {
-	case "replace":
-		if args.NewText == "" {
-			return "", "", "正在按行编辑文件...", args.Path, fmt.Errorf("invalid tool arguments: new_text is required for replace")
-		}
-	case "insert_before", "insert_after":
-		if args.NewText == "" {
-			return "", "", "正在按行编辑文件...", args.Path, fmt.Errorf("invalid tool arguments: new_text is required for insert_before or insert_after")
-		}
-	case "delete":
-		args.NewText = ""
-	default:
-		return "", "", "正在按行编辑文件...", args.Path, fmt.Errorf("invalid tool arguments: action must be replace, insert_before, insert_after, or delete")
-	}
-	result, err := files.EditTextFileLines(ctx, args.Path, action, args.StartLine, args.EndLine, args.NewText, "ai_line_edit")
-	if err != nil {
-		return "", "", "正在按行编辑文件...", args.Path, err
-	}
-	write := result.WriteResult
-	payload := workspaceToolPayload("edit_workspace_lines", write.Path, map[string]any{
-		"operation":          result.Operation,
-		"path":               write.Path,
-		"hash":               write.Hash,
-		"version_id":         write.VersionID,
-		"size":               write.Size,
-		"start_line":         result.StartLine,
-		"end_line":           result.EndLine,
-		"inserted_lines":     result.InsertedLines,
-		"total_lines_before": result.TotalLinesBefore,
-		"total_lines_after":  result.TotalLinesAfter,
-		"changed_paths":      write.ChangedPaths,
-		"next_hint":          "The line edit was applied and verified. Continue with another line edit if needed, otherwise call attempt_completion.",
-	})
-	return mustJSON(payload), fmt.Sprintf("%s lines at %d-%d in %s", result.Operation, result.StartLine, result.EndLine, write.Path), "正在按行编辑文件...", write.Path, nil
 }
 
 func (s *Service) execReplaceWorkspaceLines(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {

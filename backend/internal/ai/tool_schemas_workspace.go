@@ -7,8 +7,10 @@ func openAIWorkspaceTools() []map[string]any {
 		openAIFunctionTool("inspect_workspace", "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams()),
 		openAIFunctionTool("read_workspace_text", "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams()),
 		openAIFunctionTool("read_workspace_files", "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams()),
-		openAIFunctionTool("edit_workspace_lines", "Edit an existing text file by 1-based line range. Use after reading or searching the target range. Supports replace, delete, insert_before, and insert_after.", workspaceEditLinesParams()),
-		openAIFunctionTool("write_workspace_text", "Create, overwrite, or append text to a supported workspace text file. For long documents, use multiple append calls with each content chunk kept under about 4000 characters.", workspaceWriteTextParams()),
+		openAIFunctionTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
+		openAIFunctionTool("replace_workspace_lines", "Replace a 1-based inclusive line range in an existing text file. Prefer this for scripts, long documents, duplicate headings, or larger rewrites after reading the target line range.", workspaceReplaceLinesParams()),
+		openAIFunctionTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
+		openAIFunctionTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content.", workspaceChunkWriteParams()),
 		openAIFunctionTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
 		openAIFunctionTool("organize_workspace_matches", "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams()),
 	}
@@ -21,8 +23,10 @@ func anthropicWorkspaceTools() []map[string]any {
 		anthropicTool("inspect_workspace", "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams()),
 		anthropicTool("read_workspace_text", "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams()),
 		anthropicTool("read_workspace_files", "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams()),
-		anthropicTool("edit_workspace_lines", "Edit an existing text file by 1-based line range. Use after reading or searching the target range. Supports replace, delete, insert_before, and insert_after.", workspaceEditLinesParams()),
-		anthropicTool("write_workspace_text", "Create, overwrite, or append text to a supported workspace text file. For long documents, use multiple append calls with each content chunk kept under about 4000 characters.", workspaceWriteTextParams()),
+		anthropicTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
+		anthropicTool("replace_workspace_lines", "Replace a 1-based inclusive line range in an existing text file. Prefer this for scripts, long documents, duplicate headings, or larger rewrites after reading the target line range.", workspaceReplaceLinesParams()),
+		anthropicTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
+		anthropicTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content.", workspaceChunkWriteParams()),
 		anthropicTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
 		anthropicTool("organize_workspace_matches", "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams()),
 	}
@@ -142,39 +146,6 @@ func workspaceReplaceLinesParams() map[string]any {
 	}
 }
 
-func workspaceEditLinesParams() map[string]any {
-	return map[string]any{
-		"type":     "object",
-		"required": []string{"path", "action", "start_line"},
-		"properties": map[string]any{
-			"path":       map[string]any{"type": "string", "description": "Workspace-relative existing text file path."},
-			"action":     map[string]any{"type": "string", "enum": []string{"replace", "delete", "insert_before", "insert_after"}, "description": "Line edit operation to perform."},
-			"start_line": map[string]any{"type": "integer", "description": "1-based target line. For replace/delete this is the first line in the inclusive range. For insert_before/insert_after this is the anchor line."},
-			"end_line":   map[string]any{"type": "integer", "description": "Required for replace/delete: 1-based last line in the inclusive range. Omit for insert_before/insert_after."},
-			"new_text":   map[string]any{"type": "string", "description": "Text to insert or use as replacement. Required for replace/insert_before/insert_after; omit or empty for delete."},
-		},
-	}
-}
-
-func workspaceWriteTextParams() map[string]any {
-	return map[string]any{
-		"type":     "object",
-		"required": []string{"path", "content", "mode"},
-		"properties": map[string]any{
-			"path": map[string]any{"type": "string", "description": "Workspace-relative supported text file path."},
-			"content": map[string]any{
-				"type":        "string",
-				"description": "Text to write. Keep each call under about 4000 characters; for long documents, create/overwrite the first chunk then append subsequent chunks.",
-			},
-			"mode": map[string]any{
-				"type":        "string",
-				"enum":        []string{"create", "overwrite", "append"},
-				"description": "Use create only when the file must not already exist, overwrite only for an existing file, and append for continuing a file already created or overwritten in this task.",
-			},
-		},
-	}
-}
-
 func workspaceWriteParams(contentDescription string) map[string]any {
 	return map[string]any{
 		"type":     "object",
@@ -194,7 +165,7 @@ func workspaceSaveParams() map[string]any {
 			"path": map[string]any{"type": "string", "description": "Workspace-relative file path."},
 			"content": map[string]any{
 				"type":        "string",
-				"description": "Full short text content to save. Compatibility schema only; model-visible writes use write_workspace_text.",
+				"description": "Full short text content to save. For longer content, use write_workspace_chunk.",
 			},
 			"mode": map[string]any{
 				"type":        "string",

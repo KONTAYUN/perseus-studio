@@ -39,7 +39,7 @@ func TestGenerateReplyOpenAICreateFileAfterReminder(t *testing.T) {
 		switch count {
 		case 1:
 			assertOpenAIWriteToolsPresent(t, payload)
-			writeOpenAIToolCall(t, w, "call_create_1", "write_workspace_text", `{"path":"ai-test.txt","content":"hello from ai","mode":"create"}`)
+			writeOpenAIToolCall(t, w, "call_create_1", "save_workspace_file", `{"path":"ai-test.txt","content":"hello from ai","mode":"create"}`)
 		case 2:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已创建 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
@@ -64,7 +64,7 @@ func TestGenerateReplyOpenAICreateFileAfterReminder(t *testing.T) {
 	if !strings.Contains(reply.Content, "ai-test.txt") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
-	assertToolCallRecord(t, env, "write_workspace_text", "success")
+	assertToolCallRecord(t, env, "save_workspace_file", "success")
 	if requestCount.Load() != 2 {
 		t.Fatalf("expected 2 model requests, got %d", requestCount.Load())
 	}
@@ -226,10 +226,10 @@ func TestAgentBudgetExhaustionRequestsNoToolSummaryAndResetsCheckpointBudget(t *
 		profile:          runtimeProfileForProvider(provider),
 		allowTask:        true,
 		loadedToolsets:   allAgentToolsets(true),
-		appliedMutations: map[string]ToolEvent{"hash-1": {ToolName: "write_workspace_text", Status: "success", Path: "draft.txt"}},
+		appliedMutations: map[string]ToolEvent{"hash-1": {ToolName: "save_workspace_file", Status: "success", Path: "draft.txt"}},
 		toolLoopActive:   true,
 		events: []ToolEvent{{
-			ToolName:     "write_workspace_text",
+			ToolName:     "save_workspace_file",
 			Status:       "success",
 			Path:         "draft.txt",
 			ChangedPaths: []string{"draft.txt"},
@@ -804,7 +804,7 @@ func TestAgentRuntimeExecutesOnlyOneToolPerModelTurn(t *testing.T) {
 		case 1:
 			writeOpenAIStreamTextAndToolCalls(t, w, "我先逐步处理文件。", []streamToolCall{
 				{id: "call_read_1", name: "read_workspace_text", args: `{"path":"a.txt"}`},
-				{id: "call_save_1", name: "write_workspace_text", args: `{"path":"a.txt","content":"after","mode":"overwrite"}`},
+				{id: "call_save_1", name: "save_workspace_file", args: `{"path":"a.txt","content":"after","mode":"overwrite"}`},
 			})
 		case 2:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已读取文件。"} `)
@@ -862,7 +862,7 @@ func TestAgentRuntimeSkipsStaleToolTurnWhenSteerArrivesBeforeToolExecution(t *te
 			case <-time.After(5 * time.Second):
 				t.Fatalf("timed out waiting to release first response")
 			}
-			writeOpenAIStreamTextAndToolCall(t, w, "我先直接保存。", "call_save_1", "write_workspace_text", `{"path":"a.txt","content":"stale","mode":"overwrite"}`)
+			writeOpenAIStreamTextAndToolCall(t, w, "我先直接保存。", "call_save_1", "save_workspace_file", `{"path":"a.txt","content":"stale","mode":"overwrite"}`)
 		case 2:
 			if items, ok := payload["messages"].([]any); ok {
 				for _, item := range items {
@@ -964,7 +964,7 @@ func TestGenerateReplyOpenAIWriteExistingFile(t *testing.T) {
 		switch count {
 		case 1:
 			assertOpenAIWriteToolsPresent(t, payload)
-			writeOpenAIToolCall(t, w, "call_write_1", "write_workspace_text", `{"path":"ai-test.txt","content":"after","mode":"overwrite"}`)
+			writeOpenAIToolCall(t, w, "call_write_1", "save_workspace_file", `{"path":"ai-test.txt","content":"after","mode":"overwrite"}`)
 		case 2:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已修改 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
@@ -989,7 +989,7 @@ func TestGenerateReplyOpenAIWriteExistingFile(t *testing.T) {
 	if !strings.Contains(reply.Content, "ai-test.txt") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
-	assertToolCallRecord(t, env, "write_workspace_text", "success")
+	assertToolCallRecord(t, env, "save_workspace_file", "success")
 }
 
 func TestGenerateReplyOpenAIEditWorkspaceTextEmitsWorkspaceChanged(t *testing.T) {
@@ -1005,7 +1005,7 @@ func TestGenerateReplyOpenAIEditWorkspaceTextEmitsWorkspaceChanged(t *testing.T)
 		defer r.Body.Close()
 		switch requestCount.Add(1) {
 		case 1:
-			writeOpenAIToolCall(t, w, "call_edit_1", "edit_workspace_lines", `{"path":"ai-test.txt","action":"replace","start_line":1,"end_line":1,"new_text":"after"}`)
+			writeOpenAIToolCall(t, w, "call_edit_1", "edit_workspace_text", `{"path":"ai-test.txt","old_text":"before","new_text":"after"}`)
 		case 2:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已编辑 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
@@ -1019,7 +1019,7 @@ func TestGenerateReplyOpenAIEditWorkspaceTextEmitsWorkspaceChanged(t *testing.T)
 	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
 		UserID: testUserID,
 		Event: func(eventType, level string, payload map[string]any) {
-			if eventType == "workspace_file_changed" && payload["tool_name"] == "edit_workspace_lines" {
+			if eventType == "workspace_file_changed" && payload["tool_name"] == "edit_workspace_text" {
 				changedPayload = payload
 			}
 		},
@@ -1040,7 +1040,7 @@ func TestGenerateReplyOpenAIEditWorkspaceTextEmitsWorkspaceChanged(t *testing.T)
 	if changedPayload == nil || changedPayload["path"] != "ai-test.txt" || changedPayload["hash"] == "" || changedPayload["version_id"] == "" {
 		t.Fatalf("expected edit workspace change payload with path/hash/version, got %#v", changedPayload)
 	}
-	assertToolCallRecord(t, env, "edit_workspace_lines", "success")
+	assertToolCallRecord(t, env, "edit_workspace_text", "success")
 }
 
 func TestGenerateReplyOpenAIWritePersistsCheckpointWhenFinalReplyTimesOut(t *testing.T) {
@@ -1068,7 +1068,7 @@ func TestGenerateReplyOpenAIWritePersistsCheckpointWhenFinalReplyTimesOut(t *tes
 									"id":   "call_write_md",
 									"type": "function",
 									"function": map[string]any{
-										"name":      "write_workspace_text",
+										"name":      "save_workspace_file",
 										"arguments": `{"path":"notes/test.md","content":"version 2","mode":"overwrite"}`,
 									},
 								},
@@ -1098,7 +1098,7 @@ func TestGenerateReplyOpenAIWritePersistsCheckpointWhenFinalReplyTimesOut(t *tes
 	if readResult.Content != "version 2" {
 		t.Fatalf("expected file to be written despite final timeout, got %q", readResult.Content)
 	}
-	assertToolCallRecord(t, env, "write_workspace_text", "success")
+	assertToolCallRecord(t, env, "save_workspace_file", "success")
 }
 
 func TestGenerateReplyOpenAIReadThenTimeoutDoesNotApplyHeuristicReplacement(t *testing.T) {
@@ -1156,11 +1156,11 @@ func TestGenerateReplyOpenAIReadThenTimeoutDoesNotApplyHeuristicReplacement(t *t
 	}
 	assertToolCallRecord(t, env, "read_workspace_text", "success")
 	var savedCount int
-	if err := env.db.QueryRow(`SELECT COUNT(*) FROM tool_calls WHERE tool_name = 'write_workspace_text'`).Scan(&savedCount); err != nil {
+	if err := env.db.QueryRow(`SELECT COUNT(*) FROM tool_calls WHERE tool_name = 'save_workspace_file'`).Scan(&savedCount); err != nil {
 		t.Fatalf("QueryRow returned error: %v", err)
 	}
 	if savedCount != 0 {
-		t.Fatalf("expected no heuristic write_workspace_text call, got %d", savedCount)
+		t.Fatalf("expected no heuristic save_workspace_file call, got %d", savedCount)
 	}
 }
 
@@ -1445,7 +1445,7 @@ func TestGenerateReplyEmitsMultipleAssistantSegments(t *testing.T) {
 									"id":   "call_write_1",
 									"type": "function",
 									"function": map[string]any{
-										"name":      "write_workspace_text",
+										"name":      "save_workspace_file",
 										"arguments": `{"path":"novel-project/chapter-1.txt","content":"hello","mode":"create"}`,
 									},
 								},
@@ -1570,13 +1570,13 @@ func TestGenerateReplyOpenAIToolArgumentErrorFeedsBackAndRecovers(t *testing.T) 
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
-			writeOpenAIToolCall(t, w, "bad_args", "write_workspace_text", `{"path":"bad.txt","content":"hello","mode":`)
+			writeOpenAIToolCall(t, w, "bad_args", "save_workspace_file", `{"path":"bad.txt","content":"hello","mode":`)
 		case 2:
 			lastToolContent := lastOpenAIToolContent(t, payload)
 			if !strings.Contains(lastToolContent, "tool arguments must be valid JSON") {
 				t.Fatalf("expected invalid JSON tool_result feedback, got %s", lastToolContent)
 			}
-			writeOpenAIToolCall(t, w, "good_args", "write_workspace_text", `{"path":"bad.txt","content":"hello","mode":"create"}`)
+			writeOpenAIToolCall(t, w, "good_args", "save_workspace_file", `{"path":"bad.txt","content":"hello","mode":"create"}`)
 		case 3:
 			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建 bad.txt。","changed_paths":["bad.txt"]}`)
 		default:
@@ -1611,7 +1611,7 @@ func TestGenerateReplyOpenAIRepeatedEmptySaveArgumentsStopsLoop(t *testing.T) {
 		defer r.Body.Close()
 		_, _ = io.ReadAll(r.Body)
 		count := requestCount.Add(1)
-		writeOpenAIToolCall(t, w, fmt.Sprintf("bad_empty_%d", count), "write_workspace_text", `{}`)
+		writeOpenAIToolCall(t, w, fmt.Sprintf("bad_empty_%d", count), "save_workspace_file", `{}`)
 	}))
 	defer server.Close()
 
@@ -1635,7 +1635,7 @@ func TestGenerateReplyOpenAIRepeatedEmptySaveArgumentsStopsLoop(t *testing.T) {
 	}
 	foundInvalidToolArgs := false
 	for _, item := range logs {
-		if item.Stage == "tool_call:write_workspace_text" && strings.Contains(item.RequestSummary, `"failure_class":"tool_invalid_arguments"`) {
+		if item.Stage == "tool_call:save_workspace_file" && strings.Contains(item.RequestSummary, `"failure_class":"tool_invalid_arguments"`) {
 			foundInvalidToolArgs = true
 			if item.Level != "warn" {
 				t.Fatalf("invalid tool arguments should be warn, got %s", item.Level)
@@ -1665,9 +1665,9 @@ func TestGenerateReplyOpenAIDeduplicatesRepeatedMutationToolCall(t *testing.T) {
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
-			writeOpenAIToolCall(t, w, "dup_1", "write_workspace_text", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
+			writeOpenAIToolCall(t, w, "dup_1", "save_workspace_file", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
 		case 2:
-			writeOpenAIToolCall(t, w, "dup_2", "write_workspace_text", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
+			writeOpenAIToolCall(t, w, "dup_2", "save_workspace_file", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
 		case 3:
 			lastToolContent := lastOpenAIToolContent(t, payload)
 			if !strings.Contains(lastToolContent, "already_applied") {
@@ -1696,7 +1696,7 @@ func TestGenerateReplyOpenAIDeduplicatesRepeatedMutationToolCall(t *testing.T) {
 		t.Fatalf("unexpected file content: %q", result.Content)
 	}
 	var recordedWrites int
-	if err := env.db.QueryRow(`SELECT COUNT(*) FROM tool_calls WHERE tool_name = 'write_workspace_text' AND status = 'success'`).Scan(&recordedWrites); err != nil {
+	if err := env.db.QueryRow(`SELECT COUNT(*) FROM tool_calls WHERE tool_name = 'save_workspace_file' AND status = 'success'`).Scan(&recordedWrites); err != nil {
 		t.Fatalf("QueryRow returned error: %v", err)
 	}
 	if recordedWrites != 1 {
@@ -1713,7 +1713,7 @@ func TestGenerateReplyOpenAIFailsWhenModelNeverCompletesAfterMutation(t *testing
 		defer r.Body.Close()
 		count := requestCount.Add(1)
 		if count == 1 {
-			writeOpenAIToolCall(t, w, "write_1", "write_workspace_text", `{"path":"verified-fallback.txt","content":"done","mode":"create"}`)
+			writeOpenAIToolCall(t, w, "write_1", "save_workspace_file", `{"path":"verified-fallback.txt","content":"done","mode":"create"}`)
 			return
 		}
 		writeJSON(t, w, map[string]any{
@@ -1770,7 +1770,7 @@ func TestGenerateReplyOpenAIFallsBackToNonStreamWhenFinalStreamBreaks(t *testing
 			if payload["stream"] != true {
 				t.Fatalf("expected first request to stream, got %#v", payload["stream"])
 			}
-			writeOpenAIToolCall(t, w, "write_1", "write_workspace_text", `{"path":"verified-stream-fallback.txt","content":"done","mode":"create"}`)
+			writeOpenAIToolCall(t, w, "write_1", "save_workspace_file", `{"path":"verified-stream-fallback.txt","content":"done","mode":"create"}`)
 		case 2:
 			if payload["stream"] != true {
 				t.Fatalf("expected final request to stream before fallback, got %#v", payload["stream"])
@@ -2405,7 +2405,7 @@ func TestGenerateReplyAnthropicFallsBackToNonStreamWhenFinalStreamBreaks(t *test
 				"content": []map[string]any{{
 					"type": "tool_use",
 					"id":   "toolu_write_1",
-					"name": "write_workspace_text",
+					"name": "save_workspace_file",
 					"input": map[string]any{
 						"path":    "anthropic-verified-stream-fallback.txt",
 						"content": "done",
@@ -2477,7 +2477,7 @@ func TestGenerateReplyAnthropicIncompleteToolArgumentsDiagnosticNamesTool(t *tes
 		_, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "event: content_block_start\n")
-		fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_truncated_1\",\"name\":\"write_workspace_text\",\"input\":{}}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_truncated_1\",\"name\":\"save_workspace_file\",\"input\":{}}}\n\n")
 		fmt.Fprint(w, "event: content_block_delta\n")
 		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"机甲少女/机甲少女11-22集修改版.txt\\\", \\\"mode\\\": \\\"create\\\", \\\"content\\\":\\\"第一段\"}}\n\n")
 		fmt.Fprint(w, "event: message_delta\n")
@@ -2513,13 +2513,13 @@ func TestGenerateReplyAnthropicIncompleteToolArgumentsDiagnosticNamesTool(t *tes
 		t.Fatalf("expected stream tool call details, got %#v", summary.StreamToolCalls)
 	}
 	call := summary.StreamToolCalls[0]
-	if call.Name != "write_workspace_text" || call.ID != "toolu_truncated_1" {
+	if call.Name != "save_workspace_file" || call.ID != "toolu_truncated_1" {
 		t.Fatalf("unexpected stream tool call summary: %#v", call)
 	}
 	if call.TargetSummary != "机甲少女/机甲少女11-22集修改版.txt" {
 		t.Fatalf("expected target path in diagnostic, got %#v", call)
 	}
-	if call.ArgumentsJSONValid || call.ArgumentsJSONError == "" || !call.LooksLikeLongWrite || call.RecommendedTool != "write_workspace_text" {
+	if call.ArgumentsJSONValid || call.ArgumentsJSONError == "" || !call.LooksLikeLongWrite || call.RecommendedTool != "write_workspace_chunk" {
 		t.Fatalf("expected invalid long-write details, got %#v", call)
 	}
 }
@@ -2818,8 +2818,8 @@ func assertOpenAIWriteToolsPresent(t *testing.T, payload map[string]any) {
 	}
 
 	mutationTools := []string{
-		"write_workspace_text",
-		"edit_workspace_lines",
+		"save_workspace_file",
+		"write_workspace_chunk",
 		"manage_workspace_path",
 		"organize_workspace_matches",
 	}
@@ -2859,8 +2859,8 @@ func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any)
 		"标准 Agent Loop",
 		"工具工作完成后，可以用普通 assistant 正文交付最终结果",
 		"find_workspace_files 按名称/路径/glob 找文件",
-		"edit_workspace_lines 按 1-based 行号执行",
-		"write_workspace_text 创建/覆盖/追加文本文件",
+		"save_workspace_file 创建或整文件覆盖短文本文件",
+		"write_workspace_chunk 分块创建/覆盖/追加长文本文件",
 		"run_workspace_command 在 workspace 内运行命令",
 		"不可以永久删除文件",
 		"不可以访问 workspace 之外的路径",
@@ -2874,7 +2874,7 @@ func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any)
 func assertOpenAIToolsetLoaderPresent(t *testing.T, payload map[string]any) {
 	t.Helper()
 	names := openAIToolNamesFromPayload(t, payload)
-	for _, expected := range []string{"attempt_completion", "write_workspace_text", "manage_workspace_path", "run_workspace_command"} {
+	for _, expected := range []string{"attempt_completion", "save_workspace_file", "manage_workspace_path", "run_workspace_command"} {
 		if !names[expected] {
 			t.Fatalf("expected %q in agent tool payload, got %#v", expected, names)
 		}

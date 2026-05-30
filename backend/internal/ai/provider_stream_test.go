@@ -411,18 +411,18 @@ func TestParseAnthropicStreamDetectsTruncatedToolArguments(t *testing.T) {
 	if item.ArgumentsJSONValid || item.ArgumentsJSONError == "" {
 		t.Fatalf("expected invalid JSON details, got %#v", item)
 	}
-	if !item.LooksLikeLongWrite || item.RecommendedTool != "write_workspace_text" {
+	if !item.LooksLikeLongWrite || item.RecommendedTool != "write_workspace_chunk" {
 		t.Fatalf("expected long-write recommendation, got %#v", item)
 	}
 }
 
 func TestStreamToolDiagnosticsRecommendLineReplaceForLargeEdits(t *testing.T) {
-	args := `{"path":"script.txt","action":"replace","start_line":1,"end_line":1,"new_text":"` + strings.Repeat("新", 5000)
+	args := `{"path":"script.txt","old_text":"` + strings.Repeat("旧", 2500) + `","new_text":"` + strings.Repeat("新", 2500)
 	var summary ProviderRequestSummary
 	annotateStreamToolDiagnostics(&summary, agentModelTurn{
 		ToolCalls: []agentToolCall{{
 			ID:            "toolu_edit",
-			Name:          "edit_workspace_lines",
+			Name:          "edit_workspace_text",
 			ArgumentsJSON: args,
 		}},
 	})
@@ -430,11 +430,11 @@ func TestStreamToolDiagnosticsRecommendLineReplaceForLargeEdits(t *testing.T) {
 		t.Fatalf("expected one stream tool call diagnostic, got %#v", summary.StreamToolCalls)
 	}
 	item := summary.StreamToolCalls[0]
-	if !item.LooksLikeLargeEdit || item.RecommendedTool != "edit_workspace_lines" {
+	if !item.LooksLikeLargeEdit || item.RecommendedTool != "replace_workspace_lines" {
 		t.Fatalf("expected line replacement recommendation, got %#v", item)
 	}
-	if item.NewTextChars == 0 {
-		t.Fatalf("expected new text size, got %#v", item)
+	if item.OldTextChars == 0 || item.NewTextChars == 0 {
+		t.Fatalf("expected old/new text sizes, got %#v", item)
 	}
 }
 

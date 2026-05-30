@@ -17,29 +17,16 @@ func toolFailureRecoveryHint(toolName, errorText string) string {
 			return "One or more file paths may be wrong or stale. Inspect or find the workspace paths, then retry reading. Do not claim you read files until the read tool succeeds."
 		}
 		return "Check the path and retry only after locating the file inside the current user's workspace."
-	case "edit_workspace_lines":
-		return "Read the target file/range again, correct action/start_line/end_line/new_text, then retry edit_workspace_lines. Do not report the edit as complete until the line edit succeeds."
-	case "write_workspace_text":
-		if strings.Contains(lowerError, "not exist") || strings.Contains(lowerError, "no such") || strings.Contains(lowerError, "不存在") {
-			return "The target file does not exist. If the user wanted a new file, retry write_workspace_text with mode=create; otherwise inspect/read the correct existing file before overwriting or appending."
-		}
-		if strings.Contains(lowerError, "4000") || strings.Contains(lowerError, "too long") {
-			return "Split long text into multiple write_workspace_text calls: create or overwrite the first chunk, then append the remaining chunks. Do not report success until all writes succeed."
-		}
-		return "Read the target file again if needed, adjust path/content/mode, then retry. Do not report success until write_workspace_text succeeds."
 	case "edit_workspace_text":
 		if strings.Contains(lowerError, "matched") || strings.Contains(lowerError, "not found") {
-			return "Read the current file or target line range. For scripts, long documents, duplicate headings, or larger rewrites, use edit_workspace_lines with line numbers instead of retrying a large exact old_text."
+			return "Read the current file or target line range. For scripts, long documents, duplicate headings, or larger rewrites, use replace_workspace_lines with line numbers instead of retrying a large exact old_text."
 		}
 		return "Verify the file path and current content before retrying. Do not report the edit as complete until edit_workspace_text succeeds."
 	case "replace_workspace_lines":
-		return "Read the target file/range again, correct start_line/end_line, then retry replace_workspace_lines or the newer edit_workspace_lines. Do not report the edit as complete until the line replacement succeeds."
+		return "Read the target file/range again, correct start_line/end_line, then retry replace_workspace_lines. Do not report the edit as complete until the line replacement succeeds."
 	case "save_workspace_file":
 		if strings.Contains(lowerError, "not exist") || strings.Contains(lowerError, "no such") || strings.Contains(lowerError, "不存在") {
 			return "The target file does not exist. If the user wanted a new file, retry save_workspace_file with mode=create; otherwise inspect/read the correct existing file before overwriting."
-		}
-		if strings.Contains(lowerError, "write_workspace_chunk") || strings.Contains(lowerError, "write_workspace_text") || strings.Contains(lowerError, "4000") {
-			return "Use write_workspace_text instead; split long text into create/overwrite followed by append calls."
 		}
 		return "Read the target file again if needed, adjust the save arguments, then retry. Do not report success until save_workspace_file succeeds."
 	case "manage_workspace_path":

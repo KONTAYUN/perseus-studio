@@ -115,28 +115,15 @@ func streamToolCallLogs(calls []agentToolCall) []StreamToolCallLog {
 			if newText, ok := decoded["new_text"].(string); ok {
 				item.NewTextChars = len([]rune(newText))
 			}
-			if item.Name == "edit_workspace_lines" && item.NewTextChars == 0 {
-				item.NewTextChars = len([]rune(partialJSONStringField(args, "new_text")))
-			}
 		}
 		if item.Name == "save_workspace_file" && (!item.ArgumentsJSONValid || item.ContentChars > recommendedWorkspaceChunkChars) {
 			item.LooksLikeLongWrite = true
-			item.RecommendedTool = "write_workspace_text"
-			item.RecommendedChunkSize = recommendedWorkspaceChunkChars
-		}
-		if item.Name == "write_workspace_text" && (!item.ArgumentsJSONValid || item.ContentChars > recommendedWorkspaceChunkChars) {
-			item.LooksLikeLongWrite = true
-			item.RecommendedTool = "write_workspace_text"
+			item.RecommendedTool = "write_workspace_chunk"
 			item.RecommendedChunkSize = recommendedWorkspaceChunkChars
 		}
 		if item.Name == "edit_workspace_text" && (!item.ArgumentsJSONValid || item.OldTextChars+item.NewTextChars > recommendedWorkspaceChunkChars) {
 			item.LooksLikeLargeEdit = true
-			item.RecommendedTool = "edit_workspace_lines"
-		}
-		if item.Name == "edit_workspace_lines" && (!item.ArgumentsJSONValid || item.NewTextChars > recommendedWorkspaceChunkChars) {
-			item.LooksLikeLargeEdit = true
-			item.RecommendedTool = "edit_workspace_lines"
-			item.RecommendedChunkSize = recommendedWorkspaceChunkChars
+			item.RecommendedTool = "replace_workspace_lines"
 		}
 		items = append(items, item)
 	}

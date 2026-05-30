@@ -122,7 +122,7 @@ func (s *Service) execReadWorkspaceFile(ctx context.Context, userID, argumentsJS
 		"start_line":  result.StartLine,
 		"end_line":    result.EndLine,
 		"total_lines": result.TotalLines,
-		"next_hint":   "Use edit_workspace_lines for existing-file edits, or write_workspace_text for full overwrite/new files.",
+		"next_hint":   "Use edit_workspace_text for a precise existing-file edit, or save_workspace_file only for full overwrite/new file.",
 	})
 	return mustJSON(payload), summary, label, result.Path, nil
 }
@@ -207,7 +207,7 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		"limited_by_count": limitedByCount,
 		"start_line":       args.StartLine,
 		"end_line":         args.EndLine,
-		"next_hint":        "Use edit_workspace_lines for existing-file edits, or write_workspace_text for full overwrite/new files.",
+		"next_hint":        "Use edit_workspace_text for precise existing-file edits, or save_workspace_file only for full overwrite/new files.",
 	})
 	summary := fmt.Sprintf("read %d workspace file(s), %d failed", len(items), len(failed))
 	return mustJSON(payload), summary, "正在批量读取文件...", strings.Join(readPaths, ","), nil

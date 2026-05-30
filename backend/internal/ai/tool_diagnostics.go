@@ -50,14 +50,6 @@ func toolArgumentDiagnosticDetails(toolName, argumentsJSON string) map[string]an
 		return nil
 	}
 	switch toolName {
-	case "edit_workspace_lines":
-		return map[string]any{
-			"path":           pathSummary(stringField(args, "path")),
-			"action":         stringField(args, "action"),
-			"start_line":     intField(args, "start_line"),
-			"end_line":       intField(args, "end_line"),
-			"new_text_chars": len([]rune(stringField(args, "new_text"))),
-		}
 	case "edit_workspace_text":
 		return map[string]any{
 			"path":           pathSummary(stringField(args, "path")),
@@ -72,7 +64,7 @@ func toolArgumentDiagnosticDetails(toolName, argumentsJSON string) map[string]an
 			"end_line":       intField(args, "end_line"),
 			"new_text_chars": len([]rune(stringField(args, "new_text"))),
 		}
-	case "write_workspace_text", "save_workspace_file", "write_workspace_chunk":
+	case "save_workspace_file", "write_workspace_chunk":
 		return map[string]any{
 			"path":          pathSummary(stringField(args, "path")),
 			"content_chars": len([]rune(stringField(args, "content"))),
@@ -113,7 +105,7 @@ func toolFailureClass(toolName string, err error) string {
 		return "workspace_unsupported_file_type"
 	case toolName == "edit_workspace_text" && (strings.Contains(text, "old_text was not found") || strings.Contains(text, "old_text matched")):
 		return "workspace_exact_edit_unstable"
-	case (toolName == "edit_workspace_lines" || toolName == "replace_workspace_lines") && strings.Contains(text, "line range"):
+	case toolName == "replace_workspace_lines" && strings.Contains(text, "line range"):
 		return "workspace_line_range_invalid"
 	case strings.Contains(text, "all requested files failed to read"):
 		return "workspace_batch_read_all_failed"

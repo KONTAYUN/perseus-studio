@@ -166,7 +166,7 @@ func (m *Manager) repairPrompt(payload AIAgentPayload, missing []string, round i
 预期产物 JSON：
 %s
 
-请只补做缺失项。若缺少文件，必须实际调用 write_workspace_text 写入 workspace；如果写入失败，要基于工具错误继续修复或明确失败，不要只回复说明。`, round, strings.Join(missing, "\n"), string(rawOutputs))
+请只补做缺失项。若缺少文件，必须实际调用 save_workspace_file 写入 workspace；如果写入失败，要基于工具错误继续修复或明确失败，不要只回复说明。`, round, strings.Join(missing, "\n"), string(rawOutputs))
 }
 
 func (m *Manager) validateOutputs(ctx context.Context, payload AIAgentPayload, reply ai.Reply, files *workspace.Service) validationResult {
@@ -222,7 +222,7 @@ func firstChangedFile(events []ai.ToolEvent) string {
 		if event.Status != "success" {
 			continue
 		}
-		if event.ToolName == "write_workspace_text" || event.ToolName == "save_workspace_file" || event.ToolName == "write_workspace_chunk" {
+		if event.ToolName == "save_workspace_file" {
 			if event.Path != "" {
 				return event.Path
 			}
@@ -246,7 +246,7 @@ func hasCommandResult(events []ai.ToolEvent) bool {
 func repairForceTool(validation validationResult) string {
 	for _, kind := range validation.MissingKinds {
 		if kind == missingOutputFile {
-			return "write_workspace_text"
+			return "save_workspace_file"
 		}
 	}
 	return ""
