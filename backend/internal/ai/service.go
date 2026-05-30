@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"webide-backend/internal/store"
 	"webide-backend/internal/usersvc"
 )
+
+const providerHTTPTransportProtocol = "http/1.1"
 
 type Service struct {
 	configs *store.ConfigStore
@@ -159,6 +162,16 @@ func newProviderHTTPClient() *http.Client {
 	transport.IdleConnTimeout = 90 * time.Second
 	transport.ResponseHeaderTimeout = 0
 	transport.ExpectContinueTimeout = 1 * time.Second
+	transport.ForceAttemptHTTP2 = false
+	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	tlsConfig := transport.TLSClientConfig
+	if tlsConfig != nil {
+		tlsConfig = tlsConfig.Clone()
+	} else {
+		tlsConfig = &tls.Config{}
+	}
+	tlsConfig.NextProtos = []string{providerHTTPTransportProtocol}
+	transport.TLSClientConfig = tlsConfig
 	return &http.Client{Transport: transport}
 }
 

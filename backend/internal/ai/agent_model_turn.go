@@ -119,12 +119,17 @@ func (r *agentRuntime) forceContextOverflowCompaction(ctx context.Context, round
 }
 
 func (r *agentRuntime) tools() []map[string]any {
+	includeLoader := r.includeToolsetLoader()
 	switch r.protocol {
 	case agentProtocolAnthropic:
-		return anthropicToolsForLoadedToolsets(r.loadedToolsets, false, r.opts.UserRole)
+		return anthropicToolsForLoadedToolsets(r.loadedToolsets, includeLoader, r.opts.UserRole)
 	default:
-		return openAIToolsForLoadedToolsets(r.loadedToolsets, false, r.opts.UserRole)
+		return openAIToolsForLoadedToolsets(r.loadedToolsets, includeLoader, r.opts.UserRole)
 	}
+}
+
+func (r *agentRuntime) includeToolsetLoader() bool {
+	return r != nil && r.opts.TaskID == ""
 }
 
 func (r *agentRuntime) toolChoice() providerToolChoice {

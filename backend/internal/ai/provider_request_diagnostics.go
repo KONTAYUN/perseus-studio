@@ -26,6 +26,8 @@ func annotatePayloadDiagnostics(summary *ProviderRequestSummary, payload map[str
 	summary.UnsupportedOpenAIParams = unsupportedOpenAIParams(provider, payload, policy)
 	summary.ProviderHost = providerHost(provider.BaseURL)
 	summary.ModelID = strings.TrimSpace(provider.ModelID)
+	summary.ProviderHTTPProtocol = providerHTTPTransportProtocol
+	summary.ProviderHTTP2Disabled = true
 	summary.HasTools = len(tools) > 0
 	summary.HasRequiredToolChoice = payloadHasRequiredToolChoice(payload["tool_choice"])
 	summary.HasReasoningParams = payloadHasReasoningParams(payload)

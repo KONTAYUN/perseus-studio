@@ -90,6 +90,41 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "ask_followup_question")
 }
 
+func TestProviderHTTPClientUsesConservativeHTTP1Transport(t *testing.T) {
+	client := newProviderHTTPClient()
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", client.Transport)
+	}
+	if transport.ForceAttemptHTTP2 {
+		t.Fatal("provider transport must not attempt HTTP/2")
+	}
+	if transport.TLSNextProto == nil {
+		t.Fatal("provider transport must explicitly disable HTTP/2 TLS upgrades")
+	}
+	if transport.TLSClientConfig == nil {
+		t.Fatal("provider transport must set TLSClientConfig for ALPN")
+	}
+	if got := transport.TLSClientConfig.NextProtos; len(got) != 1 || got[0] != providerHTTPTransportProtocol {
+		t.Fatalf("expected provider ALPN %q only, got %#v", providerHTTPTransportProtocol, got)
+	}
+}
+
+func TestProviderPayloadDiagnosticsRecordHTTPTransportPolicy(t *testing.T) {
+	var summary ProviderRequestSummary
+	annotatePayloadDiagnostics(&summary, map[string]any{"model": "test", "messages": []map[string]any{}}, nil, store.ModelProvider{
+		BaseURL:  "https://api.jellix.top/v1",
+		Protocol: "openai",
+		ModelID:  "gpt-5.5",
+	}, providerReasoningPolicy{})
+	if summary.ProviderHTTPProtocol != providerHTTPTransportProtocol {
+		t.Fatalf("expected provider http protocol %q, got %q", providerHTTPTransportProtocol, summary.ProviderHTTPProtocol)
+	}
+	if !summary.ProviderHTTP2Disabled {
+		t.Fatal("expected provider HTTP/2 disabled diagnostic flag")
+	}
+}
+
 func TestOrdinaryUserSkillToolSchemaIsReadOnly(t *testing.T) {
 	loaded := map[string]bool{"skills": true}
 	names := toolNamesFromOpenAITools(openAIToolsForLoadedToolsets(loaded, true, "user"))

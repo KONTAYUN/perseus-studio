@@ -21,7 +21,7 @@ func (s *Service) runOpenAIAgent(ctx context.Context, conversationID, messageID 
 		opts:               opts,
 		profile:            profile,
 		allowTask:          opts.TaskID == "",
-		loadedToolsets:     allAgentToolsets(opts.TaskID == ""),
+		loadedToolsets:     initialAgentToolsets(opts, attachments),
 		appliedMutations:   map[string]ToolEvent{},
 		chunkWrites:        map[string]workspaceChunkWriteState{},
 		requiresCompletion: opts.ForceTool != "" || opts.TaskID != "",
@@ -50,7 +50,7 @@ func (s *Service) runAnthropicAgent(ctx context.Context, conversationID, message
 		opts:               opts,
 		profile:            profile,
 		allowTask:          opts.TaskID == "",
-		loadedToolsets:     allAgentToolsets(opts.TaskID == ""),
+		loadedToolsets:     initialAgentToolsets(opts, attachments),
 		appliedMutations:   map[string]ToolEvent{},
 		chunkWrites:        map[string]workspaceChunkWriteState{},
 		requiresCompletion: opts.ForceTool != "" || opts.TaskID != "",
@@ -73,6 +73,14 @@ func allAgentToolsets(allowTask bool) map[string]bool {
 	}
 	if allowTask {
 		loaded["task"] = true
+	}
+	return loaded
+}
+
+func initialAgentToolsets(opts RunOptions, attachments []AttachmentPayload) map[string]bool {
+	loaded := map[string]bool{}
+	if opts.TaskID != "" || opts.ForceTool != "" || attachmentsRequireToolLoop(attachments) {
+		loaded["workspace"] = true
 	}
 	return loaded
 }

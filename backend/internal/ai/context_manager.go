@@ -38,6 +38,8 @@ type ProviderRequestSummary struct {
 	UnsupportedOpenAIParams   []string             `json:"unsupported_openai_params,omitempty"`
 	ProviderHost              string               `json:"provider_host,omitempty"`
 	ModelID                   string               `json:"model_id,omitempty"`
+	ProviderHTTPProtocol      string               `json:"provider_http_protocol,omitempty"`
+	ProviderHTTP2Disabled     bool                 `json:"provider_http2_disabled,omitempty"`
 	HasTools                  bool                 `json:"has_tools,omitempty"`
 	HasRequiredToolChoice     bool                 `json:"has_required_tool_choice,omitempty"`
 	HasReasoningParams        bool                 `json:"has_reasoning_params,omitempty"`

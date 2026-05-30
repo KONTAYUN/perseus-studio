@@ -19,7 +19,7 @@ import (
 	"webide-backend/internal/store"
 )
 
-const providerSDKMaxRetries = 2
+const providerSDKMaxRetries = 0
 
 func (s *Service) openAISDKPostRaw(ctx context.Context, provider store.ModelProvider, path string, payload map[string]any, opts RunOptions, stage string) (*http.Response, error) {
 	client, err := s.openAISDKClient(provider, opts, stage)

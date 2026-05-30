@@ -162,6 +162,8 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"unsupported_openai_params":    summary.UnsupportedOpenAIParams,
 		"provider_host":                summary.ProviderHost,
 		"model_id":                     summary.ModelID,
+		"provider_http_protocol":       summary.ProviderHTTPProtocol,
+		"provider_http2_disabled":      summary.ProviderHTTP2Disabled,
 		"has_tools":                    summary.HasTools,
 		"has_required_tool_choice":     summary.HasRequiredToolChoice,
 		"has_reasoning_params":         summary.HasReasoningParams,

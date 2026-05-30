@@ -38,9 +38,12 @@ func TestGenerateReplyOpenAICreateFileAfterReminder(t *testing.T) {
 
 		switch count {
 		case 1:
+			assertOnlyCoreToolsLoaded(t, payload)
+			writeOpenAIToolCall(t, w, "load_workspace_1", "load_perseus_toolset", `{"toolset":"workspace"}`)
+		case 2:
 			assertOpenAIWriteToolsPresent(t, payload)
 			writeOpenAIToolCall(t, w, "call_create_1", "save_workspace_file", `{"path":"ai-test.txt","content":"hello from ai","mode":"create"}`)
-		case 2:
+		case 3:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已创建 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
@@ -65,8 +68,8 @@ func TestGenerateReplyOpenAICreateFileAfterReminder(t *testing.T) {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
 	assertToolCallRecord(t, env, "save_workspace_file", "success")
-	if requestCount.Load() != 2 {
-		t.Fatalf("expected 2 model requests, got %d", requestCount.Load())
+	if requestCount.Load() != 3 {
+		t.Fatalf("expected toolset load, write, and completion requests, got %d", requestCount.Load())
 	}
 }
 
@@ -127,7 +130,11 @@ func TestGenerateReplyOpenAIToolLoopUpgradesFromChatToWorkspaceRoundLimit(t *tes
 		}
 
 		count := requestCount.Add(1)
-		if count <= agentChatMaxRounds+1 {
+		if count == 1 {
+			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
+			return
+		}
+		if count <= agentChatMaxRounds+2 {
 			writeOpenAIToolCall(t, w, fmt.Sprintf("call_inspect_%d", count), "inspect_workspace", `{"path":"","max_depth":1}`)
 			return
 		}
@@ -143,7 +150,7 @@ func TestGenerateReplyOpenAIToolLoopUpgradesFromChatToWorkspaceRoundLimit(t *tes
 	if !strings.Contains(reply.Content, "已完成长工具任务") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
-	if requestCount.Load() <= agentChatMaxRounds {
+	if requestCount.Load() <= agentChatMaxRounds+1 {
 		t.Fatalf("expected more than chat max rounds, got %d", requestCount.Load())
 	}
 }
@@ -754,17 +761,30 @@ func TestGenerateReplyOpenAIStartBackgroundTaskReturnsWithoutSecondProviderTurn(
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			t.Fatalf("invalid request payload: %v", err)
 		}
-		if count := requestCount.Add(1); count != 1 {
-			t.Fatalf("start_background_task must finish the chat run without a second provider request, got request %d with payload %s", count, string(raw))
+		switch count := requestCount.Add(1); count {
+		case 1:
+			assertOnlyCoreToolsLoaded(t, payload)
+			writeOpenAIStreamTextAndToolCall(t, w,
+				"我会先加载后台任务工具。",
+				"load_task_1",
+				"load_perseus_toolset",
+				`{"toolset":"task"}`)
+		case 2:
+			if payload["tool_choice"] != "auto" {
+				t.Fatalf("expected ordinary chat request to allow background-task tool selection with auto, got %#v", payload["tool_choice"])
+			}
+			names := openAIToolNamesFromPayload(t, payload)
+			if !names["start_background_task"] {
+				t.Fatalf("expected task tool after loading task toolset, got %#v", names)
+			}
+			writeOpenAIStreamTextAndToolCall(t, w,
+				"我会创建后台任务来继续写十集。",
+				"call_task_1",
+				"start_background_task",
+				`{"title":"续写向北方10集","goal":"续写《向北方》10集","expected_outputs":[{"type":"file","path":"向北方/向北方 第3-12集.txt","description":"续写10集剧本"}],"suggested_steps":["读取当前第2集","延续人物和悬疑线","分集写作"]}`)
+		default:
+			t.Fatalf("unexpected request count: %d with payload %s", count, string(raw))
 		}
-		if payload["tool_choice"] != "auto" {
-			t.Fatalf("expected ordinary chat request to allow background-task tool selection with auto, got %#v", payload["tool_choice"])
-		}
-		writeOpenAIStreamTextAndToolCall(t, w,
-			"我会创建后台任务来继续写十集。",
-			"call_task_1",
-			"start_background_task",
-			`{"title":"续写向北方10集","goal":"续写《向北方》10集","expected_outputs":[{"type":"file","path":"向北方/向北方 第3-12集.txt","description":"续写10集剧本"}],"suggested_steps":["读取当前第2集","延续人物和悬疑线","分集写作"]}`)
 	}))
 	defer server.Close()
 
@@ -778,8 +798,8 @@ func TestGenerateReplyOpenAIStartBackgroundTaskReturnsWithoutSecondProviderTurn(
 	if err != nil {
 		t.Fatalf("GenerateReply returned error: %v", err)
 	}
-	if requestCount.Load() != 1 {
-		t.Fatalf("expected exactly one provider request, got %d", requestCount.Load())
+	if requestCount.Load() != 2 {
+		t.Fatalf("expected toolset load plus background task request, got %d", requestCount.Load())
 	}
 	if reply.BackgroundTask == nil {
 		t.Fatalf("expected background task request, got %#v", reply)
@@ -963,9 +983,11 @@ func TestGenerateReplyOpenAIWriteExistingFile(t *testing.T) {
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
+			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
+		case 2:
 			assertOpenAIWriteToolsPresent(t, payload)
 			writeOpenAIToolCall(t, w, "call_write_1", "save_workspace_file", `{"path":"ai-test.txt","content":"after","mode":"overwrite"}`)
-		case 2:
+		case 3:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已修改 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
@@ -1003,10 +1025,20 @@ func TestGenerateReplyOpenAIEditWorkspaceTextEmitsWorkspaceChanged(t *testing.T)
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
 		switch requestCount.Add(1) {
 		case 1:
-			writeOpenAIToolCall(t, w, "call_edit_1", "edit_workspace_text", `{"path":"ai-test.txt","old_text":"before","new_text":"after"}`)
+			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
 		case 2:
+			writeOpenAIToolCall(t, w, "call_edit_1", "edit_workspace_text", `{"path":"ai-test.txt","old_text":"before","new_text":"after"}`)
+		case 3:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已编辑 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count")
@@ -1057,6 +1089,27 @@ func TestGenerateReplyOpenAIWritePersistsCheckpointWhenFinalReplyTimesOut(t *tes
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
+			writeJSON(t, w, map[string]any{
+				"choices": []map[string]any{
+					{
+						"finish_reason": "tool_calls",
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []map[string]any{
+								{
+									"id":   "load_workspace_1",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "load_perseus_toolset",
+										"arguments": `{"toolset":"workspace"}`,
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+		case 2:
 			writeJSON(t, w, map[string]any{
 				"choices": []map[string]any{
 					{
@@ -1116,6 +1169,27 @@ func TestGenerateReplyOpenAIReadThenTimeoutDoesNotApplyHeuristicReplacement(t *t
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
+			writeJSON(t, w, map[string]any{
+				"choices": []map[string]any{
+					{
+						"finish_reason": "tool_calls",
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []map[string]any{
+								{
+									"id":   "load_workspace_1",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "load_perseus_toolset",
+										"arguments": `{"toolset":"workspace"}`,
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+		case 2:
 			writeJSON(t, w, map[string]any{
 				"choices": []map[string]any{
 					{
@@ -1184,9 +1258,11 @@ func TestGenerateReplyOpenAIMkdirWorkspace(t *testing.T) {
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
+			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
+		case 2:
 			assertOpenAIWriteToolsPresent(t, payload)
 			writeOpenAIToolCall(t, w, "call_mkdir_1", "manage_workspace_path", `{"action":"mkdir","path":"ai-folder"}`)
-		case 2:
+		case 3:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已创建 ai-folder。","changed_paths":["ai-folder"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
@@ -1237,11 +1313,13 @@ func TestGenerateReplyOpenAIDeleteAfterReadRequiresMutationTool(t *testing.T) {
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
+			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
+		case 2:
 			assertOpenAIWriteToolsPresent(t, payload)
 			writeOpenAIToolCall(t, w, "call_read_1", "read_workspace_text", `{"path":"delete-me.txt"}`)
-		case 2:
-			writeOpenAIToolCall(t, w, "call_delete_1", "manage_workspace_path", `{"action":"trash","path":"delete-me.txt"}`)
 		case 3:
+			writeOpenAIToolCall(t, w, "call_delete_1", "manage_workspace_path", `{"action":"trash","path":"delete-me.txt"}`)
+		case 4:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已将 delete-me.txt 移入回收站。","changed_paths":["回收站/delete-me.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
@@ -1270,8 +1348,8 @@ func TestGenerateReplyOpenAIDeleteAfterReadRequiresMutationTool(t *testing.T) {
 	}
 	assertToolCallRecord(t, env, "read_workspace_text", "success")
 	assertToolCallRecord(t, env, "manage_workspace_path", "success")
-	if requestCount.Load() != 3 {
-		t.Fatalf("expected 3 model requests, got %d", requestCount.Load())
+	if requestCount.Load() != 4 {
+		t.Fatalf("expected toolset load, read, delete, and completion requests, got %d", requestCount.Load())
 	}
 }
 
@@ -1570,14 +1648,16 @@ func TestGenerateReplyOpenAIToolArgumentErrorFeedsBackAndRecovers(t *testing.T) 
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
-			writeOpenAIToolCall(t, w, "bad_args", "save_workspace_file", `{"path":"bad.txt","content":"hello","mode":`)
+			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
 		case 2:
+			writeOpenAIToolCall(t, w, "bad_args", "save_workspace_file", `{"path":"bad.txt","content":"hello","mode":`)
+		case 3:
 			lastToolContent := lastOpenAIToolContent(t, payload)
 			if !strings.Contains(lastToolContent, "tool arguments must be valid JSON") {
 				t.Fatalf("expected invalid JSON tool_result feedback, got %s", lastToolContent)
 			}
 			writeOpenAIToolCall(t, w, "good_args", "save_workspace_file", `{"path":"bad.txt","content":"hello","mode":"create"}`)
-		case 3:
+		case 4:
 			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建 bad.txt。","changed_paths":["bad.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
@@ -1665,10 +1745,12 @@ func TestGenerateReplyOpenAIDeduplicatesRepeatedMutationToolCall(t *testing.T) {
 		count := requestCount.Add(1)
 		switch count {
 		case 1:
-			writeOpenAIToolCall(t, w, "dup_1", "save_workspace_file", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
+			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
 		case 2:
-			writeOpenAIToolCall(t, w, "dup_2", "save_workspace_file", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
+			writeOpenAIToolCall(t, w, "dup_1", "save_workspace_file", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
 		case 3:
+			writeOpenAIToolCall(t, w, "dup_2", "save_workspace_file", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
+		case 4:
 			lastToolContent := lastOpenAIToolContent(t, payload)
 			if !strings.Contains(lastToolContent, "already_applied") {
 				t.Fatalf("expected duplicate mutation to return already_applied, got %s", lastToolContent)
@@ -1711,22 +1793,33 @@ func TestGenerateReplyOpenAIFailsWhenModelNeverCompletesAfterMutation(t *testing
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		count := requestCount.Add(1)
-		if count == 1 {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		switch count := requestCount.Add(1); count {
+		case 1:
+			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
+		case 2:
 			writeOpenAIToolCall(t, w, "write_1", "save_workspace_file", `{"path":"verified-fallback.txt","content":"done","mode":"create"}`)
 			return
-		}
-		writeJSON(t, w, map[string]any{
-			"choices": []map[string]any{
-				{
-					"finish_reason": "stop",
-					"message": map[string]any{
-						"role":    "assistant",
-						"content": "",
+		default:
+			writeJSON(t, w, map[string]any{
+				"choices": []map[string]any{
+					{
+						"finish_reason": "stop",
+						"message": map[string]any{
+							"role":    "assistant",
+							"content": "",
+						},
 					},
 				},
-			},
-		})
+			})
+		}
 	}))
 	defer server.Close()
 
@@ -1745,8 +1838,8 @@ func TestGenerateReplyOpenAIFailsWhenModelNeverCompletesAfterMutation(t *testing
 	if result.Content != "done" {
 		t.Fatalf("unexpected file content: %q", result.Content)
 	}
-	if requestCount.Load() != 4 {
-		t.Fatalf("expected one tool round plus three no-tool rounds, got %d", requestCount.Load())
+	if requestCount.Load() != 5 {
+		t.Fatalf("expected toolset load, write round, and three no-tool rounds, got %d", requestCount.Load())
 	}
 }
 
@@ -1831,8 +1924,8 @@ func TestGenerateReplyRecordsDiagnosticForHTTP502(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 3 {
-		t.Fatalf("expected two retries for HTTP 502, got %d requests", requestCount.Load())
+	if requestCount.Load() != 1 {
+		t.Fatalf("provider SDK retries should be disabled, got %d requests", requestCount.Load())
 	}
 
 	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
@@ -1857,134 +1950,55 @@ func TestGenerateReplyRecordsDiagnosticForHTTP502(t *testing.T) {
 	}
 }
 
-func TestGenerateReplyRetriesHTTP502OnceThenSucceeds(t *testing.T) {
+func TestGenerateReplyDoesNotRetryHTTP502InsideProviderSDK(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := requestCount.Add(1)
-		if count == 1 {
-			w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte("errorcode:502"))
-			return
-		}
-		writeJSON(t, w, map[string]any{
-			"choices": []map[string]any{
-				{
-					"message": map[string]any{
-						"role":    "assistant",
-						"content": "重试后成功。",
-					},
-				},
-			},
-		})
+		requestCount.Add(1)
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("errorcode:502"))
 	}))
 	defer server.Close()
 
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "hello")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err == nil {
+		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 2 {
-		t.Fatalf("expected one retry for HTTP 502, got %d requests", requestCount.Load())
-	}
-	if !strings.Contains(reply.Content, "重试后成功") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
-	}
-	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
-	if err != nil {
-		t.Fatalf("diagnostics.List returned error: %v", err)
-	}
-	if len(logs) != 0 {
-		t.Fatalf("expected no diagnostic log after retry success, got %d", len(logs))
+	if requestCount.Load() != 1 {
+		t.Fatalf("provider SDK retries should be disabled, got %d requests", requestCount.Load())
 	}
 }
 
-func TestGenerateReplyRetriesHTTP502TwiceThenSucceeds(t *testing.T) {
-	env := newTestAIEnv(t)
-	ctx := context.Background()
-
-	var requestCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := requestCount.Add(1)
-		if count <= 2 {
-			w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte("errorcode:502"))
-			return
-		}
-		writeJSON(t, w, map[string]any{
-			"choices": []map[string]any{
-				{
-					"message": map[string]any{
-						"role":    "assistant",
-						"content": "第二次重试后成功。",
-					},
-				},
-			},
-		})
-	}))
-	defer server.Close()
-
-	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "hello")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
-	}
-	if requestCount.Load() != 3 {
-		t.Fatalf("expected two retries for HTTP 502, got %d requests", requestCount.Load())
-	}
-	if !strings.Contains(reply.Content, "第二次重试后成功") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
-	}
-	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
-	if err != nil {
-		t.Fatalf("diagnostics.List returned error: %v", err)
-	}
-	if len(logs) != 0 {
-		t.Fatalf("expected no diagnostic log after retry success, got %d", len(logs))
+func TestProviderSDKMaxRetriesDisabled(t *testing.T) {
+	if providerSDKMaxRetries != 0 {
+		t.Fatalf("provider SDK retries should stay disabled, got %d", providerSDKMaxRetries)
 	}
 }
 
-func TestGenerateReplyRetriesHTTP429ThenSucceeds(t *testing.T) {
+func TestGenerateReplyDoesNotRetryHTTP429InsideProviderSDK(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := requestCount.Add(1)
-		if count == 1 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
-			return
-		}
-		writeJSON(t, w, map[string]any{
-			"choices": []map[string]any{
-				{
-					"message": map[string]any{
-						"role":    "assistant",
-						"content": "限流重试后成功。",
-					},
-				},
-			},
-		})
+		requestCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
 	}))
 	defer server.Close()
 
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "hello")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err == nil {
+		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 2 {
-		t.Fatalf("expected one retry for HTTP 429, got %d requests", requestCount.Load())
-	}
-	if !strings.Contains(reply.Content, "限流重试后成功") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
+	if requestCount.Load() != 1 {
+		t.Fatalf("provider SDK retries should be disabled, got %d requests", requestCount.Load())
 	}
 }
 
@@ -2028,6 +2042,29 @@ func TestGenerateReplyCheckpointResumeAfterTransientProviderError(t *testing.T) 
 			return
 		}
 		if count == 1 {
+			writeJSON(t, w, map[string]any{
+				"choices": []map[string]any{
+					{
+						"finish_reason": "tool_calls",
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []map[string]any{
+								{
+									"id":   "load_workspace_1",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "load_perseus_toolset",
+										"arguments": `{"toolset":"workspace"}`,
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			return
+		}
+		if count == 2 {
 			writeJSON(t, w, map[string]any{
 				"choices": []map[string]any{
 					{
@@ -2133,10 +2170,15 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 			if payload["stream"] != true {
 				t.Fatalf("expected first request to stream, got %#v", payload["stream"])
 			}
-			writeOpenAIToolCall(t, w, "read_before_failure", "read_workspace_text", `{"path":"draft.txt"}`)
+			writeOpenAIToolCall(t, w, "load_workspace_1", "load_perseus_toolset", `{"toolset":"workspace"}`)
 		case 2:
 			if payload["stream"] != true {
-				t.Fatalf("expected second request to stream before fallback, got %#v", payload["stream"])
+				t.Fatalf("expected second request to stream, got %#v", payload["stream"])
+			}
+			writeOpenAIToolCall(t, w, "read_before_failure", "read_workspace_text", `{"path":"draft.txt"}`)
+		case 3:
+			if payload["stream"] != true {
+				t.Fatalf("expected third request to stream before fallback, got %#v", payload["stream"])
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Connection", "close")
@@ -2153,21 +2195,14 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 				panic(http.ErrAbortHandler)
 			}
 			_ = conn.Close()
-		case 3:
+		case 4:
 			if payload["stream"] != false {
 				t.Fatalf("expected non-stream fallback before checkpoint recovery, got %#v", payload["stream"])
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(529)
 			_, _ = w.Write([]byte(`{"error":{"message":"fallback overloaded"}}`))
-		case 4, 5:
-			if payload["stream"] != false {
-				t.Fatalf("expected SDK retry to stay on non-stream fallback, got %#v", payload["stream"])
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(529)
-			_, _ = w.Write([]byte(`{"error":{"message":"fallback overloaded"}}`))
-		case 6:
+		case 5:
 			if payload["stream"] != true {
 				t.Fatalf("expected checkpoint resume to rebuild a streaming provider turn, got %#v", payload["stream"])
 			}
@@ -2201,8 +2236,8 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 	if !strings.Contains(reply.Content, "已从断点继续并完成") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
-	if fallbackRequests.Load() != 3 {
-		t.Fatalf("expected non-stream fallback plus SDK retries before checkpoint resume, got %d fallback requests", fallbackRequests.Load())
+	if fallbackRequests.Load() != 1 {
+		t.Fatalf("expected one non-stream fallback before checkpoint resume, got %d fallback requests", fallbackRequests.Load())
 	}
 }
 
@@ -2701,8 +2736,8 @@ func TestGenerateReplyProvider400DoesNotGuessRequiredToolChoice(t *testing.T) {
 	if !ok || len(toolItems) == 0 {
 		t.Fatalf("expected tool_schema_items in diagnostic summary: %#v", summary)
 	}
-	if !summaryContainsUnsupportedPath(summary, "openai_schema_default:perseus_search_web.parameters.max_results.default") {
-		t.Fatalf("expected concrete OpenAI schema warning for perseus_search_web default, got %#v", summary)
+	if warnings, _ := summary["tool_schema_warnings"].([]any); len(warnings) != 0 {
+		t.Fatalf("workspace tool schema should be OpenAI-compatible, got warnings %#v in %#v", warnings, summary)
 	}
 }
 
@@ -2854,6 +2889,37 @@ func assertOpenAIWriteToolsPresent(t *testing.T, payload map[string]any) {
 			t.Fatalf("tool %q missing from payload: %#v", expected, names)
 		}
 	}
+}
+
+func assertOnlyCoreToolsLoaded(t *testing.T, payload map[string]any) {
+	t.Helper()
+
+	names := openAIToolNamesFromPayload(t, payload)
+	for _, expected := range []string{"attempt_completion", "ask_followup_question", "load_perseus_toolset"} {
+		if !names[expected] {
+			t.Fatalf("expected core tool %q in payload, got %#v", expected, names)
+		}
+	}
+	for _, unexpected := range []string{
+		"inspect_workspace",
+		"read_workspace_text",
+		"save_workspace_file",
+		"write_workspace_chunk",
+		"run_workspace_command",
+		"perseus_search_web",
+		"list_skills",
+		"start_background_task",
+	} {
+		if names[unexpected] {
+			t.Fatalf("tool %q should require explicit toolset load, got %#v", unexpected, names)
+		}
+	}
+}
+
+func handleOpenAIWorkspaceToolsetLoad(t *testing.T, w http.ResponseWriter, payload map[string]any, id string) {
+	t.Helper()
+	assertOnlyCoreToolsLoaded(t, payload)
+	writeOpenAIToolCall(t, w, id, "load_perseus_toolset", `{"toolset":"workspace"}`)
 }
 
 func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any) {
