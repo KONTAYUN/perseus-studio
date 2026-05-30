@@ -19,7 +19,7 @@ func (r *agentRuntime) validateSelectedReferenceScope(call agentToolCall) string
 		return ""
 	}
 	for _, candidate := range candidates {
-		if (call.Name == "write_workspace_text" || call.Name == "write_workspace_chunk") && r.pathChangedEarlierInRun(candidate) {
+		if call.Name == "write_workspace_text" && r.pathChangedEarlierInRun(candidate) {
 			continue
 		}
 		if !scope.allows(candidate) {
@@ -100,11 +100,7 @@ var selectedScopeToolExtractors = map[string]func(string) ([]string, bool){
 	"read_workspace_text":        extractSinglePathScopeTarget,
 	"edit_workspace_lines":       extractSinglePathScopeTarget,
 	"write_workspace_text":       extractSaveScopeTarget,
-	"edit_workspace_text":        extractSinglePathScopeTarget,
-	"replace_workspace_lines":    extractSinglePathScopeTarget,
 	"read_workspace_files":       extractBatchReadScopeTargets,
-	"save_workspace_file":        extractSaveScopeTarget,
-	"write_workspace_chunk":      extractSaveScopeTarget,
 	"manage_workspace_path":      extractManagePathScopeTarget,
 	"organize_workspace_matches": extractOrganizeScopeTarget,
 }

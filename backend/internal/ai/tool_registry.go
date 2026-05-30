@@ -54,18 +54,12 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 		return s.execEditWorkspaceLines(ctx, opts.UserID, argumentsJSON)
 	case "write_workspace_text":
 		return s.execWriteWorkspaceText(ctx, opts.UserID, argumentsJSON)
-	case "edit_workspace_text":
-		return s.execEditWorkspaceText(ctx, opts.UserID, argumentsJSON)
-	case "replace_workspace_lines":
-		return s.execReplaceWorkspaceLines(ctx, opts.UserID, argumentsJSON)
-	case "save_workspace_file":
-		return s.execSaveWorkspaceFile(ctx, opts.UserID, argumentsJSON)
-	case "write_workspace_chunk":
-		return s.execWriteWorkspaceChunk(ctx, opts.UserID, argumentsJSON)
 	case "manage_workspace_path":
 		return s.execManageWorkspacePath(ctx, opts.UserID, argumentsJSON)
 	case "organize_workspace_matches":
 		return s.execOrganizeWorkspaceMatches(ctx, opts.UserID, argumentsJSON)
+	case "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk":
+		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s is disabled; use edit_workspace_lines or write_workspace_text", name)
 	case "list_workspace_files", "read_workspace_file", "create_workspace_file", "write_workspace_file", "mkdir_workspace", "rename_workspace_path", "move_workspace_path", "delete_workspace_path":
 		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, edit_workspace_lines, write_workspace_text, manage_workspace_path, or organize_workspace_matches", name)
 	case "run_workspace_command":

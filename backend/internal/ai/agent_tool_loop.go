@@ -321,9 +321,6 @@ func (r *agentRuntime) normalizedToolArguments(call agentToolCall) (string, stri
 }
 
 func (r *agentRuntime) isKnownTool(name string) bool {
-	if isLegacyExecutableTool(name) {
-		return true
-	}
 	for _, tool := range r.tools() {
 		switch r.protocol {
 		case agentProtocolAnthropic:
@@ -338,13 +335,4 @@ func (r *agentRuntime) isKnownTool(name string) bool {
 		}
 	}
 	return false
-}
-
-func isLegacyExecutableTool(name string) bool {
-	switch name {
-	case "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk":
-		return true
-	default:
-		return false
-	}
 }

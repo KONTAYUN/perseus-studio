@@ -222,7 +222,7 @@ func firstChangedFile(events []ai.ToolEvent) string {
 		if event.Status != "success" {
 			continue
 		}
-		if event.ToolName == "write_workspace_text" || event.ToolName == "save_workspace_file" || event.ToolName == "write_workspace_chunk" {
+		if event.ToolName == "write_workspace_text" {
 			if event.Path != "" {
 				return event.Path
 			}

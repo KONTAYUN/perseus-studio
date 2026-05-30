@@ -53,13 +53,13 @@ func TestContextManagerCompactsReadStaleAfterMutation(t *testing.T) {
 		Event:      ToolEvent{ToolName: "read_workspace_text", Status: "success", Path: "draft.txt"},
 	}})
 	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{
-		{ID: "save_1", Name: "save_workspace_file", ArgumentsJSON: `{"path":"draft.txt","content":"new","mode":"overwrite"}`},
+		{ID: "save_1", Name: "write_workspace_text", ArgumentsJSON: `{"path":"draft.txt","content":"new","mode":"overwrite"}`},
 	}})
 	transcript.AppendToolResults([]TranscriptToolResult{{
 		ToolCallID: "save_1",
-		ToolName:   "save_workspace_file",
+		ToolName:   "write_workspace_text",
 		Content:    `{"status":"success","path":"draft.txt"}`,
-		Event:      ToolEvent{ToolName: "save_workspace_file", Status: "success", Path: "draft.txt", ChangedPaths: []string{"draft.txt"}},
+		Event:      ToolEvent{ToolName: "write_workspace_text", Status: "success", Path: "draft.txt", ChangedPaths: []string{"draft.txt"}},
 	}})
 
 	snapshot := newAgentContextManager().Build(agentProtocolOpenAI, nil, nil, transcript, providerRuntimeProfile{}, 3)
@@ -94,14 +94,14 @@ func TestContextManagerTracksBatchReadPathsForCompaction(t *testing.T) {
 	}})
 	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
 		ID:            "save_1",
-		Name:          "save_workspace_file",
+		Name:          "write_workspace_text",
 		ArgumentsJSON: `{"path":"b.txt","content":"new","mode":"overwrite"}`,
 	}}})
 	transcript.AppendToolResults([]TranscriptToolResult{{
 		ToolCallID: "save_1",
-		ToolName:   "save_workspace_file",
+		ToolName:   "write_workspace_text",
 		Content:    `{"status":"success","path":"b.txt"}`,
-		Event:      ToolEvent{ToolName: "save_workspace_file", Status: "success", Path: "b.txt", ChangedPaths: []string{"b.txt"}},
+		Event:      ToolEvent{ToolName: "write_workspace_text", Status: "success", Path: "b.txt", ChangedPaths: []string{"b.txt"}},
 	}})
 
 	snapshot := newAgentContextManager().Build(agentProtocolOpenAI, nil, nil, transcript, providerRuntimeProfile{}, 3)
