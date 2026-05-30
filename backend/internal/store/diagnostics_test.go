@@ -133,6 +133,32 @@ func TestDiagnosticStoreKeepsLatest200PerUser(t *testing.T) {
 	}
 }
 
+func TestDiagnosticStoreKeepsLargeRequestSummary(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	store := NewDiagnosticStore(db)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate returned error: %v", err)
+	}
+
+	summary := strings.Repeat("x", 20000)
+	if _, err := store.Append(ctx, DiagnosticLogInput{UserID: "user-a", Stage: "provider_error", Level: "error", RequestSummary: summary}); err != nil {
+		t.Fatalf("Append returned error: %v", err)
+	}
+	logs, err := store.List(ctx, DiagnosticLogQuery{UserID: "user-a", Limit: 10})
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if len(logs) != 1 || len(logs[0].RequestSummary) != len(summary) {
+		t.Fatalf("expected full request summary length %d, got logs=%#v", len(summary), logs)
+	}
+}
+
 func TestDiagnosticStoreDeleteSingleAndClearAll(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))

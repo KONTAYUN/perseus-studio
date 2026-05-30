@@ -5,6 +5,48 @@ import (
 	"testing"
 )
 
+func TestProviderMessageProtocolWarningsDetectsUnpairedOpenAIToolCall(t *testing.T) {
+	messages := []map[string]any{
+		{"role": "user", "content": "请后台执行"},
+		{
+			"role":    "assistant",
+			"content": "我会创建后台任务。",
+			"tool_calls": []openAIToolCall{{
+				ID:   "call_task_1",
+				Type: "function",
+				Function: openAIFunctionCall{
+					Name:      "start_background_task",
+					Arguments: []byte(`"{\"title\":\"任务\"}"`),
+				},
+			}},
+		},
+		{"role": "user", "content": "继续"},
+	}
+
+	warnings := providerMessageProtocolWarnings(messages, "openai")
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "openai_unpaired_tool_call:assistant_index=1:tool_call_id=call_task_1") {
+		t.Fatalf("expected unpaired tool-call warning, got %#v", warnings)
+	}
+}
+
+func TestProviderMessageProtocolWarningsAllowsPendingLastAssistantToolCall(t *testing.T) {
+	messages := []map[string]any{
+		{"role": "user", "content": "请后台执行"},
+		{
+			"role": "assistant",
+			"tool_calls": []openAIToolCall{{
+				ID:       "call_task_1",
+				Type:     "function",
+				Function: openAIFunctionCall{Name: "start_background_task", Arguments: []byte(`"{}"`)},
+			}},
+		},
+	}
+
+	if warnings := providerMessageProtocolWarnings(messages, "openai"); len(warnings) != 0 {
+		t.Fatalf("latest assistant tool call is a response shape, not a next request violation: %#v", warnings)
+	}
+}
+
 func TestAnthropicTranscriptMessagesCoalescesAdjacentToolResults(t *testing.T) {
 	transcript := newAgentTranscript()
 	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{

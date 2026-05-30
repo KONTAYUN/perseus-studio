@@ -739,6 +739,56 @@ func TestGenerateReplyOpenAIRequiredToolUsesConcisePreambleBeforeTool(t *testing
 	}
 }
 
+func TestGenerateReplyOpenAIStartBackgroundTaskReturnsWithoutSecondProviderTurn(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if count := requestCount.Add(1); count != 1 {
+			t.Fatalf("start_background_task must finish the chat run without a second provider request, got request %d with payload %s", count, string(raw))
+		}
+		if payload["tool_choice"] != "auto" {
+			t.Fatalf("expected ordinary chat request to allow background-task tool selection with auto, got %#v", payload["tool_choice"])
+		}
+		writeOpenAIStreamTextAndToolCall(t, w,
+			"我会创建后台任务来继续写十集。",
+			"call_task_1",
+			"start_background_task",
+			`{"title":"续写向北方10集","goal":"续写《向北方》10集","expected_outputs":[{"type":"file","path":"向北方/向北方 第3-12集.txt","description":"续写10集剧本"}],"suggested_steps":["读取当前第2集","延续人物和悬疑线","分集写作"]}`)
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "那这个向北方，你帮我写续集，一共写10集，用后台任务的方式进行")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{{
+		Kind:     "current_file",
+		Name:     "向北方 第2集.txt",
+		Path:     "向北方/向北方 第2集.txt",
+		FileType: "text",
+	}}, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if requestCount.Load() != 1 {
+		t.Fatalf("expected exactly one provider request, got %d", requestCount.Load())
+	}
+	if reply.BackgroundTask == nil {
+		t.Fatalf("expected background task request, got %#v", reply)
+	}
+	if reply.BackgroundTask.Title != "续写向北方10集" || !strings.Contains(reply.BackgroundTask.Goal, "向北方") {
+		t.Fatalf("unexpected background task request: %#v", reply.BackgroundTask)
+	}
+}
+
 func TestAgentRuntimeExecutesOnlyOneToolPerModelTurn(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -2570,6 +2620,38 @@ func TestGenerateReplyProvider400DoesNotGuessRequiredToolChoice(t *testing.T) {
 	if digest, _ := summary["tool_schema_digest"].(string); digest == "" {
 		t.Fatalf("expected tool_schema_digest in diagnostic summary: %#v", summary)
 	}
+	if bytes, _ := summary["payload_bytes"].(float64); bytes <= 0 {
+		t.Fatalf("expected payload_bytes in diagnostic summary: %#v", summary)
+	}
+	messageShapes, ok := summary["message_shapes"].([]any)
+	if !ok || len(messageShapes) == 0 {
+		t.Fatalf("expected message_shapes in diagnostic summary: %#v", summary)
+	}
+	if warnings, _ := summary["message_protocol_warnings"].([]any); len(warnings) != 0 {
+		t.Fatalf("did not expect protocol warnings for a single failed first request, got %#v", warnings)
+	}
+	toolItems, ok := summary["tool_schema_items"].([]any)
+	if !ok || len(toolItems) == 0 {
+		t.Fatalf("expected tool_schema_items in diagnostic summary: %#v", summary)
+	}
+	if !summaryContainsUnsupportedPath(summary, "openai_schema_default:perseus_search_web.parameters.max_results.default") {
+		t.Fatalf("expected concrete OpenAI schema warning for perseus_search_web default, got %#v", summary)
+	}
+}
+
+func summaryContainsUnsupportedPath(summary map[string]any, expected string) bool {
+	if warnings, _ := summary["tool_schema_warnings"].([]any); containsAnyStringValue(warnings, expected) {
+		return true
+	}
+	items, _ := summary["tool_schema_items"].([]any)
+	for _, rawItem := range items {
+		item, _ := rawItem.(map[string]any)
+		paths, _ := item["unsupported_paths"].([]any)
+		if containsAnyStringValue(paths, expected) {
+			return true
+		}
+	}
+	return false
 }
 
 func prepareOpenAIConversation(t *testing.T, ctx context.Context, env *testAIEnv, baseURL, prompt string) (store.ModelProvider, store.Conversation, store.Message, []store.Message) {

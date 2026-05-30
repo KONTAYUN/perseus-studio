@@ -76,7 +76,7 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 		r.lastProviderEmptyResponse = false
 		r.appendAssistantTurn(turn)
 
-		if request, ok, err := r.processToolCalls(ctx, turn.ToolCalls); ok || err != nil {
+		if request, completed, err := r.processToolCalls(ctx, turn.ToolCalls); request != nil || completed || err != nil {
 			if err != nil {
 				return Reply{}, err
 			}
