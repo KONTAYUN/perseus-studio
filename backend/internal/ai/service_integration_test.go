@@ -2481,7 +2481,7 @@ func TestGenerateReplyAnthropicIncompleteToolArgumentsDiagnosticNamesTool(t *tes
 		fmt.Fprint(w, "event: content_block_delta\n")
 		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"机甲少女/机甲少女11-22集修改版.txt\\\", \\\"mode\\\": \\\"create\\\", \\\"content\\\":\\\"第一段\"}}\n\n")
 		fmt.Fprint(w, "event: message_delta\n")
-		fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":8192}}\n\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":%d}}\n\n", anthropicAgentMaxTokens)
 		fmt.Fprint(w, "event: message_stop\n")
 		fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
 	}))
@@ -2506,7 +2506,7 @@ func TestGenerateReplyAnthropicIncompleteToolArgumentsDiagnosticNamesTool(t *tes
 	if summary.StreamToolArgsState != "incomplete_json" || summary.StreamFinishReason != "max_tokens" {
 		t.Fatalf("unexpected stream summary: %#v", summary)
 	}
-	if summary.StreamUsage.OutputTokens != 8192 {
+	if summary.StreamUsage.OutputTokens != anthropicAgentMaxTokens {
 		t.Fatalf("expected output token usage, got %#v", summary.StreamUsage)
 	}
 	if len(summary.StreamToolCalls) != 1 {
