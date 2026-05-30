@@ -96,6 +96,37 @@ func TestParseOpenAIStreamRevealsTextAfterToolWhenRequired(t *testing.T) {
 	}
 }
 
+func TestParseOpenAIStreamSuppressesEllipsisToolPreamble(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"..."}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_workspace_text","arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+		RevealTextAfterTool: true,
+	})
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if turn.Content != "..." {
+		t.Fatalf("stream parser should preserve provider content for runtime cleanup, got %q", turn.Content)
+	}
+	if len(deltas) != 0 {
+		t.Fatalf("ellipsis preamble should not be emitted to user, got %#v", deltas)
+	}
+	prepared, _ := prepareToolTurnForExecution(turn)
+	if prepared.Content != "" {
+		t.Fatalf("ellipsis preamble should be removed before transcript/commit, got %q", prepared.Content)
+	}
+}
+
 func TestParseOpenAIStreamDoesNotRevealRequiredTextWithoutTool(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"content":"我稍后会处理。"}}]}`,
@@ -385,6 +416,28 @@ func TestParseAnthropicStreamDetectsTruncatedToolArguments(t *testing.T) {
 	}
 }
 
+func TestStreamToolDiagnosticsRecommendLineReplaceForLargeEdits(t *testing.T) {
+	args := `{"path":"script.txt","old_text":"` + strings.Repeat("旧", 2500) + `","new_text":"` + strings.Repeat("新", 2500)
+	var summary ProviderRequestSummary
+	annotateStreamToolDiagnostics(&summary, agentModelTurn{
+		ToolCalls: []agentToolCall{{
+			ID:            "toolu_edit",
+			Name:          "edit_workspace_text",
+			ArgumentsJSON: args,
+		}},
+	})
+	if len(summary.StreamToolCalls) != 1 {
+		t.Fatalf("expected one stream tool call diagnostic, got %#v", summary.StreamToolCalls)
+	}
+	item := summary.StreamToolCalls[0]
+	if !item.LooksLikeLargeEdit || item.RecommendedTool != "replace_workspace_lines" {
+		t.Fatalf("expected line replacement recommendation, got %#v", item)
+	}
+	if item.OldTextChars == 0 || item.NewTextChars == 0 {
+		t.Fatalf("expected old/new text sizes, got %#v", item)
+	}
+}
+
 func TestParseAnthropicStreamStreamsAttemptCompletionResultFromToolArguments(t *testing.T) {
 	stream := strings.Join([]string{
 		`event: content_block_start`,
@@ -459,6 +512,46 @@ func TestParseAnthropicStreamRevealsTextAfterToolWhenRequired(t *testing.T) {
 	}
 	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].Name != "read_workspace_text" {
 		t.Fatalf("unexpected tool calls: %#v", turn.ToolCalls)
+	}
+}
+
+func TestParseAnthropicStreamSuppressesEllipsisToolPreamble(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"..."}}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_workspace_text","input":{}}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"a.txt\"}"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseAnthropicStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+		RevealTextAfterTool: true,
+	})
+	if err != nil {
+		t.Fatalf("parseAnthropicStream returned error: %v", err)
+	}
+	if turn.Content != "..." {
+		t.Fatalf("stream parser should preserve provider content for runtime cleanup, got %q", turn.Content)
+	}
+	if len(deltas) != 0 {
+		t.Fatalf("ellipsis preamble should not be emitted to user, got %#v", deltas)
+	}
+	prepared, _ := prepareToolTurnForExecution(turn)
+	if prepared.Content != "" || len(prepared.AnthropicRaw) != 1 {
+		t.Fatalf("ellipsis preamble should be removed before transcript/commit, got content=%q raw=%#v", prepared.Content, prepared.AnthropicRaw)
 	}
 }
 

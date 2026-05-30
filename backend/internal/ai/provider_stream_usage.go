@@ -102,16 +102,28 @@ func streamToolCallLogs(calls []agentToolCall) []StreamToolCallLog {
 			item.ArgumentsJSONError = err.Error()
 			item.TargetSummary = pathSummary(partialJSONStringField(args, "path"))
 			item.ContentChars = len([]rune(partialJSONStringField(args, "content")))
+			item.OldTextChars = len([]rune(partialJSONStringField(args, "old_text")))
+			item.NewTextChars = len([]rune(partialJSONStringField(args, "new_text")))
 		} else {
 			item.ArgumentsJSONValid = true
 			if content, ok := decoded["content"].(string); ok {
 				item.ContentChars = len([]rune(content))
+			}
+			if oldText, ok := decoded["old_text"].(string); ok {
+				item.OldTextChars = len([]rune(oldText))
+			}
+			if newText, ok := decoded["new_text"].(string); ok {
+				item.NewTextChars = len([]rune(newText))
 			}
 		}
 		if item.Name == "save_workspace_file" && (!item.ArgumentsJSONValid || item.ContentChars > recommendedWorkspaceChunkChars) {
 			item.LooksLikeLongWrite = true
 			item.RecommendedTool = "write_workspace_chunk"
 			item.RecommendedChunkSize = recommendedWorkspaceChunkChars
+		}
+		if item.Name == "edit_workspace_text" && (!item.ArgumentsJSONValid || item.OldTextChars+item.NewTextChars > recommendedWorkspaceChunkChars) {
+			item.LooksLikeLargeEdit = true
+			item.RecommendedTool = "replace_workspace_lines"
 		}
 		items = append(items, item)
 	}

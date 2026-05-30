@@ -56,6 +56,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_files")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "save_workspace_file")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "write_workspace_chunk")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
@@ -73,6 +74,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_files")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "save_workspace_file")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "write_workspace_chunk")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "manage_workspace_path")
@@ -453,6 +455,54 @@ func TestExecuteToolWriteWorkspaceChunkAppendsLongFile(t *testing.T) {
 	}
 }
 
+func TestExecuteToolReplaceWorkspaceLinesUsesLineRange(t *testing.T) {
+	service, db, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "script.txt", "第19集\n旧A\n旧B\n第19集\n保留\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	result, _, _, path, err := service.executeTool(context.Background(), "replace_workspace_lines", `{"path":"script.txt","start_line":2,"end_line":3,"new_text":"新A\n新B\n"}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("executeTool returned error: %v", err)
+	}
+	if path != "script.txt" {
+		t.Fatalf("unexpected path: %s", path)
+	}
+	readResult, err := files.ReadFile("script.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if readResult.Content != "第19集\n新A\n新B\n第19集\n保留\n" {
+		t.Fatalf("unexpected file content: %q", readResult.Content)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("invalid result json: %v", err)
+	}
+	if payload["operation"] != "replace_lines" || int(payload["start_line"].(float64)) != 2 || int(payload["end_line"].(float64)) != 3 {
+		t.Fatalf("unexpected result payload: %#v", payload)
+	}
+	var versionCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM file_versions WHERE path = ?`, "script.txt").Scan(&versionCount); err != nil {
+		t.Fatalf("query file_versions returned error: %v", err)
+	}
+	if versionCount != 1 {
+		t.Fatalf("expected line replace to create one prior version, got %d", versionCount)
+	}
+}
+
+func TestExecuteToolReplaceWorkspaceLinesRejectsInvalidRange(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "script.txt", "一\n二\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	_, _, _, _, err := service.executeTool(context.Background(), "replace_workspace_lines", `{"path":"script.txt","start_line":3,"end_line":4,"new_text":"三\n"}`, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "line range") {
+		t.Fatalf("expected invalid line range error, got %v", err)
+	}
+}
+
 func TestExecuteToolWriteWorkspaceChunkRequiresFirstChunkIndexForCreate(t *testing.T) {
 	service, _, _, _ := newTestAIService(t)
 
@@ -813,6 +863,14 @@ func TestToolDiagnosticClassifiesExpectedToolFailures(t *testing.T) {
 		t.Fatalf("unexpected invalid arguments diagnostic: %#v", diag)
 	}
 
+	diag = buildToolDiagnostic("edit_workspace_text", `{"path":"script.txt","old_text":"abc","new_text":"def"}`, "script.txt", 0, fmt.Errorf("old_text was not found"))
+	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_exact_edit_unstable"`) {
+		t.Fatalf("unexpected exact edit diagnostic: %#v", diag)
+	}
+	if !strings.Contains(diag.RequestSummary, `"old_text_chars":3`) || !strings.Contains(diag.RequestSummary, "replace_workspace_lines") {
+		t.Fatalf("expected edit argument details and line replacement hint, got %#v", diag)
+	}
+
 	diag = buildToolDiagnostic("read_workspace_text", `{"path":"demo.docx"}`, "demo.docx", 5, fmt.Errorf("unsupported file type"))
 	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_unsupported_file_type"`) {
 		t.Fatalf("unexpected unsupported file diagnostic: %#v", diag)
@@ -1122,6 +1180,30 @@ func TestSanitizeConversationMessagesTruncatesOlderHistory(t *testing.T) {
 	}
 }
 
+func TestSanitizeConversationMessagesDropsAssistantEllipsisPlaceholders(t *testing.T) {
+	messages := []store.Message{
+		{Role: "user", Content: "..."},
+		{Role: "assistant", Content: "..."},
+		{Role: "assistant", Content: "我先读取文件。"},
+		{Role: "assistant", Content: "……"},
+	}
+	sanitized := sanitizeConversationMessages(messages, providerRuntimeProfile{
+		MaxHistoryMessages:    10,
+		MaxRecentMessageRunes: 100,
+		MaxOlderMessageRunes:  100,
+	})
+
+	if len(sanitized) != 2 {
+		t.Fatalf("expected two non-placeholder messages, got %#v", sanitized)
+	}
+	if sanitized[0].Role != "user" || sanitized[0].Content != "..." {
+		t.Fatalf("user ellipsis must be preserved, got %#v", sanitized[0])
+	}
+	if sanitized[1].Content != "我先读取文件。" {
+		t.Fatalf("assistant useful text must be preserved, got %#v", sanitized[1])
+	}
+}
+
 func TestInjectConversationSummaryDropsSummarizedPrefix(t *testing.T) {
 	messages := []store.Message{
 		{ID: "m1", Role: "user", Content: "old"},
@@ -1258,6 +1340,7 @@ func TestSideEffectToolsRequireCompletionAfterUse(t *testing.T) {
 	for _, name := range []string{
 		"save_workspace_file",
 		"write_workspace_chunk",
+		"replace_workspace_lines",
 		"manage_workspace_path",
 		"organize_workspace_matches",
 		"install_skill_from_attachment",
@@ -1347,7 +1430,7 @@ func TestSelectedWorkspaceReferencesConstrainReadAndMutationScope(t *testing.T) 
 
 func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	loaded := map[string]bool{"workspace": true}
-	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "edit_workspace_text"} {
+	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "edit_workspace_text", "replace_workspace_lines"} {
 		assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
 		assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
 	}
@@ -1357,11 +1440,17 @@ func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	if group := toolGroup("edit_workspace_text"); group != ToolGroupEdit {
 		t.Fatalf("expected edit_workspace_text edit group, got %q", group)
 	}
+	if group := toolGroup("replace_workspace_lines"); group != ToolGroupEdit {
+		t.Fatalf("expected replace_workspace_lines edit group, got %q", group)
+	}
 	if group := toolGroup("read_workspace_files"); group != ToolGroupRead {
 		t.Fatalf("expected read_workspace_files read group, got %q", group)
 	}
 	if !isWorkspaceMutationTool("edit_workspace_text") {
 		t.Fatal("expected edit_workspace_text to be a workspace mutation")
+	}
+	if !isWorkspaceMutationTool("replace_workspace_lines") {
+		t.Fatal("expected replace_workspace_lines to be a workspace mutation")
 	}
 }
 

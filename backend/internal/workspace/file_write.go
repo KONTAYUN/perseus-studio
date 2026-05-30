@@ -192,3 +192,67 @@ func (s *Service) EditTextFile(ctx context.Context, path, oldText, newText, sour
 	result, err := s.WriteBytes(ctx, cleanPath, []byte(nextContent), source)
 	return result, count, err
 }
+
+func (s *Service) ReplaceTextFileLines(ctx context.Context, path string, startLine, endLine int, newText, source string) (LineReplaceResult, error) {
+	cleanPath, absPath, err := s.sanitizePath(path)
+	if err != nil {
+		return LineReplaceResult{}, err
+	}
+	if isAnyTrashPath(cleanPath) {
+		return LineReplaceResult{}, trashManagedOnlyError()
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return LineReplaceResult{}, fmt.Errorf("file does not exist")
+		}
+		return LineReplaceResult{}, err
+	}
+	if info.IsDir() {
+		return LineReplaceResult{}, fmt.Errorf("path is a directory")
+	}
+	if !isTextPath(cleanPath) {
+		return LineReplaceResult{}, fmt.Errorf("only text files can be edited")
+	}
+	raw, err := os.ReadFile(absPath)
+	if err != nil {
+		return LineReplaceResult{}, err
+	}
+	content := string(raw)
+	lines := strings.SplitAfter(content, "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	totalBefore := countTextLines(content)
+	if startLine <= 0 {
+		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: start_line must be a positive integer")
+	}
+	if endLine <= 0 {
+		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: end_line must be a positive integer")
+	}
+	if startLine > endLine {
+		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: start_line must be less than or equal to end_line")
+	}
+	if startLine > len(lines) {
+		return LineReplaceResult{}, fmt.Errorf("line range starts after end of file")
+	}
+	if endLine > len(lines) {
+		return LineReplaceResult{}, fmt.Errorf("line range ends after end of file")
+	}
+	nextContent := strings.Join(lines[:startLine-1], "") + newText + strings.Join(lines[endLine:], "")
+	if source == "" {
+		source = "ai_line_replace"
+	}
+	writeResult, err := s.WriteBytes(ctx, cleanPath, []byte(nextContent), source)
+	if err != nil {
+		return LineReplaceResult{}, err
+	}
+	return LineReplaceResult{
+		WriteResult:      writeResult,
+		StartLine:        startLine,
+		EndLine:          endLine,
+		InsertedLines:    countTextLines(newText),
+		TotalLinesBefore: totalBefore,
+		TotalLinesAfter:  countTextLines(nextContent),
+	}, nil
+}

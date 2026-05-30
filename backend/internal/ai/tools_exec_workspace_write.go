@@ -158,3 +158,39 @@ func (s *Service) execEditWorkspaceText(ctx context.Context, userID, argumentsJS
 	})
 	return mustJSON(payload), fmt.Sprintf("edited %s (%d replacement(s))", result.Path, replacements), "正在编辑文件...", result.Path, nil
 }
+
+func (s *Service) execReplaceWorkspaceLines(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", "正在按行替换文件...", "", err
+	}
+	var args struct {
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line"`
+		EndLine   int    `json:"end_line"`
+		NewText   string `json:"new_text"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", "", "正在按行替换文件...", "", fmt.Errorf("invalid tool arguments")
+	}
+	result, err := files.ReplaceTextFileLines(ctx, args.Path, args.StartLine, args.EndLine, args.NewText, "ai_line_replace")
+	if err != nil {
+		return "", "", "正在按行替换文件...", args.Path, err
+	}
+	write := result.WriteResult
+	payload := workspaceToolPayload("replace_workspace_lines", write.Path, map[string]any{
+		"operation":          "replace_lines",
+		"path":               write.Path,
+		"hash":               write.Hash,
+		"version_id":         write.VersionID,
+		"size":               write.Size,
+		"start_line":         result.StartLine,
+		"end_line":           result.EndLine,
+		"inserted_lines":     result.InsertedLines,
+		"total_lines_before": result.TotalLinesBefore,
+		"total_lines_after":  result.TotalLinesAfter,
+		"changed_paths":      write.ChangedPaths,
+		"next_hint":          "The line range was replaced and verified. Continue with another line-range edit if needed, otherwise call attempt_completion.",
+	})
+	return mustJSON(payload), fmt.Sprintf("replaced lines %d-%d in %s", result.StartLine, result.EndLine, write.Path), "正在按行替换文件...", write.Path, nil
+}

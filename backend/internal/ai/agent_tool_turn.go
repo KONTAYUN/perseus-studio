@@ -18,8 +18,7 @@ func prepareToolTurnForExecution(turn agentModelTurn) (agentModelTurn, int) {
 }
 
 func conciseToolPreamble(content string) string {
-	content = providerVisibleText(content)
-	content = strings.TrimSpace(content)
+	content = cleanToolPreamble(content)
 	if content == "" {
 		return ""
 	}

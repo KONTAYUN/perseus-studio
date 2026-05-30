@@ -99,6 +99,7 @@ func scopedToolCandidatePaths(toolName, argumentsJSON string) ([]string, bool) {
 var selectedScopeToolExtractors = map[string]func(string) ([]string, bool){
 	"read_workspace_text":        extractSinglePathScopeTarget,
 	"edit_workspace_text":        extractSinglePathScopeTarget,
+	"replace_workspace_lines":    extractSinglePathScopeTarget,
 	"read_workspace_files":       extractBatchReadScopeTargets,
 	"save_workspace_file":        extractSaveScopeTarget,
 	"write_workspace_chunk":      extractSaveScopeTarget,

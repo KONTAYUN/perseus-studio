@@ -131,6 +131,9 @@ func (e *toolGatedStreamDeltaEmitter) Add(text string) {
 		return
 	}
 	if !e.revealAfterTool || e.toolObserved {
+		if e.revealAfterTool && e.toolObserved && isToolPreamblePlaceholder(text) {
+			return
+		}
 		e.inner.Add(text)
 		return
 	}
@@ -145,8 +148,12 @@ func (e *toolGatedStreamDeltaEmitter) MarkToolObserved() {
 	if e.buffer.Len() == 0 {
 		return
 	}
-	e.inner.Add(e.buffer.String())
+	text := e.buffer.String()
 	e.buffer.Reset()
+	if isToolPreamblePlaceholder(text) {
+		return
+	}
+	e.inner.Add(text)
 	e.inner.Flush()
 }
 

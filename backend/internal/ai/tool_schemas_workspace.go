@@ -8,6 +8,7 @@ func openAIWorkspaceTools() []map[string]any {
 		openAIFunctionTool("read_workspace_text", "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams()),
 		openAIFunctionTool("read_workspace_files", "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams()),
 		openAIFunctionTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
+		openAIFunctionTool("replace_workspace_lines", "Replace a 1-based inclusive line range in an existing text file. Prefer this for scripts, long documents, duplicate headings, or larger rewrites after reading the target line range.", workspaceReplaceLinesParams()),
 		openAIFunctionTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
 		openAIFunctionTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content.", workspaceChunkWriteParams()),
 		openAIFunctionTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
@@ -23,6 +24,7 @@ func anthropicWorkspaceTools() []map[string]any {
 		anthropicTool("read_workspace_text", "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams()),
 		anthropicTool("read_workspace_files", "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams()),
 		anthropicTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
+		anthropicTool("replace_workspace_lines", "Replace a 1-based inclusive line range in an existing text file. Prefer this for scripts, long documents, duplicate headings, or larger rewrites after reading the target line range.", workspaceReplaceLinesParams()),
 		anthropicTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
 		anthropicTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content.", workspaceChunkWriteParams()),
 		anthropicTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
@@ -127,6 +129,19 @@ func workspaceEditParams() map[string]any {
 			"old_text":    map[string]any{"type": "string", "description": "Exact text to replace. Must match the current file content."},
 			"new_text":    map[string]any{"type": "string", "description": "Replacement text."},
 			"replace_all": map[string]any{"type": "boolean", "description": "Replace every exact match. Default false; if multiple matches exist without this, the tool fails."},
+		},
+	}
+}
+
+func workspaceReplaceLinesParams() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"path", "start_line", "end_line", "new_text"},
+		"properties": map[string]any{
+			"path":       map[string]any{"type": "string", "description": "Workspace-relative existing text file path."},
+			"start_line": map[string]any{"type": "integer", "description": "1-based first line to replace, inclusive. Read the range first."},
+			"end_line":   map[string]any{"type": "integer", "description": "1-based last line to replace, inclusive."},
+			"new_text":   map[string]any{"type": "string", "description": "Replacement text for exactly this line range. Include final newline only when the file should have one at that boundary."},
 		},
 	}
 }

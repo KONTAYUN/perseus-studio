@@ -46,3 +46,15 @@ func TestMissingAssistantFinalDeltaSkipsDivergedContent(t *testing.T) {
 		t.Fatalf("expected diverged content to be skipped, got %q", got)
 	}
 }
+
+func TestAssistantSegmentBufferSuppressesPlaceholderEllipsis(t *testing.T) {
+	buffer := &assistantSegmentBuffer{}
+	buffer.AppendDelta("...")
+	buffer.Flush("")
+	buffer.Flush("……")
+	buffer.Flush("我先读取文件。")
+
+	if len(buffer.Items) != 1 || buffer.Items[0] != "我先读取文件。" {
+		t.Fatalf("unexpected buffered segments: %#v", buffer.Items)
+	}
+}

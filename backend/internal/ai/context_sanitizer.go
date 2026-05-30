@@ -11,6 +11,7 @@ func sanitizeConversationMessages(messages []store.Message, profile providerRunt
 	if len(messages) == 0 {
 		return messages
 	}
+	messages = dropAssistantPlaceholderMessages(messages)
 	start := 0
 	if profile.MaxHistoryMessages > 0 && len(messages) > profile.MaxHistoryMessages {
 		start = len(messages) - profile.MaxHistoryMessages
@@ -35,6 +36,20 @@ func sanitizeConversationMessages(messages []store.Message, profile providerRunt
 		items[0].Content = prefix + items[0].Content
 	}
 	return items
+}
+
+func dropAssistantPlaceholderMessages(messages []store.Message) []store.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	next := make([]store.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == "assistant" && isToolPreamblePlaceholder(message.Content) {
+			continue
+		}
+		next = append(next, message)
+	}
+	return next
 }
 
 func sanitizeAttachmentPayloads(attachments []AttachmentPayload, profile providerRuntimeProfile) []AttachmentPayload {

@@ -46,10 +46,26 @@ func (b *assistantSegmentBuffer) Flush(finalContent string) {
 		content = b.current.String()
 	}
 	content = strings.TrimSpace(content)
-	if content != "" {
+	if content != "" && !isPlaceholderAssistantSegment(content) {
 		b.Items = append(b.Items, content)
 	}
 	b.current.Reset()
+}
+
+func isPlaceholderAssistantSegment(content string) bool {
+	content = strings.TrimSpace(content)
+	if content == "" || len([]rune(content)) > 8 {
+		return false
+	}
+	for _, item := range content {
+		switch item {
+		case '.', '…', '。':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func splitAssistantDelta(text string, maxRunes int) []string {

@@ -104,7 +104,10 @@ type StreamToolCallLog struct {
 	ArgumentsTail        string `json:"arguments_tail,omitempty"`
 	TargetSummary        string `json:"target_summary,omitempty"`
 	ContentChars         int    `json:"content_chars,omitempty"`
+	OldTextChars         int    `json:"old_text_chars,omitempty"`
+	NewTextChars         int    `json:"new_text_chars,omitempty"`
 	LooksLikeLongWrite   bool   `json:"looks_like_long_write,omitempty"`
+	LooksLikeLargeEdit   bool   `json:"looks_like_large_edit,omitempty"`
 	RecommendedTool      string `json:"recommended_tool,omitempty"`
 	RecommendedChunkSize int    `json:"recommended_chunk_size,omitempty"`
 }

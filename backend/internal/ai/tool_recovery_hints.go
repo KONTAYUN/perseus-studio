@@ -19,9 +19,11 @@ func toolFailureRecoveryHint(toolName, errorText string) string {
 		return "Check the path and retry only after locating the file inside the current user's workspace."
 	case "edit_workspace_text":
 		if strings.Contains(lowerError, "matched") || strings.Contains(lowerError, "not found") {
-			return "Read the current file or search a narrower snippet, then retry edit_workspace_text with an exact old_text that appears once, or set replace_all=true only when intended."
+			return "Read the current file or target line range. For scripts, long documents, duplicate headings, or larger rewrites, use replace_workspace_lines with line numbers instead of retrying a large exact old_text."
 		}
 		return "Verify the file path and current content before retrying. Do not report the edit as complete until edit_workspace_text succeeds."
+	case "replace_workspace_lines":
+		return "Read the target file/range again, correct start_line/end_line, then retry replace_workspace_lines. Do not report the edit as complete until the line replacement succeeds."
 	case "save_workspace_file":
 		if strings.Contains(lowerError, "not exist") || strings.Contains(lowerError, "no such") || strings.Contains(lowerError, "不存在") {
 			return "The target file does not exist. If the user wanted a new file, retry save_workspace_file with mode=create; otherwise inspect/read the correct existing file before overwriting."
