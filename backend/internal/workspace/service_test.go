@@ -260,6 +260,34 @@ func TestReadTextFileRangeAndEditTextFile(t *testing.T) {
 	}
 }
 
+func TestEditTextFileLinesOperations(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.CreateFile(ctx, "draft.txt", "one\ntwo\nthree\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	if _, err := files.EditTextFileLines(ctx, "draft.txt", "replace", 2, 2, "TWO\n", "test_line_edit"); err != nil {
+		t.Fatalf("replace returned error: %v", err)
+	}
+	if _, err := files.EditTextFileLines(ctx, "draft.txt", "insert_before", 1, 0, "zero\n", "test_line_edit"); err != nil {
+		t.Fatalf("insert_before returned error: %v", err)
+	}
+	if _, err := files.EditTextFileLines(ctx, "draft.txt", "insert_after", 4, 0, "four\n", "test_line_edit"); err != nil {
+		t.Fatalf("insert_after returned error: %v", err)
+	}
+	if _, err := files.EditTextFileLines(ctx, "draft.txt", "delete", 3, 3, "", "test_line_edit"); err != nil {
+		t.Fatalf("delete returned error: %v", err)
+	}
+	after, err := files.ReadFile("draft.txt")
+	if err != nil {
+		t.Fatalf("ReadFile after line edits returned error: %v", err)
+	}
+	if after.Content != "zero\none\nthree\nfour\n" {
+		t.Fatalf("unexpected line-edited content: %q", after.Content)
+	}
+}
+
 func TestTrashItemsRestoreAndConflict(t *testing.T) {
 	ctx := context.Background()
 	files := newTestService(t)

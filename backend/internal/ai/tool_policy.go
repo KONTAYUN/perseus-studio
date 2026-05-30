@@ -24,7 +24,7 @@ func toolGroup(name string) ToolGroup {
 		return ToolGroupSearch
 	case "read_workspace_text", "read_workspace_files":
 		return ToolGroupRead
-	case "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "manage_workspace_path", "organize_workspace_matches":
+	case "edit_workspace_lines", "write_workspace_text", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "manage_workspace_path", "organize_workspace_matches":
 		return ToolGroupEdit
 	case "run_workspace_command":
 		return ToolGroupCommand

@@ -45,7 +45,25 @@ func toolInputSchema(toolName string, tools []map[string]any) map[string]any {
 			return schema
 		}
 	}
+	if schema := legacyWorkspaceToolInputSchema(toolName); len(schema) > 0 {
+		return schema
+	}
 	return nil
+}
+
+func legacyWorkspaceToolInputSchema(toolName string) map[string]any {
+	switch toolName {
+	case "edit_workspace_text":
+		return workspaceEditParams()
+	case "replace_workspace_lines":
+		return workspaceReplaceLinesParams()
+	case "save_workspace_file":
+		return workspaceSaveParams()
+	case "write_workspace_chunk":
+		return workspaceChunkWriteParams()
+	default:
+		return nil
+	}
 }
 
 func toolSchemaAllowsEmptyArguments(schema map[string]any) bool {

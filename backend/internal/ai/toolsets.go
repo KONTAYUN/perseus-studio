@@ -19,10 +19,8 @@ func toolsForToolsetRole(toolset, role string) ([]string, bool) {
 			"inspect_workspace",
 			"read_workspace_text",
 			"read_workspace_files",
-			"edit_workspace_text",
-			"replace_workspace_lines",
-			"save_workspace_file",
-			"write_workspace_chunk",
+			"edit_workspace_lines",
+			"write_workspace_text",
 			"manage_workspace_path",
 			"organize_workspace_matches",
 		}, true

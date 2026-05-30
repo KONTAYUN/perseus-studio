@@ -46,14 +46,17 @@ type FileWriteResult struct {
 	ChangedPaths []string `json:"changed_paths,omitempty"`
 }
 
-type LineReplaceResult struct {
+type LineEditResult struct {
 	WriteResult      FileWriteResult `json:"write_result"`
+	Operation        string          `json:"operation"`
 	StartLine        int             `json:"start_line"`
 	EndLine          int             `json:"end_line"`
 	InsertedLines    int             `json:"inserted_lines"`
 	TotalLinesBefore int             `json:"total_lines_before"`
 	TotalLinesAfter  int             `json:"total_lines_after"`
 }
+
+type LineReplaceResult = LineEditResult
 
 type TextReadResult struct {
 	Path       string `json:"path"`
