@@ -12,7 +12,7 @@ import (
 	"webide-backend/internal/store"
 )
 
-const anthropicAgentMaxTokens = 65536
+const anthropicAgentMaxTokens = 8192
 
 func (s *Service) generateAnthropic(ctx context.Context, conversationID, messageID string, provider store.ModelProvider, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {
 	return s.runAnthropicAgent(ctx, conversationID, messageID, provider, messages, attachments, opts)

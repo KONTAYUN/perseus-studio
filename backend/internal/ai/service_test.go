@@ -86,16 +86,6 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 		assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), replaced)
 		assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), replaced)
 	}
-
-	for _, name := range []string{"write_workspace_text", "edit_workspace_lines", "attempt_completion", "start_background_task"} {
-		tool := findAnthropicTool(anthropicToolsForLoadedToolsets(loaded, true), name)
-		if tool == nil {
-			t.Fatalf("expected anthropic tool %s", name)
-		}
-		if eager, _ := tool["eager_input_streaming"].(bool); !eager {
-			t.Fatalf("expected %s to enable eager_input_streaming, got %#v", name, tool)
-		}
-	}
 }
 
 func TestOrdinaryUserSkillToolSchemaIsReadOnly(t *testing.T) {
@@ -364,6 +354,107 @@ func TestAgentRecoveryDelayBackoffCanBeDisabledForTests(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCreateWorkspaceFile(t *testing.T) {
+	service, _, root, files := newTestAIService(t)
+
+	result, _, _, path, err := service.executeTool(context.Background(), "save_workspace_file", `{"path":"notes/new.txt","content":"hello","mode":"create"}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("executeTool returned error: %v", err)
+	}
+	if path != "notes/new.txt" {
+		t.Fatalf("unexpected path: %s", path)
+	}
+
+	readResult, err := files.ReadFile("notes/new.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if readResult.Content != "hello" {
+		t.Fatalf("unexpected file content: %q", readResult.Content)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("invalid result json: %v", err)
+	}
+	if payload["path"] != "notes/new.txt" {
+		t.Fatalf("unexpected result path: %#v", payload["path"])
+	}
+	if _, err := files.ReadFile(filepath.ToSlash(filepath.Join("notes", "new.txt"))); err != nil {
+		t.Fatalf("created file missing under root %s: %v", root, err)
+	}
+}
+
+func TestExecuteToolWriteWorkspaceFile(t *testing.T) {
+	service, db, _, files := newTestAIService(t)
+
+	if _, err := files.CreateFile(context.Background(), "demo.txt", "before"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	result, _, _, path, err := service.executeTool(context.Background(), "save_workspace_file", `{"path":"demo.txt","content":"after","mode":"overwrite"}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("executeTool returned error: %v", err)
+	}
+	if path != "demo.txt" {
+		t.Fatalf("unexpected path: %s", path)
+	}
+
+	readResult, err := files.ReadFile("demo.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if readResult.Content != "after" {
+		t.Fatalf("unexpected file content: %q", readResult.Content)
+	}
+
+	var versionCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM file_versions WHERE path = ?`, "demo.txt").Scan(&versionCount); err != nil {
+		t.Fatalf("query file_versions returned error: %v", err)
+	}
+	if versionCount != 1 {
+		t.Fatalf("expected 1 file version, got %d", versionCount)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("invalid result json: %v", err)
+	}
+	if payload["version_id"] == "" {
+		t.Fatalf("expected version_id in result payload")
+	}
+}
+
+func TestExecuteToolWriteWorkspaceChunkAppendsLongFile(t *testing.T) {
+	service, db, _, files := newTestAIService(t)
+
+	if _, _, _, path, err := service.executeTool(context.Background(), "write_workspace_chunk", `{"path":"drafts/long.txt","content":"第一段\n","mode":"create","chunk_index":1}`, RunOptions{UserID: testUserID}); err != nil {
+		t.Fatalf("create chunk returned error: %v", err)
+	} else if path != "drafts/long.txt" {
+		t.Fatalf("unexpected create path: %s", path)
+	}
+	if _, _, _, path, err := service.executeTool(context.Background(), "write_workspace_chunk", `{"path":"drafts/long.txt","content":"第二段","mode":"append","chunk_index":2}`, RunOptions{UserID: testUserID}); err != nil {
+		t.Fatalf("append chunk returned error: %v", err)
+	} else if path != "drafts/long.txt" {
+		t.Fatalf("unexpected append path: %s", path)
+	}
+
+	readResult, err := files.ReadFile("drafts/long.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if readResult.Content != "第一段\n第二段" {
+		t.Fatalf("unexpected file content: %q", readResult.Content)
+	}
+	var versionCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM file_versions WHERE path = ?`, "drafts/long.txt").Scan(&versionCount); err != nil {
+		t.Fatalf("query file_versions returned error: %v", err)
+	}
+	if versionCount != 1 {
+		t.Fatalf("expected append to create one prior version, got %d", versionCount)
+	}
+}
+
 func TestExecuteToolWriteWorkspaceTextCreateOverwriteAppend(t *testing.T) {
 	service, db, _, files := newTestAIService(t)
 
@@ -399,6 +490,42 @@ func TestExecuteToolWriteWorkspaceTextCreateOverwriteAppend(t *testing.T) {
 	}
 }
 
+func TestExecuteToolReplaceWorkspaceLinesUsesLineRange(t *testing.T) {
+	service, db, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "script.txt", "第19集\n旧A\n旧B\n第19集\n保留\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	result, _, _, path, err := service.executeTool(context.Background(), "replace_workspace_lines", `{"path":"script.txt","start_line":2,"end_line":3,"new_text":"新A\n新B\n"}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("executeTool returned error: %v", err)
+	}
+	if path != "script.txt" {
+		t.Fatalf("unexpected path: %s", path)
+	}
+	readResult, err := files.ReadFile("script.txt")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if readResult.Content != "第19集\n新A\n新B\n第19集\n保留\n" {
+		t.Fatalf("unexpected file content: %q", readResult.Content)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("invalid result json: %v", err)
+	}
+	if payload["operation"] != "replace_lines" || int(payload["start_line"].(float64)) != 2 || int(payload["end_line"].(float64)) != 3 {
+		t.Fatalf("unexpected result payload: %#v", payload)
+	}
+	var versionCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM file_versions WHERE path = ?`, "script.txt").Scan(&versionCount); err != nil {
+		t.Fatalf("query file_versions returned error: %v", err)
+	}
+	if versionCount != 1 {
+		t.Fatalf("expected line replace to create one prior version, got %d", versionCount)
+	}
+}
+
 func TestExecuteToolEditWorkspaceLinesSupportsLineOperations(t *testing.T) {
 	service, _, _, files := newTestAIService(t)
 	if _, err := files.CreateFile(context.Background(), "script.txt", "一\n二\n三\n"); err != nil {
@@ -427,22 +554,24 @@ func TestExecuteToolEditWorkspaceLinesSupportsLineOperations(t *testing.T) {
 	}
 }
 
-func TestExecuteToolRejectsDisabledReplacedWorkspaceTools(t *testing.T) {
+func TestExecuteToolReplaceWorkspaceLinesRejectsInvalidRange(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "script.txt", "一\n二\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	_, _, _, _, err := service.executeTool(context.Background(), "replace_workspace_lines", `{"path":"script.txt","start_line":3,"end_line":4,"new_text":"三\n"}`, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "line range") {
+		t.Fatalf("expected invalid line range error, got %v", err)
+	}
+}
+
+func TestExecuteToolWriteWorkspaceChunkRequiresFirstChunkIndexForCreate(t *testing.T) {
 	service, _, _, _ := newTestAIService(t)
 
-	for _, item := range []struct {
-		name string
-		args string
-	}{
-		{name: "save_workspace_file", args: `{"path":"notes/new.txt","content":"hello","mode":"create"}`},
-		{name: "write_workspace_chunk", args: `{"path":"notes/new.txt","content":"hello","mode":"create","chunk_index":1}`},
-		{name: "edit_workspace_text", args: `{"path":"notes/new.txt","old_text":"a","new_text":"b"}`},
-		{name: "replace_workspace_lines", args: `{"path":"notes/new.txt","start_line":1,"end_line":1,"new_text":"b"}`},
-	} {
-		_, _, _, _, err := service.executeTool(context.Background(), item.name, item.args, RunOptions{UserID: testUserID})
-		if err == nil || !strings.Contains(err.Error(), "is disabled") {
-			t.Fatalf("expected %s disabled error, got %v", item.name, err)
-		}
+	_, _, _, _, err := service.executeTool(context.Background(), "write_workspace_chunk", `{"path":"drafts/long.txt","content":"第一段","mode":"create","chunk_index":2}`, RunOptions{UserID: testUserID})
+	if err == nil || err.Error() != "invalid tool arguments: create chunk_index must be 1" {
+		t.Fatalf("expected first chunk validation error, got %v", err)
 	}
 }
 
@@ -1867,15 +1996,6 @@ func assertToolNotRegistered(t *testing.T, tools []map[string]any, name string) 
 			t.Fatalf("tool %q should not be registered", name)
 		}
 	}
-}
-
-func findAnthropicTool(tools []map[string]any, name string) map[string]any {
-	for _, tool := range tools {
-		if tool["name"] == name {
-			return tool
-		}
-	}
-	return nil
 }
 
 func containsPathValue(value any, expected string) bool {

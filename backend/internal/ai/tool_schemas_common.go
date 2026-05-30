@@ -81,22 +81,9 @@ func openAIStrictFunctionTool(name, description string, parameters map[string]an
 }
 
 func anthropicTool(name, description string, inputSchema map[string]any) map[string]any {
-	tool := map[string]any{
+	return map[string]any{
 		"name":         name,
 		"description":  description,
 		"input_schema": inputSchema,
-	}
-	if anthropicToolUsesFineGrainedStreaming(name) {
-		tool["eager_input_streaming"] = true
-	}
-	return tool
-}
-
-func anthropicToolUsesFineGrainedStreaming(name string) bool {
-	switch name {
-	case "write_workspace_text", "edit_workspace_lines", "attempt_completion", "start_background_task":
-		return true
-	default:
-		return false
 	}
 }

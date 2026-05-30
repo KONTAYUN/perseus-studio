@@ -126,7 +126,7 @@ func toolTargetSummary(name, argumentsJSON string) string {
 		return quotedSummary(stringField(decoded, "query", "pattern"))
 	case "search_workspace_text", "perseus_search_web", "web_search":
 		return quotedSummary(stringField(decoded, "query"))
-	case "inspect_workspace", "read_workspace_text", "edit_workspace_lines", "write_workspace_text":
+	case "inspect_workspace", "read_workspace_text", "edit_workspace_lines", "write_workspace_text", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk":
 		return pathSummary(stringField(decoded, "path"))
 	case "read_workspace_files":
 		return pathsCountSummary(stringSliceField(decoded, "paths"))

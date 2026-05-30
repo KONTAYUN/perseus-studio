@@ -342,7 +342,6 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		OnCompletionResultDiscard: discardCompletionResultPreview,
 	})
 	if err != nil {
-		finalizeActiveAssistantMessage("")
 		s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}

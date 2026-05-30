@@ -38,7 +38,7 @@ func (s *Service) verifyToolResult(ctx context.Context, toolName, resultJSON str
 	}
 
 	switch toolName {
-	case "edit_workspace_lines", "write_workspace_text":
+	case "edit_workspace_lines", "write_workspace_text", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk":
 		path := firstNonEmpty(meta.Path, meta.NewPath)
 		if path == "" {
 			return ToolVerification{Status: "failed", Message: "tool result did not include file path"}

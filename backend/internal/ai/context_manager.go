@@ -90,7 +90,6 @@ type ProviderToolLog struct {
 	Properties       []string `json:"properties,omitempty"`
 	UnsupportedPaths []string `json:"unsupported_paths,omitempty"`
 	SchemaDigest     string   `json:"schema_digest,omitempty"`
-	EagerStreaming   bool     `json:"eager_input_streaming,omitempty"`
 }
 
 type StreamToolCallLog struct {

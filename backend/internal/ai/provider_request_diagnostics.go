@@ -141,9 +141,6 @@ func toolSchemaItems(tools []map[string]any, protocol string) []ProviderToolLog 
 			name = "<missing>"
 		}
 		item := ProviderToolLog{Name: name, Strict: strict, SchemaDigest: shortSchemaDigest(schema)}
-		if eager, _ := tool["eager_input_streaming"].(bool); eager {
-			item.EagerStreaming = true
-		}
 		if object, _ := schema.(map[string]any); object != nil {
 			if required, ok := stringSliceFromAny(object["required"]); ok {
 				sort.Strings(required)
