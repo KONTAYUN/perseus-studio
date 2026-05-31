@@ -115,29 +115,30 @@ export function createEditorToolRefreshActions({
         );
       }
     }
-    if ((event.tool_name === 'edit_workspace_text' || event.tool_name === 'save_workspace_file') && event.path) {
-      const tab = tabs.find((item) => item.path === event.path && item.path !== currentFilePathRef.current);
+    if (isWorkspaceWriteTool(event.tool_name) && (event.path || event.changed_paths?.length)) {
+      const changedPaths = event.changed_paths?.length ? event.changed_paths : [event.path];
+      const tab = tabs.find((item) => changedPaths.includes(item.path) && item.path !== currentFilePathRef.current);
       if (!tab) return;
       const dirty = isTabDirty(tab);
       if (dirty) {
         setOpenTabs((current) =>
           current.map((item) =>
-            item.path === event.path
+            item.path === tab.path
               ? {
                   ...item,
-                  conflict: buildInactiveTabWriteConflict(event),
+                  conflict: buildInactiveTabWriteConflict({ ...event, path: tab.path }),
                 }
               : item
           )
         );
         return;
       }
-      if (!isTextPath(event.path)) return;
+      if (!isTextPath(tab.path)) return;
       try {
-        const file = await apiGet(`/api/files/read?path=${encodeURIComponent(event.path)}`);
+        const file = await apiGet(`/api/files/read?path=${encodeURIComponent(tab.path)}`);
         setOpenTabs((current) =>
           current.map((item) =>
-            item.path === event.path
+            item.path === tab.path
               ? {
                   ...item,
                   content: file.content,
@@ -160,4 +161,14 @@ export function createEditorToolRefreshActions({
     clearPathState,
     refreshWorkspaceAfterAssistantTools,
   };
+}
+
+function isWorkspaceWriteTool(toolName) {
+  return [
+    'edit_workspace_text',
+    'replace_workspace_lines',
+    'save_workspace_file',
+    'write_workspace_chunk',
+    'finalize_workspace_write',
+  ].includes(toolName);
 }

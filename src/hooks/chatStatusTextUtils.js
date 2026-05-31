@@ -166,7 +166,10 @@ export function pendingToolStatus(input) {
   if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return target ? `正在查看 ${target}` : '正在查看工作区';
   if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return target ? `正在读取 ${target}` : '正在读取文件';
   if (toolName === 'edit_workspace_text') return target ? `正在编辑 ${target}` : '正在编辑文件';
+  if (toolName === 'replace_workspace_lines') return target ? `正在改写 ${target}` : '正在改写文件';
   if (toolName === 'save_workspace_file') return target ? `正在保存 ${target}` : '正在保存文件';
+  if (toolName === 'write_workspace_chunk') return target ? `正在写入 ${target}` : '正在写入文件';
+  if (toolName === 'finalize_workspace_write') return target ? `正在校验 ${target}` : '正在校验文件';
   if (toolName === 'manage_workspace_path') return target ? `正在管理 ${target}` : '正在管理路径';
   if (toolName === 'organize_workspace_matches') return target ? `正在整理 ${target}` : '正在整理文件';
   if (toolName === 'run_workspace_command') return target ? `正在运行 ${target} 的命令` : '正在运行命令';
@@ -182,7 +185,10 @@ export function completedToolStatus(input) {
   if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return target ? `已查看 ${target}` : '已查看工作区';
   if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return target ? `已读取 ${target}` : '已读取文件';
   if (toolName === 'edit_workspace_text') return target ? `已编辑 ${target}` : '已编辑文件';
+  if (toolName === 'replace_workspace_lines') return target ? `已改写 ${target}` : '已改写文件';
   if (toolName === 'save_workspace_file') return target ? `已保存 ${target}` : '已保存文件';
+  if (toolName === 'write_workspace_chunk') return target ? `已写入 ${target}` : '已写入文件';
+  if (toolName === 'finalize_workspace_write') return target ? `已校验 ${target}` : '已校验文件';
   if (toolName === 'manage_workspace_path') return target ? `已管理 ${target}` : '已管理路径';
   if (toolName === 'organize_workspace_matches') return target ? `已整理 ${target}` : '已整理文件';
   if (toolName === 'run_workspace_command') return target ? `已运行 ${target} 的命令` : '已运行命令';

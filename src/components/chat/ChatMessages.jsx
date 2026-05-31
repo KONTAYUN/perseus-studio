@@ -87,7 +87,7 @@ function MessageBubble({ message, ide, canRegenerate }) {
   const isSteerMessage = message.kind === 'steer';
   return (
     <div className={`group/message flex min-w-0 max-w-full overflow-hidden ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-      <div className={`flex min-w-0 max-w-[88%] overflow-hidden flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+      <div className={`flex min-w-0 max-w-[88%] flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
         {isSteerMessage && <SteerStatusLabel message={message} />}
         <div
           className={`message-bubble motion-message min-w-0 max-w-full overflow-hidden px-4 py-3 text-[14px] leading-relaxed ${
@@ -178,11 +178,17 @@ function MessageBubble({ message, ide, canRegenerate }) {
 
 function LiveProgressLine({ message }) {
   const item = latestLiveProgressItem(message);
-  if (!item?.text) return null;
+  const text = item?.text || loadingBubbleText(message, '');
+  if (!text) return null;
   return (
-    <div className="mt-2 flex min-w-0 max-w-full items-center gap-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-      <span className="min-w-0 truncate">{item.text}</span>
+    <div className="loading-status-line loading-status-line-compact mt-2 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+      <span className="loading-status-pulse h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+      <span className="loading-status-text">{text}</span>
+      <span className="loading-status-dots gap-0.5">
+        <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
+        <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
+        <span className="h-1 w-1 animate-bounce rounded-full bg-current" />
+      </span>
     </div>
   );
 }
@@ -287,7 +293,7 @@ function LoadingStateBubble({ message, fallbackText }) {
       <span className="loading-status-text">
         <span className="animate-pulse">{visibleText || '\u00A0'}</span>
       </span>
-      <span className="inline-flex gap-1">
+      <span className="loading-status-dots gap-1">
         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" />

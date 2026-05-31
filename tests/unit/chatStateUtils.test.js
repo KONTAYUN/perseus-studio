@@ -50,6 +50,7 @@ test('buildProgressItem maps tool calls to friendly text', () => {
     runId: '',
     type: 'tool_call_started',
     text: '正在读取文件',
+    toolCallId: 'tc1',
     toolName: 'read_workspace_text',
     status: '',
   });

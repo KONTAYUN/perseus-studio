@@ -238,7 +238,10 @@ export default function useIdeState(options = {}) {
         item?.status === 'success' &&
         [
           'edit_workspace_text',
+          'replace_workspace_lines',
           'save_workspace_file',
+          'write_workspace_chunk',
+          'finalize_workspace_write',
           'manage_workspace_path',
           'organize_workspace_matches',
           'run_workspace_command',

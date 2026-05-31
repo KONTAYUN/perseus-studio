@@ -73,13 +73,13 @@ test('loadingBubbleText does not use completed tool states as active progress', 
     pending: true,
     loadingState: { visibleText: '正在烹饪' },
     progressItems: [
-      { id: 'start', type: 'tool_call_started', text: '正在编辑 drafts/chapter-1.md' },
-      { id: 'done', type: 'tool_call_completed', text: '已编辑 drafts/chapter-1.md' },
+      { id: 'tool_call_started:tc1', toolCallId: 'tc1', type: 'tool_call_started', text: '正在编辑 drafts/chapter-1.md' },
+      { id: 'tool_call_completed:tc1', toolCallId: 'tc1', type: 'tool_call_completed', text: '已编辑 drafts/chapter-1.md' },
     ],
   };
 
-  assert.equal(latestLiveProgressItem(message).text, '正在编辑 drafts/chapter-1.md');
-  assert.equal(loadingBubbleText(message), '正在编辑 drafts/chapter-1.md');
+  assert.equal(latestLiveProgressItem(message), null);
+  assert.equal(loadingBubbleText(message), '正在烹饪');
 });
 
 test('loadingBubbleText falls back when progress only contains completed states', () => {
@@ -123,6 +123,9 @@ test('completedActionItems derives completed labels from successful tool attachm
   );
   assert.equal(formatToolLabel({ tool_name: 'web_extract', label: '正在摘录资料' }), '已读取网页');
   assert.equal(formatToolLabel({ tool_name: 'edit_workspace_text' }), '已编辑文件');
+  assert.equal(formatToolLabel({ tool_name: 'replace_workspace_lines' }), '已改写文件');
+  assert.equal(formatToolLabel({ tool_name: 'write_workspace_chunk' }), '已写入文件');
+  assert.equal(formatToolLabel({ tool_name: 'finalize_workspace_write' }), '已校验文件');
 });
 
 test('followupQuestionAttachment extracts options without adding completed action chip', () => {
@@ -216,6 +219,10 @@ test('pendingFollowupQuestion clears once user answers after the assistant quest
 test('shouldReloadWorkspaceForToolEvents reloads for AI file writes', () => {
   assert.equal(
     shouldReloadWorkspaceForToolEvents([{ tool_name: 'save_workspace_file', status: 'success', path: 'new-file.md' }]),
+    true
+  );
+  assert.equal(
+    shouldReloadWorkspaceForToolEvents([{ tool_name: 'write_workspace_chunk', status: 'success', path: 'new-file.md' }]),
     true
   );
   assert.equal(

@@ -77,7 +77,10 @@ test('filterTabsOutsidePath removes deleted file or folder descendants', () => {
 
 test('isSuccessfulEditorToolEvent accepts only successful editor-affecting tools', () => {
   assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'edit_workspace_text' }), true);
+  assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'replace_workspace_lines' }), true);
   assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'save_workspace_file' }), true);
+  assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'write_workspace_chunk' }), true);
+  assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'finalize_workspace_write' }), true);
   assert.equal(isSuccessfulEditorToolEvent({ status: 'failed', tool_name: 'save_workspace_file' }), false);
   assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'web_search' }), false);
 });
@@ -110,6 +113,49 @@ test('buildActiveFileToolPlan refreshes clean active file after precise AI edit'
     statusMessage: '',
   });
   assert.equal(plan.conflictPlan, null);
+});
+
+test('buildActiveFileToolPlan refreshes clean active file after line-range AI edit', () => {
+  const plan = buildActiveFileToolPlan(
+    [{ tool_name: 'replace_workspace_lines', path: 'notes/a.md', hash: 'h-lines', version_id: 'v-lines' }],
+    { activePath: 'notes/a.md', dirty: false }
+  );
+
+  assert.deepEqual(plan.reloadPlan, {
+    path: 'notes/a.md',
+    hash: 'h-lines',
+    versionId: 'v-lines',
+    statusMessage: '',
+  });
+  assert.equal(plan.conflictPlan, null);
+});
+
+test('buildActiveFileToolPlan refreshes active file after chunked AI write events', () => {
+  const plan = buildActiveFileToolPlan(
+    [{ tool_name: 'write_workspace_chunk', path: 'drafts/long.txt', changed_paths: ['drafts/long.txt'], hash: 'h-chunk' }],
+    { activePath: 'drafts/long.txt', dirty: false }
+  );
+
+  assert.deepEqual(plan.reloadPlan, {
+    path: 'drafts/long.txt',
+    hash: 'h-chunk',
+    versionId: '',
+    statusMessage: '',
+  });
+});
+
+test('buildActiveFileToolPlan uses changed_paths for finalize write refresh', () => {
+  const plan = buildActiveFileToolPlan(
+    [{ tool_name: 'finalize_workspace_write', changed_paths: ['drafts/long.txt'], hash: 'h-final' }],
+    { activePath: 'drafts/long.txt', dirty: false }
+  );
+
+  assert.deepEqual(plan.reloadPlan, {
+    path: 'drafts/long.txt',
+    hash: 'h-final',
+    versionId: '',
+    statusMessage: '',
+  });
 });
 
 test('buildActiveFileToolPlan marks dirty active file conflict after AI write', () => {

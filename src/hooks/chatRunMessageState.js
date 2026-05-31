@@ -187,6 +187,7 @@ export function buildProgressItem(type, payload = {}, fallbackText = '') {
     runId: payload.run_id || payload.runId || '',
     type,
     text,
+    toolCallId: payload.tool_call_id || '',
     toolName: payload.tool_name || '',
     status: payload.status || '',
   };

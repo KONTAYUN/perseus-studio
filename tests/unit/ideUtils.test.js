@@ -56,6 +56,9 @@ test('filterFreshEditorToolEvents deduplicates repeated AI file refresh events',
 
 test('shouldReloadWorkspaceForToolEvents includes precise AI edits', () => {
   assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'edit_workspace_text' }]), true);
+  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'replace_workspace_lines' }]), true);
+  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'write_workspace_chunk' }]), true);
+  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'finalize_workspace_write' }]), true);
   assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'failed', tool_name: 'edit_workspace_text' }]), false);
   assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'read_workspace_text' }]), false);
 });

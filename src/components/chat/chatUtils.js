@@ -15,8 +15,25 @@ export function loadingBubbleText(message, fallbackText = '') {
 
 export function latestLiveProgressItem(message) {
   const items = message?.progressItems || [];
+  const closedToolCallIds = new Set();
+  let closedUnknownToolCall = false;
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
+    if (isToolTerminalProgressType(item?.type)) {
+      const key = toolCallProgressKey(item);
+      if (key) {
+        closedToolCallIds.add(key);
+      } else {
+        closedUnknownToolCall = true;
+      }
+      continue;
+    }
+    if (item?.type === 'tool_call_started') {
+      const key = toolCallProgressKey(item);
+      if ((key && closedToolCallIds.has(key)) || closedUnknownToolCall) {
+        continue;
+      }
+    }
     if (isActiveLiveProgressType(item?.type) && (item.text || '').trim()) {
       return item;
     }
@@ -27,19 +44,22 @@ export function latestLiveProgressItem(message) {
 function isActiveLiveProgressType(type = '') {
   return (
     type === 'tool_call_started' ||
-    type === 'tool_call_failed' ||
-    type === 'tool_scope_rejected' ||
-    type === 'completion_rejected' ||
-    type === 'local_persistence_failed' ||
-    type === 'agent_budget_exhausted' ||
     type === 'agent_budget_summary_started' ||
-    type === 'agent_budget_summary_failed' ||
     type === 'agent_recovery_started' ||
     type === 'agent_recovery_retrying' ||
-    type === 'agent_recovery_failed' ||
-    type === 'context_compaction_started' ||
-    type === 'context_compaction_failed'
+    type === 'context_compaction_started'
   );
+}
+
+function isToolTerminalProgressType(type = '') {
+  return type === 'tool_call_completed' || type === 'tool_call_failed' || type === 'tool_result_returned';
+}
+
+function toolCallProgressKey(item = {}) {
+  if (item.toolCallId) return String(item.toolCallId);
+  const id = String(item.id || '');
+  const match = id.match(/^tool_call_(?:started|completed|failed|result_returned):(.+)$/);
+  return match ? match[1] : '';
 }
 
 export function visibleMessageAttachments(message) {
@@ -90,7 +110,10 @@ export function formatToolLabel(item) {
   if (item.tool_name === 'find_workspace_files' || item.tool_name === 'search_workspace_text' || item.tool_name === 'inspect_workspace') return '已查看工作区';
   if (item.tool_name === 'read_workspace_text' || item.tool_name === 'read_workspace_files') return '已读取文件';
   if (item.tool_name === 'edit_workspace_text') return '已编辑文件';
+  if (item.tool_name === 'replace_workspace_lines') return '已改写文件';
   if (item.tool_name === 'save_workspace_file') return '已保存文件';
+  if (item.tool_name === 'write_workspace_chunk') return '已写入文件';
+  if (item.tool_name === 'finalize_workspace_write') return '已校验文件';
   if (item.tool_name === 'manage_workspace_path') return '已管理路径';
   if (item.tool_name === 'organize_workspace_matches') return '已整理文件';
   if (item.tool_name === 'run_workspace_command') return '已运行命令';
