@@ -251,3 +251,134 @@ test('waitForAgentRunStream removes rejected completion preview messages', async
     globalThis.window = originalWindow;
   }
 });
+
+test('waitForAgentRunStream shows a pending shell between assistant segments', async () => {
+  const originalEventSource = globalThis.EventSource;
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.EventSource = MockEventSource;
+    globalThis.window = {
+      setInterval: () => 0,
+      clearInterval: () => {},
+      setTimeout: (fn) => {
+        queueMicrotask(fn);
+        return 0;
+      },
+    };
+    MockEventSource.instances = [];
+
+    let messages = [
+      {
+        id: 'temp_assistant',
+        role: 'assistant',
+        pending: true,
+        runId: 'run-3',
+        activeMessageId: '',
+        kind: 'run_shell',
+        content: '',
+        progressItems: [],
+      },
+    ];
+
+    const runPromise = waitForAgentRunStream({
+      control: {},
+      conversationID: 'conv-3',
+      currentConversationIdRef: { current: 'conv-3' },
+      loadConversations: async () => {},
+      onAssistantToolEvents: async () => {},
+      onTasksChanged: () => {},
+      runId: 'run-3',
+      selectedModel: null,
+      setAgentRecoveryNotice: () => {},
+      setChatError: () => {},
+      setContextCompactionNotice: () => {},
+      setContextUsage: () => {},
+      setConversationMessages: (updater) => {
+        messages = typeof updater === 'function' ? updater(messages) : updater;
+      },
+      setRunSteerItems: () => {},
+      setRunSteerNotice: () => {},
+      thinkingId: 'temp_assistant',
+    });
+
+    const source = MockEventSource.instances[0];
+    source.emit('event', {
+      seq: 1,
+      type: 'assistant_message_started',
+      payload: {
+        assistant_message: {
+          id: 'a1',
+          role: 'assistant',
+          status: 'streaming',
+          content: '',
+          conversation_id: 'conv-3',
+        },
+      },
+    });
+    source.emit('event', {
+      seq: 2,
+      type: 'assistant_message_delta',
+      payload: { message_id: 'a1', delta: '第一段已经完成' },
+    });
+    source.emit('event', {
+      seq: 3,
+      type: 'assistant_message_completed',
+      payload: {
+        assistant_message: {
+          id: 'a1',
+          role: 'assistant',
+          content: '第一段已经完成',
+          conversation_id: 'conv-3',
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(messages.map((item) => item.id), ['a1', 'temp_assistant']);
+    assert.equal(messages[0].pending, false);
+    assert.equal(messages[0].status, 'final');
+    assert.equal(messages[0].content, '第一段已经完成');
+    assert.equal(messages[1].kind, 'run_shell');
+    assert.equal(messages[1].pending, true);
+
+    source.emit('event', {
+      seq: 4,
+      type: 'assistant_message_started',
+      payload: {
+        assistant_message: {
+          id: 'a2',
+          role: 'assistant',
+          status: 'streaming',
+          content: '',
+          conversation_id: 'conv-3',
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(messages.map((item) => item.id), ['a1', 'a2']);
+    assert.equal(messages[1].pending, true);
+    assert.equal(messages[1].activeMessageId, 'a2');
+
+    source.emit('event', {
+      seq: 5,
+      type: 'assistant_message_completed',
+      payload: {
+        assistant_message: {
+          id: 'a2',
+          role: 'assistant',
+          content: '第二段开始输出',
+          conversation_id: 'conv-3',
+        },
+      },
+    });
+    source.emit('run', { id: 'run-3', status: 'succeeded' });
+    await runPromise;
+
+    assert.deepEqual(messages.map((item) => item.id), ['a1', 'a2']);
+    assert.equal(messages.some((item) => item.kind === 'run_shell'), false);
+  } finally {
+    globalThis.EventSource = originalEventSource;
+    globalThis.window = originalWindow;
+  }
+});

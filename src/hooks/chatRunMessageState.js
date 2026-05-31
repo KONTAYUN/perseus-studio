@@ -159,6 +159,7 @@ export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMe
     kind: assistant.kind === 'run_shell' ? 'assistant_segment' : (assistant.kind || 'assistant_segment'),
     runId,
     pending: false,
+    status: assistant.status && assistant.status !== 'streaming' ? assistant.status : 'final',
     activeMessageId: '',
     progressItems: [],
   };
@@ -241,8 +242,13 @@ export function appendRunTerminalMessage(messages, latestRun) {
   }, latestRun.user_message_id, latestRun.id);
 }
 
-export function hasStreamingAssistantMessage(items) {
-  return (items || []).some((item) => item?.role === 'assistant' && (item?.status === 'streaming' || item?.activeMessageId));
+export function hasStreamingAssistantMessage(items, runId = '') {
+  return (items || []).some((item) => {
+    if (!item || item.role !== 'assistant') return false;
+    if (runId && item.runId !== runId) return false;
+    if (!item.pending && !item.activeMessageId) return false;
+    return item.status === 'streaming' || Boolean(item.activeMessageId) || Boolean(item.pending);
+  });
 }
 
 export function mapPendingAssistant(current, thinkingId, transform, runId = '') {

@@ -8,6 +8,8 @@ import {
   buildProgressItem,
   hasActiveRunShell,
   hasStreamingAssistantMessage,
+  insertRunMessageAfterAnchor,
+  isRunShellMessage,
   mapPendingAssistant,
   mergeCommittedRunStart,
   mergeAssistantMessageCompleted,
@@ -38,6 +40,7 @@ export async function waitForAgentRunStream({
   control,
   conversationID,
   currentConversationIdRef,
+  userMessageId = '',
   loadConversations,
   onAssistantToolEvents,
   onTasksChanged,
@@ -62,6 +65,7 @@ export async function waitForAgentRunStream({
       setRunSteerNotice?.(null);
     }
   };
+  let activeUserMessageId = userMessageId || '';
 
   setVisibleConversationMessages((current) =>
     mapPendingAssistant(current, thinkingId, (item) => ({
@@ -163,22 +167,22 @@ export async function waitForAgentRunStream({
     setVisibleConversationMessages((current) => {
       if (current.some((item) => item.id === thinkingId)) return current;
       if (hasActiveRunShell(current, runId)) return current;
-      if (hasStreamingAssistantMessage(current)) return current;
-      return [
-        ...current,
-        buildAssistantRunShell({
-          id: thinkingId,
-          conversationId: conversationID,
-          createdAt: new Date().toISOString(),
-          content: '',
-          attachments: [],
-          runId,
-        }),
-      ];
+      if (hasStreamingAssistantMessage(current, runId)) return current;
+      return insertRunMessageAfterAnchor(current, buildAssistantRunShell({
+        id: thinkingId,
+        conversationId: conversationID,
+        createdAt: new Date().toISOString(),
+        content: '',
+        attachments: [],
+        runId,
+      }), activeUserMessageId, runId);
     });
   };
   const finish = async () => {
     closeSource();
+    setVisibleConversationMessages((current) =>
+      (current || []).filter((item) => !isRunShellMessage(item, { thinkingId, runId }))
+    );
     await loadConversations();
     refreshConversationsAfterTitleGeneration().catch((error) => {
       console.error('refreshConversationsAfterTitleGeneration failed', error);
@@ -243,6 +247,7 @@ export async function waitForAgentRunStream({
       clearVisibleRunSteerNotice();
     }
     if (item?.type === 'user_message_committed') {
+      activeUserMessageId = payload.user_message?.id || activeUserMessageId;
       setVisibleConversationMessages((current) =>
         mergeCommittedRunStart(current, {
           thinkingId,
@@ -301,6 +306,7 @@ export async function waitForAgentRunStream({
       if (payload.assistant_message) {
         setVisibleConversationMessages((current) => mergeAssistantMessageCompleted(current, thinkingId, payload.assistant_message, { runId }));
         await onAssistantToolEvents?.(payload.assistant_message.attachments || []);
+        if (!settled) ensureThinkingShell();
       }
       if (payload.task) {
         onTasksChanged?.(payload.task);

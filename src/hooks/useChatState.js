@@ -247,7 +247,7 @@ export default function useChatState({
     activeChatAbortRef.current?.abort();
   }
 
-  async function waitForAgentRun(runId, conversationID, thinkingId, control, afterSeq = 0) {
+  async function waitForAgentRun(runId, conversationID, thinkingId, control, afterSeq = 0, userMessageId = '') {
     const activeRun = { runId, conversationId: conversationID };
     activeAgentRunRef.current = activeRun;
     setActiveAgentRun(activeRun);
@@ -257,6 +257,7 @@ export default function useChatState({
         control,
         conversationID,
         currentConversationIdRef,
+        userMessageId,
         loadConversations,
         onAssistantToolEvents,
         onTasksChanged,

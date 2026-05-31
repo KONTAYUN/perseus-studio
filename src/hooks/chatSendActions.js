@@ -205,6 +205,7 @@ export function createChatSendActions({
         currentConversationIdRef.current = result.conversation.id;
       }
       control.conversationId = result.conversation.id;
+      const committedUserMessageId = result.user_message?.id || '';
       if (result.user_message) {
         setVisibleConversationMessages((current) =>
           mergeCommittedRunStart(current, {
@@ -223,7 +224,7 @@ export function createChatSendActions({
         );
       }
       if (result.run?.id) {
-        await waitForAgentRun(result.run.id, result.conversation.id, thinkingId, control);
+        await waitForAgentRun(result.run.id, result.conversation.id, thinkingId, control, 0, committedUserMessageId);
       } else {
         await loadConversations();
         if (shouldUpdateVisibleConversation()) {
