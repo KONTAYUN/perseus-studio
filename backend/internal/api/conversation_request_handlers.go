@@ -83,10 +83,6 @@ func (s *Server) parseMultipartConversationMessage(r *http.Request) (string, str
 func (s *Server) parseChatReferences(r *http.Request) ([]ai.AttachmentPayload, []chatAttachmentMetadata, error) {
 	var payloads []ai.AttachmentPayload
 	var metadata []chatAttachmentMetadata
-	files, workspaceErr := s.factory.Workspace(MustUserFromContext(r.Context()).UserID)
-	if workspaceErr != nil {
-		files = nil
-	}
 
 	for _, ref := range parseWorkspaceFileRefs(r.FormValue("workspace_refs_json")) {
 		cleanPath, err := cleanWorkspaceReferencePath(ref.Path)
@@ -107,15 +103,7 @@ func (s *Server) parseChatReferences(r *http.Request) ([]ai.AttachmentPayload, [
 			Kind:     "workspace_file",
 			Path:     cleanPath,
 			FileType: fileType,
-			Note:     fmt.Sprintf("workspace_file reference path=%s", cleanPath),
-		}
-		if files != nil && isTextWorkspaceReference(cleanPath) {
-			if result, readErr := files.ReadTextFile(cleanPath, 6000); readErr == nil {
-				payload.Text = result.Content
-				payload.IncludedInContext = true
-				payload.Truncated = result.Truncated
-				payload.Note = fmt.Sprintf("workspace_file text content path=%s", cleanPath)
-			}
+			Note:     fmt.Sprintf("workspace_file metadata only path=%s; content must be read with workspace tools", cleanPath),
 		}
 		item := chatAttachmentMetadata{
 			ID:                ref.ID,
@@ -182,14 +170,8 @@ func (s *Server) parseChatReferences(r *http.Request) ([]ai.AttachmentPayload, [
 			Kind:     "current_file",
 			Path:     cleanPath,
 			FileType: current.FileType,
+			Note:     fmt.Sprintf("current_file metadata only path=%s; content must be read with workspace tools", cleanPath),
 		})
-		if files != nil && isTextWorkspaceReference(cleanPath) {
-			if result, readErr := files.ReadTextFile(cleanPath, 6000); readErr == nil {
-				payloads[len(payloads)-1].Text = result.Content
-				payloads[len(payloads)-1].IncludedInContext = true
-				payloads[len(payloads)-1].Truncated = result.Truncated
-			}
-		}
 		metadata = append(metadata, chatAttachmentMetadata{
 			ID:                "current_file",
 			Name:              name,

@@ -32,6 +32,7 @@ func TestBuildUserTextWithEditorPanelsContextDoesNotIncludeFileContent(t *testin
 			Kind: "current_file",
 			Path: "legacy/current.md",
 			Name: "current.md",
+			Text: "legacy current body",
 		},
 	})
 
@@ -51,6 +52,7 @@ func TestBuildUserTextWithEditorPanelsContextDoesNotIncludeFileContent(t *testin
 		"secret file body",
 		"完整文件内容",
 		"内容：",
+		"legacy current body",
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("editor panels context leaked file content marker %q:\n%s", forbidden, text)
@@ -71,16 +73,18 @@ func TestBuildUserTextWithTextAttachmentIncludesOnlyExplicitTextFiles(t *testing
 			Path:     "workspace/private.md",
 			Name:     "private.md",
 			FileType: "text",
+			Text:     "private workspace file body",
 		},
 	})
 
 	for _, expected := range []string{
 		"总结这个附件",
-		"以下是用户上传文本或工作区文件预览",
+		"以下是用户上传文本附件内容",
 		"文件名：uploaded.txt",
 		"explicit uploaded text",
 		"[该文件内容已截断]",
 		"workspace file reference: path=workspace/private.md",
+		"不包含文件内容",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected attachment text to contain %q, got:\n%s", expected, text)
@@ -92,7 +96,7 @@ func TestBuildUserTextWithTextAttachmentIncludesOnlyExplicitTextFiles(t *testing
 	}
 }
 
-func TestBuildUserTextWithExplicitWorkspaceAndCurrentFileContent(t *testing.T) {
+func TestBuildUserTextWithWorkspaceAndCurrentFileReferencesNeverIncludeText(t *testing.T) {
 	text := buildUserTextWithAttachments("重写这两份", []AttachmentPayload{
 		{
 			Kind:      "workspace_file",
@@ -113,13 +117,23 @@ func TestBuildUserTextWithExplicitWorkspaceAndCurrentFileContent(t *testing.T) {
 
 	for _, expected := range []string{
 		"workspace file reference: path=draft/chapter.txt",
-		"chapter body",
 		"current workspace file reference: path=draft/current.txt",
-		"current body",
-		"[该文件预览已截断；需要完整内容请调用 read_workspace_text 或 read_workspace_files]",
+		"不包含文件内容",
+		"需要内容时必须调用 read_workspace_text 或 read_workspace_files",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected attachment text to contain %q, got:\n%s", expected, text)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"chapter body",
+		"current body",
+		"optional preview",
+		"文件预览",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("workspace/current file reference leaked %q:\n%s", forbidden, text)
 		}
 	}
 }

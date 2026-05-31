@@ -187,14 +187,3 @@ func minInt(a, b int) int {
 	}
 	return b
 }
-
-func isTextWorkspaceReference(path string) bool {
-	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
-	textExtensions := map[string]bool{
-		"txt": true, "md": true, "json": true, "js": true, "jsx": true, "ts": true, "tsx": true,
-		"css": true, "html": true, "go": true, "py": true, "yaml": true, "yml": true,
-		"xml": true, "csv": true, "log": true, "toml": true, "env": true, "gitignore": true,
-	}
-	base := strings.ToLower(filepath.Base(path))
-	return textExtensions[extension] || base == ".env" || base == ".gitignore"
-}

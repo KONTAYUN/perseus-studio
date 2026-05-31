@@ -23,27 +23,11 @@ func buildUserTextWithAttachments(content string, attachments []AttachmentPayloa
 			}
 			textParts = append(textParts, text)
 		case "workspace_file":
-			note := fmt.Sprintf("workspace file reference: path=%s, name=%s, file_type=%s。这是用户明确引用的工作区路径；需要最新或完整内容时调用 read_workspace_text 或 read_workspace_files，不要只凭预览猜。", attachment.Path, attachment.Name, attachment.FileType)
-			if attachment.Text != "" {
-				text := fmt.Sprintf("%s\noptional preview:\n%s", note, attachment.Text)
-				if attachment.Truncated {
-					text += "\n[该文件预览已截断；需要完整内容请调用 read_workspace_text 或 read_workspace_files]"
-				}
-				textParts = append(textParts, text)
-			} else {
-				notes = append(notes, note+" 图片或二进制文件默认只作为 metadata。")
-			}
+			note := fmt.Sprintf("workspace file reference: path=%s, name=%s, file_type=%s。这里只提供用户明确引用的工作区路径 metadata，不包含文件内容；需要内容时必须调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
+			notes = append(notes, note)
 		case "current_file":
-			note := fmt.Sprintf("current workspace file reference: path=%s, name=%s, file_type=%s。用户说“当前文件/这个文件/这里”时优先理解为此路径；需要最新或完整内容时调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
-			if attachment.Text != "" {
-				text := fmt.Sprintf("%s\noptional preview:\n%s", note, attachment.Text)
-				if attachment.Truncated {
-					text += "\n[该文件预览已截断；需要完整内容请调用 read_workspace_text 或 read_workspace_files]"
-				}
-				textParts = append(textParts, text)
-			} else {
-				notes = append(notes, note)
-			}
+			note := fmt.Sprintf("current workspace file reference: path=%s, name=%s, file_type=%s。用户说“当前文件/这个文件/这里”时优先理解为此路径；这里只提供 metadata，不包含文件内容；需要内容时必须调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
+			notes = append(notes, note)
 		case "editor_panels_context":
 			var lines []string
 			for _, panel := range attachment.EditorPanels {
@@ -86,7 +70,7 @@ func buildUserTextWithAttachments(content string, attachments []AttachmentPayloa
 	}
 
 	if len(textParts) > 0 {
-		builder.WriteString("\n\n以下是用户上传文本或工作区文件预览：\n\n")
+		builder.WriteString("\n\n以下是用户上传文本附件内容：\n\n")
 		builder.WriteString(strings.Join(textParts, "\n\n---\n\n"))
 	}
 	if len(notes) > 0 {

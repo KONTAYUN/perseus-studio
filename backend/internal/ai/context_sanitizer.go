@@ -58,6 +58,11 @@ func sanitizeAttachmentPayloads(attachments []AttachmentPayload, profile provide
 	}
 	items := append([]AttachmentPayload(nil), attachments...)
 	for index := range items {
+		if isWorkspaceReferenceAttachment(items[index].Kind) {
+			items[index].Text = ""
+			items[index].IncludedInContext = false
+			items[index].Truncated = false
+		}
 		limit := profile.MaxAttachmentTextRunes
 		if items[index].Kind == "selected_skill" {
 			limit = profile.MaxSkillTextRunes
@@ -71,6 +76,10 @@ func sanitizeAttachmentPayloads(attachments []AttachmentPayload, profile provide
 		}
 	}
 	return items
+}
+
+func isWorkspaceReferenceAttachment(kind string) bool {
+	return kind == "workspace_file" || kind == "current_file"
 }
 
 func truncateWithContextNote(value string, maxRunes int, label string) string {
