@@ -24,7 +24,7 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 	if err := r.applyPendingSteers(ctx, round); err != nil {
 		return agentModelTurn{}, err
 	}
-	r.lastContextSnapshot = r.contextManager.Build(r.protocol, r.messages, r.attachments, r.transcript, r.profile, round+1)
+	r.lastContextSnapshot = r.contextManager.BuildWithOptions(r.protocol, r.messages, r.attachments, r.transcript, r.profile, round+1, r.providerMessageBuildOptions())
 	r.annotateRequestSummary()
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	turn, err := r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
@@ -47,7 +47,7 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 	if retryErr := r.forceContextOverflowCompaction(ctx, round+1); retryErr != nil {
 		log.Printf("[ai] context overflow compaction skipped conversation=%s error=%v", r.conversationID, retryErr)
 	}
-	r.lastContextSnapshot = r.contextManager.Build(r.protocol, r.messages, r.attachments, r.transcript, r.profile, round+1)
+	r.lastContextSnapshot = r.contextManager.BuildWithOptions(r.protocol, r.messages, r.attachments, r.transcript, r.profile, round+1, r.providerMessageBuildOptions())
 	r.annotateRequestSummary()
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	return r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
@@ -78,6 +78,34 @@ func (r *agentRuntime) annotateRequestSummary() {
 	}
 	if checkpoint, ok := r.service.loadRunCheckpoint(context.Background(), r.opts); ok {
 		r.lastContextSnapshot.Summary.CheckpointSeq = checkpoint.Seq
+	}
+}
+
+func (r *agentRuntime) providerMessageBuildOptions() ProviderMessageBuildOptions {
+	if r == nil {
+		return ProviderMessageBuildOptions{}
+	}
+	reason := "tool_loop"
+	force := false
+	if r.performedMutation {
+		force = true
+		reason = "final_reply"
+	}
+	if r.checkpointResumeAttempts > 0 {
+		force = true
+		if r.performedMutation {
+			reason = "checkpoint_resume_final_reply"
+		} else {
+			reason = "checkpoint_resume"
+		}
+	}
+	return ProviderMessageBuildOptions{
+		ForceCompact:   force,
+		Reason:         reason,
+		TargetBytes:    providerMessageBuilderTargetBytes,
+		TriggerBytes:   providerMessageBuilderTriggerBytes,
+		TriggerEntries: providerMessageBuilderTriggerEntries,
+		PreserveRecent: providerMessageBuilderRecentEntries,
 	}
 }
 

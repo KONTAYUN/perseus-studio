@@ -30,6 +30,21 @@ type ProviderRequestSummary struct {
 	ParallelToolCalls         *bool                `json:"parallel_tool_calls,omitempty"`
 	PayloadKeys               []string             `json:"payload_keys,omitempty"`
 	PayloadBytes              int                  `json:"payload_bytes,omitempty"`
+	PayloadSoftBudgetBytes    int                  `json:"payload_soft_budget_bytes,omitempty"`
+	PayloadHardBudgetBytes    int                  `json:"payload_hard_budget_bytes,omitempty"`
+	PayloadBudgetExceeded     bool                 `json:"payload_budget_exceeded,omitempty"`
+	PayloadCompactionApplied  bool                 `json:"payload_compaction_applied,omitempty"`
+	MessageBuilderApplied     bool                 `json:"message_builder_applied,omitempty"`
+	MessageBuilderStrategy    string               `json:"message_builder_strategy,omitempty"`
+	PayloadBeforeBytes        int                  `json:"payload_before_bytes,omitempty"`
+	PayloadAfterBytes         int                  `json:"payload_after_bytes,omitempty"`
+	CompactedEntries          int                  `json:"compacted_entries,omitempty"`
+	PreservedRecentEntries    int                  `json:"preserved_recent_entries,omitempty"`
+	ContinuationSummaryChars  int                  `json:"continuation_summary_chars,omitempty"`
+	PreservedChangedPaths     []string             `json:"preserved_changed_paths,omitempty"`
+	ToolResultBytes           int                  `json:"tool_result_bytes,omitempty"`
+	ReadContentBytes          int                  `json:"read_content_bytes,omitempty"`
+	LargestToolResults        []ToolResultSizeLog  `json:"largest_tool_results,omitempty"`
 	MessageShapes             []ProviderMessageLog `json:"message_shapes,omitempty"`
 	MessageProtocolWarnings   []string             `json:"message_protocol_warnings,omitempty"`
 	ToolSchemaDigest          string               `json:"tool_schema_digest,omitempty"`
@@ -83,6 +98,15 @@ type ProviderRequestSummary struct {
 	CurrentToolCalls          int                  `json:"current_tool_calls,omitempty"`
 }
 
+type ToolResultSizeLog struct {
+	ToolName     string `json:"tool_name"`
+	Path         string `json:"path,omitempty"`
+	Bytes        int    `json:"bytes"`
+	ReadContent  bool   `json:"read_content,omitempty"`
+	Compacted    bool   `json:"compacted,omitempty"`
+	ContentChars int    `json:"content_chars,omitempty"`
+}
+
 type ProviderMessageLog struct {
 	Index        int      `json:"index"`
 	Role         string   `json:"role,omitempty"`
@@ -134,8 +158,85 @@ func newAgentContextManager() *agentContextManager {
 	return &agentContextManager{}
 }
 
+type ProviderMessageBuildOptions struct {
+	ForceCompact   bool
+	Reason         string
+	TargetBytes    int
+	TriggerBytes   int
+	TriggerEntries int
+	PreserveRecent int
+}
+
 func (m *agentContextManager) Build(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, transcript *AgentTranscript, profile providerRuntimeProfile, round int) ContextSnapshot {
+	return m.BuildWithOptions(protocol, messages, attachments, transcript, profile, round, ProviderMessageBuildOptions{})
+}
+
+func (m *agentContextManager) BuildWithOptions(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, transcript *AgentTranscript, profile providerRuntimeProfile, round int, options ProviderMessageBuildOptions) ContextSnapshot {
 	compacted, actions := m.compactTranscript(transcript, profile)
+	snapshot := m.buildFromCompacted(protocol, messages, attachments, compacted, actions, profile, round)
+	payloadActions := m.compactTranscriptForPayloadPressure(compacted, profile, estimatedContextPayloadBytes(snapshot))
+	if len(payloadActions) == 0 {
+		return m.applyProviderMessageBuilder(protocol, messages, attachments, compacted, actions, profile, round, options, snapshot)
+	}
+	actions = append(actions, payloadActions...)
+	snapshot = m.buildFromCompacted(protocol, messages, attachments, compacted, actions, profile, round)
+	return m.applyProviderMessageBuilder(protocol, messages, attachments, compacted, actions, profile, round, options, snapshot)
+}
+
+func (m *agentContextManager) applyProviderMessageBuilder(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, transcript *AgentTranscript, actions []string, profile providerRuntimeProfile, round int, options ProviderMessageBuildOptions, snapshot ContextSnapshot) ContextSnapshot {
+	builder := ProviderMessageBuilder{}
+	result := builder.Build(ProviderMessageBuildInput{
+		Protocol:      protocol,
+		Messages:      messages,
+		Attachments:   attachments,
+		Transcript:    transcript,
+		Actions:       actions,
+		Profile:       profile,
+		Round:         round,
+		Options:       options,
+		BeforePayload: estimatedContextPayloadBytes(snapshot),
+	})
+	if !result.Applied {
+		return snapshot
+	}
+	next := m.buildFromCompacted(protocol, result.Messages, attachments, result.Transcript, result.Actions, profile, round)
+	next.Summary.MessageBuilderApplied = true
+	next.Summary.MessageBuilderStrategy = result.Strategy
+	next.Summary.PayloadBeforeBytes = result.PayloadBeforeBytes
+	next.Summary.PayloadAfterBytes = estimatedContextPayloadBytes(next)
+	next.Summary.CompactedEntries = result.CompactedEntries
+	next.Summary.PreservedRecentEntries = result.PreservedRecentEntries
+	next.Summary.ContinuationSummaryChars = result.ContinuationSummaryChars
+	next.Summary.PreservedChangedPaths = append([]string(nil), result.PreservedChangedPaths...)
+	next.Summary.PayloadCompactionApplied = true
+	return next
+}
+
+func estimatedContextPayloadBytes(snapshot ContextSnapshot) int {
+	messageBytes := 0
+	switch {
+	case len(snapshot.OpenAIMessages) > 0:
+		raw, err := json.Marshal(snapshot.OpenAIMessages)
+		if err != nil {
+			return 0
+		}
+		messageBytes = len(raw)
+	case len(snapshot.AnthropicMessages) > 0 || snapshot.AnthropicSystem != "":
+		raw, err := json.Marshal(map[string]any{
+			"system":   snapshot.AnthropicSystem,
+			"messages": snapshot.AnthropicMessages,
+		})
+		if err != nil {
+			return 0
+		}
+		messageBytes = len(raw)
+	default:
+		return 0
+	}
+	return messageBytes + 16*1024
+}
+
+func (m *agentContextManager) buildFromCompacted(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, compacted *AgentTranscript, actions []string, profile providerRuntimeProfile, round int) ContextSnapshot {
 	switch protocol {
 	case agentProtocolAnthropic:
 		systemText, runtimeMessages := buildAnthropicMessages(messages, attachments)

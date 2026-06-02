@@ -296,6 +296,53 @@ func TestProviderPayloadDiagnosticsRecordHTTPTransportPolicy(t *testing.T) {
 	}
 }
 
+func TestDecodeOpenAIConversationTitleResponseAcceptsSSEDespiteNonStreamRequest(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"向北方\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"content\":\"改写\"}}]}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}
+	resp.Header.Set("Content-Type", "text/event-stream")
+
+	data, stats, mismatch, err := decodeOpenAIConversationTitleResponse(resp, "https://example.test/v1/chat/completions")
+	if err != nil {
+		t.Fatalf("decodeOpenAIConversationTitleResponse returned error: %v", err)
+	}
+	if !mismatch {
+		t.Fatalf("expected protocol mismatch flag for SSE title response")
+	}
+	if stats.Chunks != 2 || stats.ChoicesSeen != 2 {
+		t.Fatalf("unexpected SSE stats: %#v", stats)
+	}
+	if got := data.titleText(); got != "向北方改写" {
+		t.Fatalf("unexpected title text: %q", got)
+	}
+}
+
+func TestDecodeOpenAIConversationTitleResponseIgnoresUsageOnlySSEChunks(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1}}\n\ndata: [DONE]\n\n")),
+	}
+	resp.Header.Set("Content-Type", "text/event-stream")
+
+	data, stats, mismatch, err := decodeOpenAIConversationTitleResponse(resp, "https://example.test/v1/chat/completions")
+	if err != nil {
+		t.Fatalf("decodeOpenAIConversationTitleResponse returned error: %v", err)
+	}
+	if !mismatch || stats.Chunks != 1 || stats.ChoicesSeen != 0 {
+		t.Fatalf("unexpected SSE mismatch/stats: mismatch=%v stats=%#v", mismatch, stats)
+	}
+	if got := data.titleText(); got != "" {
+		t.Fatalf("expected no title text from usage-only SSE, got %q", got)
+	}
+}
+
 func TestOrdinaryUserSkillToolSchemaIsReadOnly(t *testing.T) {
 	loaded := map[string]bool{"skills": true}
 	names := toolNamesFromOpenAITools(openAIToolsForLoadedToolsets(loaded, true, "user"))
@@ -513,6 +560,17 @@ func TestHandleCompletionAttemptRejectsInternalEditProtocolLeak(t *testing.T) {
 	}
 	if discarded != 1 {
 		t.Fatalf("expected streamed completion preview to be discarded once, got %d", discarded)
+	}
+}
+
+func TestHandleCompletionAttemptRejectsChineseInternalEditProtocolLeak(t *testing.T) {
+	runtime := &agentRuntime{}
+	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"我已经通过补丁块写入了文件。"}`)
+	if !isError || completed {
+		t.Fatalf("expected Chinese internal edit protocol completion to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
+	}
+	if !strings.Contains(result, "补丁块") {
+		t.Fatalf("expected rejected marker in result, got %s", result)
 	}
 }
 
@@ -1446,6 +1504,34 @@ func TestExecuteToolMkdirWorkspace(t *testing.T) {
 	}
 }
 
+func TestExecuteAndRecordToolMkdirExistingFolderReturnsStructuredRecoverableObservation(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	if _, err := files.MkdirNew("docs/guides"); err != nil {
+		t.Fatalf("MkdirNew returned error: %v", err)
+	}
+
+	result, event, err := service.executeAndRecordTool(context.Background(), "conv", "msg", "manage_workspace_path", `{"action":"mkdir","path":"docs/guides"}`, "", RunOptions{UserID: testUserID}, providerRuntimeProfile{MaxToolResultRunes: 4000})
+	if err != nil {
+		t.Fatalf("executeAndRecordTool returned wrapper error: %v", err)
+	}
+	if event.Status != "failed" || event.Error != "path already exists" {
+		t.Fatalf("expected failed already_exists event, got %#v", event)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("invalid result json: %v\n%s", err, result)
+	}
+	if payload["reason"] != "already_exists" || payload["path_type"] != "folder" || payload["path"] != "docs/guides" {
+		t.Fatalf("expected structured already_exists observation, got %#v", payload)
+	}
+	if _, ok := payload["changed_paths"]; ok {
+		t.Fatalf("failed mkdir should not report changed_paths: %#v", payload)
+	}
+	if !strings.Contains(fmt.Sprint(payload["recovery_hint"]), "Continue using this directory") {
+		t.Fatalf("expected recovery hint to continue using existing folder, got %#v", payload["recovery_hint"])
+	}
+}
+
 func TestExecuteToolRenameWorkspacePath(t *testing.T) {
 	service, _, _, files := newTestAIService(t)
 
@@ -2041,6 +2127,42 @@ func TestBudgetToolResultForModelPreservesReadWorkspaceTextShape(t *testing.T) {
 	}
 }
 
+func TestBudgetToolResultForModelUsesSingleNumberedReadView(t *testing.T) {
+	raw := mustJSON(map[string]any{
+		"tool":             "read_workspace_text",
+		"path":             "draft.txt",
+		"content":          strings.Repeat("plain", 1200),
+		"numbered_content": strings.Repeat("1: numbered\n", 1200),
+		"start_line":       1,
+		"end_line":         1200,
+		"total_lines":      1200,
+	})
+	budgeted := budgetToolResultForModel("read_workspace_text", raw, providerRuntimeProfile{
+		MaxToolResultRunes:      1200,
+		MaxReadFileContentRunes: 10000,
+	})
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
+		t.Fatalf("budgeted result is not json: %v", err)
+	}
+	if _, ok := payload["content"]; ok {
+		t.Fatalf("expected duplicate plain content to be omitted when numbered view exists: %#v", payload)
+	}
+	if payload["content_omitted_for_model"] != true {
+		t.Fatalf("expected content omission flag, got %#v", payload)
+	}
+	if payload["numbered_content"] == nil {
+		t.Fatalf("expected numbered content to remain as model view, got %#v", payload)
+	}
+	if payload["numbered_content_truncated_for_model"] != true {
+		t.Fatalf("expected numbered content to be budgeted, got %#v", payload)
+	}
+	if got := len([]rune(budgeted)); got > 1200 {
+		t.Fatalf("expected payload within budget, got %d chars", got)
+	}
+}
+
 func TestBudgetToolResultForModelPreservesBatchReadItemsShape(t *testing.T) {
 	raw := mustJSON(map[string]any{
 		"tool": "read_workspace_files",
@@ -2068,6 +2190,50 @@ func TestBudgetToolResultForModelPreservesBatchReadItemsShape(t *testing.T) {
 		t.Fatalf("expected item path/content to remain, got %#v", first)
 	}
 	if got := len([]rune(budgeted)); got > 1200 {
+		t.Fatalf("expected payload within budget, got %d chars", got)
+	}
+}
+
+func TestBudgetToolResultForModelBudgetsBatchNumberedContent(t *testing.T) {
+	raw := mustJSON(map[string]any{
+		"tool": "read_workspace_files",
+		"items": []any{
+			map[string]any{
+				"path":             "a.txt",
+				"content":          strings.Repeat("a", 2400),
+				"numbered_content": strings.Repeat("1: a\n", 2400),
+				"start_line":       1,
+				"end_line":         2400,
+			},
+			map[string]any{
+				"path":             "b.txt",
+				"content":          strings.Repeat("b", 2400),
+				"numbered_content": strings.Repeat("1: b\n", 2400),
+				"start_line":       1,
+				"end_line":         2400,
+			},
+		},
+	})
+	budgeted := budgetToolResultForModel("read_workspace_files", raw, providerRuntimeProfile{
+		MaxToolResultRunes:      1800,
+		MaxReadFileContentRunes: 10000,
+	})
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
+		t.Fatalf("budgeted result is not json: %v", err)
+	}
+	items := payload["items"].([]any)
+	for _, rawItem := range items {
+		item := rawItem.(map[string]any)
+		if _, ok := item["content"]; ok {
+			t.Fatalf("expected duplicate plain content omitted for batch item, got %#v", item)
+		}
+		if item["numbered_content"] == nil {
+			t.Fatalf("expected numbered content model view for batch item, got %#v", item)
+		}
+	}
+	if got := len([]rune(budgeted)); got > 1800 {
 		t.Fatalf("expected payload within budget, got %d chars", got)
 	}
 }

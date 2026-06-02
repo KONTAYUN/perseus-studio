@@ -69,6 +69,7 @@ type MessageInput struct {
 	Status          string
 	SegmentIndex    int
 	MetaJSON        string
+	CreatedAt       time.Time
 }
 
 type ToolCall struct {

@@ -4,7 +4,7 @@ export default function SkillMenu({ isOpen, skills, inputValue, onChoose }) {
   if (!isOpen || skills.length === 0) return null;
 
   return (
-    <div className="motion-popover absolute bottom-[64px] left-2 z-30 max-h-56 w-[min(360px,calc(100%-24px))] overflow-auto rounded-2xl border border-gray-200 bg-white p-2 dark:border-white/10 dark:bg-[#252527] custom-scrollbar">
+    <div className="composer-popover-surface motion-popover absolute bottom-[64px] left-2 z-30 max-h-56 w-[min(360px,calc(100%-24px))] overflow-auto border border-gray-200 bg-white p-2 dark:border-white/10 dark:bg-[#252527] custom-scrollbar">
       {skills.map((skill) => (
         <button
           key={skill.id}

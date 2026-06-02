@@ -1,6 +1,6 @@
 /* Chat composer */
 .composer-shell {
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-composer);
   padding: 8px 7px 7px 14px;
   transition:
     border-color 460ms var(--ease-apple),
@@ -12,6 +12,10 @@
     0 0 42px 6px rgb(37 99 235 / 0),
     inset 0 0 0 1px rgb(96 165 250 / 0),
     inset 0 0 0 1px rgb(255 255 255 / 0.24);
+}
+
+.composer-popover-surface {
+  border-radius: var(--radius-composer-popover);
 }
 
 .dark .composer-shell {

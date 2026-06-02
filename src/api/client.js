@@ -78,6 +78,13 @@ export function apiDelete(path) {
   });
 }
 
+export function apiDeleteWithBody(path, body) {
+  return request(path, {
+    method: 'DELETE',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function apiUploadFile(path, file, overwrite = false) {
   const formData = new FormData();
   formData.append('path', path);

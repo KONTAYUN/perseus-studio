@@ -30,7 +30,6 @@ import {
   markRunSteerApplied,
   markRunSteerFailed,
   markRunSteerReceived,
-  mergeRunSteerItemsWithMessages,
   pendingRunSteerPreviewItems,
   removeRunSteerItems,
   runSteerStatusLabel,
@@ -505,36 +504,58 @@ test('run steer item advances through received and applied events', () => {
 test('received run steer stays visible in composer preview until applied', () => {
   const initial = appendRunSteerItem([], buildRunSteerItem({
     clientSteerId: 'client-1',
-    content: '先别改结尾',
+    content: '?????',
     conversationId: 'conv-1',
     runId: 'run-1',
   }));
   const received = markRunSteerReceived(initial, {
     client_steer_id: 'client-1',
     steer_id: 'steer-1',
-    content_preview: '先别改结尾',
+    content_preview: '?????',
   });
   assert.equal(pendingRunSteerPreviewItems(received).length, 1);
-  assert.equal(mergeRunSteerItemsWithMessages([], received).length, 0);
 
   const applied = markRunSteerApplied(received, { steer_id: 'steer-1' });
   assert.equal(pendingRunSteerPreviewItems(applied).length, 0);
-  assert.equal(mergeRunSteerItemsWithMessages([], applied).length, 1);
 });
 
-test('visible run steer items stay scoped to the selected conversation', () => {
+test('received run steer with a committed timeline message is not duplicated in composer preview', () => {
+  const initial = appendRunSteerItem([], buildRunSteerItem({
+    clientSteerId: 'client-1',
+    content: '请直接切警局',
+    conversationId: 'conv-1',
+    runId: 'run-1',
+  }));
+  const received = markRunSteerReceived(initial, {
+    client_steer_id: 'client-1',
+    steer_id: 'steer-1',
+    content_preview: '请直接切警局',
+    message_id: 'msg-steer-1',
+  });
+  assert.equal(received[0].messageId, 'msg-steer-1');
+  assert.equal(received[0].status, RUN_STEER_STATUS.received);
+  assert.equal(pendingRunSteerPreviewItems(received).length, 0);
+});
+
+test('visible run steer preview items stay scoped and exclude applied events', () => {
   const items = [
     {
       id: 'steer-a',
       conversation_id: 'conv-a',
-      status: RUN_STEER_STATUS.applied,
+      status: RUN_STEER_STATUS.received,
       content: 'a',
     },
     {
       id: 'steer-b',
-      conversation_id: 'conv-b',
+      conversation_id: 'conv-a',
       status: RUN_STEER_STATUS.applied,
       content: 'b',
+    },
+    {
+      id: 'steer-c',
+      conversation_id: 'conv-b',
+      status: RUN_STEER_STATUS.received,
+      content: 'c',
     },
   ];
 
@@ -552,7 +573,7 @@ test('applied steer events can be restored from durable run events', () => {
       payload: {
         steer_id: 'steer-1',
         client_steer_id: 'client-1',
-        content: '请先整理目录',
+        content: '??????',
         created_at: '2026-05-21T06:08:00Z',
       },
     },
@@ -577,211 +598,38 @@ test('applied steer events can be restored from durable run events', () => {
   assert.equal(items[0].conversation_id, 'conv-1');
   assert.equal(items[0].runId, 'run-1');
   assert.equal(items[0].steerId, 'steer-1');
-  assert.equal(items[0].content, '请先整理目录');
+  assert.equal(items[0].content, '??????');
 });
 
 test('run steer failure stays in pending input preview, not committed timeline', () => {
   const item = buildRunSteerItem({
     clientSteerId: 'client-1',
-    content: '不要改全部章节',
+    content: '???????',
     createdAt: '2026-05-20T00:00:01Z',
   });
   const failed = markRunSteerFailed([item], 'client-1', 'network failed');
   assert.equal(failed[0].status, RUN_STEER_STATUS.failed);
-  assert.equal(failed[0].content, '不要改全部章节');
+  assert.equal(failed[0].content, '???????');
   assert.equal(failed[0].error, 'network failed');
-
-  const merged = mergeRunSteerItemsWithMessages([
-    { id: 'm1', role: 'assistant', content: 'working', created_at: '2026-05-20T00:00:00Z' },
-  ], failed);
-  assert.equal(merged.length, 1);
   assert.equal(pendingRunSteerPreviewItems(failed).length, 1);
 });
 
-test('run steer item stays out of timeline until applied', () => {
+test('run steer item is removed from preview after applied and removed by id', () => {
   const item = buildRunSteerItem({
     clientSteerId: 'client-1',
-    content: '请加强恐怖感',
+    content: '??????',
     createdAt: '2026-05-20T00:00:01Z',
   });
   const received = markRunSteerReceived([item], {
     client_steer_id: 'client-1',
     steer_id: 'steer-1',
-    content_preview: '请加强恐怖感',
+    content_preview: '??????',
   });
-  assert.deepEqual(mergeRunSteerItemsWithMessages([], received), []);
   assert.equal(unappliedRunSteerItems(received).length, 1);
 
   const applied = markRunSteerApplied(received, { steer_id: 'steer-1' });
-  const merged = mergeRunSteerItemsWithMessages([], applied);
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0].kind, 'steer');
+  assert.equal(visibleRunSteerTimelineItems(applied, 'pending').length, 0);
   assert.deepEqual(removeRunSteerItems(applied, ['client-1']), []);
-});
-
-test('committed run steer is ordered before the active assistant shell', () => {
-  const item = markRunSteerApplied([
-    buildRunSteerItem({
-      clientSteerId: 'client-1',
-      content: '先按我的新要求调整',
-      createdAt: '2026-05-20T00:00:02Z',
-    }),
-  ], { client_steer_id: 'client-1', steer_id: 'steer-1' });
-
-  const merged = mergeRunSteerItemsWithMessages([
-    {
-      id: 'temp-assistant',
-      role: 'assistant',
-      pending: true,
-      content: '',
-      created_at: '2026-05-20T00:00:01Z',
-    },
-  ], item);
-
-  assert.equal(merged[0].kind, 'steer');
-  assert.equal(merged[1].id, 'temp-assistant');
-});
-
-test('applied run steer does not reorder later user turn shells', () => {
-  const steerItems = markRunSteerApplied([
-    buildRunSteerItem({
-      clientSteerId: 'client-1',
-      content: '先按我的新要求调整',
-      conversationId: 'conv-1',
-      runId: 'run-1',
-      createdAt: '2026-05-20T00:00:02Z',
-    }),
-  ], { client_steer_id: 'client-1', steer_id: 'steer-1' });
-
-  const merged = mergeRunSteerItemsWithMessages([
-    {
-      id: 'u1',
-      role: 'user',
-      content: '第一轮',
-      conversation_id: 'conv-1',
-      created_at: '2026-05-20T00:00:00Z',
-    },
-    {
-      id: 'a1',
-      role: 'assistant',
-      content: '第一轮回复',
-      conversation_id: 'conv-1',
-      runId: 'run-1',
-      pending: false,
-      created_at: '2026-05-20T00:00:01Z',
-    },
-    {
-      id: 'temp_user_100',
-      role: 'user',
-      content: '第二轮',
-      conversation_id: 'conv-1',
-      created_at: '2026-05-20T00:00:10Z',
-    },
-    {
-      id: 'temp_assistant_100',
-      role: 'assistant',
-      kind: 'run_shell',
-      runId: 'run-2',
-      pending: true,
-      content: '',
-      conversation_id: 'conv-1',
-      created_at: '2026-05-20T00:00:10Z',
-    },
-  ], steerItems);
-
-  assert.deepEqual(merged.map((item) => item.id), [
-    'u1',
-    'a1',
-    'client-1',
-    'temp_user_100',
-    'temp_assistant_100',
-  ]);
-});
-
-test('applied run steer with missing historical run anchor does not attach to current pending shell', () => {
-  const steerItems = markRunSteerApplied([
-    buildRunSteerItem({
-      clientSteerId: 'client-1',
-      content: '旧引导',
-      conversationId: 'conv-1',
-      runId: 'run-old',
-      createdAt: '2026-05-20T00:00:02Z',
-    }),
-  ], { client_steer_id: 'client-1', steer_id: 'steer-1' });
-
-  const merged = mergeRunSteerItemsWithMessages([
-    {
-      id: 'old-assistant',
-      role: 'assistant',
-      content: '旧回复',
-      conversation_id: 'conv-1',
-      pending: false,
-      created_at: '2026-05-20T00:00:05Z',
-      meta: { kind: 'assistant_segment', segment_index: 1 },
-    },
-    {
-      id: 'temp_user_100',
-      role: 'user',
-      content: '新一轮',
-      conversation_id: 'conv-1',
-      created_at: '2026-05-20T00:10:00Z',
-    },
-    {
-      id: 'temp_assistant_100',
-      role: 'assistant',
-      kind: 'run_shell',
-      runId: 'run-new',
-      pending: true,
-      content: '',
-      conversation_id: 'conv-1',
-      created_at: '2026-05-20T00:10:00Z',
-    },
-  ], steerItems);
-
-  assert.deepEqual(merged.map((item) => item.id), [
-    'client-1',
-    'old-assistant',
-    'temp_user_100',
-    'temp_assistant_100',
-  ]);
-});
-
-test('applied run steer still anchors before the pending shell for the same run', () => {
-  const steerItems = markRunSteerApplied([
-    buildRunSteerItem({
-      clientSteerId: 'client-1',
-      content: '当前引导',
-      conversationId: 'conv-1',
-      runId: 'run-1',
-      createdAt: '2026-05-20T00:00:02Z',
-    }),
-  ], { client_steer_id: 'client-1', steer_id: 'steer-1' });
-
-  const merged = mergeRunSteerItemsWithMessages([
-    {
-      id: 'msg-user-1',
-      role: 'user',
-      content: '当前任务',
-      conversation_id: 'conv-1',
-      created_at: '2026-05-20T00:00:01Z',
-    },
-    {
-      id: 'temp_assistant_1',
-      role: 'assistant',
-      kind: 'run_shell',
-      runId: 'run-1',
-      pending: true,
-      content: '',
-      conversation_id: 'conv-1',
-      created_at: '2026-05-20T00:00:03Z',
-    },
-  ], steerItems);
-
-  assert.deepEqual(merged.map((item) => item.id), [
-    'msg-user-1',
-    'client-1',
-    'temp_assistant_1',
-  ]);
 });
 
 test('normalizeContextUsageSummary calculates display metrics', () => {

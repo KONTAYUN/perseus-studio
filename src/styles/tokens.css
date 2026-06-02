@@ -29,7 +29,8 @@ body {
   --radius-card: 16px;
   --radius-panel: 20px;
   --radius-shell: 24px;
-  --radius-composer: 28px;
+  --radius-composer: var(--radius-panel);
+  --radius-composer-popover: var(--radius-card);
   --radius-cluster: 16px;
   --radius-icon: 11px;
   --radius-pill: 999px;

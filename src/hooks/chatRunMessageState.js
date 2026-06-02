@@ -78,6 +78,25 @@ export function insertRunMessageAfterAnchor(messages, message, userMessageId = '
   return nextMessages;
 }
 
+export function mergeRunUserMessage(messages, message, userMessageId = '', runId = '') {
+  const normalized = normalizeConversationMessage(message);
+  if (!normalized?.id) return messages || [];
+  const current = messages || [];
+  const existingIndex = current.findIndex((item) => item?.id === normalized.id);
+  if (existingIndex >= 0) {
+    const nextMessages = [...current];
+    nextMessages[existingIndex] = {
+      ...nextMessages[existingIndex],
+      ...normalized,
+    };
+    return nextMessages;
+  }
+  const nextMessages = [...current];
+  const insertIndex = runUserMessageInsertIndex(nextMessages, userMessageId, runId);
+  nextMessages.splice(insertIndex, 0, normalized);
+  return nextMessages;
+}
+
 export function moveRunMessageAfterAnchor(messages, messageIndex, userMessageId = '', runId = '') {
   const nextMessages = [...(messages || [])];
   if (messageIndex < 0 || messageIndex >= nextMessages.length) return nextMessages;
@@ -211,7 +230,7 @@ export function normalizeConversationMessage(message) {
   if (next.meta?.kind && !next.kind) {
     next.kind = next.meta.kind;
   }
-  if (next.meta?.status && !next.status) {
+  if (next.meta?.status && (next.meta?.kind === 'steer' || !next.status)) {
     next.status = next.meta.status;
   }
   const metaRunId = String(next.meta?.run_id || next.meta?.runId || '').trim();
@@ -332,6 +351,21 @@ function runAnchorInsertIndex(messages, userMessageId = '', runId = '') {
   if (anchorIndex < 0) return items.length;
   let insertIndex = anchorIndex + 1;
   while (insertIndex < items.length && isMessageAnchoredToRun(items[insertIndex], runId)) {
+    insertIndex += 1;
+  }
+  return insertIndex;
+}
+
+function runUserMessageInsertIndex(messages, userMessageId = '', runId = '') {
+  const items = messages || [];
+  const anchorIndex = items.findIndex((item) => item?.id === userMessageId);
+  if (anchorIndex < 0) return items.length;
+  let insertIndex = anchorIndex + 1;
+  while (
+    insertIndex < items.length &&
+    isMessageAnchoredToRun(items[insertIndex], runId) &&
+    !isPendingRunShell(items[insertIndex], '', runId)
+  ) {
     insertIndex += 1;
   }
   return insertIndex;

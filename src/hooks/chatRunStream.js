@@ -17,6 +17,7 @@ import {
   nextLoadingStatus,
   normalizeContextUsageSummary,
   normalizeConversationMessages,
+  mergeRunUserMessage,
   updateLoadingState,
 } from './chatStateUtils.js';
 import { mergeConversationSnapshotPreservingActive } from './chatMessageMerge.js';
@@ -228,11 +229,24 @@ export async function waitForAgentRunStream({
       }
     } else if (item?.type === 'agent_steer_received') {
       setRunSteerItems?.((current) => markRunSteerReceived(current, payload, { conversationId: conversationID, runId }));
+      if (payload.user_message) {
+        setVisibleConversationMessages((current) => mergeRunUserMessage(current, payload.user_message, activeUserMessageId, runId));
+        setRunSteerItems?.((current) => markRunSteerApplied(current, payload, { conversationId: conversationID, runId }));
+      }
     } else if (item?.type === 'agent_steer_applied') {
       setRunSteerItems?.((current) => markRunSteerApplied(current, payload, { conversationId: conversationID, runId }));
+      if (payload.user_message) {
+        setVisibleConversationMessages((current) => mergeRunUserMessage(current, payload.user_message, activeUserMessageId, runId));
+      }
       clearVisibleRunSteerNotice();
     } else if (item?.type === 'agent_steer_rejected') {
       setRunSteerItems?.((current) => markRunSteerRejected(current, payload, { conversationId: conversationID, runId }));
+      clearVisibleRunSteerNotice();
+    } else if (item?.type === 'agent_steer_canceled') {
+      const messageId = payload.message_id || '';
+      if (messageId) {
+        setVisibleConversationMessages((current) => (current || []).filter((messageItem) => messageItem.id !== messageId));
+      }
       clearVisibleRunSteerNotice();
     }
     if (item?.type === 'user_message_committed') {

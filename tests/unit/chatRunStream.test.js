@@ -511,3 +511,319 @@ test('waitForAgentRunStream does not keep empty completed assistant segments', a
     globalThis.window = originalWindow;
   }
 });
+
+test('waitForAgentRunStream places received steer in the message timeline before later assistant output', async () => {
+  const originalEventSource = globalThis.EventSource;
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.EventSource = MockEventSource;
+    globalThis.window = {
+      setInterval: () => 0,
+      clearInterval: () => {},
+      setTimeout: (fn) => {
+        queueMicrotask(fn);
+        return 0;
+      },
+    };
+    MockEventSource.instances = [];
+
+    let messages = [
+      {
+        id: 'u1',
+        role: 'user',
+        content: '先创建版本3',
+        conversation_id: 'conv-5',
+      },
+      {
+        id: 'temp_assistant',
+        role: 'assistant',
+        pending: true,
+        runId: 'run-5',
+        activeMessageId: '',
+        kind: 'run_shell',
+        content: '',
+        progressItems: [],
+      },
+    ];
+    let steerItems = [];
+
+    const runPromise = waitForAgentRunStream({
+      control: {},
+      conversationID: 'conv-5',
+      currentConversationIdRef: { current: 'conv-5' },
+      userMessageId: 'u1',
+      loadConversations: async () => {},
+      onAssistantToolEvents: async () => {},
+      onTasksChanged: () => {},
+      runId: 'run-5',
+      selectedModel: null,
+      setAgentRecoveryNotice: () => {},
+      setChatError: () => {},
+      setContextCompactionNotice: () => {},
+      setContextUsage: () => {},
+      setConversationMessages: (updater) => {
+        messages = typeof updater === 'function' ? updater(messages) : updater;
+      },
+      setRunSteerItems: (updater) => {
+        steerItems = typeof updater === 'function' ? updater(steerItems) : updater;
+      },
+      setRunSteerNotice: () => {},
+      thinkingId: 'temp_assistant',
+    });
+
+    const source = MockEventSource.instances[0];
+    source.emit('event', {
+      seq: 1,
+      type: 'assistant_message_started',
+      payload: {
+        assistant_message: {
+          id: 'a1',
+          role: 'assistant',
+          status: 'streaming',
+          content: '',
+          conversation_id: 'conv-5',
+          meta: { kind: 'assistant_segment', run_id: 'run-5' },
+        },
+      },
+    });
+    source.emit('event', {
+      seq: 2,
+      type: 'assistant_message_completed',
+      payload: {
+        assistant_message: {
+          id: 'a1',
+          role: 'assistant',
+          content: '第一段完成',
+          conversation_id: 'conv-5',
+          meta: { kind: 'assistant_segment', run_id: 'run-5' },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'temp_assistant']);
+
+    source.emit('event', {
+      seq: 3,
+      type: 'agent_steer_received',
+      payload: {
+        steer_id: 'steer-1',
+        client_steer_id: 'client-1',
+        content: '改成警局开场',
+        content_preview: '改成警局开场',
+        message_id: 'steer-msg-1',
+        user_message: {
+          id: 'steer-msg-1',
+          role: 'user',
+          content: '改成警局开场',
+          conversation_id: 'conv-5',
+          status: 'final',
+          created_at: '2026-05-21T00:00:02Z',
+          meta: {
+            kind: 'steer',
+            status: 'received',
+            run_id: 'run-5',
+            steer_id: 'steer-1',
+            client_steer_id: 'client-1',
+          },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'steer-msg-1', 'temp_assistant']);
+    assert.equal(messages[2].kind, 'steer');
+    assert.equal(messages[2].status, 'received');
+    assert.equal(steerItems[0].messageId, 'steer-msg-1');
+
+    source.emit('event', {
+      seq: 4,
+      type: 'assistant_message_started',
+      payload: {
+        assistant_message: {
+          id: 'a2',
+          role: 'assistant',
+          status: 'streaming',
+          content: '',
+          conversation_id: 'conv-5',
+          meta: { kind: 'assistant_segment', run_id: 'run-5' },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'steer-msg-1', 'a2']);
+
+    source.emit('event', {
+      seq: 5,
+      type: 'agent_steer_applied',
+      payload: {
+        steer_id: 'steer-1',
+        client_steer_id: 'client-1',
+        message_id: 'steer-msg-1',
+        user_message: {
+          id: 'steer-msg-1',
+          role: 'user',
+          content: '改成警局开场',
+          conversation_id: 'conv-5',
+          status: 'final',
+          created_at: '2026-05-21T00:00:02Z',
+          meta: {
+            kind: 'steer',
+            status: 'applied',
+            run_id: 'run-5',
+            steer_id: 'steer-1',
+            client_steer_id: 'client-1',
+          },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'steer-msg-1', 'a2']);
+    assert.equal(messages[2].status, 'applied');
+
+    source.emit('event', {
+      seq: 6,
+      type: 'assistant_message_completed',
+      payload: {
+        assistant_message: {
+          id: 'a2',
+          role: 'assistant',
+          content: '按警局开场继续',
+          conversation_id: 'conv-5',
+          meta: { kind: 'assistant_segment', run_id: 'run-5' },
+        },
+      },
+    });
+    source.emit('run', { id: 'run-5', status: 'succeeded' });
+    await runPromise;
+
+    assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'steer-msg-1', 'a2']);
+    assert.equal(messages[3].content, '按警局开场继续');
+  } finally {
+    globalThis.EventSource = originalEventSource;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('waitForAgentRunStream removes committed steer message after cancel event', async () => {
+  const originalEventSource = globalThis.EventSource;
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.EventSource = MockEventSource;
+    globalThis.window = {
+      setInterval: () => 0,
+      clearInterval: () => {},
+      setTimeout: (fn) => {
+        queueMicrotask(fn);
+        return 0;
+      },
+    };
+    MockEventSource.instances = [];
+
+    let messages = [
+      { id: 'u1', role: 'user', content: '继续', conversation_id: 'conv-6' },
+      {
+        id: 'temp_assistant',
+        role: 'assistant',
+        pending: true,
+        runId: 'run-6',
+        activeMessageId: '',
+        kind: 'run_shell',
+        content: '',
+        progressItems: [],
+      },
+    ];
+
+    const runPromise = waitForAgentRunStream({
+      control: {},
+      conversationID: 'conv-6',
+      currentConversationIdRef: { current: 'conv-6' },
+      userMessageId: 'u1',
+      loadConversations: async () => {},
+      onAssistantToolEvents: async () => {},
+      onTasksChanged: () => {},
+      runId: 'run-6',
+      selectedModel: null,
+      setAgentRecoveryNotice: () => {},
+      setChatError: () => {},
+      setContextCompactionNotice: () => {},
+      setContextUsage: () => {},
+      setConversationMessages: (updater) => {
+        messages = typeof updater === 'function' ? updater(messages) : updater;
+      },
+      setRunSteerItems: () => {},
+      setRunSteerNotice: () => {},
+      thinkingId: 'temp_assistant',
+    });
+
+    const source = MockEventSource.instances[0];
+    source.emit('event', {
+      seq: 1,
+      type: 'agent_steer_received',
+      payload: {
+        steer_id: 'steer-1',
+        client_steer_id: 'client-1',
+        content: '这条不要了',
+        message_id: 'steer-msg-1',
+        user_message: {
+          id: 'steer-msg-1',
+          role: 'user',
+          content: '这条不要了',
+          conversation_id: 'conv-6',
+          status: 'final',
+          created_at: '2026-05-21T00:00:02Z',
+          meta: { kind: 'steer', status: 'received', run_id: 'run-6' },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(messages.some((item) => item.id === 'steer-msg-1'), true);
+
+    source.emit('event', {
+      seq: 2,
+      type: 'agent_steer_canceled',
+      payload: {
+        steer_id: 'steer-1',
+        client_steer_id: 'client-1',
+        message_id: 'steer-msg-1',
+        message_deleted: true,
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(messages.some((item) => item.id === 'steer-msg-1'), false);
+    source.emit('event', {
+      seq: 3,
+      type: 'assistant_message_started',
+      payload: {
+        assistant_message: {
+          id: 'a-final',
+          role: 'assistant',
+          status: 'streaming',
+          content: '',
+          conversation_id: 'conv-6',
+          meta: { kind: 'assistant_segment', run_id: 'run-6' },
+        },
+      },
+    });
+    source.emit('event', {
+      seq: 4,
+      type: 'assistant_message_completed',
+      payload: {
+        assistant_message: {
+          id: 'a-final',
+          role: 'assistant',
+          content: '继续',
+          conversation_id: 'conv-6',
+          meta: { kind: 'assistant_segment', run_id: 'run-6' },
+        },
+      },
+    });
+    source.emit('run', { id: 'run-6', status: 'succeeded' });
+    await runPromise;
+  } finally {
+    globalThis.EventSource = originalEventSource;
+    globalThis.window = originalWindow;
+  }
+});

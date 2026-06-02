@@ -19,8 +19,9 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 		trimMapString(payload, "stderr", profile.MaxCommandOutputRunes/2)
 		payload["model_view"] = "stdout/stderr may be truncated for stability; the UI keeps the full command event separately."
 	case "read_workspace_text":
-		trimMapString(payload, "content", profile.MaxReadFileContentRunes)
-		if fitPayloadStringFieldToBudget(payload, "content", profile.MaxToolResultRunes) {
+		preferNumberedReadContentForModel(payload)
+		trimReadContentFields(payload, profile.MaxReadFileContentRunes)
+		if fitPayloadStringFieldsToBudget(payload, []string{"numbered_content", "content"}, profile.MaxToolResultRunes) {
 			raw, _ := json.Marshal(payload)
 			return string(raw)
 		}
@@ -47,6 +48,23 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 	return string(raw)
 }
 
+func preferNumberedReadContentForModel(payload map[string]any) {
+	numbered, _ := payload["numbered_content"].(string)
+	if numbered == "" {
+		return
+	}
+	if _, ok := payload["content"].(string); ok {
+		delete(payload, "content")
+		payload["content_omitted_for_model"] = true
+	}
+	payload["model_view"] = "numbered_content is the single file view; re-read a narrower range if needed."
+}
+
+func trimReadContentFields(payload map[string]any, maxRunes int) {
+	trimMapString(payload, "numbered_content", maxRunes)
+	trimMapString(payload, "content", maxRunes)
+}
+
 func budgetBatchReadPayload(payload map[string]any, profile providerRuntimeProfile) {
 	rawItems, ok := payload["items"].([]any)
 	if !ok {
@@ -57,12 +75,14 @@ func budgetBatchReadPayload(payload map[string]any, profile providerRuntimeProfi
 		if !ok {
 			continue
 		}
-		trimMapString(object, "content", profile.MaxReadFileContentRunes)
+		preferNumberedReadContentForModel(object)
+		trimReadContentFields(object, profile.MaxReadFileContentRunes)
 	}
 	payload["items"] = rawItems
+	payload["model_view"] = "Batch read items use one file view per item; re-read narrower ranges if needed."
 }
 
-func fitPayloadStringFieldToBudget(payload map[string]any, key string, maxRunes int) bool {
+func fitPayloadStringFieldsToBudget(payload map[string]any, keys []string, maxRunes int) bool {
 	if maxRunes <= 0 {
 		return false
 	}
@@ -75,8 +95,8 @@ func fitPayloadStringFieldToBudget(payload map[string]any, key string, maxRunes 
 		if over <= 0 {
 			return true
 		}
-		value, ok := payload[key].(string)
-		if !ok {
+		key, value := largestPayloadStringField(payload, keys)
+		if key == "" || value == "" {
 			return false
 		}
 		runes := []rune(value)
@@ -92,6 +112,19 @@ func fitPayloadStringFieldToBudget(payload map[string]any, key string, maxRunes 
 		payload[key+"_truncation_note"] = fmt.Sprintf("kept first %d chars for model stability", nextLen)
 	}
 	return false
+}
+
+func largestPayloadStringField(payload map[string]any, keys []string) (string, string) {
+	selectedKey := ""
+	selectedValue := ""
+	for _, key := range keys {
+		value, _ := payload[key].(string)
+		if len([]rune(value)) > len([]rune(selectedValue)) {
+			selectedKey = key
+			selectedValue = value
+		}
+	}
+	return selectedKey, selectedValue
 }
 
 func fitBatchReadPayloadToBudget(payload map[string]any, maxRunes int) bool {
@@ -111,8 +144,8 @@ func fitBatchReadPayloadToBudget(payload map[string]any, maxRunes int) bool {
 		if over <= 0 {
 			return true
 		}
-		item, content := largestBatchReadContent(rawItems)
-		if item == nil || content == "" {
+		item, key, content := largestBatchReadContent(rawItems)
+		if item == nil || key == "" || content == "" {
 			if len(rawItems) <= 1 {
 				return false
 			}
@@ -127,29 +160,33 @@ func fitBatchReadPayloadToBudget(payload map[string]any, maxRunes int) bool {
 		if nextLen < 0 {
 			nextLen = 0
 		}
-		item["content"] = string(runes[:nextLen])
-		item["content_truncated_for_model"] = true
-		item["content_truncation_note"] = fmt.Sprintf("kept first %d chars for model stability", nextLen)
+		item[key] = string(runes[:nextLen])
+		item[key+"_truncated_for_model"] = true
+		item[key+"_truncation_note"] = fmt.Sprintf("kept first %d chars for model stability", nextLen)
 		payload["model_view"] = "Batch read contents may be truncated for model stability; path, range, and failure metadata are preserved."
 	}
 	return false
 }
 
-func largestBatchReadContent(items []any) (map[string]any, string) {
+func largestBatchReadContent(items []any) (map[string]any, string, string) {
 	var selected map[string]any
+	selectedKey := ""
 	selectedContent := ""
 	for _, raw := range items {
 		item, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		content, _ := item["content"].(string)
-		if len([]rune(content)) > len([]rune(selectedContent)) {
-			selected = item
-			selectedContent = content
+		for _, key := range []string{"numbered_content", "content"} {
+			content, _ := item[key].(string)
+			if len([]rune(content)) > len([]rune(selectedContent)) {
+				selected = item
+				selectedKey = key
+				selectedContent = content
+			}
 		}
 	}
-	return selected, selectedContent
+	return selected, selectedKey, selectedContent
 }
 
 func compactToolResultJSON(toolName, raw string, maxRunes int) string {

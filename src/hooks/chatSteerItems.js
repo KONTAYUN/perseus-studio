@@ -83,6 +83,7 @@ export function pendingRunSteerPreviewItems(items) {
   return (items || []).filter(
     (item) =>
       item?.content &&
+      !item.messageId &&
       (item.status === RUN_STEER_STATUS.submitting ||
         item.status === RUN_STEER_STATUS.received ||
         item.status === RUN_STEER_STATUS.failed)
@@ -119,29 +120,13 @@ export function markRunSteerRejected(items, eventPayload = {}, fallback = {}) {
   });
 }
 
-export function mergeRunSteerItemsWithMessages(messages, runSteerItems) {
-  const visibleItems = (runSteerItems || []).filter(
-    (item) =>
-      item?.content &&
-      item.status === RUN_STEER_STATUS.applied &&
-      !hasMatchingSteerMessage(messages, item)
-  );
-  if (visibleItems.length === 0) return messages || [];
-  const messageIds = new Set((messages || []).map((message) => message.id));
-  const additions = visibleItems
-    .filter((item) => !messageIds.has(item.id))
-    .sort(compareConversationItems);
-  let merged = messages || [];
-  for (const item of additions) {
-    merged = insertRunSteerTimelineItem(merged, item);
-  }
-  return merged;
-}
-
 export function visibleRunSteerTimelineItems(runSteerItems, conversationId) {
   const targetConversationId = String(conversationId || '').trim();
   if (!targetConversationId) return [];
-  return (runSteerItems || []).filter((item) => item?.conversation_id === targetConversationId);
+  return (runSteerItems || []).filter((item) => {
+    if (item?.conversation_id !== targetConversationId) return false;
+    return item.status !== RUN_STEER_STATUS.applied;
+  });
 }
 
 export function buildAppliedRunSteerItemsFromEvents(events = [], { conversationId = '', runId = '' } = {}) {
@@ -156,6 +141,9 @@ export function buildAppliedRunSteerItemsFromEvents(events = [], { conversationI
     const key = steerId || clientSteerId || String(event.id || '').trim();
     if (!key) continue;
     if (type === 'agent_steer_received') {
+      if (payload.user_message || payload.message_id) {
+        continue;
+      }
       receivedBySteer.set(key, {
         content: String(payload.content || payload.content_preview || '').trim(),
         createdAt: payload.created_at || event.created_at || '',
@@ -198,6 +186,7 @@ function mergeRunSteerEvent(items, eventPayload = {}, fallback = {}) {
   const steerId = String(eventPayload.steer_id || fallback.steerId || '').trim();
   const content = String(eventPayload.content || eventPayload.content_preview || fallback.content || '').trim();
   const createdAt = String(eventPayload.created_at || fallback.createdAt || '').trim();
+  const messageId = String(eventPayload.message_id || eventPayload.user_message?.id || fallback.messageId || '').trim();
   const status = fallback.status || RUN_STEER_STATUS.received;
   const key = clientSteerId || steerId;
   if (!key && !content) return items || [];
@@ -216,6 +205,7 @@ function mergeRunSteerEvent(items, eventPayload = {}, fallback = {}) {
       content,
       error: fallback.error,
       created_at: createdAt,
+      messageId,
     })[0];
   });
   if (matched) return nextItems;
@@ -231,6 +221,7 @@ function mergeRunSteerEvent(items, eventPayload = {}, fallback = {}) {
     steerId,
     status,
     error: fallback.error || '',
+    messageId,
   });
 }
 
@@ -269,89 +260,6 @@ function strongerRunSteerStatus(currentStatus, nextStatus) {
   const currentRank = RUN_STEER_STATUS_ORDER[currentStatus] ?? 0;
   const nextRank = RUN_STEER_STATUS_ORDER[nextStatus] ?? 0;
   return nextRank >= currentRank ? nextStatus : currentStatus;
-}
-
-function isSteerMessage(message) {
-  return message?.kind === 'steer' || message?.meta?.kind === 'steer';
-}
-
-function isPendingAssistantMessage(message) {
-  return message?.role === 'assistant' && !!message?.pending;
-}
-
-function insertRunSteerTimelineItem(messages, item) {
-  const nextMessages = [...(messages || [])];
-  const insertIndex = runSteerInsertIndex(nextMessages, item);
-  nextMessages.splice(insertIndex, 0, item);
-  return nextMessages;
-}
-
-function runSteerInsertIndex(messages, item) {
-  const runId = String(item?.runId || '').trim();
-  if (runId) {
-    const pendingIndex = messages.findIndex((message) => isPendingAssistantMessage(message) && message?.runId === runId);
-    if (pendingIndex >= 0) return pendingIndex;
-
-    let lastRunItemIndex = -1;
-    for (let index = 0; index < messages.length; index += 1) {
-      if (isRunTimelineItem(messages[index], runId)) {
-        lastRunItemIndex = index;
-      }
-    }
-    if (lastRunItemIndex >= 0) return lastRunItemIndex + 1;
-
-    return timestampInsertIndex(messages, item);
-  }
-
-  const pendingIndex = singlePendingAssistantIndex(messages);
-  if (pendingIndex >= 0) return pendingIndex;
-
-  return timestampInsertIndex(messages, item);
-}
-
-function isRunTimelineItem(message, runId) {
-  if (!message || !runId) return false;
-  if (message.runId === runId || message.resumableRunId === runId) return true;
-  return isSteerMessage(message) && message.runId === runId;
-}
-
-function singlePendingAssistantIndex(messages) {
-  let foundIndex = -1;
-  for (let index = 0; index < messages.length; index += 1) {
-    if (!isPendingAssistantMessage(messages[index])) continue;
-    if (foundIndex >= 0) return -1;
-    foundIndex = index;
-  }
-  return foundIndex;
-}
-
-function timestampInsertIndex(messages, item) {
-  const itemTime = Date.parse(item?.created_at || '') || 0;
-  if (!itemTime) return messages.length;
-  for (let index = 0; index < messages.length; index += 1) {
-    const messageTime = Date.parse(messages[index]?.created_at || '') || 0;
-    if (messageTime && itemTime < messageTime) return index;
-  }
-  return messages.length;
-}
-
-function compareConversationItems(a, b) {
-  const aTime = Date.parse(a?.created_at || '') || 0;
-  const bTime = Date.parse(b?.created_at || '') || 0;
-  if (aTime !== bTime) return aTime - bTime;
-  return String(a?.id || '').localeCompare(String(b?.id || ''));
-}
-
-function hasMatchingSteerMessage(messages, item) {
-  return (messages || []).some((message) => {
-    if (!isSteerMessage(message)) return false;
-    const meta = message.meta || {};
-    return (
-      (!!item.steerId && meta.steer_id === item.steerId) ||
-      (!!item.clientSteerId && meta.client_steer_id === item.clientSteerId) ||
-      (!!item.content && message.content === item.content)
-    );
-  });
 }
 
 function removeEmptyFields(value) {

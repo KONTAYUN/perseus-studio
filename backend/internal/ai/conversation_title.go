@@ -1,8 +1,12 @@
 package ai
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -85,9 +89,19 @@ func (s *Service) generateOpenAIConversationTitle(ctx context.Context, provider 
 		}
 		return "", err
 	}
-	var data openAIResponse
-	if err := decodeProviderResponse(resp, endpoint, &data); err != nil {
+	data, stats, mismatch, err := decodeOpenAIConversationTitleResponse(resp, endpoint)
+	if err != nil {
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err)
+		return "", err
+	}
+	if mismatch && data.titleText() == "" {
+		err := &ProviderResponseError{
+			StatusCode:  http.StatusOK,
+			ContentType: "text/event-stream",
+			Endpoint:    endpoint,
+			Message:     "provider_protocol_mismatch: conversation title response was SSE but contained no title text",
+		}
+		s.recordProviderDiagnosticSummary(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err, conversationTitleProtocolMismatchSummary(provider, "text/event-stream", stats.Chunks, stats.ChoicesSeen))
 		return "", err
 	}
 	if data.Error != nil {
@@ -98,7 +112,7 @@ func (s *Service) generateOpenAIConversationTitle(ctx context.Context, provider 
 	if len(data.Choices) == 0 {
 		return "", fmt.Errorf("empty title response")
 	}
-	return normalizeOpenAIContent(data.Choices[0].Message.Content), nil
+	return normalizeOpenAIContent(data.titleText()), nil
 }
 
 func (s *Service) generateAnthropicConversationTitle(ctx context.Context, provider store.ModelProvider, instruction, prompt string, opts RunOptions, conversationID, messageID string) (string, error) {
@@ -159,4 +173,134 @@ func normalizeGeneratedConversationTitle(value string) string {
 		value = strings.TrimRight(strings.TrimSpace(trimmed), "。.!！?？,，;；:：")
 	}
 	return value
+}
+
+func decodeOpenAIConversationTitleResponse(resp *http.Response, endpoint string) (openAIResponse, openAITitleSSEStats, bool, error) {
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if strings.Contains(contentType, "text/event-stream") {
+		data, stats, err := decodeOpenAITitleSSE(resp.Body)
+		if err != nil {
+			return openAIResponse{}, stats, true, &ProviderResponseError{
+				StatusCode:      resp.StatusCode,
+				ContentType:     resp.Header.Get("Content-Type"),
+				Endpoint:        endpoint,
+				ResponseSnippet: stats.Snippet,
+				ParseError:      err.Error(),
+			}
+		}
+		return data, stats, true, nil
+	}
+	var data openAIResponse
+	if err := decodeProviderResponse(resp, endpoint, &data); err != nil {
+		return openAIResponse{}, openAITitleSSEStats{}, false, err
+	}
+	return data, openAITitleSSEStats{}, false, nil
+}
+
+type openAITitleSSEStats struct {
+	Chunks      int
+	ChoicesSeen int
+	Snippet     string
+}
+
+func decodeOpenAITitleSSE(body io.ReadCloser) (openAIResponse, openAITitleSSEStats, error) {
+	defer body.Close()
+	var result openAIResponse
+	var stats openAITitleSSEStats
+	var text strings.Builder
+	scanner := bufio.NewScanner(io.LimitReader(body, 2<<20))
+	scanner.Buffer(make([]byte, 0, 64*1024), 2<<20)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		dataLine := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if dataLine == "" || dataLine == "[DONE]" {
+			continue
+		}
+		stats.Chunks++
+		if stats.Snippet == "" {
+			stats.Snippet = truncate(dataLine, 500)
+		}
+		var chunk struct {
+			Error   any `json:"error"`
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+				Delta struct {
+					Content any `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(dataLine), &chunk); err != nil {
+			return result, stats, err
+		}
+		if chunk.Error != nil {
+			result.Error = chunk.Error
+		}
+		stats.ChoicesSeen += len(chunk.Choices)
+		for _, choice := range chunk.Choices {
+			if choice.Message.Content != "" {
+				text.WriteString(choice.Message.Content)
+			}
+			if delta := openAITitleDeltaText(choice.Delta.Content); delta != "" {
+				text.WriteString(delta)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return result, stats, err
+	}
+	content := text.String()
+	if content != "" {
+		result.Choices = []openAIChoice{{Message: openAIMessage{Content: content}}}
+	}
+	return result, stats, nil
+}
+
+func openAITitleDeltaText(value any) string {
+	switch item := value.(type) {
+	case string:
+		return item
+	case []any:
+		var b strings.Builder
+		for _, part := range item {
+			switch value := part.(type) {
+			case string:
+				b.WriteString(value)
+			case map[string]any:
+				if text := stringFromAny(value["text"]); text != "" {
+					b.WriteString(text)
+				}
+			}
+		}
+		return b.String()
+	default:
+		return ""
+	}
+}
+
+func (r openAIResponse) titleText() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	return normalizeOpenAIContent(r.Choices[0].Message.Content)
+}
+
+func conversationTitleProtocolMismatchSummary(provider store.ModelProvider, actualContentType string, chunks, choices int) string {
+	raw, _ := json.Marshal(map[string]any{
+		"failure_class":       "provider_protocol_mismatch",
+		"stage":               "conversation_title",
+		"protocol":            strings.TrimSpace(provider.Protocol),
+		"provider":            provider.Name,
+		"model":               provider.ModelID,
+		"provider_host":       providerHost(provider.BaseURL),
+		"requested_stream":    false,
+		"actual_content_type": actualContentType,
+		"sse_chunk_count":     chunks,
+		"choices_seen":        choices,
+	})
+	return string(raw)
 }

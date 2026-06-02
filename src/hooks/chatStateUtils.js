@@ -36,6 +36,7 @@ export {
   mergeAssistantMessageCompleted,
   mergeAssistantMessageStarted,
   mergeCommittedRunStart,
+  mergeRunUserMessage,
   moveRunMessageAfterAnchor,
 } from './chatRunMessageState.js';
 

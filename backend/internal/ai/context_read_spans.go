@@ -76,34 +76,36 @@ func readResultSpans(result *TranscriptToolResult) []readResultSpan {
 		spans = append(spans, span)
 	}
 	var payload struct {
-		Status     string   `json:"status"`
-		Path       string   `json:"path"`
-		Paths      []string `json:"paths"`
-		Content    string   `json:"content"`
-		Truncated  bool     `json:"truncated"`
-		StartLine  int      `json:"start_line"`
-		EndLine    int      `json:"end_line"`
-		TotalLines int      `json:"total_lines"`
-		Items      []struct {
-			Status     string `json:"status"`
-			Path       string `json:"path"`
-			Content    string `json:"content"`
-			Truncated  bool   `json:"truncated"`
-			StartLine  int    `json:"start_line"`
-			EndLine    int    `json:"end_line"`
-			TotalLines int    `json:"total_lines"`
+		Status          string   `json:"status"`
+		Path            string   `json:"path"`
+		Paths           []string `json:"paths"`
+		Content         string   `json:"content"`
+		NumberedContent string   `json:"numbered_content"`
+		Truncated       bool     `json:"truncated"`
+		StartLine       int      `json:"start_line"`
+		EndLine         int      `json:"end_line"`
+		TotalLines      int      `json:"total_lines"`
+		Items           []struct {
+			Status          string `json:"status"`
+			Path            string `json:"path"`
+			Content         string `json:"content"`
+			NumberedContent string `json:"numbered_content"`
+			Truncated       bool   `json:"truncated"`
+			StartLine       int    `json:"start_line"`
+			EndLine         int    `json:"end_line"`
+			TotalLines      int    `json:"total_lines"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(result.Content), &payload); err == nil {
 		if payload.Status == "compacted_context" {
 			return nil
 		}
-		add(payload.Path, payload.StartLine, payload.EndLine, payload.TotalLines, payload.Truncated, payload.Content)
+		add(payload.Path, payload.StartLine, payload.EndLine, payload.TotalLines, payload.Truncated, readSpanContent(payload.Content, payload.NumberedContent))
 		for _, item := range payload.Items {
 			if item.Status == "compacted_context" {
 				continue
 			}
-			add(item.Path, item.StartLine, item.EndLine, item.TotalLines, item.Truncated, item.Content)
+			add(item.Path, item.StartLine, item.EndLine, item.TotalLines, item.Truncated, readSpanContent(item.Content, item.NumberedContent))
 		}
 		if len(spans) == 0 {
 			for _, path := range payload.Paths {
@@ -126,6 +128,13 @@ func readResultSpans(result *TranscriptToolResult) []readResultSpan {
 		return spans[i].EndLine < spans[j].EndLine
 	})
 	return spans
+}
+
+func readSpanContent(content, numberedContent string) string {
+	if content != "" {
+		return content
+	}
+	return numberedContent
 }
 
 func compactBatchReadItemsStaleAfterMutation(result *TranscriptToolResult, mutatedLater map[string]bool) (bool, []string) {
@@ -154,6 +163,7 @@ func compactBatchReadItemsStaleAfterMutation(result *TranscriptToolResult, mutat
 		}
 		item["status"] = "compacted_context"
 		item["content"] = ""
+		item["numbered_content"] = ""
 		item["stale_after_mutation"] = true
 		item["message"] = "This file was modified later in the transcript. Re-read this path if exact current text is needed again."
 		if !seen[normalized] {
@@ -174,6 +184,72 @@ func compactBatchReadItemsStaleAfterMutation(result *TranscriptToolResult, mutat
 	}
 	result.Content = string(raw)
 	return true, stalePaths
+}
+
+func compactReadResultForPayload(result *TranscriptToolResult) bool {
+	if result == nil || !isReadWorkspaceTool(result.ToolName) {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result.Content), &payload); err != nil {
+		return false
+	}
+	if stringFromAny(payload["status"]) == "compacted_context" {
+		return false
+	}
+	changed := false
+	if compactReadPayloadObjectForPayload(payload) {
+		changed = true
+	}
+	if rawItems, ok := payload["items"].([]any); ok {
+		for _, rawItem := range rawItems {
+			item, ok := rawItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			if compactReadPayloadObjectForPayload(item) {
+				changed = true
+			}
+		}
+		payload["items"] = rawItems
+	}
+	if !changed {
+		return false
+	}
+	payload["payload_compacted_for_model"] = true
+	payload["model_view"] = "Read content was compacted because the provider request payload was too large. Path/range metadata remains; re-read a narrower range when exact text is needed."
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+	result.Content = string(raw)
+	return true
+}
+
+func compactReadPayloadObjectForPayload(payload map[string]any) bool {
+	if payload == nil {
+		return false
+	}
+	content := stringFromAny(payload["content"])
+	numbered := stringFromAny(payload["numbered_content"])
+	if content == "" && numbered == "" {
+		return false
+	}
+	if content != "" {
+		payload["content_chars"] = len([]rune(content))
+		payload["content_bytes"] = len([]byte(content))
+		payload["content"] = ""
+		payload["content_omitted_for_model"] = true
+	}
+	if numbered != "" {
+		payload["numbered_content_chars"] = len([]rune(numbered))
+		payload["numbered_content_bytes"] = len([]byte(numbered))
+		payload["numbered_content"] = ""
+		payload["numbered_content_omitted_for_model"] = true
+	}
+	payload["status"] = "compacted_context"
+	payload["message"] = "Exact read text was omitted for payload stability. Use read_workspace_text/read_workspace_files with start_line/end_line to retrieve the needed range again."
+	return true
 }
 
 func readSpanKey(span readResultSpan) string {

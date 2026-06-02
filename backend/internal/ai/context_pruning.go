@@ -17,6 +17,66 @@ func (m *agentContextManager) compactTranscript(transcript *AgentTranscript, pro
 	return compacted, actions
 }
 
+func (m *agentContextManager) compactTranscriptForPayloadPressure(transcript *AgentTranscript, profile providerRuntimeProfile, currentBytes int) []string {
+	if transcript == nil || profile.PayloadSoftBudgetBytes <= 0 || currentBytes <= profile.PayloadSoftBudgetBytes {
+		return nil
+	}
+	target := profile.PayloadSoftBudgetBytes
+	if profile.PayloadHardBudgetBytes > 0 && currentBytes > profile.PayloadHardBudgetBytes {
+		target = profile.PayloadSoftBudgetBytes * 85 / 100
+	}
+	current := currentBytes
+	var actions []string
+	recentEntryFloor := len(transcript.Entries) - 4
+	if recentEntryFloor < 0 {
+		recentEntryFloor = 0
+	}
+	for entryIndex := 0; entryIndex < len(transcript.Entries) && current > target; entryIndex++ {
+		entry := &transcript.Entries[entryIndex]
+		if entry.Kind != transcriptEntryTool {
+			continue
+		}
+		for resultIndex := range entry.ToolResults {
+			result := &entry.ToolResults[resultIndex]
+			if result.IsError || isCompactedToolResultContent(result.Content) {
+				continue
+			}
+			if isReadWorkspaceTool(result.ToolName) {
+				before := len([]byte(result.Content))
+				if compactReadResultForPayload(result) {
+					after := len([]byte(result.Content))
+					current -= before - after
+					action := "payload_pressure_read_compacted:" + result.ToolName
+					if path := normalizeWorkspaceEventPath(result.Event.Path); path != "" {
+						action += ":" + path
+					}
+					actions = append(actions, action)
+				}
+				if current <= target {
+					break
+				}
+				continue
+			}
+			if entryIndex >= recentEntryFloor {
+				continue
+			}
+			before := len([]byte(result.Content))
+			result.Content = compactedToolResultNotice(result.ToolName, result.Event, "Older successful tool output was compacted because the provider request payload was too large. Re-run or re-read only if exact details are needed.")
+			after := len([]byte(result.Content))
+			current -= before - after
+			action := "payload_pressure_tool_compacted:" + result.ToolName
+			if path := normalizeWorkspaceEventPath(result.Event.Path); path != "" {
+				action += ":" + path
+			}
+			actions = append(actions, action)
+			if current <= target {
+				break
+			}
+		}
+	}
+	return dedupeStrings(actions)
+}
+
 func compactSupersededReadResults(transcript *AgentTranscript) []string {
 	var newerSpans []readResultSpan
 	var actions []string

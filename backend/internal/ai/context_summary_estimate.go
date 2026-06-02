@@ -3,6 +3,7 @@ package ai
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 )
 
 func summarizeOpenAIContext(messages []map[string]any, transcript *AgentTranscript, actions []string, round int, profile providerRuntimeProfile) ProviderRequestSummary {
@@ -19,6 +20,8 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 		Protocol:                protocol,
 		ToolManifestDigest:      toolManifestDigest(),
 		InternalEditProtocol:    string(ToolTransportAssistantTextPatch),
+		PayloadSoftBudgetBytes:  profile.PayloadSoftBudgetBytes,
+		PayloadHardBudgetBytes:  profile.PayloadHardBudgetBytes,
 		MessageCount:            len(messages),
 		TranscriptEntries:       len(transcript.Entries),
 		ContextWindowTokens:     profile.ContextWindowTokens,
@@ -34,11 +37,24 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 		}
 		for _, result := range entry.ToolResults {
 			summary.ToolResultCount++
-			size := len([]rune(result.Content))
-			summary.EstimatedToolResultChars += size
+			charSize := len([]rune(result.Content))
+			byteSize := len([]byte(result.Content))
+			summary.EstimatedToolResultChars += charSize
 			summary.EstimatedToolResultTokens += estimateTextTokens(result.Content)
-			if size > summary.MaxSegmentChars {
-				summary.MaxSegmentChars = size
+			summary.ToolResultBytes += byteSize
+			if isReadWorkspaceTool(result.ToolName) {
+				summary.ReadContentBytes += readToolResultContentBytes(result.Content)
+			}
+			summary.LargestToolResults = appendLargestToolResultSize(summary.LargestToolResults, ToolResultSizeLog{
+				ToolName:     result.ToolName,
+				Path:         normalizeWorkspaceEventPath(result.Event.Path),
+				Bytes:        byteSize,
+				ReadContent:  isReadWorkspaceTool(result.ToolName),
+				Compacted:    isCompactedToolResultContent(result.Content),
+				ContentChars: charSize,
+			}, 5)
+			if charSize > summary.MaxSegmentChars {
+				summary.MaxSegmentChars = charSize
 			}
 		}
 	}
@@ -50,11 +66,53 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 		}
 	}
 	summary.EstimatedTokens = estimateRuntimeMessagesTokens(messages)
+	if profile.PayloadHardBudgetBytes > 0 && summary.PayloadBytes > profile.PayloadHardBudgetBytes {
+		summary.PayloadBudgetExceeded = true
+	}
+	for _, action := range actions {
+		if strings.HasPrefix(action, "payload_pressure_") || strings.HasPrefix(action, "budget_tool_result_pruned:") {
+			summary.PayloadCompactionApplied = true
+			break
+		}
+	}
 	if summary.ContextWindowTokens <= 0 {
 		summary.ContextWindowTokens = defaultContextWindowTokens
 	}
 	summary.ContextWatermarkPercent = contextWatermarkPercent(summary.EstimatedTokens, summary.ContextWindowTokens)
 	return summary
+}
+
+func appendLargestToolResultSize(items []ToolResultSizeLog, item ToolResultSizeLog, limit int) []ToolResultSizeLog {
+	if item.Bytes <= 0 {
+		return items
+	}
+	items = append(items, item)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Bytes > items[j].Bytes
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items
+}
+
+func readToolResultContentBytes(raw string) int {
+	var payload struct {
+		Content         string `json:"content"`
+		NumberedContent string `json:"numbered_content"`
+		Items           []struct {
+			Content         string `json:"content"`
+			NumberedContent string `json:"numbered_content"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return 0
+	}
+	total := len([]byte(payload.Content)) + len([]byte(payload.NumberedContent))
+	for _, item := range payload.Items {
+		total += len([]byte(item.Content)) + len([]byte(item.NumberedContent))
+	}
+	return total
 }
 
 func estimateMessageChars(message map[string]any) int {

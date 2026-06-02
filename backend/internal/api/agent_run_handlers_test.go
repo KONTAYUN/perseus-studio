@@ -35,10 +35,22 @@ func TestAgentRunSteerAcceptsRunningRunAndValidatesExpectedRun(t *testing.T) {
 	if err := runs.Migrate(t.Context()); err != nil {
 		t.Fatalf("runs.Migrate returned error: %v", err)
 	}
+	conversations := store.NewConversationStore(db)
+	if err := conversations.Migrate(t.Context()); err != nil {
+		t.Fatalf("conversations.Migrate returned error: %v", err)
+	}
+	conversation, err := conversations.CreateConversation(t.Context(), store.CreateConversationInput{
+		UserID:                  user.ID,
+		Title:                   "steer",
+		SelectedModelProviderID: "provider-steer-api",
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation returned error: %v", err)
+	}
 	run, err := runs.CreateRun(t.Context(), store.CreateAgentRunInput{
 		ID:              "run-steer-api",
 		UserID:          user.ID,
-		ConversationID:  "conv-steer-api",
+		ConversationID:  conversation.ID,
 		UserMessageID:   "msg-steer-api",
 		ModelProviderID: "provider-steer-api",
 	})
@@ -49,10 +61,11 @@ func TestAgentRunSteerAcceptsRunningRunAndValidatesExpectedRun(t *testing.T) {
 		t.Fatalf("UpdateRun returned error: %v", err)
 	}
 	server := &Server{
-		runs:      runs,
-		runBroker: tasks.NewBroker(),
-		mux:       http.NewServeMux(),
-		sessions:  sessions,
+		runs:          runs,
+		conversations: conversations,
+		runBroker:     tasks.NewBroker(),
+		mux:           http.NewServeMux(),
+		sessions:      sessions,
 	}
 	server.register()
 
@@ -88,6 +101,19 @@ func TestAgentRunSteerAcceptsRunningRunAndValidatesExpectedRun(t *testing.T) {
 	}
 	if response.Event.Payload["content_preview"] != "只处理我选中的文件" {
 		t.Fatalf("expected content_preview in response payload, got %#v", response.Event.Payload)
+	}
+	if strings.TrimSpace(response.Event.Payload["message_id"].(string)) == "" {
+		t.Fatalf("expected message_id in response payload, got %#v", response.Event.Payload)
+	}
+	if response.Event.Payload["user_message"] == nil {
+		t.Fatalf("expected user_message in response payload, got %#v", response.Event.Payload)
+	}
+	messages, err := conversations.ListMessages(t.Context(), user.ID, conversation.ID)
+	if err != nil {
+		t.Fatalf("ListMessages returned error: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Role != "user" || !strings.Contains(messages[0].Content, "只处理我选中的文件") || !strings.Contains(messages[0].MetaJSON, `"kind":"steer"`) {
+		t.Fatalf("expected steer to be stored as timeline message, got %#v", messages)
 	}
 
 	wrongReq := httptest.NewRequest(http.MethodPost, "/api/agent-runs/run-steer-api/steer", bytes.NewBufferString(`{"content":"x","expected_run_id":"other"}`))

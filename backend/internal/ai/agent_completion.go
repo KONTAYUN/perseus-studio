@@ -90,6 +90,10 @@ func firstInternalCompletionMarker(content string) string {
 		"finalize_workspace_write",
 		"edit_workspace_text",
 		"replace_workspace_lines",
+		"补丁块",
+		"补丁协议",
+		"补丁编辑协议",
+		"分块写入",
 	} {
 		if strings.Contains(content, marker) {
 			return marker

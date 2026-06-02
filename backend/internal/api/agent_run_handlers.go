@@ -5,23 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"webide-backend/internal/idgen"
 	"webide-backend/internal/store"
 	"webide-backend/internal/tasks"
 )
-
-type steerAgentRunRequest struct {
-	Content       string `json:"content"`
-	ExpectedRunID string `json:"expected_run_id"`
-	ClientSteerID string `json:"client_steer_id"`
-}
 
 type cancelAgentRunRequest struct {
 	Source string `json:"source"`
@@ -90,6 +82,17 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"event": event})
+	case "steers":
+		if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		event, err := s.cancelAgentRunSteer(r.Context(), user.UserID, runID, r.Body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"event": event})
 	case "events":
 		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
@@ -125,46 +128,6 @@ func queryInt(r *http.Request, key string, fallback int) int {
 		return fallback
 	}
 	return value
-}
-
-func (s *Server) steerAgentRun(ctx context.Context, userID, runID string, body io.Reader) (store.AgentEvent, error) {
-	var req steerAgentRunRequest
-	if err := json.NewDecoder(body).Decode(&req); err != nil {
-		return store.AgentEvent{}, fmt.Errorf("invalid steer request")
-	}
-	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		return store.AgentEvent{}, fmt.Errorf("content is required")
-	}
-	if strings.TrimSpace(req.ExpectedRunID) != runID {
-		return store.AgentEvent{}, fmt.Errorf("expected_run_id does not match active run")
-	}
-	run, err := s.runs.GetRun(ctx, userID, runID)
-	if err != nil {
-		return store.AgentEvent{}, err
-	}
-	if run.Status != store.AgentRunRunning && run.Status != store.AgentRunQueued {
-		return store.AgentEvent{}, fmt.Errorf("run is not accepting guidance")
-	}
-	steerID := idgen.New("steer")
-	clientSteerID := strings.TrimSpace(req.ClientSteerID)
-	preview := contentPreview(content, 120)
-	return s.appendRunEventStrict(ctx, store.AgentEventInput{
-		RunID:          runID,
-		UserID:         userID,
-		ConversationID: run.ConversationID,
-		MessageID:      nullableStringValue(run.UserMessageID),
-		Type:           "agent_steer_received",
-		Level:          "info",
-		Payload: map[string]any{
-			"steer_id":        steerID,
-			"client_steer_id": clientSteerID,
-			"content":         content,
-			"content_preview": preview,
-			"created_at":      time.Now().UTC().Format(time.RFC3339Nano),
-			"message":         "已收到引导，会在下一次安全边界应用",
-		},
-	})
 }
 
 func nullableStringValue(value sql.NullString) string {

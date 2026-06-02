@@ -84,6 +84,9 @@ func (s *Service) execManageWorkspacePath(ctx context.Context, userID, arguments
 	case "mkdir":
 		result, err := files.MkdirNew(args.Path)
 		if err != nil {
+			if payload, path, ok := s.workspacePathExistsObservation(userID, "manage_workspace_path", "mkdir", args.Path); ok {
+				return payload, "path already exists", "正在管理路径...", path, fmt.Errorf("path already exists")
+			}
 			return "", "", "正在管理路径...", args.Path, err
 		}
 		payload := map[string]any{
@@ -134,6 +137,38 @@ func (s *Service) execManageWorkspacePath(ctx context.Context, userID, arguments
 	default:
 		return "", "", "正在管理路径...", args.Path, fmt.Errorf("action must be mkdir, rename, move, or trash")
 	}
+}
+
+func (s *Service) workspacePathExistsObservation(userID, toolName, operation, path string) (string, string, bool) {
+	files, err := s.factory.Workspace(userID)
+	if err != nil {
+		return "", "", false
+	}
+	info, err := files.StatPath(path)
+	if err != nil {
+		return "", "", false
+	}
+	pathType := "file"
+	if info.Type == "folder" {
+		pathType = "folder"
+	}
+	payload := workspaceToolPayload(toolName, info.Path, map[string]any{
+		"operation":     operation,
+		"path":          info.Path,
+		"error":         "path already exists",
+		"reason":        "already_exists",
+		"path_type":     pathType,
+		"recoverable":   true,
+		"recovery_hint": alreadyExistsRecoveryHint(pathType),
+	})
+	return mustJSON(payload), info.Path, true
+}
+
+func alreadyExistsRecoveryHint(pathType string) string {
+	if pathType == "folder" {
+		return "The folder already exists. Continue using this directory or inspect it before writing; do not repeat mkdir."
+	}
+	return "A file already exists at this path. Choose a different folder path or ask before replacing it."
 }
 
 func (s *Service) execDeleteWorkspacePath(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {

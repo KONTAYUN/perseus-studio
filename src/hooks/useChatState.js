@@ -9,7 +9,6 @@ import useChatLifecycleEffects from './useChatLifecycleEffects';
 import useChatReferenceActions from './useChatReferenceActions';
 import { normalizeThinkingModeForModel } from './modelReasoningUtils';
 import {
-  mergeRunSteerItemsWithMessages,
   visibleRunSteerTimelineItems,
 } from './chatSteerItems';
 
@@ -62,6 +61,8 @@ export default function useChatState({
   const sendChatPayloadRef = useRef(null);
   const conversationMessagesRef = useRef([]);
   const contextUsageRequestRef = useRef(0);
+  const canceledPendingRunMessageIdsRef = useRef(new Set());
+  const canceledRunSteerIdsRef = useRef(new Set());
 
   const {
     branchConversation,
@@ -125,6 +126,8 @@ export default function useChatState({
   usePendingRunMessageAutoSend({
     currentConversationId,
     currentConversationIdRef,
+    canceledPendingRunMessageIdsRef,
+    canceledRunSteerIdsRef,
     isChatSending,
     pendingRunMessage,
     resumableRun,
@@ -136,6 +139,7 @@ export default function useChatState({
   useMissedRunSteerAutoQueue({
     currentConversationId,
     currentConversationIdRef,
+    canceledPendingRunMessageIdsRef,
     isChatSending,
     resumableRun,
     runSteerItems,
@@ -195,6 +199,7 @@ export default function useChatState({
     chatSkillReferences,
     currentConversationId,
     currentConversationIdRef,
+    canceledPendingRunMessageIdsRef,
     isChatSending,
     pendingRunMessage,
     runSteerItems,
@@ -294,10 +299,7 @@ export default function useChatState({
     chatSkillReferences,
     continueAgentRun,
     branchConversation,
-    conversationMessages: mergeRunSteerItemsWithMessages(
-      conversationMessages,
-      visibleRunSteerTimelineItems(runSteerItems, currentConversationId)
-    ),
+    conversationMessages,
     conversations,
     contextCompactionNotice,
     contextUsage,
@@ -335,6 +337,6 @@ export default function useChatState({
     setThinkingMode,
     thinkingMode,
     runSteerNotice,
-    runSteerItems,
+    runSteerItems: visibleRunSteerTimelineItems(runSteerItems, currentConversationId),
   };
 }

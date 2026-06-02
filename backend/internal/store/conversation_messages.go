@@ -50,8 +50,12 @@ func (s *ConversationStore) AppendMessageWithMeta(ctx context.Context, input Mes
 		status = "final"
 	}
 	metaJSON := strings.TrimSpace(input.MetaJSON)
-	now := time.Now().UTC()
-	id := nextStoreID("msg", now)
+	operationNow := time.Now().UTC()
+	createdAt := input.CreatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = operationNow
+	}
+	id := nextStoreID("msg", createdAt)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -62,7 +66,7 @@ func (s *ConversationStore) AppendMessageWithMeta(ctx context.Context, input Mes
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO messages (id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, id, input.UserID, input.ConversationID, input.Role, input.Content, input.AttachmentsJSON, status, input.SegmentIndex, metaJSON, now, now)
+`, id, input.UserID, input.ConversationID, input.Role, input.Content, input.AttachmentsJSON, status, input.SegmentIndex, metaJSON, createdAt, operationNow)
 	if err != nil {
 		return Message{}, err
 	}
@@ -70,7 +74,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 UPDATE conversations
 SET updated_at = ?
 WHERE id = ? AND user_id = ?
-`, now, input.ConversationID, input.UserID)
+`, operationNow, input.ConversationID, input.UserID)
 	if err != nil {
 		return Message{}, err
 	}

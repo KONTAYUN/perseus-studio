@@ -1,6 +1,8 @@
 package ai
 
 import (
+	"os"
+	"strconv"
 	"strings"
 
 	"webide-backend/internal/store"
@@ -24,6 +26,8 @@ type providerRuntimeProfile struct {
 	MaxReadFileContentRunes  int
 	MaxWebSearchSnippetRunes int
 	MaxWebExtractRunes       int
+	PayloadSoftBudgetBytes   int
+	PayloadHardBudgetBytes   int
 }
 
 func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProfile {
@@ -44,6 +48,8 @@ func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProf
 		MaxReadFileContentRunes:  18000,
 		MaxWebSearchSnippetRunes: 700,
 		MaxWebExtractRunes:       12000,
+		PayloadSoftBudgetBytes:   envIntDefault("PERSEUS_PROVIDER_PAYLOAD_SOFT_BYTES", 96*1024),
+		PayloadHardBudgetBytes:   envIntDefault("PERSEUS_PROVIDER_PAYLOAD_HARD_BYTES", 128*1024),
 	}
 
 	protocol := strings.ToLower(strings.TrimSpace(provider.Protocol))
@@ -82,6 +88,12 @@ func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProf
 	}
 	if profile.CompactReservedTokens == 0 {
 		profile.CompactReservedTokens = defaultCompactReservedTokens(profile.ContextWindowTokens)
+	}
+	if profile.PayloadSoftBudgetBytes <= 0 {
+		profile.PayloadSoftBudgetBytes = 96 * 1024
+	}
+	if profile.PayloadHardBudgetBytes <= profile.PayloadSoftBudgetBytes {
+		profile.PayloadHardBudgetBytes = profile.PayloadSoftBudgetBytes + 32*1024
 	}
 	return profile
 }
@@ -126,4 +138,16 @@ func providerContextWindowTokens(provider store.ModelProvider) int {
 	default:
 		return defaultContextWindowTokens
 	}
+}
+
+func envIntDefault(name string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }

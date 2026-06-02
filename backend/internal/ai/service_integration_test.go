@@ -464,11 +464,27 @@ func TestAgentAppliesPendingSteerBeforeNextModelTurn(t *testing.T) {
 	}))
 	defer server.Close()
 
+	conversation, err := env.conversations.CreateConversation(ctx, store.CreateConversationInput{
+		UserID:                  testUserID,
+		SelectedModelProviderID: "provider_steer_test",
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation returned error: %v", err)
+	}
+	userMessage, err := env.conversations.AppendMessage(ctx, testUserID, conversation.ID, "user", "继续处理", "[]")
+	if err != nil {
+		t.Fatalf("AppendMessage returned error: %v", err)
+	}
+	messages, err := env.conversations.ListMessages(ctx, testUserID, conversation.ID)
+	if err != nil {
+		t.Fatalf("ListMessages returned error: %v", err)
+	}
+
 	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
 		ID:              "run_steer_test",
 		UserID:          testUserID,
-		ConversationID:  "conv_steer_test",
-		UserMessageID:   "msg_steer_test",
+		ConversationID:  conversation.ID,
+		UserMessageID:   userMessage.ID,
 		ModelProviderID: "provider_steer_test",
 	})
 	if err != nil {
@@ -480,7 +496,7 @@ func TestAgentAppliesPendingSteerBeforeNextModelTurn(t *testing.T) {
 	if _, err := env.runs.AppendEvent(ctx, store.AgentEventInput{
 		RunID:          run.ID,
 		UserID:         testUserID,
-		ConversationID: "conv_steer_test",
+		ConversationID: conversation.ID,
 		Type:           "agent_steer_received",
 		Level:          "info",
 		Payload: map[string]any{
@@ -505,10 +521,10 @@ func TestAgentAppliesPendingSteerBeforeNextModelTurn(t *testing.T) {
 	runtime := &agentRuntime{
 		service:          env.service,
 		protocol:         agentProtocolOpenAI,
-		conversationID:   "conv_steer_test",
-		messageID:        "msg_steer_test",
+		conversationID:   conversation.ID,
+		messageID:        userMessage.ID,
 		provider:         provider,
-		messages:         []store.Message{{ID: "msg_steer_test", Role: "user", Content: "继续处理"}},
+		messages:         messages,
 		opts:             RunOptions{UserID: testUserID, RunID: run.ID},
 		profile:          runtimeProfileForProvider(provider),
 		allowTask:        true,
@@ -541,6 +557,144 @@ func TestAgentAppliesPendingSteerBeforeNextModelTurn(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Fatalf("expected no pending steer after apply, got %#v", pending)
+	}
+	storedMessages, err := env.conversations.ListMessages(ctx, testUserID, conversation.ID)
+	if err != nil {
+		t.Fatalf("ListMessages returned error: %v", err)
+	}
+	if !messagesContainStoredSteer(storedMessages, "steer-test", "不要重写全部，只处理我拖入的几集。") {
+		t.Fatalf("expected applied steer to be stored as a timeline message, got %#v", storedMessages)
+	}
+	assertStoredSteerTimelineMeta(t, storedMessages, "steer-test", "applied")
+}
+
+func TestAgentSkipsCanceledPendingSteer(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if messagesContainContentFromPayload(payload, "已经取消的引导") {
+			t.Fatalf("canceled steer leaked into provider request: %s", string(raw))
+		}
+		writeJSON(t, w, map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "没有收到新的引导。",
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	conversation, err := env.conversations.CreateConversation(ctx, store.CreateConversationInput{
+		UserID:                  testUserID,
+		SelectedModelProviderID: "provider_steer_cancel_test",
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation returned error: %v", err)
+	}
+	userMessage, err := env.conversations.AppendMessage(ctx, testUserID, conversation.ID, "user", "继续处理", "[]")
+	if err != nil {
+		t.Fatalf("AppendMessage returned error: %v", err)
+	}
+	messages, err := env.conversations.ListMessages(ctx, testUserID, conversation.ID)
+	if err != nil {
+		t.Fatalf("ListMessages returned error: %v", err)
+	}
+
+	run, err := env.runs.CreateRun(ctx, store.CreateAgentRunInput{
+		ID:              "run_steer_cancel_test",
+		UserID:          testUserID,
+		ConversationID:  conversation.ID,
+		UserMessageID:   userMessage.ID,
+		ModelProviderID: "provider_steer_cancel_test",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun returned error: %v", err)
+	}
+	if _, err := env.runs.UpdateRun(ctx, testUserID, run.ID, store.UpdateAgentRunInput{Status: store.AgentRunRunning, Stage: "calling_model"}); err != nil {
+		t.Fatalf("UpdateRun returned error: %v", err)
+	}
+	if _, err := env.runs.AppendEvent(ctx, store.AgentEventInput{
+		RunID:          run.ID,
+		UserID:         testUserID,
+		ConversationID: conversation.ID,
+		Type:           "agent_steer_received",
+		Level:          "info",
+		Payload: map[string]any{
+			"steer_id":        "steer-canceled",
+			"client_steer_id": "client-canceled",
+			"content":         "已经取消的引导",
+			"content_preview": "已经取消的引导",
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent received returned error: %v", err)
+	}
+	if _, err := env.runs.AppendEvent(ctx, store.AgentEventInput{
+		RunID:          run.ID,
+		UserID:         testUserID,
+		ConversationID: conversation.ID,
+		Type:           "agent_steer_canceled",
+		Level:          "info",
+		Payload: map[string]any{
+			"client_steer_id": "client-canceled",
+			"reason":          "user_deleted_guidance",
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent canceled returned error: %v", err)
+	}
+
+	provider := store.ModelProvider{
+		ID:       "provider_steer_cancel_test",
+		Name:     "Steer Cancel Test",
+		Protocol: "openai",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+		ModelID:  "gpt-test",
+		Enabled:  true,
+	}
+	runtime := &agentRuntime{
+		service:          env.service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   conversation.ID,
+		messageID:        userMessage.ID,
+		provider:         provider,
+		messages:         messages,
+		opts:             RunOptions{UserID: testUserID, RunID: run.ID},
+		profile:          runtimeProfileForProvider(provider),
+		allowTask:        true,
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		transcript:       newAgentTranscript(),
+		contextManager:   newAgentContextManager(),
+	}
+	if _, err := runtime.run(ctx); err != nil {
+		t.Fatalf("runtime.run returned error: %v", err)
+	}
+	pending, err := pendingSteersForRun(ctx, env.runs, testUserID, run.ID)
+	if err != nil {
+		t.Fatalf("pendingSteersForRun returned error: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected canceled steer not to be pending, got %#v", pending)
+	}
+	storedMessages, err := env.conversations.ListMessages(ctx, testUserID, conversation.ID)
+	if err != nil {
+		t.Fatalf("ListMessages returned error: %v", err)
+	}
+	if messagesContainStoredSteer(storedMessages, "steer-canceled", "已经取消的引导") {
+		t.Fatalf("canceled steer should not be stored as a timeline message: %#v", storedMessages)
 	}
 }
 
@@ -3651,6 +3805,67 @@ func messagesContainContent(messages []map[string]any, expected string) bool {
 		}
 	}
 	return false
+}
+
+func messagesContainContentFromPayload(payload map[string]any, expected string) bool {
+	items, ok := payload["messages"].([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		message, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.Contains(fmt.Sprint(message["content"]), expected) {
+			return true
+		}
+	}
+	return false
+}
+
+func messagesContainStoredSteer(messages []store.Message, steerID, content string) bool {
+	for _, message := range messages {
+		if message.Role != "user" || !strings.Contains(message.Content, content) {
+			continue
+		}
+		var meta map[string]any
+		if err := json.Unmarshal([]byte(message.MetaJSON), &meta); err != nil {
+			continue
+		}
+		if fmt.Sprint(meta["kind"]) == "steer" && fmt.Sprint(meta["steer_id"]) == steerID {
+			return true
+		}
+	}
+	return false
+}
+
+func assertStoredSteerTimelineMeta(t *testing.T, messages []store.Message, steerID, status string) {
+	t.Helper()
+	for _, message := range messages {
+		if message.Role != "user" {
+			continue
+		}
+		var meta map[string]any
+		if err := json.Unmarshal([]byte(message.MetaJSON), &meta); err != nil {
+			continue
+		}
+		if fmt.Sprint(meta["kind"]) != "steer" || fmt.Sprint(meta["steer_id"]) != steerID {
+			continue
+		}
+		if fmt.Sprint(meta["status"]) != status {
+			t.Fatalf("expected steer status %q, got meta %#v", status, meta)
+		}
+		receivedAt, err := time.Parse(time.RFC3339Nano, fmt.Sprint(meta["received_at"]))
+		if err != nil {
+			t.Fatalf("expected parseable steer received_at, got meta %#v", meta)
+		}
+		if !message.CreatedAt.Equal(receivedAt) {
+			t.Fatalf("steer message created_at must equal received_at, got created_at=%s received_at=%s", message.CreatedAt, receivedAt)
+		}
+		return
+	}
+	t.Fatalf("expected stored steer %q in messages: %#v", steerID, messages)
 }
 
 func agentEventsContain(events []store.AgentEvent, eventType, steerID string) bool {
