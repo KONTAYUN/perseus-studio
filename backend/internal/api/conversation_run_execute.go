@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -412,103 +411,16 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		return
 	}
 
-	var assistantMessage store.Message
-	if latestAssistantMessage.ID != "" {
-		if len(reply.ToolEvents) > 0 {
-			rawToolEvents, _ := json.Marshal(reply.ToolEvents)
-			updated, updateErr := s.conversations.UpdateMessageAttachments(ctx, userID, latestAssistantMessage.ID, string(rawToolEvents))
-			if updateErr != nil {
-				s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, updateErr, runStartedAt)
-				return
-			}
-			latestAssistantMessage = updated
-			if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
-				RunID:          runID,
-				UserID:         userID,
-				ConversationID: conversationID,
-				MessageID:      latestAssistantMessage.ID,
-				Type:           "assistant_message_completed",
-				Level:          "info",
-				Payload: map[string]any{
-					"message":           "assistant message attachments updated",
-					"assistant_message": latestAssistantMessage,
-					"tool_events":       reply.ToolEvents,
-				},
-			}); err != nil {
-				s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
-				return
-			}
-		}
-		assistantMessage = latestAssistantMessage
-	} else {
-		assistantAttachments := "[]"
-		if len(reply.ToolEvents) > 0 {
-			rawToolEvents, _ := json.Marshal(reply.ToolEvents)
-			assistantAttachments = string(rawToolEvents)
-		}
-		if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunRunning, "saving_message", store.UpdateAgentRunInput{}); err != nil {
-			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
-			return
-		}
-		assistantMessage, err = s.conversations.AppendMessageWithMeta(ctx, store.MessageInput{
-			UserID:          userID,
-			ConversationID:  conversationID,
-			Role:            "assistant",
-			Content:         reply.Content,
-			AttachmentsJSON: assistantAttachments,
-			Status:          "final",
-			SegmentIndex:    1,
-			MetaJSON:        messageMetaJSON("assistant_segment", 1, runID),
-		})
-		if err != nil {
-			s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
-			return
-		}
-		if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
-			RunID:          runID,
-			UserID:         userID,
-			ConversationID: conversationID,
-			MessageID:      assistantMessage.ID,
-			Type:           "assistant_message_completed",
-			Level:          "info",
-			Payload: map[string]any{
-				"message":           "assistant message completed",
-				"assistant_message": assistantMessage,
-				"tool_events":       reply.ToolEvents,
-			},
-		}); err != nil {
-			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
-			return
-		}
-	}
-	if reply.IncompleteReason == ai.IncompleteReasonBudgetExhausted {
-		if err := s.completeConversationRunWithBudgetExhaustion(ctx, userID, conversationID, userMessageID, runID, assistantMessage, reply); err != nil {
-			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
-		}
-		return
-	}
-	if err := s.ai.ClearRunCheckpoints(ctx, ai.RunOptions{UserID: userID, RunID: runID}); err != nil {
-		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
-		return
-	}
-	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunSucceeded, "completed", store.UpdateAgentRunInput{
-		AssistantMessageID: assistantMessage.ID,
-		SetCompletedAt:     true,
-	}); err != nil {
-		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
-		return
-	}
-	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
-		RunID:          runID,
-		UserID:         userID,
-		ConversationID: conversationID,
-		MessageID:      assistantMessage.ID,
-		Type:           "run_completed",
-		Level:          "info",
-		Payload:        map[string]any{"message": "run completed"},
-	}); err != nil {
-		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
-		return
-	}
-	s.maybeGenerateConversationTitleAsync(userID, userRole, conversationID, userMessageID, assistantMessage.ID, modelProviderID, content, assistantMessage.Content, runID)
+	s.completeConversationRun(ctx, conversationRunCompletionInput{
+		UserID:                 userID,
+		UserRole:               userRole,
+		ConversationID:         conversationID,
+		UserMessageID:          userMessageID,
+		ModelProviderID:        modelProviderID,
+		Content:                content,
+		RunID:                  runID,
+		RunStartedAt:           runStartedAt,
+		Reply:                  reply,
+		LatestAssistantMessage: latestAssistantMessage,
+	})
 }

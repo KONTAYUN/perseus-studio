@@ -21,49 +21,8 @@ import {
 } from './chatStateUtils.js';
 import { mergeConversationSnapshotPreservingActive } from './chatMessageMerge.js';
 import { markRunSteerApplied, markRunSteerReceived, markRunSteerRejected } from './chatSteerItems.js';
-
-function toolEventFromPayload(payload = {}) {
-  return {
-    tool_name: payload.tool_name,
-    status_kind: payload.status_kind || '',
-    status: payload.status || 'success',
-    path: payload.path || '',
-    old_path: payload.old_path || '',
-    new_path: payload.new_path || '',
-    changed_paths: payload.changed_paths || [],
-    hash: payload.hash || '',
-    version_id: payload.version_id || '',
-  };
-}
-
-function scheduleDelay(callback, delay) {
-  const scheduler = globalThis.window?.setTimeout || globalThis.setTimeout;
-  if (typeof scheduler === 'function') {
-    return scheduler(callback, delay);
-  }
-  queueMicrotask(callback);
-  return 0;
-}
-
-function startInterval(callback, delay) {
-  const scheduler = globalThis.window?.setInterval || globalThis.setInterval;
-  if (typeof scheduler === 'function') {
-    return scheduler(callback, delay);
-  }
-  return null;
-}
-
-function stopInterval(timer) {
-  if (timer == null) return;
-  const clearer = globalThis.window?.clearInterval || globalThis.clearInterval;
-  if (typeof clearer === 'function') {
-    clearer(timer);
-  }
-}
-
-function wait(delay) {
-  return new Promise((resolve) => scheduleDelay(resolve, delay));
-}
+import { scheduleDelay, startInterval, stopInterval, wait } from './chatRunStreamTimers.js';
+import { shouldEnsureProgressShell, toolEventFromPayload } from './chatRunStreamToolEvents.js';
 
 export async function waitForAgentRunStream({
   afterSeq = 0,
@@ -449,8 +408,4 @@ export async function waitForAgentRunStream({
     };
     openStream();
   });
-}
-
-function shouldEnsureProgressShell(type = '') {
-  return type.startsWith('tool_call_') || type === 'tool_scope_rejected' || type === 'completion_rejected' || type === 'local_persistence_failed';
 }
