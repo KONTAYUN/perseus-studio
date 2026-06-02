@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -229,6 +230,42 @@ func TestSearchTextReturnsLineMetadata(t *testing.T) {
 	}
 }
 
+func TestSearchTextScopedFiltersPathsAndGlobs(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.MkdirNew("docs"); err != nil {
+		t.Fatalf("MkdirNew docs returned error: %v", err)
+	}
+	if _, err := files.MkdirNew("src"); err != nil {
+		t.Fatalf("MkdirNew src returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "docs/a.md", "needle docs\n"); err != nil {
+		t.Fatalf("CreateFile docs/a returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "docs/b.txt", "needle txt\n"); err != nil {
+		t.Fatalf("CreateFile docs/b returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "src/a.md", "needle src\n"); err != nil {
+		t.Fatalf("CreateFile src/a returned error: %v", err)
+	}
+
+	results, limited, err := files.SearchTextScoped("needle", false, 20, 0, TextSearchOptions{
+		PathScope:    "docs",
+		IncludeGlobs: []string{"*.md"},
+		ExcludeGlobs: []string{"docs/skip*"},
+	})
+	if err != nil {
+		t.Fatalf("SearchTextScoped returned error: %v", err)
+	}
+	if limited {
+		t.Fatal("did not expect limited search")
+	}
+	if got, want := textSearchPaths(results), []string{"docs/a.md"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected scoped search paths: got %#v want %#v", got, want)
+	}
+}
+
 func TestReadTextFileRangeAndEditTextFile(t *testing.T) {
 	ctx := context.Background()
 	files := newTestService(t)
@@ -242,6 +279,9 @@ func TestReadTextFileRangeAndEditTextFile(t *testing.T) {
 	}
 	if read.Content != "two\n" || read.StartLine != 2 || read.EndLine != 2 || read.TotalLines != 4 {
 		t.Fatalf("unexpected ranged read: %#v", read)
+	}
+	if read.NumberedContent != "2: two\n" {
+		t.Fatalf("unexpected numbered content: %q", read.NumberedContent)
 	}
 
 	result, replacements, err := files.EditTextFile(ctx, "draft.txt", "two", "TWO", "test_edit", false)
@@ -257,6 +297,42 @@ func TestReadTextFileRangeAndEditTextFile(t *testing.T) {
 	}
 	if after.Content != "one\nTWO\nthree\n" {
 		t.Fatalf("unexpected edited content: %q", after.Content)
+	}
+}
+
+func TestEditTextFileSmartUsesTrimmedLineMatch(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.CreateFile(ctx, "draft.txt", "intro\n  target line  \nend\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	result, err := files.EditTextFileSmart(ctx, "draft.txt", "target line\n", "replacement\n", "test_edit", false)
+	if err != nil {
+		t.Fatalf("EditTextFileSmart returned error: %v", err)
+	}
+	if result.MatchKind != TextEditMatchTrimmedLines || result.Replacements != 1 {
+		t.Fatalf("unexpected smart edit result: %#v", result)
+	}
+	after, err := files.ReadFile("draft.txt")
+	if err != nil {
+		t.Fatalf("ReadFile after edit returned error: %v", err)
+	}
+	if after.Content != "intro\nreplacement\nend\n" {
+		t.Fatalf("unexpected edited content: %q", after.Content)
+	}
+}
+
+func TestEditTextFileSmartRejectsOmissionPlaceholder(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.CreateFile(ctx, "draft.txt", "one\ntwo\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	_, err := files.EditTextFileSmart(ctx, "draft.txt", "one\n", "ONE\n其余不变", "test_edit", false)
+	if err == nil || !strings.Contains(err.Error(), "omission placeholder") {
+		t.Fatalf("expected omission placeholder error, got %v", err)
 	}
 }
 
@@ -390,6 +466,14 @@ func treeNames(nodes []TreeNode) []string {
 }
 
 func searchPaths(nodes []SearchResult) []string {
+	paths := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		paths = append(paths, node.Path)
+	}
+	return paths
+}
+
+func textSearchPaths(nodes []TextSearchResult) []string {
 	paths := make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		paths = append(paths, node.Path)

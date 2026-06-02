@@ -23,9 +23,19 @@ func buildToolDiagnostic(toolName, argumentsJSON, targetSummary string, duration
 	summary := map[string]any{
 		"failure_class":        failureClass,
 		"tool_name":            toolName,
+		"tool_manifest_digest": toolManifestDigest(),
 		"arguments_summary":    summarizeToolArguments(argumentsJSON),
 		"target_summary":       strings.TrimSpace(targetSummary),
 		"recoverable_by_model": toolFailureRecoverableByModel(failureClass),
+	}
+	if metadata := manifestToolDiagnosticMetadata(toolName); len(metadata) > 0 {
+		summary["tool_manifest_entry"] = metadata
+	}
+	if protocol := manifestRecommendedProtocol(toolName); protocol != "" {
+		summary["recommended_protocol"] = protocol
+	}
+	if primary := manifestPrimaryEditProtocol(); primary != "" {
+		summary["internal_edit_protocol"] = primary
 	}
 	if durationMS > 0 {
 		summary["duration_ms"] = durationMS
@@ -50,6 +60,19 @@ func toolArgumentDiagnosticDetails(toolName, argumentsJSON string) map[string]an
 		return nil
 	}
 	switch toolName {
+	case "apply_workspace_patch":
+		patch := stringField(args, "patch")
+		details := map[string]any{
+			"path":              pathSummary(firstPatchPathFromText(patch)),
+			"patch_chars":       len([]rune(patch)),
+			"patch_sha":         hashWorkspaceText(patch),
+			"patch_head":        patchDiagnosticHead(patch),
+			"patch_tail":        patchDiagnosticTail(patch),
+			"patch_block_count": countWorkspacePatchBlocks(patch),
+			"detected_paths":    workspacePatchCandidatePathsLoose(patch),
+			"transport":         "json_or_text_patch",
+		}
+		return details
 	case "edit_workspace_text":
 		return map[string]any{
 			"path":           pathSummary(stringField(args, "path")),
@@ -105,6 +128,8 @@ func toolFailureClass(toolName string, err error) string {
 		return "workspace_unsupported_file_type"
 	case toolName == "edit_workspace_text" && (strings.Contains(text, "old_text was not found") || strings.Contains(text, "old_text matched")):
 		return "workspace_exact_edit_unstable"
+	case toolName == "apply_workspace_patch" && strings.Contains(text, "patch apply failed"):
+		return "workspace_patch_apply_failed"
 	case toolName == "replace_workspace_lines" && strings.Contains(text, "line range"):
 		return "workspace_line_range_invalid"
 	case strings.Contains(text, "all requested files failed to read"):
@@ -138,6 +163,7 @@ func toolDiagnosticLevel(failureClass string) string {
 		"workspace_unsupported_file_type",
 		"workspace_exact_edit_unstable",
 		"workspace_line_range_invalid",
+		"workspace_patch_apply_failed",
 		"workspace_batch_read_all_failed",
 		"search_provider_not_configured",
 		"web_extract_unavailable",
@@ -154,6 +180,7 @@ func toolFailureRecoverableByModel(failureClass string) bool {
 	case "workspace_path_not_found",
 		"workspace_exact_edit_unstable",
 		"workspace_line_range_invalid",
+		"workspace_patch_apply_failed",
 		"workspace_batch_read_all_failed",
 		"web_extract_unavailable",
 		"skill_unavailable",

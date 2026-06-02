@@ -9,24 +9,11 @@ func openAIToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool, ro
 	if len(roles) > 0 {
 		role = normalizeRunUserRole(roles[0])
 	}
-	tools := []map[string]any{openAICompletionTool(), openAIQuestionTool()}
-	if includeLoader {
-		tools = append(tools, openAIToolsetLoaderTool())
-	}
-	if loaded["workspace"] {
-		tools = append(tools, openAIWorkspaceTools()...)
-	}
-	if loaded["command"] {
-		tools = append(tools, openAICommandTools()...)
-	}
-	if loaded["search"] {
-		tools = append(tools, openAIWebTools()...)
-	}
-	if loaded["skills"] {
-		tools = append(tools, openAISkillToolsForRole(role)...)
-	}
-	if loaded["task"] {
-		tools = append(tools, openAIBackgroundTaskTool())
+	var tools []map[string]any
+	for _, name := range providerVisibleToolNames(loaded, includeLoader, role) {
+		if tool := openAIToolByName(name); tool != nil {
+			tools = append(tools, tool)
+		}
 	}
 	return tools
 }
@@ -40,26 +27,55 @@ func anthropicToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool,
 	if len(roles) > 0 {
 		role = normalizeRunUserRole(roles[0])
 	}
-	tools := []map[string]any{anthropicCompletionTool(), anthropicQuestionTool()}
-	if includeLoader {
-		tools = append(tools, anthropicToolsetLoaderTool())
-	}
-	if loaded["workspace"] {
-		tools = append(tools, anthropicWorkspaceTools()...)
-	}
-	if loaded["command"] {
-		tools = append(tools, anthropicCommandTools()...)
-	}
-	if loaded["search"] {
-		tools = append(tools, anthropicWebTools()...)
-	}
-	if loaded["skills"] {
-		tools = append(tools, anthropicSkillToolsForRole(role)...)
-	}
-	if loaded["task"] {
-		tools = append(tools, anthropicBackgroundTaskTool())
+	var tools []map[string]any
+	for _, name := range providerVisibleToolNames(loaded, includeLoader, role) {
+		if tool := anthropicToolByName(name); tool != nil {
+			tools = append(tools, tool)
+		}
 	}
 	return tools
+}
+
+func openAIToolByName(name string) map[string]any {
+	switch name {
+	case "attempt_completion":
+		return openAICompletionTool()
+	case "ask_followup_question":
+		return openAIQuestionTool()
+	case "load_perseus_toolset":
+		return openAIToolsetLoaderTool()
+	case "run_workspace_command":
+		return openAICommandTool()
+	case "perseus_search_web", "web_extract":
+		return openAIWebToolByName(name)
+	case "list_skills", "read_skill", "install_skill_from_attachment", "delete_skill":
+		return openAISkillToolByName(name)
+	case "start_background_task":
+		return openAIBackgroundTaskTool()
+	default:
+		return openAIWorkspaceToolByName(name)
+	}
+}
+
+func anthropicToolByName(name string) map[string]any {
+	switch name {
+	case "attempt_completion":
+		return anthropicCompletionTool()
+	case "ask_followup_question":
+		return anthropicQuestionTool()
+	case "load_perseus_toolset":
+		return anthropicToolsetLoaderTool()
+	case "run_workspace_command":
+		return anthropicCommandTool()
+	case "perseus_search_web", "web_extract":
+		return anthropicWebToolByName(name)
+	case "list_skills", "read_skill", "install_skill_from_attachment", "delete_skill":
+		return anthropicSkillToolByName(name)
+	case "start_background_task":
+		return anthropicBackgroundTaskTool()
+	default:
+		return anthropicWorkspaceToolByName(name)
+	}
 }
 
 func openAIFunctionTool(name, description string, parameters map[string]any) map[string]any {

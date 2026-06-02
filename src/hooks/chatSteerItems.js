@@ -128,15 +128,14 @@ export function mergeRunSteerItemsWithMessages(messages, runSteerItems) {
   );
   if (visibleItems.length === 0) return messages || [];
   const messageIds = new Set((messages || []).map((message) => message.id));
-  const additions = visibleItems.filter((item) => !messageIds.has(item.id));
-  return [...(messages || []), ...additions].sort((a, b) => {
-    if (isSteerMessage(a) && isPendingAssistantMessage(b)) return -1;
-    if (isPendingAssistantMessage(a) && isSteerMessage(b)) return 1;
-    const aTime = Date.parse(a.created_at || '') || 0;
-    const bTime = Date.parse(b.created_at || '') || 0;
-    if (aTime !== bTime) return aTime - bTime;
-    return String(a.id || '').localeCompare(String(b.id || ''));
-  });
+  const additions = visibleItems
+    .filter((item) => !messageIds.has(item.id))
+    .sort(compareConversationItems);
+  let merged = messages || [];
+  for (const item of additions) {
+    merged = insertRunSteerTimelineItem(merged, item);
+  }
+  return merged;
 }
 
 export function visibleRunSteerTimelineItems(runSteerItems, conversationId) {
@@ -278,6 +277,69 @@ function isSteerMessage(message) {
 
 function isPendingAssistantMessage(message) {
   return message?.role === 'assistant' && !!message?.pending;
+}
+
+function insertRunSteerTimelineItem(messages, item) {
+  const nextMessages = [...(messages || [])];
+  const insertIndex = runSteerInsertIndex(nextMessages, item);
+  nextMessages.splice(insertIndex, 0, item);
+  return nextMessages;
+}
+
+function runSteerInsertIndex(messages, item) {
+  const runId = String(item?.runId || '').trim();
+  if (runId) {
+    const pendingIndex = messages.findIndex((message) => isPendingAssistantMessage(message) && message?.runId === runId);
+    if (pendingIndex >= 0) return pendingIndex;
+
+    let lastRunItemIndex = -1;
+    for (let index = 0; index < messages.length; index += 1) {
+      if (isRunTimelineItem(messages[index], runId)) {
+        lastRunItemIndex = index;
+      }
+    }
+    if (lastRunItemIndex >= 0) return lastRunItemIndex + 1;
+
+    return timestampInsertIndex(messages, item);
+  }
+
+  const pendingIndex = singlePendingAssistantIndex(messages);
+  if (pendingIndex >= 0) return pendingIndex;
+
+  return timestampInsertIndex(messages, item);
+}
+
+function isRunTimelineItem(message, runId) {
+  if (!message || !runId) return false;
+  if (message.runId === runId || message.resumableRunId === runId) return true;
+  return isSteerMessage(message) && message.runId === runId;
+}
+
+function singlePendingAssistantIndex(messages) {
+  let foundIndex = -1;
+  for (let index = 0; index < messages.length; index += 1) {
+    if (!isPendingAssistantMessage(messages[index])) continue;
+    if (foundIndex >= 0) return -1;
+    foundIndex = index;
+  }
+  return foundIndex;
+}
+
+function timestampInsertIndex(messages, item) {
+  const itemTime = Date.parse(item?.created_at || '') || 0;
+  if (!itemTime) return messages.length;
+  for (let index = 0; index < messages.length; index += 1) {
+    const messageTime = Date.parse(messages[index]?.created_at || '') || 0;
+    if (messageTime && itemTime < messageTime) return index;
+  }
+  return messages.length;
+}
+
+function compareConversationItems(a, b) {
+  const aTime = Date.parse(a?.created_at || '') || 0;
+  const bTime = Date.parse(b?.created_at || '') || 0;
+  if (aTime !== bTime) return aTime - bTime;
+  return String(a?.id || '').localeCompare(String(b?.id || ''));
 }
 
 function hasMatchingSteerMessage(messages, item) {

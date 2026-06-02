@@ -4,6 +4,14 @@ import "strings"
 
 func toolFailureRecoveryHint(toolName, errorText string) string {
 	lowerError := strings.ToLower(errorText)
+	editProtocol := manifestRecommendedProtocol(toolName)
+	if editProtocol == "" && toolName == "apply_workspace_patch" {
+		editProtocol = manifestPrimaryEditProtocol()
+	}
+	patchPhrase := "*** Begin Patch text patch"
+	if editProtocol == string(ToolTransportAssistantTextPatch) {
+		patchPhrase = "*** Begin Patch text patch"
+	}
 	switch toolName {
 	case "find_workspace_files":
 		return "Search returned paths. Use read_workspace_text before relying on file contents, or search_workspace_text for symbols/text."
@@ -19,20 +27,22 @@ func toolFailureRecoveryHint(toolName, errorText string) string {
 		return "Check the path and retry only after locating the file inside the current user's workspace."
 	case "edit_workspace_text":
 		if strings.Contains(lowerError, "matched") || strings.Contains(lowerError, "not found") {
-			return "Read the current file or target line range. For scripts, long documents, duplicate headings, or larger rewrites, use replace_workspace_lines with line numbers instead of retrying a large exact old_text."
+			return "Read the current file or target line range again, then submit a corrected " + patchPhrase + " before claiming completion."
 		}
-		return "Verify the file path and current content before retrying. Do not report the edit as complete until edit_workspace_text succeeds."
+		return "Verify the file path and current content before continuing. For new turns, submit file changes as a " + patchPhrase + "."
+	case "apply_workspace_patch":
+		return "Read the target file or range again, then submit a corrected " + patchPhrase + ". Do not report the edit as complete until the patch succeeds."
 	case "replace_workspace_lines":
-		return "Read the target file/range again, correct start_line/end_line, then retry replace_workspace_lines. Do not report the edit as complete until the line replacement succeeds."
+		return "Read the target file/range again, then submit a corrected " + patchPhrase + ". Do not report the edit as complete until the change succeeds."
 	case "save_workspace_file":
 		if strings.Contains(lowerError, "not exist") || strings.Contains(lowerError, "no such") || strings.Contains(lowerError, "不存在") {
-			return "The target file does not exist. If the user wanted a new file, retry save_workspace_file with mode=create; otherwise inspect/read the correct existing file before overwriting."
+			return "The target file does not exist. Inspect or find the correct path, then submit the intended file change as a " + patchPhrase + "."
 		}
-		return "Read the target file again if needed, adjust the save arguments, then retry. Do not report success until save_workspace_file succeeds."
+		return "Read the target file again if needed, then submit the intended file change as a " + patchPhrase + ". Do not report success until the change succeeds."
 	case "write_workspace_chunk":
-		return "Continue the chunk sequence in order, keeping each chunk short. Do not claim the long file is complete until finalize_workspace_write succeeds."
+		return "This compatibility write must continue in order. For new turns, submit the intended file change as a " + patchPhrase + ". Do not claim completion until the change verifies."
 	case "finalize_workspace_write":
-		return "Read the file or continue appending missing chunks before claiming completion. Retry finalize_workspace_write only after expected chunks, lines, chars, and hash match the final file."
+		return "Read the file or continue the existing compatibility write sequence before claiming completion. For new turns, submit file changes as a " + patchPhrase + "."
 	case "manage_workspace_path":
 		return "Verify the target path with inspect_workspace before retrying. If the request is ambiguous or destructive, ask the user to confirm the exact target."
 	case "organize_workspace_matches":

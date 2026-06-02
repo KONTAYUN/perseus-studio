@@ -30,6 +30,7 @@ func (r *agentRuntime) handleFollowupQuestion(toolCallID, argumentsJSON string) 
 	emitToolLifecycleEvent(r.opts, "tool_call_started", "info", map[string]any{
 		"tool_call_id":      toolCallID,
 		"tool_name":         "ask_followup_question",
+		"status_kind":       manifestStatusKind("ask_followup_question"),
 		"status":            "running",
 		"arguments_summary": summarizeToolArguments(argumentsJSON),
 	})
@@ -68,6 +69,7 @@ func (r *agentRuntime) handleFollowupQuestion(toolCallID, argumentsJSON string) 
 	event := ToolEvent{
 		ToolCallID:    toolCallID,
 		ToolName:      "ask_followup_question",
+		StatusKind:    manifestStatusKind("ask_followup_question"),
 		Label:         "已询问用户",
 		Status:        "success",
 		Question:      attempt.Question,
@@ -113,6 +115,7 @@ func (r *agentRuntime) handleFollowupQuestion(toolCallID, argumentsJSON string) 
 	emitToolLifecycleEvent(r.opts, "tool_call_completed", "info", map[string]any{
 		"tool_call_id":      toolCallID,
 		"tool_name":         "ask_followup_question",
+		"status_kind":       manifestStatusKind("ask_followup_question"),
 		"status":            "success",
 		"label":             event.Label,
 		"question":          attempt.Question,
@@ -127,6 +130,7 @@ func (r *agentRuntime) handleFollowupQuestion(toolCallID, argumentsJSON string) 
 	emitToolLifecycleEvent(r.opts, "user_question_requested", "info", map[string]any{
 		"tool_call_id":   toolCallID,
 		"tool_name":      "ask_followup_question",
+		"status_kind":    manifestStatusKind("ask_followup_question"),
 		"status":         "success",
 		"question":       attempt.Question,
 		"options":        attempt.Options,

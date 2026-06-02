@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { completedActionItems, followupQuestionAttachment, formatToolLabel, latestLiveProgressItem, loadingBubbleText, pendingFollowupQuestion, shouldReserveMessageFooter, visibleMessageAttachments } from '../../src/components/chat/chatUtils.js';
+import { completedActionItems, followupQuestionAttachment, formatToolLabel, latestLiveProgressItem, loadingBubbleText, loadingStatusDisplayText, loadingStatusReserveText, pendingFollowupQuestion, shouldReserveMessageFooter, visibleMessageAttachments } from '../../src/components/chat/chatUtils.js';
 import { shouldReloadWorkspaceForToolEvents } from '../../src/hooks/ideUtils.js';
 
 test('visibleMessageAttachments hides editor context metadata', () => {
@@ -111,7 +111,7 @@ test('completedActionItems derives completed labels from successful tool attachm
     attachments: [
       { tool_call_id: 'tc1', tool_name: 'read_workspace_text', status: 'success', label: '正在翻阅底稿' },
       { tool_call_id: 'tc2', tool_name: 'read_workspace_text', status: 'success' },
-      { tool_call_id: 'tc3', tool_name: 'save_workspace_file', status: 'success' },
+      { tool_call_id: 'tc3', tool_name: 'apply_workspace_patch', status: 'success', status_kind: 'workspace_edit' },
       { tool_call_id: 'tc4', tool_name: 'run_workspace_command', status: 'failed' },
       { tool_call_id: 'tc5', tool_name: 'ask_followup_question', status: 'success', question: '要哪种语气？' },
     ],
@@ -119,13 +119,10 @@ test('completedActionItems derives completed labels from successful tool attachm
 
   assert.deepEqual(
     items.map((item) => item.label),
-    ['已读取文件', '已保存文件']
+    ['已读取文件', '已编辑文件']
   );
   assert.equal(formatToolLabel({ tool_name: 'web_extract', label: '正在摘录资料' }), '已读取网页');
-  assert.equal(formatToolLabel({ tool_name: 'edit_workspace_text' }), '已编辑文件');
-  assert.equal(formatToolLabel({ tool_name: 'replace_workspace_lines' }), '已改写文件');
-  assert.equal(formatToolLabel({ tool_name: 'write_workspace_chunk' }), '已写入文件');
-  assert.equal(formatToolLabel({ tool_name: 'finalize_workspace_write' }), '已校验文件');
+  assert.equal(formatToolLabel({ tool_name: 'historical_write_tool', status_kind: 'workspace_edit' }), '已编辑文件');
 });
 
 test('followupQuestionAttachment extracts options without adding completed action chip', () => {
@@ -218,11 +215,11 @@ test('pendingFollowupQuestion clears once user answers after the assistant quest
 
 test('shouldReloadWorkspaceForToolEvents reloads for AI file writes', () => {
   assert.equal(
-    shouldReloadWorkspaceForToolEvents([{ tool_name: 'save_workspace_file', status: 'success', path: 'new-file.md' }]),
+    shouldReloadWorkspaceForToolEvents([{ type: 'workspace_file_changed', status: 'success', changed_paths: ['new-file.md'] }]),
     true
   );
   assert.equal(
-    shouldReloadWorkspaceForToolEvents([{ tool_name: 'write_workspace_chunk', status: 'success', path: 'new-file.md' }]),
+    shouldReloadWorkspaceForToolEvents([{ tool_name: 'legacy_unknown', status: 'success', changed_paths: ['new-file.md'] }]),
     true
   );
   assert.equal(
@@ -239,4 +236,49 @@ test('loadingBubbleText keeps intentional empty typing frame', () => {
     ''
   );
   assert.equal(loadingBubbleText({}, '正在处理'), '正在处理');
+});
+
+test('loadingStatusDisplayText reserves the empty typing frame for pending bubbles', () => {
+  assert.equal(
+    loadingStatusDisplayText({
+      pending: true,
+      loadingState: { text: '正在整理上下文', visibleText: '', stage: 'typing' },
+    }),
+    '\u00A0'
+  );
+  assert.equal(loadingStatusDisplayText({}, ''), '');
+});
+
+test('loadingStatusReserveText keeps the full pending label during empty typing frames', () => {
+  assert.equal(
+    loadingStatusReserveText({
+      pending: true,
+      loadingState: { text: '正在读取 very/long/path/chapter-1.md', visibleText: '', stage: 'typing' },
+    }),
+    '正在读取 very/long/path/chapter-1.md'
+  );
+  assert.equal(
+    loadingStatusReserveText({ pending: true }, '', '正在处理'),
+    '正在处理'
+  );
+});
+
+test('loadingStatusReserveText keeps long live progress stable during empty frames', () => {
+  assert.equal(
+    loadingStatusReserveText(
+      {
+        pending: true,
+        loadingState: { text: '正在烹饪', visibleText: '', stage: 'typing' },
+        progressItems: [
+          {
+            id: 'agent_recovery_retrying:1',
+            type: 'agent_recovery_retrying',
+            text: '连接中断，10 秒后从断点继续 1/2',
+          },
+        ],
+      },
+      ''
+    ),
+    '连接中断，10 秒后从断点继续 1/2'
+  );
 });

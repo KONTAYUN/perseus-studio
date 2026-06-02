@@ -30,5 +30,10 @@ func (s *Service) execRunWorkspaceCommand(ctx context.Context, userID, arguments
 		truncate(result.Stdout, 220),
 		truncate(result.Stderr, 220),
 	)
-	return mustJSON(result), summary, "正在执行命令...", result.Cwd, nil
+	path := result.Cwd
+	if len(result.ChangedPaths) > 0 {
+		path = result.ChangedPaths[0]
+		summary = fmt.Sprintf("%s changed_paths=%d", summary, len(result.ChangedPaths))
+	}
+	return mustJSON(result), summary, "正在执行命令...", path, nil
 }

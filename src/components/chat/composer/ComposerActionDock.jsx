@@ -1,6 +1,7 @@
 import React from 'react';
 import { Paperclip, Send, Square } from 'lucide-react';
 import ModelMenu from './ModelMenu';
+import { composerPrimaryButtonState } from './composerActionState';
 
 export default function ComposerActionDock({
   attachmentInputRef,
@@ -26,6 +27,9 @@ export default function ComposerActionDock({
     onSend?.();
   }, [hasDraft, isChatSending, onSend, onStop]);
 
+  const primaryState = composerPrimaryButtonState({ hasDraft, isChatSending, isSendDisabled });
+  const isStopAction = primaryState.action === 'stop';
+
   return (
     <div className="composer-action-dock">
       <div className="composer-action-left">
@@ -43,17 +47,11 @@ export default function ComposerActionDock({
         <button
           data-testid="chat-send-button"
           onClick={handlePrimaryAction}
-          disabled={isSendDisabled}
-          className={`motion-button composer-icon-button pointer-events-auto flex items-center justify-center ${
-            isChatSending && !hasDraft
-              ? 'composer-stop-button'
-              : isSendDisabled
-              ? 'composer-send-button-disabled'
-              : 'composer-send-button'
-          }`}
-          title={isChatSending && hasDraft ? '挂起发送' : isChatSending ? '停止生成' : '发送'}
+          disabled={primaryState.disabled}
+          className={`motion-button composer-icon-button pointer-events-auto flex items-center justify-center ${primaryState.toneClass}`}
+          title={primaryState.title}
         >
-          {isChatSending && !hasDraft ? (
+          {isStopAction ? (
             <Square size={13} fill="currentColor" strokeWidth={2.5} />
           ) : (
             <Send size={15} className="composer-send-icon" strokeWidth={2.5} />

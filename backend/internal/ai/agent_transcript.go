@@ -56,7 +56,7 @@ func (t *AgentTranscript) AppendAssistantTurn(turn agentModelTurn) {
 	entry := TranscriptEntry{
 		Kind:             transcriptEntryAssistant,
 		Text:             turn.Content,
-		ToolCalls:        cloneAgentToolCalls(turn.ToolCalls),
+		ToolCalls:        cloneTranscriptAgentToolCalls(turn.ToolCalls),
 		AnthropicContent: cloneMapAnySlice(turn.AnthropicRaw),
 		Usage:            turn.Usage,
 	}
@@ -119,7 +119,37 @@ func cloneAgentToolCalls(items []agentToolCall) []agentToolCall {
 			Name:           item.Name,
 			ArgumentsJSON:  item.ArgumentsJSON,
 			AnthropicInput: cloneMapAny(item.AnthropicInput),
+			PatchText:      item.PatchText,
 		})
+	}
+	return next
+}
+
+func cloneTranscriptAgentToolCalls(items []agentToolCall) []agentToolCall {
+	if len(items) == 0 {
+		return nil
+	}
+	next := make([]agentToolCall, 0, len(items))
+	for _, item := range items {
+		clone := agentToolCall{
+			ID:             item.ID,
+			Name:           item.Name,
+			ArgumentsJSON:  item.ArgumentsJSON,
+			AnthropicInput: cloneMapAny(item.AnthropicInput),
+		}
+		if item.Name == "apply_workspace_patch" && strings.TrimSpace(item.PatchText) != "" {
+			clone.ArgumentsJSON = mustJSON(map[string]any{
+				"patch":       "[assistant_text_patch captured by backend]",
+				"transport":   "assistant_text_patch",
+				"patch_chars": len([]rune(item.PatchText)),
+			})
+			clone.AnthropicInput = map[string]any{
+				"patch":       "[assistant_text_patch captured by backend]",
+				"transport":   "assistant_text_patch",
+				"patch_chars": len([]rune(item.PatchText)),
+			}
+		}
+		next = append(next, clone)
 	}
 	return next
 }
@@ -277,6 +307,6 @@ func initialRuntimeCheckpoint(messages []store.Message, attachments []Attachment
 		ChunkWrites:        map[string]workspaceChunkWriteState{},
 		LoadedToolsets:     allAgentToolsets(allowTask),
 		RequiresCompletion: requiresCompletion,
-		ToolLoopActive:     requiresCompletion || attachmentsRequireToolLoop(attachments),
+		ToolLoopActive:     requiresCompletion,
 	}
 }

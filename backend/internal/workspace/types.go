@@ -46,6 +46,20 @@ type FileWriteResult struct {
 	ChangedPaths []string `json:"changed_paths,omitempty"`
 }
 
+type TextEditMatchKind string
+
+const (
+	TextEditMatchExact               TextEditMatchKind = "exact"
+	TextEditMatchTrimmedLines        TextEditMatchKind = "trimmed_lines"
+	TextEditMatchIndentationFlexible TextEditMatchKind = "indentation_flexible"
+)
+
+type TextEditResult struct {
+	WriteResult  FileWriteResult   `json:"write_result"`
+	Replacements int               `json:"replacements"`
+	MatchKind    TextEditMatchKind `json:"match_kind"`
+}
+
 type LineReplaceResult struct {
 	WriteResult      FileWriteResult `json:"write_result"`
 	StartLine        int             `json:"start_line"`
@@ -56,12 +70,13 @@ type LineReplaceResult struct {
 }
 
 type TextReadResult struct {
-	Path       string `json:"path"`
-	Content    string `json:"content"`
-	Truncated  bool   `json:"truncated"`
-	StartLine  int    `json:"start_line,omitempty"`
-	EndLine    int    `json:"end_line,omitempty"`
-	TotalLines int    `json:"total_lines,omitempty"`
+	Path            string `json:"path"`
+	Content         string `json:"content"`
+	NumberedContent string `json:"numbered_content,omitempty"`
+	Truncated       bool   `json:"truncated"`
+	StartLine       int    `json:"start_line,omitempty"`
+	EndLine         int    `json:"end_line,omitempty"`
+	TotalLines      int    `json:"total_lines,omitempty"`
 }
 
 type PathChangeResult struct {
@@ -83,12 +98,15 @@ type TrashItem struct {
 }
 
 type CommandResult struct {
-	Command    string    `json:"command"`
-	Cwd        string    `json:"cwd"`
-	Stdout     string    `json:"stdout"`
-	Stderr     string    `json:"stderr"`
-	ExitCode   int       `json:"exit_code"`
-	TimedOut   bool      `json:"timed_out"`
-	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at"`
+	Command           string    `json:"command"`
+	Cwd               string    `json:"cwd"`
+	Stdout            string    `json:"stdout"`
+	Stderr            string    `json:"stderr"`
+	ExitCode          int       `json:"exit_code"`
+	TimedOut          bool      `json:"timed_out"`
+	StartedAt         time.Time `json:"started_at"`
+	FinishedAt        time.Time `json:"finished_at"`
+	ChangedPaths      []string  `json:"changed_paths,omitempty"`
+	WorkspaceMutation bool      `json:"workspace_mutation,omitempty"`
+	Hash              string    `json:"hash,omitempty"`
 }

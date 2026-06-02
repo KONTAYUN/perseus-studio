@@ -60,6 +60,17 @@ type MessageDraftInput struct {
 	MetaJSON        string
 }
 
+type MessageInput struct {
+	UserID          string
+	ConversationID  string
+	Role            string
+	Content         string
+	AttachmentsJSON string
+	Status          string
+	SegmentIndex    int
+	MetaJSON        string
+}
+
 type ToolCall struct {
 	ID               string       `json:"id"`
 	UserID           string       `json:"user_id"`

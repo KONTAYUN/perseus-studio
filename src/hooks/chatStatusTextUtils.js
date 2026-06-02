@@ -162,14 +162,11 @@ export function agentEventText(type, payload = {}) {
 }
 
 export function pendingToolStatus(input) {
-  const { toolName, target } = normalizeToolStatusInput(input);
+  const { toolName, statusKind, target } = normalizeToolStatusInput(input);
+  const byKind = pendingStatusByKind(statusKind, target);
+  if (byKind) return byKind;
   if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return target ? `正在查看 ${target}` : '正在查看工作区';
   if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return target ? `正在读取 ${target}` : '正在读取文件';
-  if (toolName === 'edit_workspace_text') return target ? `正在编辑 ${target}` : '正在编辑文件';
-  if (toolName === 'replace_workspace_lines') return target ? `正在改写 ${target}` : '正在改写文件';
-  if (toolName === 'save_workspace_file') return target ? `正在保存 ${target}` : '正在保存文件';
-  if (toolName === 'write_workspace_chunk') return target ? `正在写入 ${target}` : '正在写入文件';
-  if (toolName === 'finalize_workspace_write') return target ? `正在校验 ${target}` : '正在校验文件';
   if (toolName === 'manage_workspace_path') return target ? `正在管理 ${target}` : '正在管理路径';
   if (toolName === 'organize_workspace_matches') return target ? `正在整理 ${target}` : '正在整理文件';
   if (toolName === 'run_workspace_command') return target ? `正在运行 ${target} 的命令` : '正在运行命令';
@@ -180,15 +177,12 @@ export function pendingToolStatus(input) {
 }
 
 export function completedToolStatus(input) {
-  const { toolName, target } = normalizeToolStatusInput(input);
+  const { toolName, statusKind, target } = normalizeToolStatusInput(input);
   if (toolName === 'ask_followup_question') return '';
+  const byKind = completedStatusByKind(statusKind, target);
+  if (byKind) return byKind;
   if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return target ? `已查看 ${target}` : '已查看工作区';
   if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return target ? `已读取 ${target}` : '已读取文件';
-  if (toolName === 'edit_workspace_text') return target ? `已编辑 ${target}` : '已编辑文件';
-  if (toolName === 'replace_workspace_lines') return target ? `已改写 ${target}` : '已改写文件';
-  if (toolName === 'save_workspace_file') return target ? `已保存 ${target}` : '已保存文件';
-  if (toolName === 'write_workspace_chunk') return target ? `已写入 ${target}` : '已写入文件';
-  if (toolName === 'finalize_workspace_write') return target ? `已校验 ${target}` : '已校验文件';
   if (toolName === 'manage_workspace_path') return target ? `已管理 ${target}` : '已管理路径';
   if (toolName === 'organize_workspace_matches') return target ? `已整理 ${target}` : '已整理文件';
   if (toolName === 'run_workspace_command') return target ? `已运行 ${target} 的命令` : '已运行命令';
@@ -200,12 +194,59 @@ export function completedToolStatus(input) {
 
 function normalizeToolStatusInput(input) {
   if (typeof input === 'string') {
-    return { toolName: input, target: '' };
+    return { toolName: input, statusKind: '', target: '' };
   }
   return {
     toolName: input?.tool_name || input?.toolName || '',
+    statusKind: input?.status_kind || input?.statusKind || '',
     target: String(input?.target_summary || input?.targetSummary || '').trim(),
   };
+}
+
+function pendingStatusByKind(statusKind = '', target = '') {
+  switch (statusKind) {
+    case 'workspace_search':
+      return target ? `正在查看 ${target}` : '正在查看工作区';
+    case 'workspace_read':
+      return target ? `正在读取 ${target}` : '正在读取文件';
+    case 'workspace_edit':
+      return target ? `正在编辑 ${target}` : '正在编辑文件';
+    case 'workspace_path':
+      return target ? `正在整理 ${target}` : '正在整理文件';
+    case 'command':
+      return target ? `正在运行 ${target} 的命令` : '正在运行命令';
+    case 'web':
+      return target ? `正在搜索 ${target}` : '正在搜索资料';
+    case 'skill':
+      return target ? `正在处理 ${target}` : '正在处理技能';
+    case 'task':
+      return '正在启动后台任务';
+    default:
+      return '';
+  }
+}
+
+function completedStatusByKind(statusKind = '', target = '') {
+  switch (statusKind) {
+    case 'workspace_search':
+      return target ? `已查看 ${target}` : '已查看工作区';
+    case 'workspace_read':
+      return target ? `已读取 ${target}` : '已读取文件';
+    case 'workspace_edit':
+      return target ? `已编辑 ${target}` : '已编辑文件';
+    case 'workspace_path':
+      return target ? `已整理 ${target}` : '已整理文件';
+    case 'command':
+      return target ? `已运行 ${target} 的命令` : '已运行命令';
+    case 'web':
+      return target ? `已搜索 ${target}` : '已搜索资料';
+    case 'skill':
+      return target ? `已处理 ${target}` : '已处理技能';
+    case 'task':
+      return '已启动后台任务';
+    default:
+      return '';
+  }
 }
 
 export function playfulPendingStatus(seed = '') {

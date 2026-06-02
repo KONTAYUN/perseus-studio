@@ -93,9 +93,9 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 			}
 		}
 		defer closeStream()
-		requiresTool := normalizeProviderToolChoice(req.ToolChoice).requiresTool()
+		revealTextAfterAction := req.ActionBoundaryActive || normalizeProviderToolChoice(req.ToolChoice).requiresTool()
 		var emitText func(string)
-		if req.Opts.Event != nil && !requiresTool {
+		if req.Opts.Event != nil && providerTurnCanStreamAssistantText(req) {
 			emitText = func(text string) {
 				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
 			}
@@ -107,14 +107,14 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		turn, err := parseOpenAIStreamWithOptions(streamBody, providerStreamParseOptions{
 			EmitText:                  emitText,
 			EmitCompletionResultDelta: emitCompletionResult,
-			RevealTextAfterTool:       requiresTool,
+			RevealTextAfterTool:       revealTextAfterAction,
 		})
-		if emitText != nil && strings.TrimSpace(turn.Content) != "" && (!requiresTool || len(turn.ToolCalls) > 0) {
+		if emitText != nil && strings.TrimSpace(turn.PublicStreamedContent) != "" && (!revealTextAfterAction || len(turn.ToolCalls) > 0) {
 			turn.PublicTextStreamed = true
 		}
 		if err != nil {
 			if partial, ok := partialTurnFromStreamError(err); ok {
-				if emitText != nil && strings.TrimSpace(partial.Content) != "" && (!requiresTool || len(partial.ToolCalls) > 0) {
+				if emitText != nil && strings.TrimSpace(partial.PublicStreamedContent) != "" && (!revealTextAfterAction || len(partial.ToolCalls) > 0) {
 					partial.PublicTextStreamed = true
 				}
 				if !partial.CompletionResultStreamed && emitCompletionResult != nil {
@@ -175,16 +175,17 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 
 func (s *Service) callOpenAIAgentTurn(ctx context.Context, runtime *agentRuntime, round int) (agentModelTurn, error) {
 	return s.providerV2(agentProtocolOpenAI).Turn(ctx, providerTurnRequest{
-		ConversationID:    runtime.conversationID,
-		MessageID:         runtime.messageID,
-		Provider:          runtime.provider,
-		Protocol:          runtime.protocol,
-		Tools:             runtime.tools(),
-		ToolChoice:        runtime.toolChoice(),
-		Snapshot:          runtime.lastContextSnapshot,
-		PerformedMutation: runtime.performedMutation,
-		HasToolEvents:     len(runtime.events) > 0,
-		Opts:              runtime.opts,
+		ConversationID:       runtime.conversationID,
+		MessageID:            runtime.messageID,
+		Provider:             runtime.provider,
+		Protocol:             runtime.protocol,
+		Tools:                runtime.tools(),
+		ToolChoice:           runtime.toolChoice(),
+		Snapshot:             runtime.lastContextSnapshot,
+		PerformedMutation:    runtime.performedMutation,
+		HasToolEvents:        len(runtime.events) > 0,
+		ActionBoundaryActive: runtime.actionBoundaryActive(),
+		Opts:                 runtime.opts,
 	})
 }
 

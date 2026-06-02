@@ -7,7 +7,10 @@ import {
   playfulPendingStatus,
   updateLoadingState,
 } from './chatStatusTextUtils.js';
-import { normalizeConversationMessage } from './chatRunMessageState.js';
+import {
+  normalizeConversationMessage,
+  normalizeConversationMessages as normalizeRunConversationMessages,
+} from './chatRunMessageState.js';
 
 export {
   agentEventText,
@@ -39,7 +42,7 @@ export {
 export { normalizeConversationMessage };
 
 export function normalizeConversationMessages(items) {
-  return (items || []).map((item) => normalizeConversationMessage(item));
+  return normalizeRunConversationMessages(items);
 }
 
 export function formatContextTokenCount(value) {

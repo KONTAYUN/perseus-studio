@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -275,9 +276,13 @@ func isTransientTransportError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
 	text := strings.ToLower(err.Error())
 	transientMarkers := []string{
 		"tls: bad record mac",
+		"eof",
 		"unexpected eof",
 		"connection reset",
 		"connection refused",

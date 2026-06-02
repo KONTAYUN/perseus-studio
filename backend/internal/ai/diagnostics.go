@@ -179,6 +179,11 @@ func sanitizeUserFacingAIError(message string) string {
 		return "本地状态保存失败，本轮已暂停；可以检查磁盘/数据库状态后继续本轮"
 	case strings.Contains(lower, "malformed http response"):
 		return "模型供应商连接协议异常，本轮请求没有拿到有效响应"
+	case strings.Contains(lower, "eof") ||
+		strings.Contains(lower, "connection reset") ||
+		strings.Contains(lower, "connection aborted") ||
+		strings.Contains(lower, "server closed idle connection"):
+		return "模型供应商连接中断，本轮请求没有拿到有效响应"
 	case strings.Contains(lower, "tls: bad record mac"):
 		return "模型供应商 TLS 连接中断，本轮请求没有拿到有效响应"
 	case strings.Contains(lower, "transport connection broken"):

@@ -1,11 +1,11 @@
 package ai
 
 func openAIBackgroundTaskTool() map[string]any {
-	return openAIFunctionTool("start_background_task", "Create a background task for long-running, multi-step work. Use for web research plus report writing, long documents, batch edits, refactors, build/test/fix loops, or work the user wants to continue in the background.", backgroundTaskParams())
+	return openAIFunctionTool("start_background_task", "Create a background task for multi-step work that should continue outside the foreground turn. Use for web research plus report writing, document work, batch edits, refactors, build/test/fix loops, or work the user wants to continue in the background.", backgroundTaskParams())
 }
 
 func anthropicBackgroundTaskTool() map[string]any {
-	return anthropicTool("start_background_task", "Create a background task for long-running, multi-step work. Use for web research plus report writing, long documents, batch edits, refactors, build/test/fix loops, or work the user wants to continue in the background.", backgroundTaskParams())
+	return anthropicTool("start_background_task", "Create a background task for multi-step work that should continue outside the foreground turn. Use for web research plus report writing, document work, batch edits, refactors, build/test/fix loops, or work the user wants to continue in the background.", backgroundTaskParams())
 }
 
 func backgroundTaskParams() map[string]any {

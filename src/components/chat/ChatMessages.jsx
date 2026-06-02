@@ -1,6 +1,6 @@
 import React from 'react';
 import { Copy, GitBranch, MessageSquare, RefreshCw, Trash2 } from 'lucide-react';
-import { completedActionItems, formatDate, latestLiveProgressItem, loadingBubbleText, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
+import { completedActionItems, formatDate, latestLiveProgressItem, loadingStatusDisplayText, loadingStatusReserveText, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
 import { Button, IconButton } from '../ui';
 import { RUN_STEER_STATUS, runSteerStatusLabel } from '../../hooks/chatSteerItems';
 
@@ -178,17 +178,13 @@ function MessageBubble({ message, ide, canRegenerate }) {
 
 function LiveProgressLine({ message }) {
   const item = latestLiveProgressItem(message);
-  const text = item?.text || loadingBubbleText(message, '');
-  if (!text) return null;
+  const text = item?.text || loadingStatusDisplayText(message, '');
+  const reserveText = loadingStatusReserveText(message, text);
+  if (!text && !reserveText) return null;
   return (
     <div className="loading-status-line loading-status-line-compact mt-2 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
       <span className="loading-status-pulse h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-      <span className="loading-status-text">{text}</span>
-      <span className="loading-status-dots gap-0.5">
-        <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
-        <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
-        <span className="h-1 w-1 animate-bounce rounded-full bg-current" />
-      </span>
+      <LoadingStatusText text={text} reserveText={reserveText} dotSize="sm" />
     </div>
   );
 }
@@ -287,18 +283,41 @@ function CompletedActionItems({ items }) {
 }
 
 function LoadingStateBubble({ message, fallbackText }) {
-  const visibleText = loadingBubbleText(message, fallbackText);
+  const visibleText = loadingStatusDisplayText(message, fallbackText);
+  const reserveText = loadingStatusReserveText(message, visibleText, fallbackText);
   return (
     <div className="loading-status-line">
-      <span className="loading-status-text">
-        <span className="animate-pulse">{visibleText || '\u00A0'}</span>
-      </span>
-      <span className="loading-status-dots gap-1">
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" />
-      </span>
+      <LoadingStatusText text={visibleText} reserveText={reserveText} pulse />
     </div>
+  );
+}
+
+function LoadingStatusText({ text, reserveText, pulse = false, dotSize = 'md' }) {
+  const displayText = text || '\u00A0';
+  const reservedText = reserveText || text || '\u00A0';
+  return (
+    <span className="loading-status-text">
+      <span className="loading-status-flow loading-status-visible">
+        <span className={pulse ? 'animate-pulse' : undefined}>{displayText}</span>
+        <LoadingStatusDots size={dotSize} />
+      </span>
+      <span className="loading-status-flow loading-status-reserve" aria-hidden="true">
+        <span>{reservedText}</span>
+        <LoadingStatusDots size={dotSize} />
+      </span>
+    </span>
+  );
+}
+
+function LoadingStatusDots({ size = 'md' }) {
+  const dotClass = size === 'sm' ? 'h-1 w-1' : 'h-1.5 w-1.5';
+  const gapClass = size === 'sm' ? 'gap-0.5' : 'gap-1';
+  return (
+    <span className={`loading-status-dots ${gapClass}`}>
+      <span className={`${dotClass} animate-bounce rounded-full bg-current [animation-delay:-0.2s]`} />
+      <span className={`${dotClass} animate-bounce rounded-full bg-current [animation-delay:-0.1s]`} />
+      <span className={`${dotClass} animate-bounce rounded-full bg-current`} />
+    </span>
   );
 }
 

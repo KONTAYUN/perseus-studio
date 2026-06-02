@@ -53,6 +53,7 @@ type EditorPanelContext struct {
 type ToolEvent struct {
 	ToolCallID    string   `json:"tool_call_id,omitempty"`
 	ToolName      string   `json:"tool_name"`
+	StatusKind    string   `json:"status_kind,omitempty"`
 	Label         string   `json:"label"`
 	Status        string   `json:"status"`
 	TargetSummary string   `json:"target_summary,omitempty"`
@@ -122,6 +123,7 @@ type RunOptions struct {
 	OnAssistantMessageStarted   func(messageID string, content string, segmentIndex int)
 	OnAssistantMessageDelta     func(messageID string, delta string)
 	OnAssistantMessageCompleted func(messageID string, finalContent string, segmentIndex int)
+	OnAssistantMessageDiscarded func(messageID string, reason string, segmentIndex int)
 	OnAssistantToolBoundary     func()
 	OnCompletionResultDelta     func(delta string)
 	OnCompletionResultDiscard   func()

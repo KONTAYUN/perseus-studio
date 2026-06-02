@@ -118,12 +118,15 @@ func streamToolCallLogs(calls []agentToolCall) []StreamToolCallLog {
 		}
 		if item.Name == "save_workspace_file" && (!item.ArgumentsJSONValid || item.ContentChars > recommendedWorkspaceChunkChars) {
 			item.LooksLikeLongWrite = true
-			item.RecommendedTool = "write_workspace_chunk"
-			item.RecommendedChunkSize = recommendedWorkspaceChunkChars
+			item.RecommendedTool = manifestRecommendedProtocol(item.Name)
+		}
+		if item.Name == "write_workspace_chunk" && (!item.ArgumentsJSONValid || item.ContentChars > recommendedWorkspaceChunkChars) {
+			item.LooksLikeLongWrite = true
+			item.RecommendedTool = manifestRecommendedProtocol(item.Name)
 		}
 		if item.Name == "edit_workspace_text" && (!item.ArgumentsJSONValid || item.OldTextChars+item.NewTextChars > recommendedWorkspaceChunkChars) {
 			item.LooksLikeLargeEdit = true
-			item.RecommendedTool = "replace_workspace_lines"
+			item.RecommendedTool = manifestRecommendedProtocol(item.Name)
 		}
 		items = append(items, item)
 	}

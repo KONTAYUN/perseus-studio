@@ -31,9 +31,25 @@ ORDER BY created_at ASC
 }
 
 func (s *ConversationStore) AppendMessage(ctx context.Context, userID, conversationID, role, content, attachmentsJSON string) (Message, error) {
-	if attachmentsJSON == "" {
-		attachmentsJSON = "[]"
+	return s.AppendMessageWithMeta(ctx, MessageInput{
+		UserID:          userID,
+		ConversationID:  conversationID,
+		Role:            role,
+		Content:         content,
+		AttachmentsJSON: attachmentsJSON,
+		Status:          "final",
+	})
+}
+
+func (s *ConversationStore) AppendMessageWithMeta(ctx context.Context, input MessageInput) (Message, error) {
+	if input.AttachmentsJSON == "" {
+		input.AttachmentsJSON = "[]"
 	}
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = "final"
+	}
+	metaJSON := strings.TrimSpace(input.MetaJSON)
 	now := time.Now().UTC()
 	id := nextStoreID("msg", now)
 
@@ -45,8 +61,8 @@ func (s *ConversationStore) AppendMessage(ctx context.Context, userID, conversat
 
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO messages (id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, 'final', 0, '', ?, ?)
-`, id, userID, conversationID, role, content, attachmentsJSON, now, now)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, id, input.UserID, input.ConversationID, input.Role, input.Content, input.AttachmentsJSON, status, input.SegmentIndex, metaJSON, now, now)
 	if err != nil {
 		return Message{}, err
 	}
@@ -54,14 +70,14 @@ VALUES (?, ?, ?, ?, ?, ?, 'final', 0, '', ?, ?)
 UPDATE conversations
 SET updated_at = ?
 WHERE id = ? AND user_id = ?
-`, now, conversationID, userID)
+`, now, input.ConversationID, input.UserID)
 	if err != nil {
 		return Message{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Message{}, err
 	}
-	return s.GetMessage(ctx, userID, id)
+	return s.GetMessage(ctx, input.UserID, id)
 }
 
 func (s *ConversationStore) GetMessage(ctx context.Context, userID, id string) (Message, error) {

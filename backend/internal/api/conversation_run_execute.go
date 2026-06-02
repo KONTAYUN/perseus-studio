@@ -114,6 +114,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 	var activeAssistantSegment int
 	var activeAssistantContent strings.Builder
 	var latestAssistantMessage store.Message
+	var lastFinalizedAssistantContent string
 	var completionPreviewMessageID string
 	var completionPreviewSegment int
 
@@ -133,7 +134,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			AttachmentsJSON: "[]",
 			Status:          "streaming",
 			SegmentIndex:    activeAssistantSegment,
-			MetaJSON:        messageMetaJSON("assistant_segment", activeAssistantSegment),
+			MetaJSON:        messageMetaJSON("assistant_segment", activeAssistantSegment, runID),
 		})
 		if createErr != nil {
 			log.Printf("[ai] assistant message started failed conversation=%s run=%s error=%v", conversationID, runID, createErr)
@@ -202,6 +203,35 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		appendActiveAssistantDeltaChunks(missingAssistantFinalDelta(activeAssistantContent.String(), finalContent))
 	}
 
+	discardActiveAssistantMessage := func(reason string) {
+		if getPersistenceErr() != nil || activeAssistantMessageID == "" {
+			return
+		}
+		messageID := activeAssistantMessageID
+		segmentIndex := activeAssistantSegment
+		if err := s.conversations.DeleteMessage(ctx, userID, conversationID, messageID); err != nil {
+			log.Printf("[ai] assistant message discard failed conversation=%s run=%s message=%s error=%v", conversationID, runID, messageID, err)
+			recordPersistenceErr("assistant_message_discard_failed", err)
+			return
+		}
+		log.Printf("[ai] assistant message discarded conversation=%s run=%s message=%s reason=%s", conversationID, runID, messageID, reason)
+		safeAppendEvent("append_assistant_message_discarded_event", ctx, store.AgentEventInput{
+			RunID:          runID,
+			UserID:         userID,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Type:           "assistant_message_discarded",
+			Level:          "info",
+			Payload: map[string]any{
+				"message_id":    messageID,
+				"segment_index": segmentIndex,
+				"reason":        reason,
+			},
+		})
+		activeAssistantMessageID = ""
+		activeAssistantContent.Reset()
+	}
+
 	finalizeActiveAssistantMessage := func(finalContent string) {
 		if getPersistenceErr() != nil {
 			return
@@ -214,13 +244,18 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		if finalContent == "" {
 			finalContent = strings.TrimSpace(activeAssistantContent.String())
 		}
-		item, finalizeErr := s.conversations.FinalizeMessage(ctx, userID, activeAssistantMessageID, finalContent, messageMetaJSON("assistant_segment", activeAssistantSegment))
+		if finalContent == "" {
+			discardActiveAssistantMessage("empty_assistant_segment")
+			return
+		}
+		item, finalizeErr := s.conversations.FinalizeMessage(ctx, userID, activeAssistantMessageID, finalContent, messageMetaJSON("assistant_segment", activeAssistantSegment, runID))
 		if finalizeErr != nil {
 			log.Printf("[ai] assistant message completed failed conversation=%s run=%s message=%s error=%v", conversationID, runID, activeAssistantMessageID, finalizeErr)
 			recordPersistenceErr("assistant_message_finalize_failed", finalizeErr)
 			return
 		}
 		latestAssistantMessage = item
+		lastFinalizedAssistantContent = finalContent
 		log.Printf("[ai] assistant message completed conversation=%s run=%s message=%s segment=%d chars=%d", conversationID, runID, item.ID, activeAssistantSegment, len([]rune(finalContent)))
 		safeAppendEvent("append_assistant_message_completed_event", ctx, store.AgentEventInput{
 			RunID:          runID,
@@ -245,7 +280,10 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		if delta == "" {
 			return
 		}
-		if activeAssistantMessageID == "" {
+		if completionPreviewMessageID == "" {
+			if activeAssistantMessageID != "" {
+				discardActiveAssistantMessage("completion_result_supersedes_preamble")
+			}
 			startActiveAssistantMessage()
 			completionPreviewMessageID = activeAssistantMessageID
 			completionPreviewSegment = activeAssistantSegment
@@ -298,10 +336,20 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		ThinkingMode: thinkingMode,
 		Log:          logEvent,
 		Event: func(eventType, level string, payload map[string]any) {
+			streamState := assistantStreamState{
+				ActiveMessageID:      activeAssistantMessageID,
+				CompletionPreviewID:  completionPreviewMessageID,
+				LastFinalizedContent: lastFinalizedAssistantContent,
+			}
 			if eventType == "model_delta" {
-				appendActiveAssistantDeltaChunks(eventPayloadString(payload, "text"))
+				if shouldAppendModelDelta(streamState) {
+					appendActiveAssistantDeltaChunks(eventPayloadString(payload, "text"))
+				}
 			} else if eventType == "model_message_completed" {
-				finalizeActiveAssistantMessage(eventPayloadString(payload, "content"))
+				finalContent := eventPayloadString(payload, "content")
+				if shouldFinalizeModelMessageCompleted(finalContent, streamState.LastFinalizedContent) {
+					finalizeActiveAssistantMessage(finalContent)
+				}
 				completionPreviewMessageID = ""
 				completionPreviewSegment = 0
 			}
@@ -337,6 +385,15 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 				return
 			}
 			finalizeActiveAssistantMessage("")
+		},
+		OnAssistantMessageDiscarded: func(messageID string, reason string, segmentIndex int) {
+			if activeAssistantMessageID != "" && activeAssistantMessageID == messageID {
+				discardActiveAssistantMessage(reason)
+			}
+			if completionPreviewMessageID == messageID {
+				completionPreviewMessageID = ""
+				completionPreviewSegment = 0
+			}
 		},
 		OnCompletionResultDelta:   appendCompletionResultDelta,
 		OnCompletionResultDiscard: discardCompletionResultPreview,
@@ -393,7 +450,16 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 			return
 		}
-		assistantMessage, err = s.conversations.AppendMessage(ctx, userID, conversationID, "assistant", reply.Content, assistantAttachments)
+		assistantMessage, err = s.conversations.AppendMessageWithMeta(ctx, store.MessageInput{
+			UserID:          userID,
+			ConversationID:  conversationID,
+			Role:            "assistant",
+			Content:         reply.Content,
+			AttachmentsJSON: assistantAttachments,
+			Status:          "final",
+			SegmentIndex:    1,
+			MetaJSON:        messageMetaJSON("assistant_segment", 1, runID),
+		})
 		if err != nil {
 			s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 			return

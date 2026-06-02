@@ -6,11 +6,17 @@ import (
 	"strings"
 )
 
-func messageMetaJSON(kind string, segmentIndex int) string {
-	raw, _ := json.Marshal(map[string]any{
+func messageMetaJSON(kind string, segmentIndex int, runID ...string) string {
+	payload := map[string]any{
 		"kind":          kind,
 		"segment_index": segmentIndex,
-	})
+	}
+	if len(runID) > 0 {
+		if trimmed := strings.TrimSpace(runID[0]); trimmed != "" {
+			payload["run_id"] = trimmed
+		}
+	}
+	raw, _ := json.Marshal(payload)
 	return string(raw)
 }
 
@@ -109,4 +115,22 @@ func missingAssistantFinalDelta(currentContent string, finalContent string) stri
 		return finalContent[len(trimmedCurrent):]
 	}
 	return ""
+}
+
+type assistantStreamState struct {
+	ActiveMessageID      string
+	CompletionPreviewID  string
+	LastFinalizedContent string
+}
+
+func shouldAppendModelDelta(state assistantStreamState) bool {
+	return state.CompletionPreviewID == "" || state.ActiveMessageID != state.CompletionPreviewID
+}
+
+func shouldFinalizeModelMessageCompleted(finalContent string, lastFinalizedContent string) bool {
+	finalContent = strings.TrimSpace(finalContent)
+	if finalContent == "" {
+		return false
+	}
+	return finalContent != strings.TrimSpace(lastFinalizedContent)
 }

@@ -11,17 +11,18 @@ import (
 )
 
 type providerTurnRequest struct {
-	ConversationID    string
-	MessageID         string
-	Provider          store.ModelProvider
-	Protocol          agentProtocol
-	Tools             []map[string]any
-	ToolChoice        providerToolChoice
-	DisableTools      bool
-	Snapshot          ContextSnapshot
-	PerformedMutation bool
-	HasToolEvents     bool
-	Opts              RunOptions
+	ConversationID       string
+	MessageID            string
+	Provider             store.ModelProvider
+	Protocol             agentProtocol
+	Tools                []map[string]any
+	ToolChoice           providerToolChoice
+	DisableTools         bool
+	Snapshot             ContextSnapshot
+	PerformedMutation    bool
+	HasToolEvents        bool
+	ActionBoundaryActive bool
+	Opts                 RunOptions
 }
 
 type providerToolChoiceMode string
@@ -133,6 +134,13 @@ func (s *Service) providerV2(protocol agentProtocol) providerAdapterV2 {
 	}
 }
 
+func providerTurnCanStreamAssistantText(req providerTurnRequest) bool {
+	if strings.TrimSpace(req.Opts.TaskID) != "" {
+		return false
+	}
+	return true
+}
+
 func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary) {
 	if opts.Event == nil {
 		return
@@ -157,8 +165,12 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"message_shapes":               summary.MessageShapes,
 		"message_protocol_warnings":    summary.MessageProtocolWarnings,
 		"tool_schema_digest":           summary.ToolSchemaDigest,
+		"tool_manifest_digest":         summary.ToolManifestDigest,
 		"tool_schema_warnings":         summary.ToolSchemaWarnings,
 		"tool_schema_items":            summary.ToolSchemaItems,
+		"provider_visible_tools":       summary.ProviderVisibleTools,
+		"loaded_capabilities":          summary.LoadedCapabilities,
+		"internal_edit_protocol":       summary.InternalEditProtocol,
 		"unsupported_openai_params":    summary.UnsupportedOpenAIParams,
 		"provider_host":                summary.ProviderHost,
 		"model_id":                     summary.ModelID,
@@ -179,6 +191,7 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"transcript_entries":           summary.TranscriptEntries,
 		"tool_result_count":            summary.ToolResultCount,
 		"tool_loop_active":             summary.ToolLoopActive,
+		"action_boundary_active":       summary.ActionBoundaryActive,
 		"estimated_chars":              summary.EstimatedChars,
 		"estimated_tokens":             summary.EstimatedTokens,
 		"context_window_tokens":        summary.ContextWindowTokens,
@@ -253,14 +266,14 @@ func providerFailureClass(err error, summary ProviderRequestSummary) string {
 		}
 		return "provider_http_error"
 	}
-	if isCheckpointRecoverableProviderError(err) {
-		return "provider_transient_transport"
-	}
 	if strings.Contains(strings.ToLower(err.Error()), "incomplete tool call arguments") {
 		return "provider_incomplete_tool_arguments"
 	}
 	if failureClass := providerTransportFailureClass(err); failureClass != "" {
 		return failureClass
+	}
+	if isCheckpointRecoverableProviderError(err) {
+		return "provider_transient_transport"
 	}
 	return ""
 }
@@ -306,10 +319,21 @@ func providerTransportFailureClass(err error) string {
 	switch {
 	case strings.Contains(text, "no such host") || strings.Contains(text, "lookup ") && strings.Contains(text, ":53"):
 		return "provider_dns_lookup_failed"
+	case strings.Contains(text, "eof"):
+		return "provider_transport_eof"
+	case strings.Contains(text, "malformed http response"):
+		return "provider_transport_protocol_error"
 	case strings.Contains(text, "connection refused"):
 		return "provider_connection_refused"
+	case strings.Contains(text, "connection reset") ||
+		strings.Contains(text, "connection aborted") ||
+		strings.Contains(text, "transport connection broken") ||
+		strings.Contains(text, "server closed idle connection"):
+		return "provider_connection_interrupted"
 	case strings.Contains(text, "context deadline exceeded") || strings.Contains(text, "client.timeout exceeded"):
 		return "provider_transport_timeout"
+	case strings.Contains(text, "tls: bad record mac"):
+		return "provider_tls_interrupted"
 	default:
 		return ""
 	}

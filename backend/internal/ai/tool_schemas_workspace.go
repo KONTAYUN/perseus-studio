@@ -1,36 +1,97 @@
 package ai
 
 func openAIWorkspaceTools() []map[string]any {
-	return []map[string]any{
-		openAIFunctionTool("find_workspace_files", "Find workspace files or folders by name/path query or glob pattern. Use first when the exact path is unknown.", workspaceFindParams()),
-		openAIFunctionTool("search_workspace_text", "Search text inside workspace files and return file paths, line numbers, and context. Use for finding symbols, phrases, or likely edit locations.", workspaceSearchTextParams()),
-		openAIFunctionTool("inspect_workspace", "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams()),
-		openAIFunctionTool("read_workspace_text", "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams()),
-		openAIFunctionTool("read_workspace_files", "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams()),
-		openAIFunctionTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
-		openAIFunctionTool("replace_workspace_lines", "Replace a 1-based inclusive line range in an existing text file. Prefer this for scripts, long documents, duplicate headings, or larger rewrites after reading the target line range.", workspaceReplaceLinesParams()),
-		openAIFunctionTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
-		openAIFunctionTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content. After the last chunk, call finalize_workspace_write.", workspaceChunkWriteParams()),
-		openAIFunctionTool("finalize_workspace_write", "Finalize and verify a long chunked workspace write. Use after write_workspace_chunk for long documents, scripts, reports, or generated files before claiming completion.", workspaceFinalizeWriteParams()),
-		openAIFunctionTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
-		openAIFunctionTool("organize_workspace_matches", "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams()),
+	var tools []map[string]any
+	for _, name := range providerVisibleToolNamesForToolset("workspace", "admin") {
+		if tool := openAIWorkspaceToolByName(name); tool != nil {
+			tools = append(tools, tool)
+		}
 	}
+	return tools
 }
 
 func anthropicWorkspaceTools() []map[string]any {
-	return []map[string]any{
-		anthropicTool("find_workspace_files", "Find workspace files or folders by name/path query or glob pattern. Use first when the exact path is unknown.", workspaceFindParams()),
-		anthropicTool("search_workspace_text", "Search text inside workspace files and return file paths, line numbers, and context. Use for finding symbols, phrases, or likely edit locations.", workspaceSearchTextParams()),
-		anthropicTool("inspect_workspace", "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams()),
-		anthropicTool("read_workspace_text", "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams()),
-		anthropicTool("read_workspace_files", "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams()),
-		anthropicTool("edit_workspace_text", "Edit an existing text file with exact search/replace. Use after reading or searching the file. For new files or full overwrite, use save_workspace_file.", workspaceEditParams()),
-		anthropicTool("replace_workspace_lines", "Replace a 1-based inclusive line range in an existing text file. Prefer this for scripts, long documents, duplicate headings, or larger rewrites after reading the target line range.", workspaceReplaceLinesParams()),
-		anthropicTool("save_workspace_file", "Create or overwrite a workspace text file with backend validation. Use mode=create for new files and mode=overwrite for existing files.", workspaceSaveParams()),
-		anthropicTool("write_workspace_chunk", "Create, overwrite, or append one chunk of text to a workspace file. Use this for long generated documents instead of putting the whole file into save_workspace_file.content. After the last chunk, call finalize_workspace_write.", workspaceChunkWriteParams()),
-		anthropicTool("finalize_workspace_write", "Finalize and verify a long chunked workspace write. Use after write_workspace_chunk for long documents, scripts, reports, or generated files before claiming completion.", workspaceFinalizeWriteParams()),
-		anthropicTool("manage_workspace_path", "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams()),
-		anthropicTool("organize_workspace_matches", "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams()),
+	var tools []map[string]any
+	for _, name := range providerVisibleToolNamesForToolset("workspace", "admin") {
+		if tool := anthropicWorkspaceToolByName(name); tool != nil {
+			tools = append(tools, tool)
+		}
+	}
+	return tools
+}
+
+func openAIWorkspaceToolByName(name string) map[string]any {
+	switch name {
+	case "find_workspace_files":
+		return openAIFunctionTool(name, "Find workspace files or folders by name/path query or glob pattern. Use first when the exact path is unknown.", workspaceFindParams())
+	case "search_workspace_text":
+		return openAIFunctionTool(name, "Search text inside workspace files and return file paths, line numbers, and context. Use for finding symbols, phrases, or likely edit locations.", workspaceSearchTextParams())
+	case "inspect_workspace":
+		return openAIFunctionTool(name, "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams())
+	case "read_workspace_text":
+		return openAIFunctionTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams())
+	case "read_workspace_files":
+		return openAIFunctionTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
+	case "manage_workspace_path":
+		return openAIFunctionTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams())
+	case "organize_workspace_matches":
+		return openAIFunctionTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
+	default:
+		return nil
+	}
+}
+
+func anthropicWorkspaceToolByName(name string) map[string]any {
+	switch name {
+	case "find_workspace_files":
+		return anthropicTool(name, "Find workspace files or folders by name/path query or glob pattern. Use first when the exact path is unknown.", workspaceFindParams())
+	case "search_workspace_text":
+		return anthropicTool(name, "Search text inside workspace files and return file paths, line numbers, and context. Use for finding symbols, phrases, or likely edit locations.", workspaceSearchTextParams())
+	case "inspect_workspace":
+		return anthropicTool(name, "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams())
+	case "read_workspace_text":
+		return anthropicTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams())
+	case "read_workspace_files":
+		return anthropicTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
+	case "manage_workspace_path":
+		return anthropicTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams())
+	case "organize_workspace_matches":
+		return anthropicTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
+	default:
+		return nil
+	}
+}
+
+func workspaceToolInputSchemaByName(name string) map[string]any {
+	switch name {
+	case "find_workspace_files":
+		return workspaceFindParams()
+	case "search_workspace_text":
+		return workspaceSearchTextParams()
+	case "inspect_workspace":
+		return workspaceListParams()
+	case "read_workspace_text":
+		return workspaceReadParams()
+	case "read_workspace_files":
+		return workspaceReadFilesParams()
+	case "manage_workspace_path":
+		return workspaceManageParams()
+	case "organize_workspace_matches":
+		return workspaceOrganizeParams()
+	case "apply_workspace_patch":
+		return workspacePatchParams()
+	case "edit_workspace_text":
+		return workspaceEditParams()
+	case "replace_workspace_lines":
+		return workspaceReplaceLinesParams()
+	case "save_workspace_file":
+		return workspaceSaveParams()
+	case "write_workspace_chunk":
+		return workspaceChunkWriteParams()
+	case "finalize_workspace_write":
+		return workspaceFinalizeWriteParams()
+	default:
+		return nil
 	}
 }
 
@@ -52,6 +113,9 @@ func workspaceSearchTextParams() map[string]any {
 		"properties": map[string]any{
 			"query":         map[string]any{"type": "string", "description": "Text or regex to search for inside workspace text files."},
 			"regex":         map[string]any{"type": "boolean", "description": "Treat query as a Go regular expression. Default false."},
+			"path_scope":    map[string]any{"type": "string", "description": "Optional workspace-relative file or folder path to limit the search."},
+			"include_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional glob patterns to include, such as *.md or scripts/*.txt."},
+			"exclude_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional glob patterns to exclude."},
 			"context_lines": map[string]any{"type": "integer", "description": "Context lines before/after each match. Default 1, maximum 3."},
 			"max_results":   map[string]any{"type": "integer", "description": "Maximum matches to return. Default 80, maximum 200."},
 		},
@@ -135,6 +199,19 @@ func workspaceEditParams() map[string]any {
 	}
 }
 
+func workspacePatchParams() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"patch"},
+		"properties": map[string]any{
+			"patch": map[string]any{
+				"type":        "string",
+				"description": "Text patch beginning with *** Begin Patch and ending with *** End Patch. New model turns should output patch blocks directly in assistant text so the backend can capture and verify them.",
+			},
+		},
+	}
+}
+
 func workspaceReplaceLinesParams() map[string]any {
 	return map[string]any{
 		"type":     "object",
@@ -167,7 +244,7 @@ func workspaceSaveParams() map[string]any {
 			"path": map[string]any{"type": "string", "description": "Workspace-relative file path."},
 			"content": map[string]any{
 				"type":        "string",
-				"description": "Full short text content to save. For longer content, use write_workspace_chunk.",
+				"description": "Compatibility content for historical save calls. New model turns should edit files with a *** Begin Patch text patch.",
 			},
 			"mode": map[string]any{
 				"type":        "string",
@@ -186,16 +263,16 @@ func workspaceChunkWriteParams() map[string]any {
 			"path": map[string]any{"type": "string", "description": "Workspace-relative text file path."},
 			"content": map[string]any{
 				"type":        "string",
-				"description": "One text chunk to write. Keep each chunk under about 4000 characters.",
+				"description": "Text to append for compatibility with existing chunked runs. Prefer a *** Begin Patch text patch for new edits.",
 			},
 			"chunk_index": map[string]any{
 				"type":        "integer",
-				"description": "1-based chunk number. The first create/overwrite chunk must be 1; each append increments it.",
+				"description": "1-based segment number. The first create/overwrite segment must be 1; each append increments it.",
 			},
 			"mode": map[string]any{
 				"type":        "string",
 				"enum":        []string{"create", "overwrite", "append"},
-				"description": "Use create for the first chunk of a new file, overwrite for the first chunk of an existing file, and append for each following chunk.",
+				"description": "Use create for the first segment of a new file, overwrite for the first segment of an existing file, and append for each following segment.",
 			},
 		},
 	}
@@ -208,11 +285,11 @@ func workspaceFinalizeWriteParams() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Workspace-relative text file path previously written with write_workspace_chunk.",
+				"description": "Workspace-relative text file path previously written with the compatibility write tool.",
 			},
 			"expected_chunks": map[string]any{
 				"type":        "integer",
-				"description": "Total number of write_workspace_chunk calls expected for this file in the current run.",
+				"description": "Total number of compatibility write calls expected for this file in the current run.",
 			},
 			"expected_lines": map[string]any{
 				"type":        "integer",

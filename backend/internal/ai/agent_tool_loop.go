@@ -28,6 +28,7 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 				emitToolLifecycleEvent(r.opts, "tool_result_returned", "warn", map[string]any{
 					"tool_call_id": skipped.ID,
 					"tool_name":    skipped.Name,
+					"status_kind":  manifestStatusKind(skipped.Name),
 					"round":        r.currentRound,
 					"status":       "failed",
 					"is_error":     true,
@@ -74,8 +75,9 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 				"consecutive_tool_errors":   r.consecutiveToolErrors,
 				"repeated_tool_error_count": r.repeatedToolErrorCount,
 				"tool_name":                 call.Name,
+				"status_kind":               manifestStatusKind(call.Name),
 				"tool_call_id":              call.ID,
-				"arguments_summary":         summarizeToolArguments(call.ArgumentsJSON),
+				"arguments_summary":         summarizeToolArguments(executionToolArgumentsJSON(call)),
 			})
 			return nil, false, fmt.Errorf("%s", r.repeatedToolErrorMessage())
 		}
@@ -102,6 +104,7 @@ func (r *agentRuntime) toolBudgetExhaustedResult(call agentToolCall, maxToolCall
 	event := ToolEvent{
 		ToolCallID: call.ID,
 		ToolName:   call.Name,
+		StatusKind: manifestStatusKind(call.Name),
 		Status:     "failed",
 		Label:      userFriendlyToolLabel(call.Name),
 		Error:      message,
@@ -117,7 +120,7 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		call.ID = fmt.Sprintf("tool_%d", r.toolCalls)
 	}
 	if errText := r.normalizeAndValidateToolCall(&call); errText != "" {
-		r.recordToolError(call.Name, call.ArgumentsJSON, errText)
+		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
 		event := r.invalidToolCallEvent(ctx, call, errText)
 		r.events = append(r.events, event)
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
@@ -126,7 +129,7 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		r.requiresCompletion = true
 		request, err := parseBackgroundTaskRequest(call.ArgumentsJSON, lastUserMessageContent(r.messages))
 		if err != nil {
-			r.recordToolError(call.Name, call.ArgumentsJSON, err.Error())
+			r.recordToolError(call.Name, executionToolArgumentsJSON(call), err.Error())
 			return r.toolErrorJSON(call.Name, err.Error()), true, nil, false, nil
 		}
 		return "", false, &request, false, nil
@@ -140,16 +143,17 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		return content, isError, nil, completed, nil
 	}
 	if errText := r.validateSelectedReferenceScope(call); errText != "" {
-		r.recordToolError(call.Name, call.ArgumentsJSON, errText)
+		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
 		emitToolLifecycleEvent(r.opts, "tool_scope_rejected", "warn", map[string]any{
 			"tool_call_id": call.ID,
 			"tool_name":    call.Name,
+			"status_kind":  manifestStatusKind(call.Name),
 			"reason":       errText,
 		})
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
 	}
 	if errText := r.validateChunkWriteToolCall(call); errText != "" {
-		r.recordToolError(call.Name, call.ArgumentsJSON, errText)
+		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
 		event := r.invalidToolCallEvent(ctx, call, errText)
 		r.events = append(r.events, event)
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
@@ -160,13 +164,14 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	}
 	operationHash := ""
 	if isWorkspaceMutationTool(call.Name) {
-		operationHash = mutationOperationHash(call.Name, call.ArgumentsJSON)
+		operationHash = mutationOperationHash(call.Name, executionToolArgumentsJSON(call))
 		if previous, ok := r.appliedMutations[operationHash]; ok {
 			result, event := r.alreadyAppliedToolResult(call, previous)
 			r.events = append(r.events, event)
 			emitToolLifecycleEvent(r.opts, "tool_call_completed", "info", map[string]any{
 				"tool_call_id":    call.ID,
 				"tool_name":       call.Name,
+				"status_kind":     manifestStatusKind(call.Name),
 				"round":           r.currentRound,
 				"status":          "success",
 				"label":           event.Label,
@@ -182,6 +187,7 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 			emitToolLifecycleEvent(r.opts, "tool_result_returned", "info", map[string]any{
 				"tool_call_id":    call.ID,
 				"tool_name":       call.Name,
+				"status_kind":     manifestStatusKind(call.Name),
 				"round":           r.currentRound,
 				"status":          "success",
 				"is_error":        false,
@@ -191,7 +197,7 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 			return result, false, nil, false, nil
 		}
 	}
-	result, event, execErr := r.service.executeAndRecordTool(ctx, r.conversationID, r.messageID, call.Name, call.ArgumentsJSON, operationHash, r.opts, r.profile)
+	result, event, execErr := r.service.executeAndRecordTool(ctx, r.conversationID, r.messageID, call.Name, executionToolArgumentsJSON(call), operationHash, r.opts, r.profile)
 	event.OperationHash = operationHash
 	r.events = append(r.events, event)
 	if execErr != nil {
@@ -208,14 +214,19 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		r.recordChunkWriteSuccess(call, &event)
 		result = r.annotateChunkWriteResult(call, result)
 	}
+	if event.Status == "success" && call.Name == "run_workspace_command" && len(event.ChangedPaths) > 0 {
+		r.performedMutation = true
+		r.requiresCompletion = true
+	}
 	if event.Status == "success" {
 		r.clearToolErrors()
 	} else {
-		r.recordToolError(call.Name, call.ArgumentsJSON, event.Error)
+		r.recordToolError(call.Name, executionToolArgumentsJSON(call), event.Error)
 	}
 	emitToolLifecycleEvent(r.opts, "tool_result_returned", eventLevel(event.Status), map[string]any{
 		"tool_call_id": call.ID,
 		"tool_name":    call.Name,
+		"status_kind":  manifestStatusKind(call.Name),
 		"round":        r.currentRound,
 		"status":       event.Status,
 		"is_error":     event.Status != "success",
@@ -232,6 +243,9 @@ func (r *agentRuntime) alreadyAppliedToolResult(call agentToolCall, previous Too
 	}
 	if previous.ToolName == "" {
 		previous.ToolName = call.Name
+	}
+	if previous.StatusKind == "" {
+		previous.StatusKind = manifestStatusKind(call.Name)
 	}
 	payload := map[string]any{
 		"status":          "already_applied",
@@ -251,14 +265,16 @@ func (r *agentRuntime) alreadyAppliedToolResult(call agentToolCall, previous Too
 }
 
 func (r *agentRuntime) invalidToolCallEvent(ctx context.Context, call agentToolCall, message string) ToolEvent {
-	targetSummary := toolTargetSummary(call.Name, call.ArgumentsJSON)
+	argumentsJSON := executionToolArgumentsJSON(call)
+	targetSummary := toolTargetSummary(call.Name, argumentsJSON)
 	err := invalidToolArgumentsError(message)
 	if r.service != nil {
-		r.service.recordToolDiagnostic(ctx, r.opts, r.conversationID, r.messageID, call.Name, call.ArgumentsJSON, targetSummary, 0, err)
+		r.service.recordToolDiagnostic(ctx, r.opts, r.conversationID, r.messageID, call.Name, argumentsJSON, targetSummary, 0, err)
 	}
 	event := ToolEvent{
 		ToolCallID:    call.ID,
 		ToolName:      call.Name,
+		StatusKind:    manifestStatusKind(call.Name),
 		Label:         userFriendlyToolLabel(call.Name),
 		Status:        "failed",
 		TargetSummary: targetSummary,
@@ -270,10 +286,11 @@ func (r *agentRuntime) invalidToolCallEvent(ctx context.Context, call agentToolC
 	emitToolLifecycleEvent(r.opts, "tool_call_failed", "warn", map[string]any{
 		"tool_call_id":      call.ID,
 		"tool_name":         call.Name,
+		"status_kind":       manifestStatusKind(call.Name),
 		"status":            "failed",
 		"label":             event.Label,
 		"error":             err.Error(),
-		"arguments_summary": summarizeToolArguments(call.ArgumentsJSON),
+		"arguments_summary": summarizeToolArguments(argumentsJSON),
 		"target_summary":    targetSummary,
 		"recovery_hint":     toolFailureRecoveryHint(call.Name, err.Error()),
 		"verification":      ToolVerification{Status: "skipped", Message: "tool arguments failed validation before execution"},
@@ -302,11 +319,25 @@ func (r *agentRuntime) normalizedToolArguments(call agentToolCall) (string, stri
 	if strings.TrimSpace(call.Name) == "" {
 		return "", "tool name is required"
 	}
+	argumentsJSON := strings.TrimSpace(executionToolArgumentsJSON(call))
 	if !r.isKnownTool(call.Name) {
 		return "", fmt.Sprintf("unknown or unavailable tool %q", call.Name)
 	}
+	if call.Name == "apply_workspace_patch" {
+		if strings.TrimSpace(call.PatchText) == "" {
+			return "", "apply_workspace_patch is an internal assistant text patch channel; output a complete *** Begin Patch / *** End Patch patch block instead of calling it as a JSON tool"
+		}
+		argumentsJSON := strings.TrimSpace(executionToolArgumentsJSON(call))
+		var decoded any
+		if err := json.Unmarshal([]byte(argumentsJSON), &decoded); err != nil {
+			return "", "tool arguments must be valid JSON: " + err.Error()
+		}
+		return argumentsJSON, ""
+	}
 	schema := toolInputSchema(call.Name, r.tools())
-	argumentsJSON := strings.TrimSpace(call.ArgumentsJSON)
+	if len(schema) == 0 && isLegacyWorkspaceMutationTool(call.Name) {
+		schema = legacyWorkspaceMutationToolInputSchema(call.Name)
+	}
 	if argumentsJSON == "" {
 		if toolSchemaAllowsEmptyArguments(schema) {
 			argumentsJSON = "{}"
@@ -322,13 +353,16 @@ func (r *agentRuntime) normalizedToolArguments(call agentToolCall) (string, stri
 	if !ok {
 		return "", "tool arguments must be a JSON object"
 	}
-	if errText := validateToolArgumentsAgainstSchema(call.Name, object, r.tools()); errText != "" {
+	if errText := validateToolArgumentsAgainstSchemaMap(object, schema); errText != "" {
 		return "", errText
 	}
 	return argumentsJSON, ""
 }
 
 func (r *agentRuntime) isKnownTool(name string) bool {
+	if name == "apply_workspace_patch" {
+		return true
+	}
 	for _, tool := range r.tools() {
 		switch r.protocol {
 		case agentProtocolAnthropic:
@@ -342,5 +376,13 @@ func (r *agentRuntime) isKnownTool(name string) bool {
 			}
 		}
 	}
-	return false
+	return isLegacyWorkspaceMutationTool(name)
+}
+
+func isLegacyWorkspaceMutationTool(name string) bool {
+	return manifestToolIsLegacyCompat(name) && manifestToolIsMutation(name)
+}
+
+func legacyWorkspaceMutationToolInputSchema(name string) map[string]any {
+	return workspaceToolInputSchemaByName(name)
 }

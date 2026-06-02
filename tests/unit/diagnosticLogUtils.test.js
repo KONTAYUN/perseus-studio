@@ -45,6 +45,24 @@ test('diagnosticShortJudgement summarizes provider request failures', () => {
     }),
     '上游连接临时中断'
   );
+  assert.equal(
+    diagnosticShortJudgement({
+      request_summary: '{"failure_class":"provider_transport_eof"}',
+    }),
+    '上游连接提前断开'
+  );
+  assert.equal(
+    diagnosticShortJudgement({
+      request_summary: '{"failure_class":"provider_connection_interrupted"}',
+    }),
+    '上游连接中断'
+  );
+  assert.equal(
+    diagnosticShortJudgement({
+      request_summary: '{"failure_class":"provider_transport_timeout"}',
+    }),
+    '上游连接超时'
+  );
 });
 
 test('diagnosticShortJudgement falls back for old diagnostics', () => {

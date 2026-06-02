@@ -82,12 +82,11 @@ func isContextOverflowError(err error) bool {
 }
 
 func isWorkspaceMutationTool(name string) bool {
-	switch name {
-	case "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write", "manage_workspace_path", "organize_workspace_matches":
-		return true
-	default:
-		return false
-	}
+	return manifestToolIsMutation(name)
+}
+
+func IsWorkspaceMutationTool(name string) bool {
+	return isWorkspaceMutationTool(name)
 }
 
 func unsupportedToolCallingError() error {

@@ -38,6 +38,7 @@ type agentRuntime struct {
 	chunkWrites               map[string]workspaceChunkWriteState
 	performedMutation         bool
 	lastToolFailed            bool
+	lastToolFailure           runtimeToolFailure
 	invalidTurns              int
 	toolCalls                 int
 	consecutiveToolErrors     int
@@ -61,6 +62,15 @@ type agentRuntime struct {
 	providerAttempts          int
 }
 
+type runtimeToolFailure struct {
+	ToolName     string
+	Message      string
+	FailureClass string
+	Target       string
+	Mutation     bool
+	Recoverable  bool
+}
+
 type agentModelTurn struct {
 	Content                  string
 	FinishReason             string
@@ -69,6 +79,7 @@ type agentModelTurn struct {
 	AnthropicRaw             []map[string]any
 	Streamed                 bool
 	PublicTextStreamed       bool
+	PublicStreamedContent    string
 	CompletionResultStreamed bool
 	Usage                    ProviderUsage
 }
@@ -78,6 +89,7 @@ type agentToolCall struct {
 	Name           string
 	ArgumentsJSON  string
 	AnthropicInput map[string]any
+	PatchText      string
 }
 
 type workspaceChunkWriteState struct {

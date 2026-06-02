@@ -64,7 +64,8 @@ test('applyLatestRunState restores running live tool progress from persisted eve
       type: 'tool_call_started',
       payload: {
         tool_call_id: 'tc-save-31',
-        tool_name: 'save_workspace_file',
+        tool_name: 'apply_workspace_patch',
+        status_kind: 'workspace_edit',
         target_summary: '白凌传·造化篇续集/第三十一集.txt',
       },
     },
@@ -73,8 +74,8 @@ test('applyLatestRunState restores running live tool progress from persisted eve
   assert.equal(messages.length, 3);
   assert.equal(messages[2].pending, true);
   assert.equal(messages[2].runId, 'run-1');
-  assert.equal(messages[2].progressItems[0].text, '正在保存 白凌传·造化篇续集/第三十一集.txt');
-  assert.equal(messages[2].loadingState.visibleText, '正在保存 白凌传·造化篇续集/第三十一集.txt');
+  assert.equal(messages[2].progressItems[0].text, '正在编辑 白凌传·造化篇续集/第三十一集.txt');
+  assert.equal(messages[2].loadingState.visibleText, '正在编辑 白凌传·造化篇续集/第三十一集.txt');
 });
 
 test('applyLatestRunState falls back to run stage when no tool is active', () => {
@@ -108,7 +109,8 @@ test('run-id based pending shell continues receiving later updates after recover
       payload: {
         run_id: 'run-1',
         tool_call_id: 'tc-1',
-        tool_name: 'save_workspace_file',
+        tool_name: 'apply_workspace_patch',
+        status_kind: 'workspace_edit',
         target_summary: 'chapter-31.txt',
       },
     },
@@ -118,13 +120,14 @@ test('run-id based pending shell continues receiving later updates after recover
     id: 'tool_call_completed:tc-1',
     runId: 'run-1',
     type: 'tool_call_completed',
-    text: '已保存 chapter-31.txt',
-    toolName: 'save_workspace_file',
+    text: '已编辑 chapter-31.txt',
+    toolName: 'apply_workspace_patch',
+    statusKind: 'workspace_edit',
     status: 'success',
   });
 
-  assert.equal(next[1].progressItems[0].text, '正在保存 chapter-31.txt');
-  assert.equal(next[1].progressItems[1].text, '已保存 chapter-31.txt');
+  assert.equal(next[1].progressItems[0].text, '正在编辑 chapter-31.txt');
+  assert.equal(next[1].progressItems[1].text, '已编辑 chapter-31.txt');
   assert.equal(next[1].progressItems.length, 2);
   assert.equal(next[1].runId, 'run-1');
 });

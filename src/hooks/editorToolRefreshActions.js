@@ -9,7 +9,7 @@ import {
   remapEditorPath,
   remapEditorTabs,
 } from './editorTabUtils';
-import { detectFileType, isAnyTrashPath, isTextPath, pathMatches } from './ideUtils';
+import { detectFileType, isAnyTrashPath, isTextPath, isWorkspaceFileChangeEvent, pathMatches } from './ideUtils';
 
 export function createEditorToolRefreshActions({
   closeCurrentFile,
@@ -115,7 +115,7 @@ export function createEditorToolRefreshActions({
         );
       }
     }
-    if (isWorkspaceWriteTool(event.tool_name) && (event.path || event.changed_paths?.length)) {
+    if (isWorkspaceFileChangedEvent(event) && (event.path || event.changed_paths?.length)) {
       const changedPaths = event.changed_paths?.length ? event.changed_paths : [event.path];
       const tab = tabs.find((item) => changedPaths.includes(item.path) && item.path !== currentFilePathRef.current);
       if (!tab) return;
@@ -163,12 +163,6 @@ export function createEditorToolRefreshActions({
   };
 }
 
-function isWorkspaceWriteTool(toolName) {
-  return [
-    'edit_workspace_text',
-    'replace_workspace_lines',
-    'save_workspace_file',
-    'write_workspace_chunk',
-    'finalize_workspace_write',
-  ].includes(toolName);
+function isWorkspaceFileChangedEvent(event) {
+  return isWorkspaceFileChangeEvent(event);
 }

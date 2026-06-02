@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"webide-backend/internal/workspace"
 )
 
 func (s *Service) execListWorkspaceFiles(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
@@ -67,25 +69,35 @@ func (s *Service) execSearchWorkspaceText(ctx context.Context, userID, arguments
 		return "", "", "正在搜索文件内容...", "", err
 	}
 	var args struct {
-		Query        string `json:"query"`
-		Regex        bool   `json:"regex"`
-		ContextLines int    `json:"context_lines"`
-		MaxResults   int    `json:"max_results"`
+		Query        string   `json:"query"`
+		Regex        bool     `json:"regex"`
+		ContextLines int      `json:"context_lines"`
+		MaxResults   int      `json:"max_results"`
+		PathScope    string   `json:"path_scope"`
+		IncludeGlobs []string `json:"include_globs"`
+		ExcludeGlobs []string `json:"exclude_globs"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在搜索文件内容...", "", fmt.Errorf("invalid tool arguments")
 	}
-	results, limited, err := files.SearchText(args.Query, args.Regex, args.MaxResults, args.ContextLines)
+	results, limited, err := files.SearchTextScoped(args.Query, args.Regex, args.MaxResults, args.ContextLines, workspace.TextSearchOptions{
+		PathScope:    args.PathScope,
+		IncludeGlobs: args.IncludeGlobs,
+		ExcludeGlobs: args.ExcludeGlobs,
+	})
 	if err != nil {
 		return "", "", "正在搜索文件内容...", "", err
 	}
 	payload := workspaceToolPayload("search_workspace_text", "", map[string]any{
-		"query":     args.Query,
-		"regex":     args.Regex,
-		"matches":   results,
-		"count":     len(results),
-		"limited":   limited,
-		"next_hint": "Read the relevant path/range with read_workspace_text before editing, unless the exact replacement is already known.",
+		"query":         args.Query,
+		"regex":         args.Regex,
+		"path_scope":    args.PathScope,
+		"include_globs": args.IncludeGlobs,
+		"exclude_globs": args.ExcludeGlobs,
+		"matches":       results,
+		"count":         len(results),
+		"limited":       limited,
+		"next_hint":     "Read the relevant path/range with read_workspace_text before editing, unless the exact replacement is already known.",
 	})
 	summary := fmt.Sprintf("found %d text match(es)", len(results))
 	return mustJSON(payload), summary, "正在搜索文件内容...", "", nil
@@ -116,13 +128,14 @@ func (s *Service) execReadWorkspaceFile(ctx context.Context, userID, argumentsJS
 	}
 	summary := fmt.Sprintf("read %s (%d chars, truncated=%t)", result.Path, len([]rune(result.Content)), result.Truncated)
 	payload := workspaceToolPayload("read_workspace_text", result.Path, map[string]any{
-		"path":        result.Path,
-		"content":     result.Content,
-		"truncated":   result.Truncated,
-		"start_line":  result.StartLine,
-		"end_line":    result.EndLine,
-		"total_lines": result.TotalLines,
-		"next_hint":   "Use edit_workspace_text for a precise existing-file edit, or save_workspace_file only for full overwrite/new file.",
+		"path":             result.Path,
+		"content":          result.Content,
+		"numbered_content": result.NumberedContent,
+		"truncated":        result.Truncated,
+		"start_line":       result.StartLine,
+		"end_line":         result.EndLine,
+		"total_lines":      result.TotalLines,
+		"next_hint":        "Use a *** Begin Patch text patch for any file content change.",
 	})
 	return mustJSON(payload), summary, label, result.Path, nil
 }
@@ -158,12 +171,13 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 	}
 
 	type readItem struct {
-		Path       string `json:"path"`
-		Content    string `json:"content"`
-		Truncated  bool   `json:"truncated"`
-		StartLine  int    `json:"start_line"`
-		EndLine    int    `json:"end_line"`
-		TotalLines int    `json:"total_lines"`
+		Path            string `json:"path"`
+		Content         string `json:"content"`
+		NumberedContent string `json:"numbered_content,omitempty"`
+		Truncated       bool   `json:"truncated"`
+		StartLine       int    `json:"start_line"`
+		EndLine         int    `json:"end_line"`
+		TotalLines      int    `json:"total_lines"`
 	}
 	type failedItem struct {
 		Path  string `json:"path"`
@@ -182,12 +196,13 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 			truncated = true
 		}
 		items = append(items, readItem{
-			Path:       result.Path,
-			Content:    result.Content,
-			Truncated:  result.Truncated,
-			StartLine:  result.StartLine,
-			EndLine:    result.EndLine,
-			TotalLines: result.TotalLines,
+			Path:            result.Path,
+			Content:         result.Content,
+			NumberedContent: result.NumberedContent,
+			Truncated:       result.Truncated,
+			StartLine:       result.StartLine,
+			EndLine:         result.EndLine,
+			TotalLines:      result.TotalLines,
 		})
 	}
 	if len(items) == 0 {
@@ -207,7 +222,7 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		"limited_by_count": limitedByCount,
 		"start_line":       args.StartLine,
 		"end_line":         args.EndLine,
-		"next_hint":        "Use edit_workspace_text for precise existing-file edits, or save_workspace_file only for full overwrite/new files.",
+		"next_hint":        "Use a *** Begin Patch text patch for any file content change.",
 	})
 	summary := fmt.Sprintf("read %d workspace file(s), %d failed", len(items), len(failed))
 	return mustJSON(payload), summary, "正在批量读取文件...", strings.Join(readPaths, ","), nil

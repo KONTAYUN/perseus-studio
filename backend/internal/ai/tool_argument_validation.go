@@ -8,6 +8,10 @@ import (
 
 func validateToolArgumentsAgainstSchema(toolName string, args map[string]any, tools []map[string]any) string {
 	schema := toolInputSchema(toolName, tools)
+	return validateToolArgumentsAgainstSchemaMap(args, schema)
+}
+
+func validateToolArgumentsAgainstSchemaMap(args map[string]any, schema map[string]any) string {
 	if len(schema) == 0 {
 		return ""
 	}

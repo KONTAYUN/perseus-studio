@@ -76,14 +76,39 @@ func ledgerToolArgumentValue(value any) (any, bool) {
 	}
 }
 
+func executionToolArgumentsJSON(call agentToolCall) string {
+	if call.Name == "apply_workspace_patch" && strings.TrimSpace(call.PatchText) != "" {
+		return mustJSON(map[string]any{
+			"patch":     call.PatchText,
+			"transport": "assistant_text_patch",
+		})
+	}
+	return call.ArgumentsJSON
+}
+
+func ledgerToolCallArgumentsJSON(call agentToolCall) string {
+	return ledgerToolArgumentsJSON(executionToolArgumentsJSON(call))
+}
+
+func toolCallTranscriptArgumentsJSON(call agentToolCall) string {
+	if call.Name == "apply_workspace_patch" && strings.TrimSpace(call.PatchText) != "" {
+		return mustJSON(map[string]any{
+			"patch":       "[assistant_text_patch captured by backend]",
+			"transport":   "assistant_text_patch",
+			"patch_chars": len([]rune(call.PatchText)),
+		})
+	}
+	return call.ArgumentsJSON
+}
+
 func summarizeToolArgumentValue(value any) string {
 	switch item := value.(type) {
 	case map[string]any:
 		summary := make(map[string]any, len(item))
 		for key, raw := range item {
-			if key == "content" {
+			if key == "content" || key == "patch" {
 				if text, ok := raw.(string); ok {
-					summary[key] = fmt.Sprintf("[content %d chars]", len([]rune(text)))
+					summary[key] = fmt.Sprintf("[%s %d chars]", key, len([]rune(text)))
 					continue
 				}
 			}
@@ -126,7 +151,12 @@ func toolTargetSummary(name, argumentsJSON string) string {
 		return quotedSummary(stringField(decoded, "query", "pattern"))
 	case "search_workspace_text", "perseus_search_web", "web_search":
 		return quotedSummary(stringField(decoded, "query"))
-	case "inspect_workspace", "read_workspace_text", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
+	case "inspect_workspace", "read_workspace_text", "apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
+		if name == "apply_workspace_patch" {
+			if path := firstPatchPathFromText(stringField(decoded, "patch")); path != "" {
+				return pathSummary(path)
+			}
+		}
 		return pathSummary(stringField(decoded, "path"))
 	case "read_workspace_files":
 		return pathsCountSummary(stringSliceField(decoded, "paths"))

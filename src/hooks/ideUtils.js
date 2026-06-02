@@ -217,19 +217,20 @@ export function attachmentFingerprint(file) {
 }
 
 export function shouldReloadWorkspaceForToolEvents(toolEvents) {
-  return (toolEvents || []).some(
-    (item) =>
-      item?.status === 'success' &&
-      [
-        'edit_workspace_text',
-        'replace_workspace_lines',
-        'save_workspace_file',
-        'write_workspace_chunk',
-        'finalize_workspace_write',
-        'manage_workspace_path',
-        'organize_workspace_matches',
-        'run_workspace_command',
-      ].includes(item?.tool_name)
+  return (toolEvents || []).some((item) => item?.status === 'success' && isWorkspaceRefreshEvent(item));
+}
+
+export function isWorkspaceFileChangeEvent(item) {
+  if (!item) return false;
+  if (item.type === 'workspace_file_changed') return true;
+  if (Array.isArray(item.changed_paths) && item.changed_paths.length > 0) return true;
+  return item.status_kind === 'workspace_edit' || item.statusKind === 'workspace_edit';
+}
+
+export function isWorkspaceRefreshEvent(item) {
+  return (
+    isWorkspaceFileChangeEvent(item) ||
+    ['manage_workspace_path', 'organize_workspace_matches', 'run_workspace_command'].includes(item?.tool_name)
   );
 }
 

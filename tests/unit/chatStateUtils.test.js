@@ -99,6 +99,36 @@ test('assistant message merges keep live progress while pending and clear it on 
   assert.deepEqual(completed[0].progressItems, []);
 });
 
+test('empty completed assistant segment is discarded instead of rendered as a bubble', () => {
+  const completed = mergeAssistantMessageCompleted(
+    [
+      { id: 'u1', role: 'user', content: '创建文件', conversation_id: 'conv-1' },
+      {
+        id: 'a-empty',
+        role: 'assistant',
+        status: 'streaming',
+        content: '\n',
+        pending: true,
+        activeMessageId: 'a-empty',
+        conversation_id: 'conv-1',
+      },
+    ],
+    'shell-1',
+    {
+      id: 'a-empty',
+      role: 'assistant',
+      status: 'final',
+      content: '',
+      attachments: [],
+      conversation_id: 'conv-1',
+      meta: { kind: 'assistant_segment' },
+    },
+    { runId: 'run-1' }
+  );
+
+  assert.deepEqual(completed.map((item) => item.id), ['u1']);
+});
+
 test('assistant message start removes duplicate shell for the same run when persisted streaming draft already exists', () => {
   const started = mergeAssistantMessageStarted([
     { id: 'u1', role: 'user', content: '继续', conversation_id: 'conv-1' },
@@ -169,7 +199,7 @@ test('conversation snapshot merge preserves newer active stream text', () => {
       pending: true,
       activeMessageId: 'a1',
       runId: 'run-1',
-      progressItems: [{ id: 'p1', text: '正在保存文件' }],
+      progressItems: [{ id: 'p1', text: '正在编辑文件' }],
       created_at: '2026-05-21T00:00:01Z',
     },
   ], [
@@ -188,7 +218,7 @@ test('conversation snapshot merge preserves newer active stream text', () => {
   assert.equal(merged[0].pending, true);
   assert.equal(merged[0].runId, 'run-1');
   assert.deepEqual(merged[0].attachments, [{ tool_name: 'save_workspace_file' }]);
-  assert.equal(merged[0].progressItems[0].text, '正在保存文件');
+  assert.equal(merged[0].progressItems[0].text, '正在编辑文件');
 });
 
 test('conversation snapshot merge accepts terminal snapshots after stream state is no longer active', () => {
@@ -331,6 +361,56 @@ test('committed user message anchors the assistant run shell after branch reload
   assert.equal(merged[2].pending, true);
 });
 
+test('committed user message anchors assistant shell after persisted run steer', () => {
+  const merged = mergeCommittedRunStart(
+    [
+      {
+        id: 'msg-user-1',
+        role: 'user',
+        content: '继续当前任务',
+        conversation_id: 'conv-1',
+        created_at: '2026-05-21T00:00:00Z',
+      },
+      {
+        id: 'steer-1',
+        role: 'user',
+        kind: 'steer',
+        runId: 'run-1',
+        content: '按新的要求继续',
+        conversation_id: 'conv-1',
+        created_at: '2026-05-21T00:00:01Z',
+      },
+      {
+        id: 'temp_assistant_1',
+        role: 'assistant',
+        pending: true,
+        kind: 'run_shell',
+        runId: 'run-1',
+        content: '',
+        conversation_id: 'conv-1',
+        created_at: '2026-05-21T00:00:02Z',
+      },
+    ],
+    {
+      thinkingId: 'temp_assistant_1',
+      userMessage: {
+        id: 'msg-user-1',
+        role: 'user',
+        content: '继续当前任务',
+        conversation_id: 'conv-1',
+        created_at: '2026-05-21T00:00:00Z',
+      },
+      assistantShell: buildAssistantRunShell({
+        id: 'temp_assistant_1',
+        conversationId: 'conv-1',
+        runId: 'run-1',
+      }),
+    }
+  );
+
+  assert.deepEqual(merged.map((item) => item.id), ['msg-user-1', 'steer-1', 'run-1']);
+});
+
 test('buildProgressItem maps context compaction events', () => {
   assert.equal(
     buildProgressItem('context_compaction_started', { reason: 'manual' }).text,
@@ -354,10 +434,11 @@ test('buildProgressItem includes safe tool target summaries', () => {
   assert.equal(
     buildProgressItem('tool_call_completed', {
       tool_call_id: 'tc1',
-      tool_name: 'save_workspace_file',
+      tool_name: 'apply_workspace_patch',
+      status_kind: 'workspace_edit',
       target_summary: 'drafts/chapter-1.md',
     }).text,
-    '已保存 drafts/chapter-1.md'
+    '已编辑 drafts/chapter-1.md'
   );
 });
 
@@ -561,6 +642,148 @@ test('committed run steer is ordered before the active assistant shell', () => {
   assert.equal(merged[1].id, 'temp-assistant');
 });
 
+test('applied run steer does not reorder later user turn shells', () => {
+  const steerItems = markRunSteerApplied([
+    buildRunSteerItem({
+      clientSteerId: 'client-1',
+      content: '先按我的新要求调整',
+      conversationId: 'conv-1',
+      runId: 'run-1',
+      createdAt: '2026-05-20T00:00:02Z',
+    }),
+  ], { client_steer_id: 'client-1', steer_id: 'steer-1' });
+
+  const merged = mergeRunSteerItemsWithMessages([
+    {
+      id: 'u1',
+      role: 'user',
+      content: '第一轮',
+      conversation_id: 'conv-1',
+      created_at: '2026-05-20T00:00:00Z',
+    },
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: '第一轮回复',
+      conversation_id: 'conv-1',
+      runId: 'run-1',
+      pending: false,
+      created_at: '2026-05-20T00:00:01Z',
+    },
+    {
+      id: 'temp_user_100',
+      role: 'user',
+      content: '第二轮',
+      conversation_id: 'conv-1',
+      created_at: '2026-05-20T00:00:10Z',
+    },
+    {
+      id: 'temp_assistant_100',
+      role: 'assistant',
+      kind: 'run_shell',
+      runId: 'run-2',
+      pending: true,
+      content: '',
+      conversation_id: 'conv-1',
+      created_at: '2026-05-20T00:00:10Z',
+    },
+  ], steerItems);
+
+  assert.deepEqual(merged.map((item) => item.id), [
+    'u1',
+    'a1',
+    'client-1',
+    'temp_user_100',
+    'temp_assistant_100',
+  ]);
+});
+
+test('applied run steer with missing historical run anchor does not attach to current pending shell', () => {
+  const steerItems = markRunSteerApplied([
+    buildRunSteerItem({
+      clientSteerId: 'client-1',
+      content: '旧引导',
+      conversationId: 'conv-1',
+      runId: 'run-old',
+      createdAt: '2026-05-20T00:00:02Z',
+    }),
+  ], { client_steer_id: 'client-1', steer_id: 'steer-1' });
+
+  const merged = mergeRunSteerItemsWithMessages([
+    {
+      id: 'old-assistant',
+      role: 'assistant',
+      content: '旧回复',
+      conversation_id: 'conv-1',
+      pending: false,
+      created_at: '2026-05-20T00:00:05Z',
+      meta: { kind: 'assistant_segment', segment_index: 1 },
+    },
+    {
+      id: 'temp_user_100',
+      role: 'user',
+      content: '新一轮',
+      conversation_id: 'conv-1',
+      created_at: '2026-05-20T00:10:00Z',
+    },
+    {
+      id: 'temp_assistant_100',
+      role: 'assistant',
+      kind: 'run_shell',
+      runId: 'run-new',
+      pending: true,
+      content: '',
+      conversation_id: 'conv-1',
+      created_at: '2026-05-20T00:10:00Z',
+    },
+  ], steerItems);
+
+  assert.deepEqual(merged.map((item) => item.id), [
+    'client-1',
+    'old-assistant',
+    'temp_user_100',
+    'temp_assistant_100',
+  ]);
+});
+
+test('applied run steer still anchors before the pending shell for the same run', () => {
+  const steerItems = markRunSteerApplied([
+    buildRunSteerItem({
+      clientSteerId: 'client-1',
+      content: '当前引导',
+      conversationId: 'conv-1',
+      runId: 'run-1',
+      createdAt: '2026-05-20T00:00:02Z',
+    }),
+  ], { client_steer_id: 'client-1', steer_id: 'steer-1' });
+
+  const merged = mergeRunSteerItemsWithMessages([
+    {
+      id: 'msg-user-1',
+      role: 'user',
+      content: '当前任务',
+      conversation_id: 'conv-1',
+      created_at: '2026-05-20T00:00:01Z',
+    },
+    {
+      id: 'temp_assistant_1',
+      role: 'assistant',
+      kind: 'run_shell',
+      runId: 'run-1',
+      pending: true,
+      content: '',
+      conversation_id: 'conv-1',
+      created_at: '2026-05-20T00:00:03Z',
+    },
+  ], steerItems);
+
+  assert.deepEqual(merged.map((item) => item.id), [
+    'msg-user-1',
+    'client-1',
+    'temp_assistant_1',
+  ]);
+});
+
 test('normalizeContextUsageSummary calculates display metrics', () => {
   const summary = normalizeContextUsageSummary({
     estimated_tokens: 48000,
@@ -626,6 +849,18 @@ test('normalizeConversationMessage marks streaming assistant as pending', () => 
   assert.equal(normalized.pending, true);
   assert.equal(normalized.activeMessageId, 'm1');
   assert.equal(hasStreamingAssistantMessage([normalized]), true);
+});
+
+test('normalizeConversationMessage restores run ownership from message meta', () => {
+  const normalized = normalizeConversationMessage({
+    id: 'm1',
+    role: 'assistant',
+    content: '完成',
+    meta: { kind: 'assistant_segment', segment_index: 1, run_id: 'run-1' },
+  });
+
+  assert.equal(normalized.kind, 'assistant_segment');
+  assert.equal(normalized.runId, 'run-1');
 });
 
 test('updateLoadingState advances holding loader after minimum display time', () => {

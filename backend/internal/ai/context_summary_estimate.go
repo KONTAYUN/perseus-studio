@@ -17,6 +17,8 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 	summary := ProviderRequestSummary{
 		Round:                   round,
 		Protocol:                protocol,
+		ToolManifestDigest:      toolManifestDigest(),
+		InternalEditProtocol:    string(ToolTransportAssistantTextPatch),
 		MessageCount:            len(messages),
 		TranscriptEntries:       len(transcript.Entries),
 		ContextWindowTokens:     profile.ContextWindowTokens,

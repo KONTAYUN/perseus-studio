@@ -8,19 +8,19 @@ import (
 
 func TestRepairForceToolUsesTypedMissingKind(t *testing.T) {
 	if got := repairForceTool(validationResult{MissingKinds: []string{missingOutputFile}}); got != "" {
-		t.Fatalf("expected file repair not to force a short-write tool, got %q", got)
+		t.Fatalf("expected file repair not to force a compatibility write tool, got %q", got)
 	}
 	if got := repairForceTool(validationResult{Missing: []string{"missing file: draft.txt"}}); got != "" {
 		t.Fatalf("expected human-readable missing text not to drive tool choice, got %q", got)
 	}
 }
 
-func TestFirstChangedFileAcceptsChunkedAndFinalizedWrites(t *testing.T) {
+func TestFirstChangedFileAcceptsPatchAndCompatibilityWrites(t *testing.T) {
 	events := []ai.ToolEvent{
-		{ToolName: "write_workspace_chunk", Status: "success", Path: "drafts/long.txt", ChangedPaths: []string{"drafts/long.txt"}},
+		{ToolName: "apply_workspace_patch", Status: "success", Path: "drafts/long.txt", ChangedPaths: []string{"drafts/long.txt"}},
 	}
 	if got := firstChangedFile(events); got != "drafts/long.txt" {
-		t.Fatalf("expected chunked write output path, got %q", got)
+		t.Fatalf("expected patch output path, got %q", got)
 	}
 
 	events = []ai.ToolEvent{

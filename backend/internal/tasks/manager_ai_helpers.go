@@ -151,7 +151,7 @@ func (m *Manager) executionPrompt(payload AIAgentPayload) string {
 - 如果预期产物包含 file，必须实际创建或写入该 workspace 相对路径；不要只口头说明。
 - 如果没有明确文件路径，请为报告/Markdown 选择一个简洁中文或英文文件名，放在 workspace 根目录。
 - 修改已有文件前优先 read_workspace_text；需要项目结构时先 inspect_workspace。
-- 长报告、剧本、长文稿或超过短文本保存限制的文件，必须使用 write_workspace_chunk 分块写入，并在最后调用 finalize_workspace_write 校验完整性。
+- 文件内容变更统一直接输出以 *** Begin Patch 开始、*** End Patch 结束的 patch 块；系统会把它当作 workspace patch 执行并校验写入，不要把 patch 内容当成最终回复。
 - 命令只在构建、测试、检查、批处理或脚本执行需要时使用；命令失败要说明关键错误。
 - 使用联网资料时，最终内容里保留来源 URL。
 - 完成前确保预期文件真实存在且非空；完成后调用 attempt_completion，用中文简短总结实际产物。`, goal, payload.UserMessage, string(rawOutputs), string(rawSteps))
@@ -167,7 +167,7 @@ func (m *Manager) repairPrompt(payload AIAgentPayload, missing []string, round i
 预期产物 JSON：
 %s
 
-请只补做缺失项。若缺少文件，必须实际创建或写入 workspace 文件；短文本可用 save_workspace_file，长文稿必须用 write_workspace_chunk 分块写入并调用 finalize_workspace_write 校验。如果写入失败，要基于工具错误继续修复或明确失败，不要只回复说明。`, round, strings.Join(missing, "\n"), string(rawOutputs))
+请只补做缺失项。若缺少文件，必须实际创建或写入 workspace 文件；文件内容变更统一直接输出以 *** Begin Patch 开始、*** End Patch 结束的 patch 块让系统执行。如果写入失败，要基于工具错误继续修复或明确失败，不要只回复说明。`, round, strings.Join(missing, "\n"), string(rawOutputs))
 }
 
 func (m *Manager) validateOutputs(ctx context.Context, payload AIAgentPayload, reply ai.Reply, files *workspace.Service) validationResult {
@@ -236,12 +236,7 @@ func firstChangedFile(events []ai.ToolEvent) string {
 }
 
 func isWorkspaceFileOutputTool(toolName string) bool {
-	switch toolName {
-	case "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write", "edit_workspace_text", "replace_workspace_lines":
-		return true
-	default:
-		return false
-	}
+	return ai.IsWorkspaceMutationTool(toolName)
 }
 
 func hasCommandResult(events []ai.ToolEvent) bool {

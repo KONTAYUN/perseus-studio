@@ -3,6 +3,7 @@ package workspace
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 func (s *Service) ReadFile(path string) (FileReadResult, error) {
@@ -82,5 +83,26 @@ func (s *Service) ReadTextFileRange(path string, startLine, endLine, maxChars in
 		text = string(runes[:maxChars])
 		truncated = true
 	}
-	return TextReadResult{Path: cleanPath, Content: text, Truncated: truncated, StartLine: startLine, EndLine: endLine, TotalLines: totalLines}, nil
+	return TextReadResult{Path: cleanPath, Content: text, NumberedContent: numberedTextLines(text, startLine), Truncated: truncated, StartLine: startLine, EndLine: endLine, TotalLines: totalLines}, nil
+}
+
+func numberedTextLines(text string, startLine int) string {
+	if text == "" {
+		return ""
+	}
+	if startLine <= 0 {
+		startLine = 1
+	}
+	lines := strings.SplitAfter(text, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	var builder strings.Builder
+	for index, line := range lines {
+		builder.WriteString(fmt.Sprintf("%d: %s", startLine+index, line))
+		if !strings.HasSuffix(line, "\n") && index < len(lines)-1 {
+			builder.WriteString("\n")
+		}
+	}
+	return builder.String()
 }

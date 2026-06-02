@@ -101,6 +101,7 @@ func scopedToolCandidatePaths(toolName, argumentsJSON string) ([]string, bool) {
 
 var selectedScopeToolExtractors = map[string]func(string) ([]string, bool){
 	"read_workspace_text":        extractSinglePathScopeTarget,
+	"apply_workspace_patch":      extractPatchScopeTargets,
 	"edit_workspace_text":        extractSinglePathScopeTarget,
 	"replace_workspace_lines":    extractSinglePathScopeTarget,
 	"read_workspace_files":       extractBatchReadScopeTargets,
@@ -129,6 +130,16 @@ func extractBatchReadScopeTargets(argumentsJSON string) ([]string, bool) {
 		return nil, false
 	}
 	return normalizeCandidatePaths(args.Paths...), true
+}
+
+func extractPatchScopeTargets(argumentsJSON string) ([]string, bool) {
+	var args struct {
+		Patch string `json:"patch"`
+	}
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return nil, false
+	}
+	return workspacePatchCandidatePaths(args.Patch), true
 }
 
 func extractSaveScopeTarget(argumentsJSON string) ([]string, bool) {

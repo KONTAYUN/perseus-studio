@@ -146,51 +146,58 @@ func (s *Service) AppendTextFile(ctx context.Context, path, content, source stri
 }
 
 func (s *Service) EditTextFile(ctx context.Context, path, oldText, newText, source string, replaceAll bool) (FileWriteResult, int, error) {
+	result, err := s.EditTextFileSmart(ctx, path, oldText, newText, source, replaceAll)
+	return result.WriteResult, result.Replacements, err
+}
+
+func (s *Service) EditTextFileSmart(ctx context.Context, path, oldText, newText, source string, replaceAll bool) (TextEditResult, error) {
 	cleanPath, absPath, err := s.sanitizePath(path)
 	if err != nil {
-		return FileWriteResult{}, 0, err
+		return TextEditResult{}, err
 	}
 	if isAnyTrashPath(cleanPath) {
-		return FileWriteResult{}, 0, trashManagedOnlyError()
+		return TextEditResult{}, trashManagedOnlyError()
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return FileWriteResult{}, 0, fmt.Errorf("file does not exist")
+			return TextEditResult{}, fmt.Errorf("file does not exist")
 		}
-		return FileWriteResult{}, 0, err
+		return TextEditResult{}, err
 	}
 	if info.IsDir() {
-		return FileWriteResult{}, 0, fmt.Errorf("path is a directory")
+		return TextEditResult{}, fmt.Errorf("path is a directory")
 	}
 	if !isTextPath(cleanPath) {
-		return FileWriteResult{}, 0, fmt.Errorf("only text files can be edited")
+		return TextEditResult{}, fmt.Errorf("only text files can be edited")
 	}
 	if oldText == "" {
-		return FileWriteResult{}, 0, fmt.Errorf("old_text is required")
+		return TextEditResult{}, fmt.Errorf("old_text is required")
+	}
+	if looksLikeOmittedText(newText) {
+		return TextEditResult{}, fmt.Errorf("new_text appears to contain an omission placeholder; provide the complete replacement text")
 	}
 	raw, err := os.ReadFile(absPath)
 	if err != nil {
-		return FileWriteResult{}, 0, err
+		return TextEditResult{}, err
 	}
 	content := string(raw)
-	count := strings.Count(content, oldText)
-	if count == 0 {
-		return FileWriteResult{}, 0, fmt.Errorf("old_text was not found")
+	editPlan, err := planTextReplacement(content, oldText, newText, replaceAll)
+	if err != nil {
+		return TextEditResult{}, err
 	}
-	if !replaceAll && count > 1 {
-		return FileWriteResult{}, 0, fmt.Errorf("old_text matched %d times; set replace_all=true or provide a more specific old_text", count)
-	}
-	limit := 1
-	if replaceAll {
-		limit = -1
-	}
-	nextContent := strings.Replace(content, oldText, newText, limit)
 	if source == "" {
 		source = "ai_edit"
 	}
-	result, err := s.WriteBytes(ctx, cleanPath, []byte(nextContent), source)
-	return result, count, err
+	writeResult, err := s.WriteBytes(ctx, cleanPath, []byte(editPlan.content), source)
+	if err != nil {
+		return TextEditResult{}, err
+	}
+	return TextEditResult{
+		WriteResult:  writeResult,
+		Replacements: editPlan.replacements,
+		MatchKind:    editPlan.matchKind,
+	}, nil
 }
 
 func (s *Service) ReplaceTextFileLines(ctx context.Context, path string, startLine, endLine int, newText, source string) (LineReplaceResult, error) {

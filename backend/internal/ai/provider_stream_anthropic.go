@@ -25,7 +25,7 @@ func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn
 
 func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOptions) (agentModelTurn, error) {
 	var content strings.Builder
-	deltas := newToolGatedStreamDeltaEmitter(opts)
+	deltas := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(opts))
 	completionDeltas := newStreamDeltaEmitter(opts.EmitCompletionResultDelta)
 	visibleText := newProviderVisibleTextFilter()
 	blocks := map[int]*anthropicStreamBlock{}
@@ -134,6 +134,7 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 	completionDeltas.Flush()
 	if err != nil {
 		turn := buildAnthropicStreamTurn(content.String(), finishReason, blocks)
+		turn.PublicStreamedContent = deltas.StreamedContent()
 		turn.Usage = usage
 		turn.CompletionResultStreamed = completionResultStreamed
 		if hasCompleteToolCalls(turn) {
@@ -142,6 +143,7 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 		return agentModelTurn{}, err
 	}
 	turn := buildAnthropicStreamTurn(content.String(), finishReason, blocks)
+	turn.PublicStreamedContent = deltas.StreamedContent()
 	turn.Usage = usage
 	turn.CompletionResultStreamed = completionResultStreamed
 	return turn, nil

@@ -23,13 +23,13 @@ type finalizeWriteArgs struct {
 
 func (r *agentRuntime) validateChunkWriteToolCall(call agentToolCall) string {
 	if r != nil && isWorkspaceMutationTool(call.Name) {
-		if _, ok := r.appliedMutations[mutationOperationHash(call.Name, call.ArgumentsJSON)]; ok {
+		if _, ok := r.appliedMutations[mutationOperationHash(call.Name, executionToolArgumentsJSON(call))]; ok {
 			return ""
 		}
 	}
 	switch call.Name {
 	case "write_workspace_chunk":
-		args, err := parseChunkWriteArgs(call.ArgumentsJSON)
+		args, err := parseChunkWriteArgs(executionToolArgumentsJSON(call))
 		if err != nil {
 			return ""
 		}
@@ -57,7 +57,7 @@ func (r *agentRuntime) validateChunkWriteToolCall(call agentToolCall) string {
 			}
 		}
 	case "finalize_workspace_write":
-		args, err := parseFinalizeWriteArgs(call.ArgumentsJSON)
+		args, err := parseFinalizeWriteArgs(executionToolArgumentsJSON(call))
 		if err != nil {
 			return ""
 		}
@@ -82,7 +82,7 @@ func (r *agentRuntime) recordChunkWriteSuccess(call agentToolCall, event *ToolEv
 	}
 	switch call.Name {
 	case "write_workspace_chunk":
-		args, err := parseChunkWriteArgs(call.ArgumentsJSON)
+		args, err := parseChunkWriteArgs(executionToolArgumentsJSON(call))
 		if err != nil {
 			return
 		}
@@ -102,7 +102,7 @@ func (r *agentRuntime) recordChunkWriteSuccess(call agentToolCall, event *ToolEv
 		r.chunkWrites[path] = state
 		eventPayloadPatchChunkState(event, state)
 	case "finalize_workspace_write":
-		args, err := parseFinalizeWriteArgs(call.ArgumentsJSON)
+		args, err := parseFinalizeWriteArgs(executionToolArgumentsJSON(call))
 		if err != nil {
 			return
 		}
@@ -117,7 +117,7 @@ func (r *agentRuntime) annotateChunkWriteResult(call agentToolCall, result strin
 	if r == nil || call.Name != "write_workspace_chunk" {
 		return result
 	}
-	args, err := parseChunkWriteArgs(call.ArgumentsJSON)
+	args, err := parseChunkWriteArgs(executionToolArgumentsJSON(call))
 	if err != nil {
 		return result
 	}
@@ -134,7 +134,7 @@ func (r *agentRuntime) annotateChunkWriteResult(call agentToolCall, result strin
 	payload["total_chars"] = state.TotalChars
 	payload["current_hash"] = state.CurrentHash
 	payload["needs_finalize"] = true
-	payload["next_hint"] = "Continue with write_workspace_chunk mode=append for the next chunk, then call finalize_workspace_write before attempt_completion."
+	payload["next_hint"] = "The compatibility write was applied. Continue only if this existing write sequence requires more content."
 	return mustJSON(payload)
 }
 

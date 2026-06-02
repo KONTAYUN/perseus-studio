@@ -21,8 +21,10 @@ func annotatePayloadDiagnostics(summary *ProviderRequestSummary, payload map[str
 	summary.MessageShapes = providerMessageShapes(payload["messages"])
 	summary.MessageProtocolWarnings = providerMessageProtocolWarnings(payload["messages"], provider.Protocol)
 	summary.ToolSchemaDigest = toolSchemaDigest(tools)
+	summary.ToolManifestDigest = toolManifestDigest()
 	summary.ToolSchemaWarnings = toolSchemaWarnings(tools, provider.Protocol)
 	summary.ToolSchemaItems = toolSchemaItems(tools, provider.Protocol)
+	summary.ProviderVisibleTools = providerToolNames(tools, provider.Protocol)
 	summary.UnsupportedOpenAIParams = unsupportedOpenAIParams(provider, payload, policy)
 	summary.ProviderHost = providerHost(provider.BaseURL)
 	summary.ModelID = strings.TrimSpace(provider.ModelID)
@@ -33,6 +35,28 @@ func annotatePayloadDiagnostics(summary *ProviderRequestSummary, payload map[str
 	summary.HasReasoningParams = payloadHasReasoningParams(payload)
 	summary.ReasoningProfileSource = policy.Profile.Source
 	summary.ReasoningProfileLevels = append([]string(nil), policy.Profile.Levels...)
+}
+
+func providerToolNames(tools []map[string]any, protocol string) []string {
+	if len(tools) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		name := ""
+		if strings.EqualFold(protocol, "openai") {
+			if fn, _ := tool["function"].(map[string]any); fn != nil {
+				name = strings.TrimSpace(stringFromAny(fn["name"]))
+			}
+		} else {
+			name = strings.TrimSpace(stringFromAny(tool["name"]))
+		}
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func providerHost(rawURL string) string {

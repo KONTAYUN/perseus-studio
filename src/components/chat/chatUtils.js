@@ -13,6 +13,25 @@ export function loadingBubbleText(message, fallbackText = '') {
   return fallbackText || '正在处理';
 }
 
+export function loadingStatusDisplayText(message, fallbackText = '') {
+  const progress = latestLiveProgressItem(message);
+  if (progress?.text) return progress.text;
+  if (message?.loadingState && Object.prototype.hasOwnProperty.call(message.loadingState, 'visibleText')) {
+    if (message.loadingState.visibleText) return message.loadingState.visibleText;
+    return message.pending ? '\u00A0' : '';
+  }
+  if (fallbackText) return fallbackText;
+  return message?.pending ? '正在处理' : '';
+}
+
+export function loadingStatusReserveText(message, visibleText = '', fallbackText = '') {
+  const progress = latestLiveProgressItem(message);
+  if (progress?.text) return progress.text;
+  const stateText = message?.loadingState?.text;
+  if (stateText) return stateText;
+  return visibleText || fallbackText || (message?.pending ? '正在处理' : '');
+}
+
 export function latestLiveProgressItem(message) {
   const items = message?.progressItems || [];
   const closedToolCallIds = new Set();
@@ -107,13 +126,10 @@ export function formatDate(value) {
 
 export function formatToolLabel(item) {
   if (item.tool_name === 'ask_followup_question') return '已询问用户';
+  const byKind = formatToolLabelByKind(item.status_kind || item.statusKind || '');
+  if (byKind) return byKind;
   if (item.tool_name === 'find_workspace_files' || item.tool_name === 'search_workspace_text' || item.tool_name === 'inspect_workspace') return '已查看工作区';
   if (item.tool_name === 'read_workspace_text' || item.tool_name === 'read_workspace_files') return '已读取文件';
-  if (item.tool_name === 'edit_workspace_text') return '已编辑文件';
-  if (item.tool_name === 'replace_workspace_lines') return '已改写文件';
-  if (item.tool_name === 'save_workspace_file') return '已保存文件';
-  if (item.tool_name === 'write_workspace_chunk') return '已写入文件';
-  if (item.tool_name === 'finalize_workspace_write') return '已校验文件';
   if (item.tool_name === 'manage_workspace_path') return '已管理路径';
   if (item.tool_name === 'organize_workspace_matches') return '已整理文件';
   if (item.tool_name === 'run_workspace_command') return '已运行命令';
@@ -121,6 +137,29 @@ export function formatToolLabel(item) {
   if (item.tool_name === 'web_extract') return '已读取网页';
   if (item.tool_name === 'list_skills' || item.tool_name === 'read_skill' || item.tool_name === 'install_skill_from_attachment' || item.tool_name === 'delete_skill') return '已处理技能';
   return '已处理';
+}
+
+function formatToolLabelByKind(statusKind = '') {
+  switch (statusKind) {
+    case 'workspace_search':
+      return '已查看工作区';
+    case 'workspace_read':
+      return '已读取文件';
+    case 'workspace_edit':
+      return '已编辑文件';
+    case 'workspace_path':
+      return '已整理文件';
+    case 'command':
+      return '已运行命令';
+    case 'web':
+      return '已搜索资料';
+    case 'skill':
+      return '已处理技能';
+    case 'task':
+      return '已启动后台任务';
+    default:
+      return '';
+  }
 }
 
 export function completedActionItems(message) {

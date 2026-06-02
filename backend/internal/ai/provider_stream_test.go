@@ -154,6 +154,101 @@ func TestParseOpenAIStreamDoesNotRevealRequiredTextWithoutTool(t *testing.T) {
 	}
 }
 
+func TestProviderPatchFilteredEmitterHidesPatchBlockOnly(t *testing.T) {
+	var deltas []string
+	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+	}))
+
+	for _, piece := range []string{
+		"我会创建文件。\n",
+		"*** Begin",
+		" Patch\n*** Add File: draft.md\n+secret\n*** End Patch",
+		"\n已经处理。",
+	} {
+		emitter.Add(piece)
+	}
+	emitter.Flush()
+
+	if got := strings.Join(deltas, ""); got != "我会创建文件。\n\n已经处理。" {
+		t.Fatalf("unexpected streamed text: %q deltas=%#v", got, deltas)
+	}
+	if strings.Contains(emitter.StreamedContent(), "*** Begin Patch") || strings.Contains(emitter.StreamedContent(), "secret") {
+		t.Fatalf("patch content leaked through filter: %q", emitter.StreamedContent())
+	}
+}
+
+func TestProviderPatchFilteredEmitterSuppressesPatchOnlyWhitespace(t *testing.T) {
+	var deltas []string
+	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+	}))
+
+	for _, piece := range []string{
+		"\n",
+		"*** Begin Patch\n*** Add File: draft.md\n+secret\n",
+		"*** End Patch",
+	} {
+		emitter.Add(piece)
+	}
+	emitter.Flush()
+
+	if got := strings.Join(deltas, ""); got != "" {
+		t.Fatalf("patch-only whitespace should not stream, got %q deltas=%#v", got, deltas)
+	}
+	if got := emitter.StreamedContent(); got != "" {
+		t.Fatalf("patch-only whitespace should not be recorded as public content, got %q", got)
+	}
+}
+
+func TestProviderPatchFilteredEmitterSuppressesPatchFenceOnlyWrapper(t *testing.T) {
+	var deltas []string
+	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+	}))
+
+	for _, piece := range []string{
+		"```patch\n",
+		"*** Begin Patch\n*** Add File: draft.md\n+secret\n*** End Patch",
+		"\n```",
+	} {
+		emitter.Add(piece)
+	}
+	emitter.Flush()
+
+	if got := strings.Join(deltas, ""); got != "" {
+		t.Fatalf("fenced patch-only wrapper should not stream, got %q deltas=%#v", got, deltas)
+	}
+}
+
+func TestProviderPatchFilteredEmitterStreamsRealTextAroundFencedPatch(t *testing.T) {
+	var deltas []string
+	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+	}))
+
+	for _, piece := range []string{
+		"我会创建文件。\n\n```patch\n*** Begin",
+		" Patch\n*** Add File: draft.md\n+secret\n*** End Patch\n",
+		"```\n已经处理。",
+	} {
+		emitter.Add(piece)
+	}
+	emitter.Flush()
+
+	if got := strings.Join(deltas, ""); got != "我会创建文件。\n已经处理。" {
+		t.Fatalf("unexpected streamed text: %q deltas=%#v", got, deltas)
+	}
+}
+
 func TestParseOpenAIStreamReturnsPartialCompleteToolCallOnTransportError(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"save_workspace_file","arguments":"{\"path\":\"a.txt\",\"content\":\"x\",\"mode\":\"create\"}"}}]}}]}`,
@@ -221,6 +316,67 @@ func TestParseOpenAIStreamStreamsAttemptCompletionResultFromToolArguments(t *tes
 	}
 	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].Name != "attempt_completion" {
 		t.Fatalf("unexpected tool calls: %#v", turn.ToolCalls)
+	}
+}
+
+func TestParseOpenAIStreamDoesNotPreviewInternalCompletionProtocol(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"done_1","type":"function","function":{"name":"attempt_completion","arguments":"{\"result\":\"需要使用 *** Begin Patch"}}]}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" / *** End Patch 修改。\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	var deltas []string
+	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitCompletionResultDelta: func(text string) {
+			deltas = append(deltas, text)
+		},
+	})
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if turn.CompletionResultStreamed || len(deltas) != 0 {
+		t.Fatalf("internal completion protocol should not stream, streamed=%v deltas=%#v", turn.CompletionResultStreamed, deltas)
+	}
+}
+
+func TestParseOpenAIStreamKeepsCompletionResultSeparateFromAssistantText(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"我准备完成"}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"done_1","type":"function","function":{"name":"attempt_completion","arguments":"{\"result\":\"最终答复"}}]}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"content":"。"}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"内容\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	var textDeltas []string
+	var completionDeltas []string
+	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{
+		EmitText: func(text string) {
+			textDeltas = append(textDeltas, text)
+		},
+		EmitCompletionResultDelta: func(text string) {
+			completionDeltas = append(completionDeltas, text)
+		},
+		RevealTextAfterTool: true,
+	})
+	if err != nil {
+		t.Fatalf("parseOpenAIStream returned error: %v", err)
+	}
+	if strings.Join(textDeltas, "") != "我准备完成。" {
+		t.Fatalf("assistant text stream should stay separate, got %#v", textDeltas)
+	}
+	if strings.Join(completionDeltas, "") != "最终答复内容" {
+		t.Fatalf("completion stream should contain only attempt_completion.result, got %#v", completionDeltas)
+	}
+	if !turn.CompletionResultStreamed {
+		t.Fatal("expected completion result streamed")
 	}
 }
 
@@ -411,7 +567,7 @@ func TestParseAnthropicStreamDetectsTruncatedToolArguments(t *testing.T) {
 	if item.ArgumentsJSONValid || item.ArgumentsJSONError == "" {
 		t.Fatalf("expected invalid JSON details, got %#v", item)
 	}
-	if !item.LooksLikeLongWrite || item.RecommendedTool != "write_workspace_chunk" {
+	if !item.LooksLikeLongWrite || item.RecommendedTool != "assistant_text_patch" {
 		t.Fatalf("expected long-write recommendation, got %#v", item)
 	}
 }
@@ -430,7 +586,7 @@ func TestStreamToolDiagnosticsRecommendLineReplaceForLargeEdits(t *testing.T) {
 		t.Fatalf("expected one stream tool call diagnostic, got %#v", summary.StreamToolCalls)
 	}
 	item := summary.StreamToolCalls[0]
-	if !item.LooksLikeLargeEdit || item.RecommendedTool != "replace_workspace_lines" {
+	if !item.LooksLikeLargeEdit || item.RecommendedTool != "assistant_text_patch" {
 		t.Fatalf("expected line replacement recommendation, got %#v", item)
 	}
 	if item.OldTextChars == 0 || item.NewTextChars == 0 {

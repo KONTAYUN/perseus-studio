@@ -20,7 +20,12 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 		r.discardStreamedCompletionResult()
 		return r.toolErrorJSON("attempt_completion", errText), true, false
 	}
-	r.clearToolErrors()
+	if reason := invalidCompletionUserVisibleContent(attempt.Result, attempt.Notes); reason != "" {
+		r.recordToolError("attempt_completion", argumentsJSON, reason)
+		r.discardStreamedCompletionResult()
+		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
+		return r.toolErrorJSON("attempt_completion", reason), true, false
+	}
 	if r.performedMutation {
 		if len(attempt.ChangedPaths) == 0 {
 			reason := "workspace 变更任务完成时必须在 changed_paths 中列出已验证的变更路径。"
@@ -37,12 +42,19 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 			return r.toolErrorJSON("attempt_completion", reason), true, false
 		}
 	}
-	if rejected := r.completionRejection(); rejected != "" {
+	previousFailure := r.lastToolFailure
+	previousFailed := r.lastToolFailed
+	if rejected := r.completionRejection(attempt); rejected != "" {
 		r.recordToolError("attempt_completion", argumentsJSON, rejected)
+		if previousFailed && previousFailure.ToolName != "" && previousFailure.Recoverable {
+			r.lastToolFailed = true
+			r.lastToolFailure = previousFailure
+		}
 		r.discardStreamedCompletionResult()
 		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": rejected})
 		return r.toolErrorJSON("attempt_completion", rejected), true, false
 	}
+	r.clearToolErrors()
 	content := attempt.Result
 	if strings.TrimSpace(attempt.Notes) != "" {
 		content += "\n\n" + strings.TrimSpace(attempt.Notes)
@@ -53,32 +65,172 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 	return mustJSON(map[string]any{"result": attempt.Result, "summary": attempt.Summary, "changed_paths": attempt.ChangedPaths, "failed_items": attempt.FailedItems, "notes": attempt.Notes}), false, true
 }
 
+func invalidCompletionUserVisibleContent(result, notes string) string {
+	content := strings.TrimSpace(result)
+	if strings.TrimSpace(notes) != "" {
+		content += "\n\n" + strings.TrimSpace(notes)
+	}
+	if content == "" {
+		return ""
+	}
+	if marker := firstInternalCompletionMarker(content); marker != "" {
+		return "attempt_completion.result 必须是最终用户可见答复，不能包含内部编辑协议或工具名：" + marker + "。如果还需要编辑文件，请先执行真实 workspace 编辑动作；如果任务已完成，请改写成面向用户的结果说明。"
+	}
+	return ""
+}
+
+func firstInternalCompletionMarker(content string) string {
+	for _, marker := range []string{
+		"*** Begin Patch",
+		"*** End Patch",
+		"assistant_text_patch",
+		"apply_workspace_patch",
+		"save_workspace_file",
+		"write_workspace_chunk",
+		"finalize_workspace_write",
+		"edit_workspace_text",
+		"replace_workspace_lines",
+	} {
+		if strings.Contains(content, marker) {
+			return marker
+		}
+	}
+	return ""
+}
+
 func (r *agentRuntime) discardStreamedCompletionResult() {
 	if r != nil && r.opts.OnCompletionResultDiscard != nil {
 		r.opts.OnCompletionResultDiscard()
 	}
 }
 
-func (r *agentRuntime) completionRejection() string {
+func (r *agentRuntime) completionRejection(attempt completionAttempt) string {
 	if r.toolLoopActive && r.toolCalls == 0 {
 		return "当前任务已经进入工具工作流，但还没有执行任何工具。请先调用合适的工具，再使用 attempt_completion。"
+	}
+	if unverified := r.completionPathsWithoutVerifiedMutation(attempt.ChangedPaths); len(unverified) > 0 {
+		return "attempt_completion 声明了未被真实 workspace 变更验证的 changed_paths：" + strings.Join(unverified, ", ") + "。请先执行真实 workspace 编辑动作，或移除未验证路径。"
 	}
 	if r.performedMutation && !r.hasSuccessfulWorkspaceMutation() {
 		return "workspace 变更任务尚未产生可验证的成功变更，不能完成。请继续执行或修正 workspace 工具。"
 	}
 	if r.lastToolFailed {
+		if r.lastToolFailure.ToolName == "attempt_completion" {
+			if attemptReportsFailedWork(attempt) {
+				return "attempt_completion 正在报告未完成的 workspace 写入/修改，但本轮没有对应的工具失败结果。请继续执行真实编辑动作，或在确有工具失败后再总结缺失项。"
+			}
+			return ""
+		}
+		if r.lastToolFailure.Recoverable {
+			detail := r.lastToolFailure.ToolName
+			if r.lastToolFailure.Target != "" {
+				detail += " (" + r.lastToolFailure.Target + ")"
+			}
+			return "上一项可恢复工具调用失败且尚未修复，不能完成：" + detail + "。请根据 tool_result 修正参数并继续执行。"
+		}
+		if len(attempt.FailedItems) > 0 && len(attempt.ChangedPaths) == 0 {
+			return ""
+		}
 		return "上一项工具调用失败且尚未修复，不能完成。请根据 tool_result 修正参数或明确说明无法完成。"
+	}
+	if attemptReportsFailedWork(attempt) {
+		return "attempt_completion 正在报告未完成的 workspace 写入/修改，但本轮没有对应的工具失败结果。请继续执行真实编辑动作，或在确有工具失败后再总结缺失项。"
 	}
 	return ""
 }
 
-func (r *agentRuntime) hasSuccessfulWorkspaceMutation() bool {
-	for _, event := range r.events {
-		if event.Status == "success" && isWorkspaceMutationTool(event.ToolName) && len(event.ChangedPaths) > 0 {
+func attemptReportsFailedWork(attempt completionAttempt) bool {
+	if len(attempt.FailedItems) > 0 {
+		return true
+	}
+	return completionResultContradictsFinality(attempt.Result, attempt.Notes)
+}
+
+func completionResultContradictsFinality(result, notes string) bool {
+	content := strings.ToLower(strings.TrimSpace(result + "\n" + notes))
+	if content == "" {
+		return false
+	}
+	if containsAny(content, []string{
+		"workspace",
+		"文件",
+		"写入",
+		"保存",
+		"创建",
+		"修改",
+		"变更",
+		"file",
+		"write",
+		"written",
+		"save",
+		"saved",
+		"create",
+		"created",
+		"edit",
+		"edited",
+		"modify",
+		"modified",
+	}) && containsAny(content, []string{
+		"未能",
+		"没能",
+		"没有成功",
+		"尚未",
+		"还没有",
+		"不能声称",
+		"无法完成",
+		"could not",
+		"couldn't",
+		"unable to",
+		"not ",
+		"failed",
+	}) {
+		return true
+	}
+	return false
+}
+
+func containsAny(content string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(content, needle) {
 			return true
 		}
 	}
 	return false
+}
+
+func (r *agentRuntime) hasSuccessfulWorkspaceMutation() bool {
+	for _, event := range r.events {
+		if event.Status == "success" && eventCountsAsWorkspaceMutation(event) && len(event.ChangedPaths) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *agentRuntime) completionPathsWithoutVerifiedMutation(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	verified := map[string]bool{}
+	for _, event := range r.events {
+		if event.Status != "success" || !eventCountsAsWorkspaceMutation(event) {
+			continue
+		}
+		for _, path := range normalizedCompletionMutationPaths(event) {
+			verified[path] = true
+		}
+	}
+	seen := map[string]bool{}
+	var missing []string
+	for _, path := range paths {
+		normalized := normalizeWorkspaceEventPath(path)
+		if normalized == "" || verified[normalized] || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		missing = append(missing, normalized)
+	}
+	return missing
 }
 
 func (r *agentRuntime) completionPathsMissingMutations(paths []string) []string {
@@ -92,7 +244,7 @@ func (r *agentRuntime) completionPathsMissingMutations(paths []string) []string 
 	seenMissing := map[string]bool{}
 	var missing []string
 	for _, event := range r.events {
-		if event.Status != "success" || !isWorkspaceMutationTool(event.ToolName) {
+		if event.Status != "success" || !eventCountsAsWorkspaceMutation(event) {
 			continue
 		}
 		candidates := normalizedCompletionMutationPaths(event)
@@ -106,6 +258,13 @@ func (r *agentRuntime) completionPathsMissingMutations(paths []string) []string 
 		}
 	}
 	return missing
+}
+
+func eventCountsAsWorkspaceMutation(event ToolEvent) bool {
+	if isWorkspaceMutationTool(event.ToolName) {
+		return true
+	}
+	return event.ToolName == "run_workspace_command" && len(event.ChangedPaths) > 0
 }
 
 func normalizedCompletionMutationPaths(event ToolEvent) []string {
@@ -172,7 +331,7 @@ func (r *agentRuntime) verifiedMutationPaths() []string {
 	seen := map[string]bool{}
 	var paths []string
 	for _, event := range r.events {
-		if event.Status != "success" || !isWorkspaceMutationTool(event.ToolName) {
+		if event.Status != "success" || !eventCountsAsWorkspaceMutation(event) {
 			continue
 		}
 		for _, path := range append([]string{event.Path, event.NewPath}, event.ChangedPaths...) {

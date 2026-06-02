@@ -28,16 +28,17 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 	r.annotateRequestSummary()
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	turn, err := r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
-		ConversationID:    r.conversationID,
-		MessageID:         r.messageID,
-		Provider:          r.provider,
-		Protocol:          r.protocol,
-		Tools:             r.tools(),
-		ToolChoice:        r.toolChoice(),
-		Snapshot:          r.lastContextSnapshot,
-		PerformedMutation: r.performedMutation,
-		HasToolEvents:     len(r.events) > 0,
-		Opts:              r.opts,
+		ConversationID:       r.conversationID,
+		MessageID:            r.messageID,
+		Provider:             r.provider,
+		Protocol:             r.protocol,
+		Tools:                r.tools(),
+		ToolChoice:           r.toolChoice(),
+		Snapshot:             r.lastContextSnapshot,
+		PerformedMutation:    r.performedMutation,
+		HasToolEvents:        len(r.events) > 0,
+		ActionBoundaryActive: r.actionBoundaryActive(),
+		Opts:                 r.opts,
 	})
 	if err == nil || r.contextOverflowRetried || !isContextOverflowError(err) || isContextCanceledError(err) {
 		return turn, err
@@ -50,16 +51,17 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 	r.annotateRequestSummary()
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	return r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
-		ConversationID:    r.conversationID,
-		MessageID:         r.messageID,
-		Provider:          r.provider,
-		Protocol:          r.protocol,
-		Tools:             r.tools(),
-		ToolChoice:        r.toolChoice(),
-		Snapshot:          r.lastContextSnapshot,
-		PerformedMutation: r.performedMutation,
-		HasToolEvents:     len(r.events) > 0,
-		Opts:              r.opts,
+		ConversationID:       r.conversationID,
+		MessageID:            r.messageID,
+		Provider:             r.provider,
+		Protocol:             r.protocol,
+		Tools:                r.tools(),
+		ToolChoice:           r.toolChoice(),
+		Snapshot:             r.lastContextSnapshot,
+		PerformedMutation:    r.performedMutation,
+		HasToolEvents:        len(r.events) > 0,
+		ActionBoundaryActive: r.actionBoundaryActive(),
+		Opts:                 r.opts,
 	})
 }
 
@@ -67,13 +69,23 @@ func (r *agentRuntime) annotateRequestSummary() {
 	r.lastContextSnapshot.Summary.ProviderAttempts = r.providerAttempts
 	r.lastContextSnapshot.Summary.CheckpointResumeAttempt = r.checkpointResumeAttempts
 	r.lastContextSnapshot.Summary.LoadedToolsets = loadedToolsetNames(r.loadedToolsets)
+	r.lastContextSnapshot.Summary.LoadedCapabilities = loadedToolsetCapabilitiesForDiagnostics(r.loadedToolsets)
 	r.lastContextSnapshot.Summary.ForcedTool = strings.TrimSpace(r.opts.ForceTool)
+	r.lastContextSnapshot.Summary.ToolLoopActive = r.toolLoopActive
+	r.lastContextSnapshot.Summary.ActionBoundaryActive = r.actionBoundaryActive()
 	if r.checkpointResumeAttempts > 0 {
 		r.lastContextSnapshot.Summary.RecoverableTransientError = true
 	}
 	if checkpoint, ok := r.service.loadRunCheckpoint(context.Background(), r.opts); ok {
 		r.lastContextSnapshot.Summary.CheckpointSeq = checkpoint.Seq
 	}
+}
+
+func loadedToolsetCapabilitiesForDiagnostics(loaded map[string]bool) map[string]any {
+	if !loaded["workspace"] {
+		return nil
+	}
+	return toolsetCapabilities("workspace")
 }
 
 func loadedToolsetNames(loaded map[string]bool) []string {
@@ -133,48 +145,16 @@ func (r *agentRuntime) includeToolsetLoader() bool {
 }
 
 func (r *agentRuntime) toolChoice() providerToolChoice {
-	if forced := r.pendingForcedTool(); forced != "" {
-		return providerToolChoice{Mode: providerToolChoiceForced, ToolName: forced}
-	}
-	if r.requiresToolThisTurn() {
-		return providerToolChoice{Mode: providerToolChoiceRequired}
-	}
 	return providerToolChoice{Mode: providerToolChoiceAuto}
 }
 
-func (r *agentRuntime) requiresToolThisTurn() bool {
-	if r.opts.TaskID != "" {
-		return true
-	}
-	if r.pendingForcedTool() != "" {
-		return true
-	}
-	if (strings.TrimSpace(r.opts.ForceTool) != "" || r.requiresCompletion || r.toolLoopActive) && !r.readyForTextCompletion() {
-		return true
-	}
-	return false
-}
-
-func (r *agentRuntime) readyForTextCompletion() bool {
+func (r *agentRuntime) actionBoundaryActive() bool {
 	if r == nil {
 		return false
 	}
-	if r.lastToolFailed {
-		return false
-	}
-	if r.performedMutation {
-		return r.hasSuccessfulWorkspaceMutation()
-	}
-	if !r.requiresCompletion && !r.toolLoopActive && strings.TrimSpace(r.opts.ForceTool) == "" {
-		return false
-	}
-	return len(r.events) > 0
-}
-
-func (r *agentRuntime) pendingForcedTool() string {
-	name := strings.TrimSpace(r.opts.ForceTool)
-	if name == "" || r.toolCalls > 0 {
-		return ""
-	}
-	return name
+	return r.toolLoopActive ||
+		r.requiresCompletion ||
+		strings.TrimSpace(r.opts.ForceTool) != "" ||
+		strings.TrimSpace(r.opts.TaskID) != "" ||
+		attachmentsRequireToolLoop(r.attachments)
 }

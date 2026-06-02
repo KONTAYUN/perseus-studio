@@ -28,9 +28,30 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 		if err != nil {
 			return Reply{}, err
 		}
+		if patchResult := normalizeTextPatchTurn(turn); patchResult.Extracted {
+			turn = patchResult.Turn
+			patchText := ""
+			if len(turn.ToolCalls) > 0 {
+				patchText = turn.ToolCalls[0].PatchText
+			}
+			emitToolLifecycleEvent(r.opts, "assistant_text_patch_captured", "info", map[string]any{
+				"round":                round + 1,
+				"tool_name":            "apply_workspace_patch",
+				"status_kind":          manifestStatusKind("apply_workspace_patch"),
+				"transport":            "assistant_text_patch",
+				"patch_chars":          len([]rune(patchText)),
+				"patch_sha":            hashWorkspaceText(patchText),
+				"patch_block_count":    countWorkspacePatchBlocks(patchText),
+				"detected_paths":       workspacePatchCandidatePathsLoose(patchText),
+				"discarded_tool_calls": patchResult.DiscardedToolCalls,
+				"discarded_tool_names": patchResult.DiscardedToolNames,
+				"action_boundary":      "assistant_text_patch_supersedes_json_tool_calls",
+			})
+		}
 		r.lastProviderFinishReason = turn.FinishReason
 		if len(turn.ToolCalls) == 0 {
-			if !r.requiresToolThisTurn() {
+			allowTextCompletion := !r.actionBoundaryActive()
+			if allowTextCompletion {
 				r.commitAssistantContent(turn)
 			}
 			if reply, ok, err := r.handleNoToolTurn(ctx, turn); ok || err != nil {
@@ -108,9 +129,14 @@ func (r *agentRuntime) commitAssistantContent(turn agentModelTurn) {
 	}
 	if !turn.PublicTextStreamed {
 		emitToolLifecycleEvent(r.opts, "model_delta", "info", map[string]any{"text": turn.Content})
+		r.ensureActiveAssistantMessage(turn.Content)
+		r.appendActiveAssistantDelta(turn.Content)
+		return
 	}
-	r.ensureActiveAssistantMessage(turn.Content)
-	r.appendActiveAssistantDelta(turn.Content)
+	if strings.TrimSpace(turn.PublicStreamedContent) == "" {
+		return
+	}
+	r.ensureActiveAssistantMessage(turn.PublicStreamedContent)
 }
 
 func (r *agentRuntime) appendAssistantTurn(turn agentModelTurn) {
@@ -147,6 +173,20 @@ func (r *agentRuntime) finalizeActiveAssistantMessage(content string) {
 	r.activeAssistantMessageID = ""
 }
 
+func (r *agentRuntime) discardActiveAssistantMessage(reason string) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "assistant_action_boundary_rejected"
+	}
+	if r.activeAssistantMessageID == "" {
+		return
+	}
+	if r.opts.OnAssistantMessageDiscarded != nil {
+		r.opts.OnAssistantMessageDiscarded(r.activeAssistantMessageID, reason, r.activeAssistantSegment)
+	}
+	r.activeAssistantMessageID = ""
+}
+
 func (r *agentRuntime) correctiveMessage(content string) string {
 	if strings.TrimSpace(content) == "" {
 		return "你的上一轮响应没有文本也没有工具调用。当前任务需要通过工具执行并验证；请调用合适的 workspace/search/command/skill 工具，完成后调用 attempt_completion。"
@@ -175,6 +215,15 @@ func (r *agentRuntime) fail(message string, cause error) (Reply, error) {
 
 func (r *agentRuntime) recordToolError(toolName, argumentsJSON, message string) {
 	r.lastToolFailed = true
+	failureClass := toolFailureClass(toolName, fmt.Errorf("%s", message))
+	r.lastToolFailure = runtimeToolFailure{
+		ToolName:     strings.TrimSpace(toolName),
+		Message:      strings.TrimSpace(message),
+		FailureClass: failureClass,
+		Target:       toolTargetSummary(toolName, argumentsJSON),
+		Mutation:     isWorkspaceMutationTool(toolName) || (toolName == "run_workspace_command" && strings.TrimSpace(argumentsJSON) != ""),
+		Recoverable:  toolFailureRecoverableByModel(failureClass),
+	}
 	r.consecutiveToolErrors++
 	key := repeatedToolErrorKey(toolName, argumentsJSON, message)
 	if key != "" && key == r.repeatedToolErrorKey {
@@ -190,6 +239,7 @@ func (r *agentRuntime) recordToolError(toolName, argumentsJSON, message string) 
 
 func (r *agentRuntime) clearToolErrors() {
 	r.lastToolFailed = false
+	r.lastToolFailure = runtimeToolFailure{}
 	r.consecutiveToolErrors = 0
 	r.repeatedToolErrorKey = ""
 	r.repeatedToolErrorCount = 0
@@ -229,6 +279,13 @@ func mutationOperationHash(toolName, argumentsJSON string) string {
 	if err := json.Unmarshal([]byte(argumentsJSON), &decoded); err != nil {
 		decoded = strings.TrimSpace(argumentsJSON)
 	}
+	if object, ok := decoded.(map[string]any); ok && toolName == "apply_workspace_patch" {
+		if patch, ok := object["patch"].(string); ok && strings.TrimSpace(patch) != "" {
+			object["patch_sha256"] = hashWorkspaceText(patch)
+			object["patch_chars"] = len([]rune(patch))
+			object["patch"] = "[patch omitted from hash canonical payload]"
+		}
+	}
 	canonical, err := json.Marshal(decoded)
 	if err != nil {
 		canonical = []byte(strings.TrimSpace(argumentsJSON))
@@ -238,15 +295,16 @@ func mutationOperationHash(toolName, argumentsJSON string) string {
 }
 
 func userFriendlyToolLabel(toolName string) string {
+	if entry, ok := toolManifestEntry(toolName); ok && strings.TrimSpace(entry.Label) != "" {
+		return entry.Label
+	}
 	switch toolName {
 	case "find_workspace_files", "search_workspace_text", "inspect_workspace":
 		return "已查看工作区"
 	case "read_workspace_text", "read_workspace_files":
 		return "已读取文件"
-	case "edit_workspace_text", "replace_workspace_lines":
+	case "apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
 		return "已编辑文件"
-	case "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
-		return "已保存文件"
 	case "manage_workspace_path":
 		return "已管理路径"
 	case "organize_workspace_matches":

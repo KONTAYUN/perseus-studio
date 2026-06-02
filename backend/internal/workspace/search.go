@@ -173,7 +173,17 @@ func (s *Service) FindFiles(query, pattern string, maxResults int) ([]SearchResu
 	return results, nil
 }
 
+type TextSearchOptions struct {
+	PathScope    string
+	IncludeGlobs []string
+	ExcludeGlobs []string
+}
+
 func (s *Service) SearchText(query string, regex bool, maxResults int, contextLines int) ([]TextSearchResult, bool, error) {
+	return s.SearchTextScoped(query, regex, maxResults, contextLines, TextSearchOptions{})
+}
+
+func (s *Service) SearchTextScoped(query string, regex bool, maxResults int, contextLines int, opts TextSearchOptions) ([]TextSearchResult, bool, error) {
 	if err := s.migrateLegacyTrashDir(); err != nil {
 		return nil, false, err
 	}
@@ -198,6 +208,14 @@ func (s *Service) SearchText(query string, regex bool, maxResults int, contextLi
 		}
 		pattern = compiled
 	}
+	pathScope := strings.Trim(strings.ReplaceAll(opts.PathScope, "\\", "/"), "/")
+	if pathScope != "" {
+		cleanScope, _, err := s.sanitizePath(pathScope)
+		if err != nil {
+			return nil, false, err
+		}
+		pathScope = cleanScope
+	}
 
 	results := make([]TextSearchResult, 0, maxResults)
 	limited := false
@@ -219,7 +237,16 @@ func (s *Service) SearchText(query string, regex bool, maxResults int, contextLi
 			}
 			return nil
 		}
+		if pathScope != "" && !searchPathWithinScope(relPath, pathScope) {
+			if entry.IsDir() && !searchScopeMayContain(pathScope, relPath) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() || !isTextPath(relPath) {
+			return nil
+		}
+		if !searchPathMatchesAnyInclude(relPath, opts.IncludeGlobs) || searchPathMatchesAnyExclude(relPath, opts.ExcludeGlobs) {
 			return nil
 		}
 		fileResults, err := searchTextFile(absPath, relPath, query, pattern, maxResults-len(results), contextLines)
@@ -237,6 +264,56 @@ func (s *Service) SearchText(query string, regex bool, maxResults int, contextLi
 		return nil, false, err
 	}
 	return results, limited, nil
+}
+
+func searchPathWithinScope(path, scope string) bool {
+	path = strings.Trim(strings.ReplaceAll(path, "\\", "/"), "/")
+	scope = strings.Trim(strings.ReplaceAll(scope, "\\", "/"), "/")
+	return scope == "" || path == scope || strings.HasPrefix(path, scope+"/")
+}
+
+func searchScopeMayContain(scope, dir string) bool {
+	scope = strings.Trim(strings.ReplaceAll(scope, "\\", "/"), "/")
+	dir = strings.Trim(strings.ReplaceAll(dir, "\\", "/"), "/")
+	return dir == "" || scope == dir || strings.HasPrefix(scope, dir+"/")
+}
+
+func searchPathMatchesAnyInclude(path string, patterns []string) bool {
+	patterns = normalizeSearchGlobs(patterns)
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, pattern := range patterns {
+		matched, err := pathMatchesPattern(path, pattern)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+func searchPathMatchesAnyExclude(path string, patterns []string) bool {
+	for _, pattern := range normalizeSearchGlobs(patterns) {
+		matched, err := pathMatchesPattern(path, pattern)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeSearchGlobs(patterns []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(strings.ReplaceAll(pattern, "\\", "/"))
+		if pattern == "" || seen[pattern] {
+			continue
+		}
+		seen[pattern] = true
+		out = append(out, pattern)
+	}
+	return out
 }
 
 func normalizeSearchText(value string) string {

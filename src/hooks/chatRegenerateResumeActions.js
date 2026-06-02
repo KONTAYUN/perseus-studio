@@ -1,6 +1,7 @@
 import { apiPost } from '../api/client';
 import { formatChatError } from './chatErrorUtils';
 import { buildAssistantRunShell, mapPendingAssistant } from './chatStateUtils.js';
+import { isWorkspaceRefreshEvent } from './ideUtils.js';
 
 export function createChatRegenerateResumeActions({
   activeChatAbortRef,
@@ -31,7 +32,7 @@ export function createChatRegenerateResumeActions({
     if (!selectedMessage || selectedMessage.role !== 'assistant' || selectedIndex <= lastUserIndex) return;
     const assistantTail = conversationMessages.slice(lastUserIndex + 1).filter((item) => item.role === 'assistant');
     const hasMutationTool = assistantTail.some((message) => (message.attachments || []).some((item) =>
-      ['save_workspace_file', 'manage_workspace_path', 'organize_workspace_matches', 'run_workspace_command'].includes(item?.tool_name)
+      isWorkspaceRefreshEvent(item)
     ));
     if (hasMutationTool) {
       const ok = await confirm?.({

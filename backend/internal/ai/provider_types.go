@@ -113,6 +113,7 @@ func sanitizeAnthropicVisibleTextBlocks(content []map[string]any) []map[string]a
 		}
 		text, _ := block["text"].(string)
 		visible := filter.Feed(text)
+		visible, _, _ = extractWorkspacePatchBlock(visible)
 		if strings.TrimSpace(visible) == "" {
 			continue
 		}
@@ -124,6 +125,10 @@ func sanitizeAnthropicVisibleTextBlocks(content []map[string]any) []map[string]a
 		next = append(next, clean)
 	}
 	if tail := filter.Close(); strings.TrimSpace(tail) != "" {
+		tail, _, _ = extractWorkspacePatchBlock(tail)
+		if strings.TrimSpace(tail) == "" {
+			return next
+		}
 		next = append(next, map[string]any{"type": "text", "text": tail})
 	}
 	return next

@@ -50,6 +50,8 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 		return s.execReadWorkspaceFile(ctx, opts.UserID, argumentsJSON)
 	case "read_workspace_files":
 		return s.execReadWorkspaceFiles(ctx, opts.UserID, argumentsJSON)
+	case "apply_workspace_patch":
+		return s.execApplyWorkspacePatch(ctx, opts.UserID, argumentsJSON)
 	case "edit_workspace_text":
 		return s.execEditWorkspaceText(ctx, opts.UserID, argumentsJSON)
 	case "replace_workspace_lines":
@@ -65,7 +67,7 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 	case "organize_workspace_matches":
 		return s.execOrganizeWorkspaceMatches(ctx, opts.UserID, argumentsJSON)
 	case "list_workspace_files", "read_workspace_file", "create_workspace_file", "write_workspace_file", "mkdir_workspace", "rename_workspace_path", "move_workspace_path", "delete_workspace_path":
-		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, save_workspace_file, write_workspace_chunk, finalize_workspace_write, manage_workspace_path, or organize_workspace_matches", name)
+		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, a *** Begin Patch text patch, manage_workspace_path, or organize_workspace_matches", name)
 	case "run_workspace_command":
 		return s.execRunWorkspaceCommand(ctx, opts.UserID, argumentsJSON)
 	case "perseus_search_web", "web_search":
@@ -153,9 +155,12 @@ func execLoadPerseusToolsetForRole(argumentsJSON, role string) (string, string, 
 		return "", "", "正在加载工具...", "", fmt.Errorf("unknown toolset: %s", args.Toolset)
 	}
 	result := mustJSON(map[string]any{
-		"loaded_toolset":  args.Toolset,
-		"available_tools": availableTools,
-		"instruction":     "Continue with the newly loaded tools when they are needed for the user's request.",
+		"loaded_toolset":       args.Toolset,
+		"available_tools":      availableTools,
+		"json_tools":           availableTools,
+		"capabilities":         toolsetCapabilities(args.Toolset),
+		"instruction":          toolsetInstruction(args.Toolset),
+		"tool_manifest_digest": toolManifestDigest(),
 	})
 	return result, fmt.Sprintf("loaded toolset: %s", args.Toolset), "正在加载工具...", "", nil
 }

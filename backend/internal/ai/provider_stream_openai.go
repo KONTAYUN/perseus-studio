@@ -131,9 +131,6 @@ func (e *toolGatedStreamDeltaEmitter) Add(text string) {
 		return
 	}
 	if !e.revealAfterTool || e.toolObserved {
-		if e.revealAfterTool && e.toolObserved && isToolPreamblePlaceholder(text) {
-			return
-		}
 		e.inner.Add(text)
 		return
 	}
@@ -170,7 +167,7 @@ func (e *toolGatedStreamDeltaEmitter) Flush() {
 
 func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOptions) (agentModelTurn, error) {
 	var content strings.Builder
-	deltas := newToolGatedStreamDeltaEmitter(opts)
+	deltas := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(opts))
 	completionDeltas := newStreamDeltaEmitter(opts.EmitCompletionResultDelta)
 	visibleText := newProviderVisibleTextFilter()
 	toolBuilders := map[int]*openAIStreamToolBuilder{}
@@ -230,6 +227,7 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 	completionDeltas.Flush()
 	if err != nil {
 		turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)
+		turn.PublicStreamedContent = deltas.StreamedContent()
 		turn.CompletionResultStreamed = completionResultStreamed
 		if hasCompleteToolCalls(turn) {
 			return agentModelTurn{}, &partialStreamTurnError{turn: turn, err: err}
@@ -237,6 +235,7 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 		return agentModelTurn{}, err
 	}
 	turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)
+	turn.PublicStreamedContent = deltas.StreamedContent()
 	turn.CompletionResultStreamed = completionResultStreamed
 	return turn, nil
 }

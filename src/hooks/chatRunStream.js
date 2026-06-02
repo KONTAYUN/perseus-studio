@@ -25,6 +25,7 @@ import { markRunSteerApplied, markRunSteerReceived, markRunSteerRejected } from 
 function toolEventFromPayload(payload = {}) {
   return {
     tool_name: payload.tool_name,
+    status_kind: payload.status_kind || '',
     status: payload.status || 'success',
     path: payload.path || '',
     old_path: payload.old_path || '',
@@ -33,6 +34,35 @@ function toolEventFromPayload(payload = {}) {
     hash: payload.hash || '',
     version_id: payload.version_id || '',
   };
+}
+
+function scheduleDelay(callback, delay) {
+  const scheduler = globalThis.window?.setTimeout || globalThis.setTimeout;
+  if (typeof scheduler === 'function') {
+    return scheduler(callback, delay);
+  }
+  queueMicrotask(callback);
+  return 0;
+}
+
+function startInterval(callback, delay) {
+  const scheduler = globalThis.window?.setInterval || globalThis.setInterval;
+  if (typeof scheduler === 'function') {
+    return scheduler(callback, delay);
+  }
+  return null;
+}
+
+function stopInterval(timer) {
+  if (timer == null) return;
+  const clearer = globalThis.window?.clearInterval || globalThis.clearInterval;
+  if (typeof clearer === 'function') {
+    clearer(timer);
+  }
+}
+
+function wait(delay) {
+  return new Promise((resolve) => scheduleDelay(resolve, delay));
 }
 
 export async function waitForAgentRunStream({
@@ -94,7 +124,7 @@ export async function waitForAgentRunStream({
       source = null;
     }
     if (loadingTimer) {
-      window.clearInterval(loadingTimer);
+      stopInterval(loadingTimer);
       loadingTimer = null;
     }
   };
@@ -113,7 +143,7 @@ export async function waitForAgentRunStream({
   };
   const refreshConversationsAfterTitleGeneration = async () => {
     for (const delay of [1000, 3000, 6000, 10000, 15000, 15000]) {
-      await new Promise((resolve) => window.setTimeout(resolve, delay));
+      await wait(delay);
       await loadConversations();
     }
   };
@@ -345,7 +375,7 @@ export async function waitForAgentRunStream({
       const run = await apiGet(`/api/agent-runs/${encodeURIComponent(runId)}`);
       await handleRun(run);
       if (settled) return;
-      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      await wait(2000);
     }
     throw new Error('执行仍在进行，但事件流连接中断，请刷新会话查看结果');
   };
@@ -355,7 +385,7 @@ export async function waitForAgentRunStream({
     eventChain.catch(reject);
   };
 
-  loadingTimer = window.setInterval(() => {
+  loadingTimer = startInterval(() => {
     if (settled) return;
     setVisibleConversationMessages((current) =>
       mapPendingAssistant(current, thinkingId, (item) => updateLoadingState(item), runId)
@@ -411,7 +441,7 @@ export async function waitForAgentRunStream({
         if (settled || fallbackStarted) return;
         if (reconnectAttempts < 3) {
           reconnectAttempts += 1;
-          window.setTimeout(openStream, Math.min(500 * reconnectAttempts, 1500));
+          scheduleDelay(openStream, Math.min(500 * reconnectAttempts, 1500));
           return;
         }
         pollUntilDone().then(resolve).catch(reject);

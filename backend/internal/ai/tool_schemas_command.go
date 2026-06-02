@@ -1,15 +1,19 @@
 package ai
 
 func openAICommandTools() []map[string]any {
-	return []map[string]any{
-		openAIFunctionTool("run_workspace_command", "Run a shell command inside the current user's workspace to inspect projects, run tests, build, or execute scripts. Use only when command execution is necessary. The cwd must be workspace-relative and dangerous commands are blocked.", commandParams()),
-	}
+	return []map[string]any{openAICommandTool()}
 }
 
 func anthropicCommandTools() []map[string]any {
-	return []map[string]any{
-		anthropicTool("run_workspace_command", "Run a shell command inside the current user's workspace to inspect projects, run tests, build, or execute scripts. Use only when command execution is necessary. The cwd must be workspace-relative and dangerous commands are blocked.", commandParams()),
-	}
+	return []map[string]any{anthropicCommandTool()}
+}
+
+func openAICommandTool() map[string]any {
+	return openAIFunctionTool("run_workspace_command", "Run a shell command inside the current user's workspace to inspect projects, run tests, build, or execute scripts. Use only when command execution is necessary. The cwd must be workspace-relative and dangerous commands are blocked.", commandParams())
+}
+
+func anthropicCommandTool() map[string]any {
+	return anthropicTool("run_workspace_command", "Run a shell command inside the current user's workspace to inspect projects, run tests, build, or execute scripts. Use only when command execution is necessary. The cwd must be workspace-relative and dangerous commands are blocked.", commandParams())
 }
 
 func commandParams() map[string]any {

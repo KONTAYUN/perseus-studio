@@ -42,9 +42,12 @@ test('filterFreshEditorToolEvents deduplicates repeated AI file refresh events',
   const seen = new Set();
   const event = {
     tool_call_id: 'tc1',
-    tool_name: 'save_workspace_file',
+    tool_name: 'apply_workspace_patch',
+    type: 'workspace_file_changed',
+    status_kind: 'workspace_edit',
     status: 'success',
     path: 'docs/a.txt',
+    changed_paths: ['docs/a.txt'],
     hash: 'h1',
     version_id: 'v1',
   };
@@ -55,10 +58,8 @@ test('filterFreshEditorToolEvents deduplicates repeated AI file refresh events',
 });
 
 test('shouldReloadWorkspaceForToolEvents includes precise AI edits', () => {
-  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'edit_workspace_text' }]), true);
-  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'replace_workspace_lines' }]), true);
-  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'write_workspace_chunk' }]), true);
-  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'finalize_workspace_write' }]), true);
+  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', type: 'workspace_file_changed', changed_paths: ['a.md'] }]), true);
+  assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'unknown_tool', changed_paths: ['a.md'] }]), true);
   assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'failed', tool_name: 'edit_workspace_text' }]), false);
   assert.equal(shouldReloadWorkspaceForToolEvents([{ status: 'success', tool_name: 'read_workspace_text' }]), false);
 });

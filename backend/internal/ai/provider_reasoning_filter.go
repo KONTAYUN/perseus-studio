@@ -16,7 +16,8 @@ func newProviderVisibleTextFilter() *providerVisibleTextFilter {
 
 func providerVisibleText(text string) string {
 	filter := newProviderVisibleTextFilter()
-	return strings.TrimSpace(filter.Feed(text) + filter.Close())
+	visible := filter.Feed(text) + filter.Close()
+	return strings.TrimSpace(visible)
 }
 
 type providerVisibleTextEmitter interface {
@@ -176,6 +177,7 @@ func providerReasoningBoundarySuffixLen(text string, candidates []string) int {
 	lower := strings.ToLower(text)
 	best := 0
 	for _, candidate := range candidates {
+		candidate = strings.ToLower(candidate)
 		limit := len(candidate) - 1
 		if limit > len(lower) {
 			limit = len(lower)

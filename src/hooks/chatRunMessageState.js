@@ -154,6 +154,10 @@ export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMe
   const assistant = normalizeConversationMessage(assistantMessage);
   if (!assistant) return messages;
   const normalizedMessages = messages || [];
+  if (isEmptyTerminalAssistantSegment(assistant)) {
+    const withoutEmptySegment = normalizedMessages.filter((item) => item?.id !== assistant.id);
+    return removePendingRunShells(withoutEmptySegment, thinkingId, runId);
+  }
   const nextAssistant = {
     ...assistant,
     kind: assistant.kind === 'run_shell' ? 'assistant_segment' : (assistant.kind || 'assistant_segment'),
@@ -183,7 +187,7 @@ export function mergeAssistantMessageCompleted(messages, thinkingId, assistantMe
 export function buildProgressItem(type, payload = {}, fallbackText = '') {
   const text = agentEventText(type, payload) || payload.message || fallbackText || '';
   if (!text) return null;
-  return {
+  const item = {
     id: payload.event_id || `${type}:${payload.tool_call_id || payload.round || payload.path || payload.message || payload.reason || text}`,
     runId: payload.run_id || payload.runId || '',
     type,
@@ -192,6 +196,10 @@ export function buildProgressItem(type, payload = {}, fallbackText = '') {
     toolName: payload.tool_name || '',
     status: payload.status || '',
   };
+  if (payload.status_kind) {
+    item.statusKind = payload.status_kind;
+  }
+  return item;
 }
 
 export function normalizeConversationMessage(message) {
@@ -205,6 +213,10 @@ export function normalizeConversationMessage(message) {
   }
   if (next.meta?.status && !next.status) {
     next.status = next.meta.status;
+  }
+  const metaRunId = String(next.meta?.run_id || next.meta?.runId || '').trim();
+  if (metaRunId && !next.runId) {
+    next.runId = metaRunId;
   }
   if (next.role === 'assistant' && next.status === 'streaming') {
     next.pending = true;
@@ -220,7 +232,9 @@ export function normalizeConversationMessage(message) {
 }
 
 export function normalizeConversationMessages(items) {
-  return (items || []).map((item) => normalizeConversationMessage(item));
+  return (items || [])
+    .map((item) => normalizeConversationMessage(item))
+    .filter((item) => !isEmptyTerminalAssistantSegment(item));
 }
 
 export function appendRunTerminalMessage(messages, latestRun) {
@@ -324,7 +338,12 @@ function runAnchorInsertIndex(messages, userMessageId = '', runId = '') {
 }
 
 function isMessageAnchoredToRun(item, runId = '') {
-  if (!item || item.role !== 'assistant') return false;
+  if (!item) return false;
+  const isRunSteer = item.role === 'user' && (item.kind === 'steer' || item.meta?.kind === 'steer');
+  if (isRunSteer) {
+    return !!runId && item.runId === runId;
+  }
+  if (item.role !== 'assistant') return false;
   if (runId && (item.runId === runId || item.resumableRunId === runId)) return true;
   if (!item.runId && !item.resumableRunId && item.kind !== 'run_shell') return true;
   return false;
@@ -375,4 +394,17 @@ function isFinalAssistantMessage(item) {
   if (item.pending || item.activeMessageId) return false;
   if (item.kind === 'run_shell') return false;
   return item.status === 'final' || item.status === undefined || item.status === '';
+}
+
+function isEmptyTerminalAssistantSegment(item) {
+  if (!item || item.role !== 'assistant') return false;
+  if (item.pending || item.activeMessageId) return false;
+  if (item.error || item.resumableRunId) return false;
+  if (String(item.content || '').trim() !== '') return false;
+  if ((item.attachments || []).length > 0) return false;
+  if ((item.progressItems || []).length > 0) return false;
+  const status = item.status || 'final';
+  if (status !== 'final') return false;
+  const kind = item.kind || item.meta?.kind || '';
+  return kind === '' || kind === 'assistant_segment';
 }

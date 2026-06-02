@@ -19,6 +19,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	emitToolLifecycleEvent(opts, "tool_call_started", "info", map[string]any{
 		"tool_call_id":      toolCallID,
 		"tool_name":         name,
+		"status_kind":       manifestStatusKind(name),
 		"status":            "running",
 		"operation_hash":    operationHash,
 		"arguments_summary": summarizeToolArguments(argumentsJSON),
@@ -48,7 +49,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 				"diagnostic_log_id": diagID,
 				"operation_hash":    operationHash,
 			})
-			return "", ToolEvent{ToolCallID: toolCallID, ToolName: name, Label: userFriendlyToolLabel(name), Status: "failed", Error: wrapped.Error(), OperationHash: operationHash}, WithDiagnosticID(wrapped, diagID)
+			return "", ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: userFriendlyToolLabel(name), Status: "failed", Error: wrapped.Error(), OperationHash: operationHash}, WithDiagnosticID(wrapped, diagID)
 		}
 		if recorded.ID != "" {
 			toolCallID = recorded.ID
@@ -62,10 +63,12 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	if err != nil {
 		status = "failed"
 		errorText = err.Error()
-		result = mustJSON(map[string]any{
-			"error":         errorText,
-			"recovery_hint": toolFailureRecoveryHint(name, errorText),
-		})
+		if !jsonObjectHasField(result, "error") {
+			result = mustJSON(map[string]any{
+				"error":         errorText,
+				"recovery_hint": toolFailureRecoveryHint(name, errorText),
+			})
+		}
 		summary = errorText
 		s.recordToolDiagnostic(ctx, opts, conversationID, messageID, name, argumentsJSON, targetSummary, durationMS, err)
 		verification = ToolVerification{Status: "skipped", Message: "tool execution failed"}
@@ -87,6 +90,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	eventPayload := map[string]any{
 		"tool_call_id":      toolCallID,
 		"tool_name":         name,
+		"status_kind":       manifestStatusKind(name),
 		"status":            status,
 		"label":             label,
 		"path":              path,
@@ -101,7 +105,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		eventPayload["error"] = errorText
 		eventPayload["recovery_hint"] = toolFailureRecoveryHint(name, errorText)
 	}
-	event := ToolEvent{ToolCallID: toolCallID, ToolName: name, Label: label, Status: status, TargetSummary: targetSummary, OperationHash: operationHash, Path: path, Error: errorText, DurationMS: durationMS}
+	event := ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: label, Status: status, TargetSummary: targetSummary, OperationHash: operationHash, Path: path, Error: errorText, DurationMS: durationMS}
 	if status == "success" {
 		var meta struct {
 			Path          string   `json:"path"`
@@ -214,10 +218,11 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		log.Printf("[ai] tool conversation=%s name=%s status=%s path=%s", conversationID, name, status, path)
 		logTask(opts, "info", fmt.Sprintf("tool call done: %s", name))
 		emitToolLifecycleEvent(opts, "tool_call_completed", "info", eventPayload)
-		if isWorkspaceMutationTool(name) && (len(event.ChangedPaths) > 0 || event.Path != "" || event.OldPath != "" || event.NewPath != "") {
+		if shouldEmitWorkspaceFileChanged(name, event) {
 			emitToolLifecycleEvent(opts, "workspace_file_changed", "info", map[string]any{
 				"tool_call_id":   toolCallID,
 				"tool_name":      name,
+				"status_kind":    manifestStatusKind(name),
 				"status":         status,
 				"path":           event.Path,
 				"old_path":       event.OldPath,
@@ -234,4 +239,26 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		emitToolLifecycleEvent(opts, "tool_call_failed", "error", eventPayload)
 	}
 	return budgetToolResultForModel(name, result, profile), event, nil
+}
+
+func jsonObjectHasField(raw string, field string) bool {
+	if raw == "" || field == "" {
+		return false
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return false
+	}
+	_, ok := decoded[field]
+	return ok
+}
+
+func shouldEmitWorkspaceFileChanged(name string, event ToolEvent) bool {
+	if len(event.ChangedPaths) == 0 && event.Path == "" && event.OldPath == "" && event.NewPath == "" {
+		return false
+	}
+	if isWorkspaceMutationTool(name) {
+		return true
+	}
+	return name == "run_workspace_command" && len(event.ChangedPaths) > 0
 }

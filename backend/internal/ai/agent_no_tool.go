@@ -8,17 +8,17 @@ import (
 
 func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn) (Reply, bool, error) {
 	content := strings.TrimSpace(turn.Content)
-	toolLoopActive := r.requiresCompletion || r.toolLoopActive || r.opts.ForceTool != ""
+	actionBoundaryActive := r.actionBoundaryActive()
 	r.lastProviderEmptyResponse = content == ""
 	if turn.FinishReason == "timeout_after_mutation" || turn.FinishReason == "recoverable_final_response_error" {
-		if content != "" && !toolLoopActive {
+		if content != "" && !actionBoundaryActive {
 			emitToolLifecycleEvent(r.opts, "model_message_completed", "warn", map[string]any{"content": content})
 			return Reply{Content: content, ToolEvents: r.events}, true, nil
 		}
 		reply, err := r.fail("模型最终回复连接中断；已有工具结果已保存到断点，可继续本轮", nil)
 		return reply, true, err
 	}
-	if !toolLoopActive {
+	if !actionBoundaryActive {
 		if content == "" {
 			err := fmt.Errorf("empty model response")
 			diagID := r.service.recordProviderDiagnostic(ctx, r.opts, r.provider, r.conversationID, r.messageID, "provider_empty_response", "warn", 0, err)
@@ -46,17 +46,15 @@ func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn
 		emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
 		return Reply{Content: content, ToolEvents: r.events}, true, nil
 	}
-	if content != "" && r.readyForTextCompletion() {
-		r.completedContent = content
-		r.finalizeActiveAssistantMessage(content)
-		emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
-		return Reply{Content: content, ToolEvents: r.events}, true, nil
+	if content != "" {
+		r.discardActiveAssistantMessage("action_required_plain_text_rejected")
 	}
 	r.invalidTurns++
 	if content == "" {
-		r.service.recordProviderDiagnostic(ctx, r.opts, r.provider, r.conversationID, r.messageID, "provider_empty_response", "warn", 0, fmt.Errorf("empty model response"))
+		diagID := r.service.recordProviderDiagnostic(ctx, r.opts, r.provider, r.conversationID, r.messageID, "provider_empty_response", "warn", 0, fmt.Errorf("empty model response"))
 		if r.invalidTurns > agentMaxInvalidTurns {
 			reply, err := r.fail("模型返回空内容且没有工具调用，workspace 任务未执行完成", nil)
+			err = WithDiagnosticID(err, diagID)
 			return reply, true, err
 		}
 		if err := r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint()); err != nil {

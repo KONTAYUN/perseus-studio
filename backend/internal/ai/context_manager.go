@@ -33,8 +33,12 @@ type ProviderRequestSummary struct {
 	MessageShapes             []ProviderMessageLog `json:"message_shapes,omitempty"`
 	MessageProtocolWarnings   []string             `json:"message_protocol_warnings,omitempty"`
 	ToolSchemaDigest          string               `json:"tool_schema_digest,omitempty"`
+	ToolManifestDigest        string               `json:"tool_manifest_digest,omitempty"`
 	ToolSchemaWarnings        []string             `json:"tool_schema_warnings,omitempty"`
 	ToolSchemaItems           []ProviderToolLog    `json:"tool_schema_items,omitempty"`
+	ProviderVisibleTools      []string             `json:"provider_visible_tools,omitempty"`
+	LoadedCapabilities        map[string]any       `json:"loaded_capabilities,omitempty"`
+	InternalEditProtocol      string               `json:"internal_edit_protocol,omitempty"`
 	UnsupportedOpenAIParams   []string             `json:"unsupported_openai_params,omitempty"`
 	ProviderHost              string               `json:"provider_host,omitempty"`
 	ModelID                   string               `json:"model_id,omitempty"`
@@ -55,6 +59,7 @@ type ProviderRequestSummary struct {
 	TranscriptEntries         int                  `json:"transcript_entries"`
 	ToolResultCount           int                  `json:"tool_result_count"`
 	ToolLoopActive            bool                 `json:"tool_loop_active"`
+	ActionBoundaryActive      bool                 `json:"action_boundary_active,omitempty"`
 	EstimatedChars            int                  `json:"estimated_chars"`
 	EstimatedTokens           int                  `json:"estimated_tokens"`
 	ContextWindowTokens       int                  `json:"context_window_tokens"`
@@ -100,23 +105,22 @@ type ProviderToolLog struct {
 }
 
 type StreamToolCallLog struct {
-	Index                int    `json:"index"`
-	ID                   string `json:"id,omitempty"`
-	Name                 string `json:"name,omitempty"`
-	ArgumentsChars       int    `json:"arguments_chars,omitempty"`
-	ArgumentsBytes       int    `json:"arguments_bytes,omitempty"`
-	ArgumentsJSONValid   bool   `json:"arguments_json_valid"`
-	ArgumentsJSONError   string `json:"arguments_json_error,omitempty"`
-	ArgumentsHead        string `json:"arguments_head,omitempty"`
-	ArgumentsTail        string `json:"arguments_tail,omitempty"`
-	TargetSummary        string `json:"target_summary,omitempty"`
-	ContentChars         int    `json:"content_chars,omitempty"`
-	OldTextChars         int    `json:"old_text_chars,omitempty"`
-	NewTextChars         int    `json:"new_text_chars,omitempty"`
-	LooksLikeLongWrite   bool   `json:"looks_like_long_write,omitempty"`
-	LooksLikeLargeEdit   bool   `json:"looks_like_large_edit,omitempty"`
-	RecommendedTool      string `json:"recommended_tool,omitempty"`
-	RecommendedChunkSize int    `json:"recommended_chunk_size,omitempty"`
+	Index              int    `json:"index"`
+	ID                 string `json:"id,omitempty"`
+	Name               string `json:"name,omitempty"`
+	ArgumentsChars     int    `json:"arguments_chars,omitempty"`
+	ArgumentsBytes     int    `json:"arguments_bytes,omitempty"`
+	ArgumentsJSONValid bool   `json:"arguments_json_valid"`
+	ArgumentsJSONError string `json:"arguments_json_error,omitempty"`
+	ArgumentsHead      string `json:"arguments_head,omitempty"`
+	ArgumentsTail      string `json:"arguments_tail,omitempty"`
+	TargetSummary      string `json:"target_summary,omitempty"`
+	ContentChars       int    `json:"content_chars,omitempty"`
+	OldTextChars       int    `json:"old_text_chars,omitempty"`
+	NewTextChars       int    `json:"new_text_chars,omitempty"`
+	LooksLikeLongWrite bool   `json:"looks_like_long_write,omitempty"`
+	LooksLikeLargeEdit bool   `json:"looks_like_large_edit,omitempty"`
+	RecommendedTool    string `json:"recommended_tool,omitempty"`
 }
 
 func (s ProviderRequestSummary) JSON() string {

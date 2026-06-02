@@ -21,7 +21,7 @@ func openAITranscriptMessages(entries []TranscriptEntry) []map[string]any {
 						Type: "function",
 						Function: openAIFunctionCall{
 							Name:      call.Name,
-							Arguments: json.RawMessage(strconvQuoteJSON(call.ArgumentsJSON)),
+							Arguments: json.RawMessage(strconvQuoteJSON(toolCallTranscriptArgumentsJSON(call))),
 						},
 					})
 				}
@@ -63,7 +63,7 @@ func anthropicTranscriptMessages(entries []TranscriptEntry) []map[string]any {
 				input := cloneMapAny(call.AnthropicInput)
 				if input == nil {
 					var decoded map[string]any
-					if err := json.Unmarshal([]byte(call.ArgumentsJSON), &decoded); err == nil {
+					if err := json.Unmarshal([]byte(toolCallTranscriptArgumentsJSON(call)), &decoded); err == nil {
 						input = decoded
 					}
 				}

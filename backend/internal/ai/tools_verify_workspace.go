@@ -16,7 +16,7 @@ type ToolVerification struct {
 }
 
 func (s *Service) verifyToolResult(ctx context.Context, toolName, resultJSON string, opts RunOptions) ToolVerification {
-	if !isWorkspaceMutationTool(toolName) {
+	if !isWorkspaceMutationTool(toolName) && !commandResultHasWorkspaceChanges(toolName, resultJSON) {
 		return ToolVerification{Status: "skipped", Message: "not a workspace mutation tool"}
 	}
 	if strings.TrimSpace(opts.UserID) == "" {
@@ -37,20 +37,48 @@ func (s *Service) verifyToolResult(ctx context.Context, toolName, resultJSON str
 		return ToolVerification{Status: "failed", Message: "tool result was not valid JSON"}
 	}
 
-	switch toolName {
-	case "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
+	if isWorkspaceContentMutationTool(toolName) {
 		path := firstNonEmpty(meta.Path, meta.NewPath)
 		if path == "" {
 			return ToolVerification{Status: "failed", Message: "tool result did not include file path"}
 		}
 		read, err := files.ReadFile(path)
+		if err != nil && toolName == "apply_workspace_patch" {
+			var patchMeta struct {
+				ChangedPaths []string `json:"changed_paths"`
+			}
+			_ = json.Unmarshal([]byte(resultJSON), &patchMeta)
+			for _, candidate := range patchMeta.ChangedPaths {
+				if strings.TrimSpace(candidate) == "" || candidate == path {
+					continue
+				}
+				if nextRead, nextErr := files.ReadFile(candidate); nextErr == nil {
+					read = nextRead
+					err = nil
+					path = candidate
+					break
+				}
+			}
+		}
 		if err != nil {
+			if toolName == "apply_workspace_patch" {
+				var patchMeta struct {
+					ChangedPaths []string `json:"changed_paths"`
+				}
+				_ = json.Unmarshal([]byte(resultJSON), &patchMeta)
+				if len(patchMeta.ChangedPaths) > 0 {
+					return ToolVerification{Status: "verified", Message: "patch changed paths recorded; primary path may have been moved to trash", Path: path}
+				}
+			}
 			return ToolVerification{Status: "failed", Message: fmt.Sprintf("file is not readable after write: %v", err), Path: path}
 		}
 		if meta.Hash != "" && read.Hash != meta.Hash {
 			return ToolVerification{Status: "failed", Message: "file hash mismatch after write", Path: path}
 		}
 		return ToolVerification{Status: "verified", Message: "file exists and is readable", Path: path}
+	}
+
+	switch toolName {
 	case "manage_workspace_path":
 		var data struct {
 			Operation string `json:"operation"`
@@ -104,9 +132,41 @@ func (s *Service) verifyToolResult(ctx context.Context, toolName, resultJSON str
 			return ToolVerification{Status: "failed", Message: "no successful organize moves were verified", Path: data.TargetFolder}
 		}
 		return ToolVerification{Status: "verified", Message: fmt.Sprintf("verified %d organized item(s)", verified), Path: data.TargetFolder}
+	case "run_workspace_command":
+		var data struct {
+			ChangedPaths []string `json:"changed_paths"`
+		}
+		if err := json.Unmarshal([]byte(resultJSON), &data); err != nil {
+			return ToolVerification{Status: "failed", Message: "command result was not valid JSON"}
+		}
+		if len(data.ChangedPaths) == 0 {
+			return ToolVerification{Status: "skipped", Message: "command did not change workspace files"}
+		}
+		return ToolVerification{Status: "verified", Message: fmt.Sprintf("command changed %d workspace path(s)", len(data.ChangedPaths)), Path: data.ChangedPaths[0]}
 	default:
 		return ToolVerification{Status: "skipped", Message: "no verifier for tool"}
 	}
+}
+
+func isWorkspaceContentMutationTool(toolName string) bool {
+	entry, ok := toolManifestEntry(toolName)
+	if !ok || !entry.Mutation {
+		return false
+	}
+	return entry.StatusKind == "workspace_edit"
+}
+
+func commandResultHasWorkspaceChanges(toolName, resultJSON string) bool {
+	if toolName != "run_workspace_command" {
+		return false
+	}
+	var data struct {
+		ChangedPaths []string `json:"changed_paths"`
+	}
+	if err := json.Unmarshal([]byte(resultJSON), &data); err != nil {
+		return false
+	}
+	return len(data.ChangedPaths) > 0
 }
 
 func (s *Service) verifyManagedMkdir(files *workspace.Service, resultJSON string) ToolVerification {

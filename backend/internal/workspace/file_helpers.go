@@ -88,3 +88,7 @@ func isTextPath(path string) bool {
 	}
 	return name == ".env" || name == ".gitignore" || textExtensions[extension]
 }
+
+func IsSupportedTextPath(path string) bool {
+	return isTextPath(path)
+}

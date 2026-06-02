@@ -2,15 +2,37 @@ package ai
 
 func openAIWebTools() []map[string]any {
 	return []map[string]any{
-		openAIStrictFunctionTool("perseus_search_web", "Search the web using the configured Perseus search provider and return relevant results with URLs. Use for current or external information. Cite source URLs when using results.", webSearchParams()),
-		openAIStrictFunctionTool("web_extract", "Extract readable text from one HTTP/HTTPS URL when a search result needs more detail. Use only after search or when the user provides a URL. Some providers may not support extraction.", webExtractParams()),
+		openAIWebToolByName("perseus_search_web"),
+		openAIWebToolByName("web_extract"),
 	}
 }
 
 func anthropicWebTools() []map[string]any {
 	return []map[string]any{
-		anthropicTool("perseus_search_web", "Search the web using the configured Perseus search provider and return relevant results with URLs. Use for current or external information. Cite source URLs when using results.", webSearchParams()),
-		anthropicTool("web_extract", "Extract readable text from one HTTP/HTTPS URL when a search result needs more detail. Use only after search or when the user provides a URL. Some providers may not support extraction.", webExtractParams()),
+		anthropicWebToolByName("perseus_search_web"),
+		anthropicWebToolByName("web_extract"),
+	}
+}
+
+func openAIWebToolByName(name string) map[string]any {
+	switch name {
+	case "perseus_search_web":
+		return openAIStrictFunctionTool(name, "Search the web using the configured Perseus search provider and return relevant results with URLs. Use for current or external information. Cite source URLs when using results.", webSearchParams())
+	case "web_extract":
+		return openAIStrictFunctionTool(name, "Extract readable text from one HTTP/HTTPS URL when a search result needs more detail. Use only after search or when the user provides a URL. Some providers may not support extraction.", webExtractParams())
+	default:
+		return nil
+	}
+}
+
+func anthropicWebToolByName(name string) map[string]any {
+	switch name {
+	case "perseus_search_web":
+		return anthropicTool(name, "Search the web using the configured Perseus search provider and return relevant results with URLs. Use for current or external information. Cite source URLs when using results.", webSearchParams())
+	case "web_extract":
+		return anthropicTool(name, "Extract readable text from one HTTP/HTTPS URL when a search result needs more detail. Use only after search or when the user provides a URL. Some providers may not support extraction.", webExtractParams())
+	default:
+		return nil
 	}
 }
 

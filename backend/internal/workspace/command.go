@@ -3,6 +3,8 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -44,6 +46,10 @@ func (s *Service) RunCommand(ctx context.Context, command, cwd string, timeoutSe
 	}
 
 	startedAt := time.Now().UTC()
+	before, err := s.commandWorkspaceSnapshot()
+	if err != nil {
+		return CommandResult{}, err
+	}
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
@@ -56,6 +62,7 @@ func (s *Service) RunCommand(ctx context.Context, command, cwd string, timeoutSe
 
 	err = cmd.Run()
 	finishedAt := time.Now().UTC()
+	after, snapshotErr := s.commandWorkspaceSnapshot()
 	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded)
 	exitCode := 0
 	if timedOut {
@@ -67,17 +74,51 @@ func (s *Service) RunCommand(ctx context.Context, command, cwd string, timeoutSe
 			return CommandResult{}, err
 		}
 	}
+	if snapshotErr != nil {
+		return CommandResult{}, snapshotErr
+	}
+	changedPaths := diffCommandWorkspaceSnapshots(before, after)
+	workspaceMutation := len(changedPaths) > 0
+	hash := ""
+	if workspaceMutation {
+		hash = hashCommandChangedPaths(changedPaths, after)
+	}
 
 	return CommandResult{
-		Command:    command,
-		Cwd:        cleanCwd,
-		Stdout:     truncateCommandOutput(stdout.String()),
-		Stderr:     truncateCommandOutput(stderr.String()),
-		ExitCode:   exitCode,
-		TimedOut:   timedOut,
-		StartedAt:  startedAt,
-		FinishedAt: finishedAt,
+		Command:           command,
+		Cwd:               cleanCwd,
+		Stdout:            truncateCommandOutput(stdout.String()),
+		Stderr:            truncateCommandOutput(stderr.String()),
+		ExitCode:          exitCode,
+		TimedOut:          timedOut,
+		StartedAt:         startedAt,
+		FinishedAt:        finishedAt,
+		ChangedPaths:      changedPaths,
+		WorkspaceMutation: workspaceMutation,
+		Hash:              hash,
 	}, nil
+}
+
+func hashCommandChangedPaths(paths []string, snapshot commandWorkspaceSnapshot) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for _, path := range paths {
+		item, exists := snapshot[path]
+		builder.WriteString(path)
+		builder.WriteByte('\x00')
+		if !exists {
+			builder.WriteString("deleted")
+		} else {
+			builder.WriteString(item.Type)
+			builder.WriteByte(':')
+			builder.WriteString(item.Hash)
+		}
+		builder.WriteByte('\n')
+	}
+	sum := sha256.Sum256([]byte(builder.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 func shellCommand(ctx context.Context, command string) *exec.Cmd {

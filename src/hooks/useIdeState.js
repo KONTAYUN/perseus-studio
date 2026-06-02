@@ -5,7 +5,7 @@ import useFileTree from './useFileTree';
 import useLayoutState from './useLayoutState';
 import useSettingsData from './useSettingsData';
 import useSkills from './useSkills';
-import { detectFileType, filterFreshEditorToolEvents, isAnyTrashPath, isTextPath, shouldReloadWorkspaceForToolEvents } from './ideUtils';
+import { detectFileType, filterFreshEditorToolEvents, isAnyTrashPath, isTextPath, isWorkspaceRefreshEvent, shouldReloadWorkspaceForToolEvents } from './ideUtils';
 import useIdeLifecycleEffects from './useIdeLifecycleEffects';
 
 export default function useIdeState(options = {}) {
@@ -143,20 +143,7 @@ export default function useIdeState(options = {}) {
     );
     if (successfulSkillEvents.length > 0) await skillsState.loadSkills();
 
-    const successfulEvents = (toolEvents || []).filter(
-      (item) =>
-        item?.status === 'success' &&
-        [
-          'edit_workspace_text',
-          'replace_workspace_lines',
-          'save_workspace_file',
-          'write_workspace_chunk',
-          'finalize_workspace_write',
-          'manage_workspace_path',
-          'organize_workspace_matches',
-          'run_workspace_command',
-        ].includes(item?.tool_name)
-    );
+    const successfulEvents = (toolEvents || []).filter((item) => item?.status === 'success' && isWorkspaceRefreshEvent(item));
     const freshSuccessfulEvents = filterFreshEditorToolEvents(successfulEvents, processedEditorToolEventKeysRef.current);
     if (processedEditorToolEventKeysRef.current.size > 500) {
       processedEditorToolEventKeysRef.current = new Set([...processedEditorToolEventKeysRef.current].slice(-250));

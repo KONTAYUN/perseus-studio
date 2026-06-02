@@ -4,9 +4,11 @@ import "webide-backend/internal/workspace"
 
 func workspaceToolPayload(toolName, path string, values map[string]any) map[string]any {
 	payload := map[string]any{
-		"ok":     true,
-		"status": "success",
-		"tool":   toolName,
+		"ok":          true,
+		"status":      "success",
+		"tool":        toolName,
+		"tool_name":   toolName,
+		"status_kind": manifestStatusKind(toolName),
 	}
 	if path != "" {
 		payload["path"] = path
