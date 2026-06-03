@@ -86,8 +86,15 @@ export function agentEventText(type, payload = {}) {
       return playfulPendingStatus(type);
     case 'model_call_attempt_started':
       return playfulPendingStatus(type);
-    case 'model_call_retrying':
-      return playfulPendingStatus(type);
+    case 'model_call_retrying': {
+      const attempt = Number(payload.attempt) || 1;
+      const maxAttempts = Number(payload.max_attempts) || 1;
+      const delaySeconds = Math.ceil((Number(payload.delay_ms) || Number(payload.retry_after_ms) || 0) / 1000);
+      if (delaySeconds > 0) {
+        return `连接中断，${delaySeconds} 秒后重试 ${attempt}/${maxAttempts}`;
+      }
+      return `连接中断，正在重试 ${attempt}/${maxAttempts}`;
+    }
     case 'model_call_attempt_completed':
       return playfulPendingStatus(type);
     case 'model_call_attempt_failed':

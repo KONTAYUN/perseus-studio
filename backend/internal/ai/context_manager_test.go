@@ -76,8 +76,8 @@ func TestContextManagerCompactsReadStaleAfterMutation(t *testing.T) {
 	if strings.Contains(text, "old draft content that should not be replayed") {
 		t.Fatalf("expected stale pre-mutation read content to be compacted")
 	}
-	if !strings.Contains(text, "This file was modified later in the transcript") {
-		t.Fatalf("expected compacted stale-read notice in provider context")
+	if !strings.Contains(text, "stale_after_later_mutation") {
+		t.Fatalf("expected stale-read reference state in provider context")
 	}
 }
 
@@ -120,8 +120,8 @@ func TestContextManagerTracksBatchReadPathsForCompaction(t *testing.T) {
 	if !strings.Contains(string(raw), "old a") {
 		t.Fatalf("expected unaffected batch read content to remain available")
 	}
-	if !strings.Contains(string(raw), "Some batch read items were compacted") {
-		t.Fatalf("expected partial-stale batch read notice in provider context")
+	if !strings.Contains(string(raw), "stale_after_later_mutation") {
+		t.Fatalf("expected partial-stale batch read reference in provider context")
 	}
 }
 
@@ -199,7 +199,7 @@ func TestContextManagerCompactsExactDuplicateReadRange(t *testing.T) {
 	}
 	older := compacted.Entries[1].ToolResults[0].Content
 	newer := compacted.Entries[3].ToolResults[0].Content
-	if !strings.Contains(older, "compacted_context") {
+	if !strings.Contains(older, "context_reference") {
 		t.Fatalf("expected older duplicate read to be compacted, got %s", older)
 	}
 	if !strings.Contains(newer, "same range content") {
@@ -216,7 +216,7 @@ func TestContextManagerCompactsContainedReadAfterWiderRead(t *testing.T) {
 	if !containsActionPrefix(actions, "superseded_read:draft.txt:240-278") {
 		t.Fatalf("expected contained range compaction, got %#v", actions)
 	}
-	if !strings.Contains(compacted.Entries[1].ToolResults[0].Content, "compacted_context") {
+	if !strings.Contains(compacted.Entries[1].ToolResults[0].Content, "context_reference") {
 		t.Fatalf("expected contained older read to be compacted")
 	}
 }
@@ -292,8 +292,8 @@ func TestContextManagerPrunesOldToolResultsForBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal messages: %v", err)
 	}
-	if !strings.Contains(string(raw), "Older successful tool output was pruned") {
-		t.Fatalf("expected compact notice in provider context")
+	if !strings.Contains(string(raw), "reference_only") {
+		t.Fatalf("expected reference-only notice in provider context")
 	}
 }
 
@@ -345,14 +345,57 @@ func TestContextManagerCompactsReadResultsForPayloadPressure(t *testing.T) {
 	if strings.Contains(text, "payload pressure text payload pressure text") {
 		t.Fatalf("expected large read body to be omitted from provider payload")
 	}
-	if !strings.Contains(text, "chapter-0.txt") || !strings.Contains(text, "start_line") || !strings.Contains(text, "compacted_context") {
+	if !strings.Contains(text, "chapter-0.txt") || !strings.Contains(text, "start_line") || !strings.Contains(text, "context_reference") {
 		t.Fatalf("expected path/range metadata and compact notice to remain, got %s", text)
+	}
+	if snapshot.Summary.SourceReadTruncated {
+		t.Fatalf("source read truncation should remain false when tool result truncated=false")
+	}
+	if !snapshot.Summary.ProviderContextCompacted {
+		t.Fatalf("expected provider context compaction diagnostic")
+	}
+	for _, leaked := range []string{"compacted_context", "读取被压缩", "provider request payload", "Exact read text was omitted"} {
+		if strings.Contains(text, leaked) {
+			t.Fatalf("provider-visible read reference leaked internal phrase %q in %s", leaked, text)
+		}
+	}
+}
+
+func TestProviderMessageBuilderUsesTypedInternalSummary(t *testing.T) {
+	transcript := newAgentTranscript()
+	for index := 0; index < 10; index++ {
+		appendReadRange(t, transcript, fmt.Sprintf("read_%d", index), fmt.Sprintf("draft-%d.txt", index), 1, 40, 120, strings.Repeat("historical body ", 80))
+	}
+
+	snapshot := newAgentContextManager().BuildWithOptions(agentProtocolOpenAI, []store.Message{{Role: "user", Content: "继续。"}}, nil, transcript, providerRuntimeProfile{}, 10, ProviderMessageBuildOptions{
+		ForceCompact:   true,
+		Reason:         "checkpoint_resume",
+		Phase:          "checkpoint_resume",
+		TriggerEntries: 2,
+		PreserveRecent: 4,
+	})
+	if !snapshot.Summary.MessageBuilderApplied || snapshot.Summary.ProviderMessagePhase != "checkpoint_resume" {
+		t.Fatalf("expected typed builder compaction with checkpoint phase, got %#v", snapshot.Summary)
+	}
+	raw, err := json.Marshal(snapshot.OpenAIMessages)
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"role":"system"`) || !strings.Contains(text, `"name":"perseus_context_summary"`) {
+		t.Fatalf("expected OpenAI internal context summary as named system message, got %s", text)
+	}
+	if strings.Contains(text, `"role":"user","content":"Internal continuation context`) {
+		t.Fatalf("internal summary should not look like a real user message: %s", text)
 	}
 }
 
 func TestCompactedToolResultDetectionUsesStatusField(t *testing.T) {
 	if !isCompactedToolResultContent(`{"status":"compacted_context","message":"done"}`) {
 		t.Fatal("expected compacted status to be detected")
+	}
+	if !isCompactedToolResultContent(`{"status":"context_reference","content_state":"reference_only"}`) {
+		t.Fatal("expected context reference status to be detected")
 	}
 	if isCompactedToolResultContent(`{"content":"literal \"status\":\"compacted_context\" text"}`) {
 		t.Fatal("did not expect literal content text to be treated as compacted")
@@ -422,8 +465,11 @@ func TestProviderMessageBuilderCompactsLongTranscriptAndPreservesFacts(t *testin
 		t.Fatalf("marshal messages: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "Provider continuation summary") {
-		t.Fatalf("expected continuation summary in provider payload")
+	if !strings.Contains(text, "Internal continuation context") {
+		t.Fatalf("expected internal continuation context in provider payload")
+	}
+	if strings.Contains(text, `"role":"user","content":"Internal continuation context`) {
+		t.Fatalf("internal continuation context must not be represented as an ordinary OpenAI user message")
 	}
 	if strings.Contains(text, strings.Repeat("large historical read content ", 10)) {
 		t.Fatalf("expected old large read bodies to be folded out")
@@ -463,16 +509,19 @@ func TestAgentRuntimeProviderMessageOptionsForceFinalAndRecovery(t *testing.T) {
 		t.Fatalf("expected normal tool loop options, got %#v", opts)
 	}
 	runtime.performedMutation = true
-	if opts := runtime.providerMessageBuildOptions(); !opts.ForceCompact || opts.Reason != "final_reply" {
-		t.Fatalf("expected final reply force compaction, got %#v", opts)
+	if opts := runtime.providerMessageBuildOptions(); opts.ForceCompact || opts.Reason != "tool_loop" {
+		t.Fatalf("mutation alone must not force final reply compaction, got %#v", opts)
 	}
 	runtime.checkpointResumeAttempts = 1
-	if opts := runtime.providerMessageBuildOptions(); !opts.ForceCompact || opts.Reason != "checkpoint_resume_final_reply" {
-		t.Fatalf("expected checkpoint final reply force compaction, got %#v", opts)
+	if opts := runtime.providerMessageBuildOptions(); !opts.ForceCompact || opts.Reason != "checkpoint_resume" {
+		t.Fatalf("expected checkpoint force compaction, got %#v", opts)
 	}
 	runtime.performedMutation = false
 	if opts := runtime.providerMessageBuildOptions(); !opts.ForceCompact || opts.Reason != "checkpoint_resume" {
 		t.Fatalf("expected checkpoint force compaction, got %#v", opts)
+	}
+	if opts := runtime.providerMessageBuildOptionsForPhase("final_reply", true); !opts.ForceCompact || opts.Reason != "final_reply" || opts.Phase != "final_reply" {
+		t.Fatalf("expected explicit final reply force compaction, got %#v", opts)
 	}
 }
 

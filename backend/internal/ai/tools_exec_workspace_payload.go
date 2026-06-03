@@ -29,6 +29,16 @@ func workspaceToolPayload(toolName, path string, values map[string]any) map[stri
 	return payload
 }
 
+func workspaceToolErrorPayload(toolName, path string, values map[string]any) map[string]any {
+	payload := workspaceToolPayload(toolName, path, values)
+	payload["ok"] = false
+	payload["status"] = "failed"
+	if _, ok := values["summary"]; !ok {
+		payload["summary"] = toolName + " failed"
+	}
+	return payload
+}
+
 func countTreeNodes(nodes []workspace.TreeNode) int {
 	count := 0
 	for _, node := range nodes {

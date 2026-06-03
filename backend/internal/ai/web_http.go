@@ -26,14 +26,16 @@ type ProviderResponseError struct {
 }
 
 type RequestAttemptEvent struct {
-	Type        string
-	Attempt     int
-	MaxAttempts int
-	StatusCode  int
-	DurationMS  int64
-	Error       string
-	Retriable   bool
-	Endpoint    string
+	Type         string
+	Attempt      int
+	MaxAttempts  int
+	StatusCode   int
+	DurationMS   int64
+	DelayMS      int64
+	RetryAfterMS int64
+	Error        string
+	Retriable    bool
+	Endpoint     string
 }
 
 type RequestAttemptObserver func(RequestAttemptEvent)
@@ -270,6 +272,10 @@ func isRetriableProviderStatus(statusCode int) bool {
 		statusCode == http.StatusBadGateway ||
 		statusCode == http.StatusServiceUnavailable ||
 		statusCode == http.StatusGatewayTimeout
+}
+
+func isRetriableProviderStatusIncluding529(statusCode int) bool {
+	return isRetriableProviderStatus(statusCode) || statusCode == 529
 }
 
 func isTransientTransportError(err error) bool {

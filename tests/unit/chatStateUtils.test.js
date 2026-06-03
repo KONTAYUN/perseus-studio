@@ -67,6 +67,17 @@ test('buildProgressItem maps tool calls to friendly text', () => {
   );
 });
 
+test('buildProgressItem separates provider request retry from checkpoint recovery wording', () => {
+  assert.equal(
+    buildProgressItem('model_call_retrying', { attempt: 1, max_attempts: 3, delay_ms: 1500 }).text,
+    '连接中断，2 秒后重试 1/3'
+  );
+  assert.equal(
+    buildAgentRecoveryNotice('agent_recovery_retrying', { attempt: 1, max_attempts: 2, delay_ms: 10000 }).text,
+    '连接中断，10 秒后从断点继续 1/2'
+  );
+});
+
 test('appendRunProgressItem keeps live progress on the waiting shell only', () => {
   const progress = { id: 'tool:1', text: '正在读取文件' };
   const shell = { id: 'temp', role: 'assistant', pending: true, progressItems: [] };

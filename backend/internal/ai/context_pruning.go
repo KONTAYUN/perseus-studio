@@ -61,7 +61,7 @@ func (m *agentContextManager) compactTranscriptForPayloadPressure(transcript *Ag
 				continue
 			}
 			before := len([]byte(result.Content))
-			result.Content = compactedToolResultNotice(result.ToolName, result.Event, "Older successful tool output was compacted because the provider request payload was too large. Re-run or re-read only if exact details are needed.")
+			result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "older_tool_result_reference", "reference_only", "Use this path metadata as historical context; call the tool again only when exact details are needed.")
 			after := len([]byte(result.Content))
 			current -= before - after
 			action := "payload_pressure_tool_compacted:" + result.ToolName
@@ -101,7 +101,7 @@ func compactSupersededReadResults(transcript *AgentTranscript) []string {
 				}
 			}
 			if allSuperseded {
-				result.Content = compactedToolResultNotice(result.ToolName, result.Event, "A newer read of this file range exists later in the transcript. Re-read this path/range only if exact text is needed again.")
+				result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "superseded_by_newer_read", "reference_only", "A newer read of this file range exists later in the transcript. Use the newer observation, or read this path/range again if exact text is needed.")
 				actions = append(actions, "superseded_read:"+strings.Join(readSpanLabels(spans), ","))
 			}
 			newerSpans = append(newerSpans, spans...)
@@ -150,7 +150,7 @@ func compactReadsStaleAfterMutation(transcript *AgentTranscript) []string {
 				}
 			}
 			if stale {
-				result.Content = compactedToolResultNotice(result.ToolName, result.Event, "This file was modified later in the transcript. Re-read this path if exact current text is needed again.")
+				result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "stale_after_later_mutation", "stale_after_later_mutation", "This file was modified later in the transcript. Read the path again before relying on exact current text.")
 			}
 		}
 	}
@@ -158,12 +158,19 @@ func compactReadsStaleAfterMutation(transcript *AgentTranscript) []string {
 }
 
 func compactedToolResultNotice(toolName string, event ToolEvent, message string) string {
+	return compactedToolResultNoticeWithReason(toolName, event, "older_observation_reference", "reference_only", message)
+}
+
+func compactedToolResultNoticeWithReason(toolName string, event ToolEvent, reasonCode, contentState, message string) string {
 	payload := map[string]any{
-		"status":        "compacted_context",
-		"tool_name":     toolName,
-		"path":          event.Path,
-		"changed_paths": event.ChangedPaths,
-		"message":       message,
+		"status":            "context_reference",
+		"tool_name":         toolName,
+		"path":              event.Path,
+		"changed_paths":     event.ChangedPaths,
+		"content_state":     contentState,
+		"reason_code":       reasonCode,
+		"next_action":       message,
+		"exact_text_needed": "call the relevant workspace tool for the specific path and line range",
 	}
 	return mustJSON(payload)
 }
@@ -212,7 +219,7 @@ func compactToolResultsForBudget(transcript *AgentTranscript, profile providerRu
 				continue
 			}
 			before := estimateTextTokens(result.Content)
-			result.Content = compactedToolResultNotice(result.ToolName, result.Event, "Older successful tool output was pruned from model context to preserve the context window. Re-run or re-read only if exact details are needed.")
+			result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "budget_reference", "reference_only", "Use this historical tool metadata only; call the relevant tool again if exact details are needed.")
 			after := estimateTextTokens(result.Content)
 			current -= before - after
 			actionKey := result.ToolName
@@ -285,5 +292,5 @@ func isCompactedToolResultContent(content string) bool {
 	var payload struct {
 		Status string `json:"status"`
 	}
-	return json.Unmarshal([]byte(content), &payload) == nil && payload.Status == "compacted_context"
+	return json.Unmarshal([]byte(content), &payload) == nil && (payload.Status == "compacted_context" || payload.Status == "context_reference")
 }

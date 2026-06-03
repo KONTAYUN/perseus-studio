@@ -274,7 +274,7 @@ func (s *Service) summarizeOpenAI(ctx context.Context, provider store.ModelProvi
 	path := openAIChatPath()
 	endpoint := providerSDKEndpoint(provider.BaseURL, path)
 	startedAt := time.Now()
-	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "conversation_summary")
+	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "conversation_summary", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
 		if !isContextCanceledError(err) {
@@ -310,7 +310,7 @@ func (s *Service) summarizeAnthropic(ctx context.Context, provider store.ModelPr
 	path := anthropicMessagesPath(provider)
 	endpoint := providerSDKEndpoint(provider.BaseURL, path)
 	startedAt := time.Now()
-	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "conversation_summary")
+	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "conversation_summary", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
 		if !isContextCanceledError(err) {

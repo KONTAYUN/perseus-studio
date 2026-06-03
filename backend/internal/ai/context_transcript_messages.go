@@ -40,6 +40,12 @@ func openAITranscriptMessages(entries []TranscriptEntry) []map[string]any {
 				"role":    "user",
 				"content": entry.Text,
 			})
+		case transcriptEntryCompactionSummary:
+			items = append(items, map[string]any{
+				"role":    "system",
+				"content": entry.Text,
+				"name":    "perseus_context_summary",
+			})
 		}
 	}
 	return items
@@ -82,6 +88,11 @@ func anthropicTranscriptMessages(entries []TranscriptEntry) []map[string]any {
 			items = append(items, map[string]any{"role": "user", "content": content})
 		case transcriptEntryUser:
 			items = append(items, map[string]any{"role": "user", "content": entry.Text})
+		case transcriptEntryCompactionSummary:
+			items = append(items, map[string]any{"role": "user", "content": []map[string]any{{
+				"type": "text",
+				"text": entry.Text,
+			}}})
 		}
 	}
 	return items

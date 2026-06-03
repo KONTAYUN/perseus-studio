@@ -105,7 +105,7 @@ func (s *Service) refineOpenAIReply(ctx context.Context, conversationID, message
 	path := openAIChatPath()
 	endpoint := providerSDKEndpoint(provider.BaseURL, path)
 	startedAt := time.Now()
-	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "thinking_refinement")
+	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "thinking_refinement", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)
@@ -144,7 +144,7 @@ func (s *Service) refineAnthropicReply(ctx context.Context, conversationID, mess
 	path := anthropicMessagesPath(provider)
 	endpoint := providerSDKEndpoint(provider.BaseURL, path)
 	startedAt := time.Now()
-	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "thinking_refinement")
+	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "thinking_refinement", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)

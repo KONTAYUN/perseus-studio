@@ -30,7 +30,7 @@ func (r *agentRuntime) handleBudgetExhausted(ctx context.Context, reason string,
 		"max_rounds":     maxRounds,
 		"max_tool_calls": maxToolCalls,
 	})
-	r.lastContextSnapshot = r.contextManager.BuildWithOptions(r.protocol, r.messages, r.attachments, r.transcript, r.profile, r.currentRound+1, r.providerMessageBuildOptions())
+	r.lastContextSnapshot = r.contextManager.BuildWithOptions(r.protocol, r.messages, r.attachments, r.transcript, r.profile, r.currentRound+1, r.providerMessageBuildOptionsForPhase("final_reply", true))
 	r.annotateRequestSummary()
 	r.annotateBudgetSummaryRequest(info)
 	r.lastContextSnapshot.Summary.ActionBoundaryActive = false

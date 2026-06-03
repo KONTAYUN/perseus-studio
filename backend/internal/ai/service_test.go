@@ -584,6 +584,22 @@ func TestHandleCompletionAttemptCanRecoverAfterCompletionArgumentError(t *testin
 	}
 }
 
+func TestRuntimeCheckpointPreservesLastToolFailureDetails(t *testing.T) {
+	runtime := &agentRuntime{
+		transcript:       newAgentTranscript(),
+		appliedMutations: map[string]ToolEvent{},
+		chunkWrites:      map[string]workspaceChunkWriteState{},
+		loadedToolsets:   map[string]bool{"workspace": true},
+	}
+	runtime.recordToolError("manage_workspace_path", `{"action":"mkdir","path":"docs"}`, "path already exists")
+	checkpoint := runtime.checkpoint()
+	restored := &agentRuntime{}
+	restored.restoreCheckpoint(checkpoint)
+	if !restored.lastToolFailed || !restored.lastToolFailure.Recoverable || restored.lastToolFailure.FailureClass != "workspace_path_already_exists" {
+		t.Fatalf("expected restored checkpoint to preserve recoverable failure, got failed=%v detail=%#v", restored.lastToolFailed, restored.lastToolFailure)
+	}
+}
+
 func TestHandleCompletionAttemptRejectsAfterRecoverablePatchFailure(t *testing.T) {
 	runtime := &agentRuntime{}
 	runtime.recordToolError("apply_workspace_patch", mustJSON(map[string]any{
@@ -595,6 +611,29 @@ func TestHandleCompletionAttemptRejectsAfterRecoverablePatchFailure(t *testing.T
 	}
 	if !strings.Contains(result, "上一项可恢复工具调用失败") || !runtime.lastToolFailed {
 		t.Fatalf("expected recoverable failure to remain active, result=%s last=%#v", result, runtime.lastToolFailure)
+	}
+}
+
+func TestHandleCompletionAttemptRejectsAfterExistingFolderMkdirFailure(t *testing.T) {
+	runtime := &agentRuntime{
+		toolLoopActive: true,
+		toolCalls:      3,
+		events: []ToolEvent{
+			{ToolName: "load_perseus_toolset", Status: "success"},
+			{ToolName: "find_workspace_files", Status: "success"},
+			{ToolName: "manage_workspace_path", Status: "failed", Path: "向北方/修改版3", Error: "path already exists"},
+		},
+	}
+	runtime.recordToolError("manage_workspace_path", `{"action":"mkdir","path":"向北方/修改版3"}`, "path already exists")
+	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"抱歉，这轮没有成功把大纲写进文件里。已确认目标目录存在，但当前可用工具里没有完成文本文件写入的执行通道。","failed_items":["向北方/修改版3/向北方_10集大纲.txt"]}`)
+	if !isError || completed {
+		t.Fatalf("expected existing-folder failure to reject completion, isError=%v completed=%v result=%s", isError, completed, result)
+	}
+	if !strings.Contains(result, "上一项可恢复工具调用失败") {
+		t.Fatalf("expected recoverable path failure rejection, got %s", result)
+	}
+	if !runtime.lastToolFailed || !runtime.lastToolFailure.Recoverable || runtime.lastToolFailure.FailureClass != "workspace_path_already_exists" {
+		t.Fatalf("expected recoverable already_exists failure to remain active, got %#v", runtime.lastToolFailure)
 	}
 }
 
@@ -717,6 +756,58 @@ func TestAgentRecoveryDelayBackoffCanBeDisabledForTests(t *testing.T) {
 	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "100")
 	if delay := agentRecoveryDelay(3); delay != 400*time.Millisecond {
 		t.Fatalf("expected exponential recovery delay, got %s", delay)
+	}
+}
+
+func TestProviderRetryPolicyDefaultsAndEnv(t *testing.T) {
+	t.Setenv("PERSEUS_PROVIDER_REQUEST_MAX_ATTEMPTS", "")
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "")
+	t.Setenv("PERSEUS_PROVIDER_RETRY_MAX_DELAY_MS", "")
+	policy := currentProviderRetryPolicy()
+	if policy.MaxAttempts != 3 {
+		t.Fatalf("expected default provider max attempts to be 3, got %d", policy.MaxAttempts)
+	}
+	if policy.BaseDelay != 750*time.Millisecond {
+		t.Fatalf("expected default provider base delay 750ms, got %s", policy.BaseDelay)
+	}
+	if policy.MaxDelay != 5*time.Second {
+		t.Fatalf("expected default provider max delay 5s, got %s", policy.MaxDelay)
+	}
+
+	t.Setenv("PERSEUS_PROVIDER_REQUEST_MAX_ATTEMPTS", "0")
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "9000")
+	t.Setenv("PERSEUS_PROVIDER_RETRY_MAX_DELAY_MS", "1000")
+	policy = currentProviderRetryPolicy()
+	if policy.MaxAttempts != 1 {
+		t.Fatalf("expected provider max attempts floor to 1, got %d", policy.MaxAttempts)
+	}
+	if policy.BaseDelay != time.Second || policy.MaxDelay != time.Second {
+		t.Fatalf("expected base delay to be clamped to max delay, got base=%s max=%s", policy.BaseDelay, policy.MaxDelay)
+	}
+}
+
+func TestProviderRetryAfterParsing(t *testing.T) {
+	if got := parseRetryAfter("1.5", time.Now()); got != 1500*time.Millisecond {
+		t.Fatalf("expected 1.5s retry-after, got %s", got)
+	}
+	now := time.Date(2026, 6, 2, 1, 2, 3, 0, time.UTC)
+	if got := parseRetryAfter(now.Add(2*time.Second).Format(http.TimeFormat), now); got != 2*time.Second {
+		t.Fatalf("expected http-date retry-after, got %s", got)
+	}
+}
+
+func TestProviderStreamFallbackEnabledDefaultAndEnv(t *testing.T) {
+	t.Setenv("PERSEUS_PROVIDER_STREAM_FALLBACK_ENABLED", "")
+	if !providerStreamFallbackEnabled() {
+		t.Fatal("expected stream fallback to be enabled by default")
+	}
+	t.Setenv("PERSEUS_PROVIDER_STREAM_FALLBACK_ENABLED", "false")
+	if providerStreamFallbackEnabled() {
+		t.Fatal("expected stream fallback to be disabled by env")
+	}
+	t.Setenv("PERSEUS_PROVIDER_STREAM_FALLBACK_ENABLED", "0")
+	if !providerStreamFallbackEnabled() {
+		t.Fatal("only explicit false should disable stream fallback")
 	}
 }
 
@@ -1523,6 +1614,9 @@ func TestExecuteAndRecordToolMkdirExistingFolderReturnsStructuredRecoverableObse
 	}
 	if payload["reason"] != "already_exists" || payload["path_type"] != "folder" || payload["path"] != "docs/guides" {
 		t.Fatalf("expected structured already_exists observation, got %#v", payload)
+	}
+	if payload["ok"] != false || payload["status"] != "failed" {
+		t.Fatalf("failed already_exists observation should not claim success, got %#v", payload)
 	}
 	if _, ok := payload["changed_paths"]; ok {
 		t.Fatalf("failed mkdir should not report changed_paths: %#v", payload)

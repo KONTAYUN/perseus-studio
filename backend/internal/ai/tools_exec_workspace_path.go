@@ -152,7 +152,7 @@ func (s *Service) workspacePathExistsObservation(userID, toolName, operation, pa
 	if info.Type == "folder" {
 		pathType = "folder"
 	}
-	payload := workspaceToolPayload(toolName, info.Path, map[string]any{
+	payload := workspaceToolErrorPayload(toolName, info.Path, map[string]any{
 		"operation":     operation,
 		"path":          info.Path,
 		"error":         "path already exists",

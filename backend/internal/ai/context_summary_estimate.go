@@ -44,6 +44,9 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 			summary.ToolResultBytes += byteSize
 			if isReadWorkspaceTool(result.ToolName) {
 				summary.ReadContentBytes += readToolResultContentBytes(result.Content)
+				if readToolResultSourceTruncated(result.Content) {
+					summary.SourceReadTruncated = true
+				}
 			}
 			summary.LargestToolResults = appendLargestToolResultSize(summary.LargestToolResults, ToolResultSizeLog{
 				ToolName:     result.ToolName,
@@ -72,6 +75,7 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 	for _, action := range actions {
 		if strings.HasPrefix(action, "payload_pressure_") || strings.HasPrefix(action, "budget_tool_result_pruned:") {
 			summary.PayloadCompactionApplied = true
+			summary.ProviderContextCompacted = true
 			break
 		}
 	}
@@ -80,6 +84,27 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 	}
 	summary.ContextWatermarkPercent = contextWatermarkPercent(summary.EstimatedTokens, summary.ContextWindowTokens)
 	return summary
+}
+
+func readToolResultSourceTruncated(raw string) bool {
+	var payload struct {
+		Truncated bool `json:"truncated"`
+		Items     []struct {
+			Truncated bool `json:"truncated"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return false
+	}
+	if payload.Truncated {
+		return true
+	}
+	for _, item := range payload.Items {
+		if item.Truncated {
+			return true
+		}
+	}
+	return false
 }
 
 func appendLargestToolResultSize(items []ToolResultSizeLog, item ToolResultSizeLog, limit int) []ToolResultSizeLog {

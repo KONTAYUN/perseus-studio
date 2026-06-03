@@ -31,15 +31,17 @@ func providerAttemptObserver(opts RunOptions, provider store.ModelProvider, stag
 			level = "error"
 		}
 		payload := map[string]any{
-			"stage":         stage,
-			"provider_id":   provider.ID,
-			"provider_name": provider.Name,
-			"protocol":      provider.Protocol,
-			"model_id":      provider.ModelID,
-			"attempt":       event.Attempt,
-			"max_attempts":  event.MaxAttempts,
-			"duration_ms":   event.DurationMS,
-			"retriable":     event.Retriable,
+			"stage":          stage,
+			"provider_id":    provider.ID,
+			"provider_name":  provider.Name,
+			"protocol":       provider.Protocol,
+			"model_id":       provider.ModelID,
+			"attempt":        event.Attempt,
+			"max_attempts":   event.MaxAttempts,
+			"duration_ms":    event.DurationMS,
+			"delay_ms":       event.DelayMS,
+			"retry_after_ms": event.RetryAfterMS,
+			"retriable":      event.Retriable,
 		}
 		if event.StatusCode > 0 {
 			payload["http_status"] = event.StatusCode

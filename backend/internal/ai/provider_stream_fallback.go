@@ -1,6 +1,15 @@
 package ai
 
-import "context"
+import (
+	"context"
+	"os"
+	"strings"
+)
+
+func providerStreamFallbackEnabled() bool {
+	value := strings.TrimSpace(os.Getenv("PERSEUS_PROVIDER_STREAM_FALLBACK_ENABLED"))
+	return value == "" || !strings.EqualFold(value, "false")
+}
 
 func shouldFallbackAfterStreamError(ctx context.Context, err error) bool {
 	if err == nil {
@@ -9,7 +18,7 @@ func shouldFallbackAfterStreamError(ctx context.Context, err error) bool {
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
-	return true
+	return providerStreamFallbackEnabled()
 }
 
 func clonePayloadWithStream(payload map[string]any, stream bool) map[string]any {

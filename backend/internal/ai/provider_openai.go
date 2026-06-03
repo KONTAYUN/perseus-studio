@@ -58,26 +58,12 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 
 	startedAt := time.Now()
 	stage := diagnosticStage(req.Provider.Protocol, req.PerformedMutation, req.HasToolEvents)
-	resp, err := p.service.openAISDKPostRaw(ctx, req.Provider, path, payload, req.Opts, stage)
+	req.Snapshot.Summary.StreamRetryPhase = "stream"
+	resp, err := p.service.openAISDKPostRaw(ctx, req.Provider, path, payload, req.Opts, stage, &req.Snapshot.Summary)
 	duration := time.Since(startedAt)
 	if err != nil {
 		if isContextCanceledError(err) {
 			return agentModelTurn{}, err
-		}
-		if isRecoverableFinalProviderError(err) {
-			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "warn", duration.Milliseconds(), err, req.Snapshot.Summary)
-			emitToolLifecycleEvent(req.Opts, "model_stream_recovering", "warn", map[string]any{
-				"stage":         "provider_stream_transport",
-				"provider_id":   req.Provider.ID,
-				"provider_name": req.Provider.Name,
-				"protocol":      req.Provider.Protocol,
-				"model_id":      req.Provider.ModelID,
-				"error":         err.Error(),
-				"diagnostic_id": diagID,
-				"recovery":      "retry_non_stream",
-			})
-			req.Snapshot.Summary.StreamFallbackUsed = true
-			return p.callNonStream(ctx, req, payload, endpoint, "provider_stream_transport_fallback")
 		}
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
@@ -193,8 +179,10 @@ func (p openAIProviderV2) callNonStream(ctx context.Context, reqState providerTu
 	fallbackPayload := clonePayloadWithStream(payload, false)
 	reqState.Snapshot.Summary.Stream = boolPtr(false)
 	reqState.Snapshot.Summary.StreamFallbackUsed = true
+	reqState.Snapshot.Summary.StreamRetryPhase = "non_stream_fallback"
+	reqState.Snapshot.Summary.FallbackAttempts++
 	startedAt := time.Now()
-	resp, err := p.service.openAISDKPostRaw(ctx, reqState.Provider, openAIChatPath(), fallbackPayload, reqState.Opts, stage)
+	resp, err := p.service.openAISDKPostRaw(ctx, reqState.Provider, openAIChatPath(), fallbackPayload, reqState.Opts, stage, &reqState.Snapshot.Summary)
 	duration := time.Since(startedAt)
 	if err != nil {
 		if isContextCanceledError(err) {

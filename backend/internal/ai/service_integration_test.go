@@ -2182,6 +2182,7 @@ func TestGenerateReplyOpenAIFailsWhenModelNeverCompletesAfterMutation(t *testing
 func TestGenerateReplyOpenAIFallsBackToNonStreamWhenFinalStreamBreaks(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2245,6 +2246,7 @@ func TestGenerateReplyOpenAIFallsBackToNonStreamWhenFinalStreamBreaks(t *testing
 func TestGenerateReplyRecordsDiagnosticForHTTP502(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2260,8 +2262,8 @@ func TestGenerateReplyRecordsDiagnosticForHTTP502(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 1 {
-		t.Fatalf("provider SDK retries should be disabled, got %d requests", requestCount.Load())
+	if requestCount.Load() != 3 {
+		t.Fatalf("expected provider policy to make 3 attempts, got %d requests", requestCount.Load())
 	}
 
 	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
@@ -2286,9 +2288,153 @@ func TestGenerateReplyRecordsDiagnosticForHTTP502(t *testing.T) {
 	}
 }
 
-func TestGenerateReplyDoesNotRetryHTTP502InsideProviderSDK(t *testing.T) {
+func TestGenerateReplyRetriesTransientHTTP502WithProviderPolicy(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
+
+	var requestCount atomic.Int32
+	var bodies []string
+	var retryEvents int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		bodies = append(bodies, string(raw))
+		if requestCount.Add(1) < 3 {
+			w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("errorcode:502"))
+			return
+		}
+		writeOpenAIToolCall(t, w, "done_after_retry", "attempt_completion", `{"result":"已重试后完成。"}`)
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "hello")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			if eventType == "model_call_retrying" {
+				retryEvents++
+				if payload["max_attempts"] != 3 {
+					t.Fatalf("expected max attempts diagnostic to be 3, got %#v", payload["max_attempts"])
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "已重试后完成") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if requestCount.Load() != 3 {
+		t.Fatalf("expected 3 provider policy attempts, got %d requests", requestCount.Load())
+	}
+	if retryEvents != 2 {
+		t.Fatalf("expected 2 retry events, got %d", retryEvents)
+	}
+	if len(bodies) != 3 {
+		t.Fatalf("expected 3 captured request bodies, got %d", len(bodies))
+	}
+	for index, body := range bodies {
+		if !strings.Contains(body, `"messages"`) || !strings.Contains(body, `"stream":true`) {
+			t.Fatalf("attempt %d did not replay the provider payload: %s", index+1, body)
+		}
+	}
+}
+
+func TestGenerateReplyDoesNotRetryHTTP400(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad schema"}}`))
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "hello")
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err == nil {
+		t.Fatal("expected GenerateReply error")
+	}
+	if requestCount.Load() != 1 {
+		t.Fatalf("expected non-retriable 400 to make 1 request, got %d", requestCount.Load())
+	}
+}
+
+func TestProviderSDKNativeRetriesRemainDisabled(t *testing.T) {
+	if providerSDKMaxRetries != 0 {
+		t.Fatalf("provider SDK native retries should stay disabled, got %d", providerSDKMaxRetries)
+	}
+}
+
+func TestGenerateReplyRetriesHTTP429RetryAfterWithProviderPolicy(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
+
+	var requestCount atomic.Int32
+	var retryAfterSeen bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requestCount.Add(1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "0.001")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+			return
+		}
+		writeOpenAIToolCall(t, w, "done_after_429", "attempt_completion", `{"result":"已按 Retry-After 重试后完成。"}`)
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "hello")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			if eventType == "model_call_retrying" && numberFromAnyForTest(payload["retry_after_ms"]) > 0 {
+				retryAfterSeen = true
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "Retry-After") {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if requestCount.Load() != 2 {
+		t.Fatalf("expected 2 provider attempts, got %d", requestCount.Load())
+	}
+	if !retryAfterSeen {
+		t.Fatal("expected retry_after_ms in retry event")
+	}
+}
+
+func numberFromAnyForTest(value any) int64 {
+	switch item := value.(type) {
+	case int64:
+		return item
+	case int:
+		return int64(item)
+	case float64:
+		return int64(item)
+	default:
+		return 0
+	}
+}
+
+func TestGenerateReplyProviderRetryDiagnostics(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2304,27 +2450,55 @@ func TestGenerateReplyDoesNotRetryHTTP502InsideProviderSDK(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 1 {
-		t.Fatalf("provider SDK retries should be disabled, got %d requests", requestCount.Load())
+	if requestCount.Load() != 3 {
+		t.Fatalf("expected request-level stream attempts only, got %d requests", requestCount.Load())
+	}
+	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 5})
+	if err != nil {
+		t.Fatalf("diagnostics.List returned error: %v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected diagnostic log")
+	}
+	var summary ProviderRequestSummary
+	if err := json.Unmarshal([]byte(logs[0].RequestSummary), &summary); err != nil {
+		t.Fatalf("invalid request summary: %v\n%s", err, logs[0].RequestSummary)
+	}
+	if summary.SDKMaxAttempts != 3 || summary.RequestAttempts != 3 || !summary.RetryableError || summary.StreamRetryPhase != "stream" || summary.StreamFallbackUsed || summary.FallbackAttempts != 0 {
+		t.Fatalf("unexpected retry diagnostics: %#v", summary)
 	}
 }
 
-func TestProviderSDKMaxRetriesDisabled(t *testing.T) {
-	if providerSDKMaxRetries != 0 {
-		t.Fatalf("provider SDK retries should stay disabled, got %d", providerSDKMaxRetries)
-	}
-}
-
-func TestGenerateReplyDoesNotRetryHTTP429InsideProviderSDK(t *testing.T) {
+func TestGenerateReplyTransportErrorDoesNotUseStreamFallback(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
 
 	var requestCount atomic.Int32
+	var fallbackRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if payload["stream"] == false {
+			fallbackRequests.Add(1)
+		}
 		requestCount.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			panic(http.ErrAbortHandler)
+		}
+		conn, _, hijackErr := hijacker.Hijack()
+		if hijackErr != nil {
+			panic(http.ErrAbortHandler)
+		}
+		_ = conn.Close()
 	}))
 	defer server.Close()
 
@@ -2333,8 +2507,11 @@ func TestGenerateReplyDoesNotRetryHTTP429InsideProviderSDK(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 1 {
-		t.Fatalf("provider SDK retries should be disabled, got %d requests", requestCount.Load())
+	if requestCount.Load() != 3 {
+		t.Fatalf("expected request-level retry attempts only, got %d requests", requestCount.Load())
+	}
+	if fallbackRequests.Load() != 0 {
+		t.Fatalf("transport failure before a stream should not use non-stream fallback, got %d fallback requests", fallbackRequests.Load())
 	}
 }
 
@@ -2482,6 +2659,7 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
 	if _, err := env.files.CreateFile(ctx, "draft.txt", "draft body"); err != nil {
 		t.Fatalf("CreateFile returned error: %v", err)
 	}
@@ -2531,14 +2709,14 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 				panic(http.ErrAbortHandler)
 			}
 			_ = conn.Close()
-		case 4:
+		case 4, 5, 6:
 			if payload["stream"] != false {
 				t.Fatalf("expected non-stream fallback before checkpoint recovery, got %#v", payload["stream"])
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(529)
 			_, _ = w.Write([]byte(`{"error":{"message":"fallback overloaded"}}`))
-		case 5:
+		case 7:
 			if payload["stream"] != true {
 				t.Fatalf("expected checkpoint resume to rebuild a streaming provider turn, got %#v", payload["stream"])
 			}
@@ -2572,8 +2750,8 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 	if !strings.Contains(reply.Content, "已从断点继续并完成") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
-	if fallbackRequests.Load() != 1 {
-		t.Fatalf("expected one non-stream fallback before checkpoint resume, got %d fallback requests", fallbackRequests.Load())
+	if fallbackRequests.Load() != 3 {
+		t.Fatalf("expected fallback request-level retries before checkpoint resume, got %d fallback requests", fallbackRequests.Load())
 	}
 }
 
@@ -2761,9 +2939,44 @@ func TestGenerateReplyAnthropicEmptyStreamFallsBackToNonStream(t *testing.T) {
 	}
 }
 
+func TestGenerateReplyAnthropicEmptyStreamRespectsFallbackDisabled(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_STREAM_FALLBACK_ENABLED", "false")
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		if payload["stream"] != true {
+			t.Fatalf("fallback should be disabled, got stream=%#v", payload["stream"])
+		}
+		requestCount.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareAnthropicConversation(t, ctx, env, server.URL, "你好")
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err == nil {
+		t.Fatal("expected GenerateReply error")
+	}
+	if requestCount.Load() != 1 {
+		t.Fatalf("expected no non-stream fallback request, got %d requests", requestCount.Load())
+	}
+}
+
 func TestGenerateReplyAnthropicFallsBackToNonStreamWhenFinalStreamBreaks(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
+	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2953,6 +3166,74 @@ func TestGenerateReplyCapturesTextPatchWithoutStreamingPatchToClient(t *testing.
 	}
 	if len(reply.ToolEvents) == 0 || reply.ToolEvents[0].ToolName != "load_perseus_toolset" || reply.ToolEvents[1].ToolName != "apply_workspace_patch" {
 		t.Fatalf("expected loader and internal patch tool events, got %#v", reply.ToolEvents)
+	}
+}
+
+func TestGenerateReplyRejectsNoWriteChannelCompletionAfterExistingFolderMkdir(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	if _, err := env.files.MkdirNew("向北方/修改版3"); err != nil {
+		t.Fatalf("MkdirNew returned error: %v", err)
+	}
+
+	var requestCount atomic.Int32
+	var rejected []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch requestCount.Add(1) {
+		case 1:
+			writeOpenAIToolCall(t, w, "load_workspace", "load_perseus_toolset", `{"toolset":"workspace"}`)
+		case 2:
+			writeOpenAIToolCall(t, w, "find_project", "find_workspace_files", `{"query":"向北方","pattern":"","max_results":50}`)
+		case 3:
+			writeOpenAIToolCall(t, w, "mkdir_existing", "manage_workspace_path", `{"action":"mkdir","path":"向北方/修改版3"}`)
+		case 4:
+			writeOpenAIToolCall(t, w, "bad_done", "attempt_completion", `{"result":"抱歉，这轮没有成功把大纲写进文件里。已确认目标目录存在，但当前可用工具里没有完成文本文件写入的执行通道。","failed_items":["向北方/修改版3/向北方_10集大纲.txt"]}`)
+		case 5:
+			writeOpenAIStreamText(t, w, "*** Begin Patch\n*** Add File: 向北方/修改版3/向北方_10集大纲.txt\n+恐怖元素版大纲\n*** End Patch")
+		case 6:
+			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建大纲文件。","changed_paths":["向北方/修改版3/向北方_10集大纲.txt"]}`)
+		default:
+			t.Fatalf("unexpected request %d", requestCount.Load())
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "还是得新建一个文件写进去，不要发在聊天里面")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, _ string, payload map[string]any) {
+			if eventType == "completion_rejected" {
+				if reason, _ := payload["reason"].(string); reason != "" {
+					rejected = append(rejected, reason)
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if requestCount.Load() != 6 {
+		t.Fatalf("expected model to continue after rejected completion, requests=%d reply=%#v", requestCount.Load(), reply)
+	}
+	if len(rejected) == 0 || !strings.Contains(strings.Join(rejected, "\n"), "上一项可恢复工具调用失败") {
+		t.Fatalf("expected no-write-channel completion to be rejected after recoverable path failure, got %#v", rejected)
+	}
+	read, err := env.files.ReadFile("向北方/修改版3/向北方_10集大纲.txt")
+	if err != nil || read.Content != "恐怖元素版大纲\n" {
+		t.Fatalf("expected file to be written after corrective patch, content=%q err=%v", read.Content, err)
+	}
+	if !strings.Contains(reply.Content, "已创建大纲文件") {
+		t.Fatalf("unexpected reply: %#v", reply)
+	}
+	var existingResult string
+	if err := env.db.QueryRowContext(ctx, `SELECT result_json FROM tool_calls WHERE conversation_id = ? AND tool_name = 'manage_workspace_path' AND status = 'failed'`, conversation.ID).Scan(&existingResult); err != nil {
+		t.Fatalf("expected failed manage_workspace_path ledger row: %v", err)
+	}
+	if !strings.Contains(existingResult, `"ok":false`) || !strings.Contains(existingResult, `"status":"failed"`) || strings.Contains(existingResult, `"changed_paths"`) {
+		t.Fatalf("existing-folder observation should be failed without changed_paths, got %s", existingResult)
 	}
 }
 

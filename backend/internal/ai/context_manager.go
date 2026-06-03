@@ -16,6 +16,7 @@ type ContextSnapshot struct {
 type ProviderRequestSummary struct {
 	Round                     int                  `json:"round"`
 	Protocol                  string               `json:"protocol"`
+	ProviderMessagePhase      string               `json:"provider_message_phase,omitempty"`
 	RequestKind               string               `json:"request_kind,omitempty"`
 	Stream                    *bool                `json:"stream,omitempty"`
 	ToolChoice                string               `json:"tool_choice,omitempty"`
@@ -42,6 +43,9 @@ type ProviderRequestSummary struct {
 	PreservedRecentEntries    int                  `json:"preserved_recent_entries,omitempty"`
 	ContinuationSummaryChars  int                  `json:"continuation_summary_chars,omitempty"`
 	PreservedChangedPaths     []string             `json:"preserved_changed_paths,omitempty"`
+	PreservedReadRanges       []string             `json:"preserved_read_ranges,omitempty"`
+	SourceReadTruncated       bool                 `json:"source_read_truncated,omitempty"`
+	ProviderContextCompacted  bool                 `json:"provider_context_compacted,omitempty"`
 	ToolResultBytes           int                  `json:"tool_result_bytes,omitempty"`
 	ReadContentBytes          int                  `json:"read_content_bytes,omitempty"`
 	LargestToolResults        []ToolResultSizeLog  `json:"largest_tool_results,omitempty"`
@@ -87,6 +91,13 @@ type ProviderRequestSummary struct {
 	MaxSegmentChars           int                  `json:"max_segment_chars"`
 	CompactionActions         []string             `json:"compaction_actions,omitempty"`
 	ProviderAttempts          int                  `json:"provider_attempts,omitempty"`
+	ProviderRetryPolicy       map[string]any       `json:"provider_retry_policy,omitempty"`
+	SDKMaxAttempts            int                  `json:"sdk_max_attempts,omitempty"`
+	RequestAttempts           int                  `json:"request_attempts,omitempty"`
+	RetryableError            bool                 `json:"retryable_error,omitempty"`
+	RetryAfterMS              int64                `json:"retry_after_ms,omitempty"`
+	StreamRetryPhase          string               `json:"stream_retry_phase,omitempty"`
+	FallbackAttempts          int                  `json:"fallback_attempts,omitempty"`
 	StreamFallbackUsed        bool                 `json:"stream_fallback_used,omitempty"`
 	CheckpointResumeAttempt   int                  `json:"checkpoint_resume_attempt,omitempty"`
 	CheckpointSeq             int64                `json:"checkpoint_seq,omitempty"`
@@ -161,6 +172,7 @@ func newAgentContextManager() *agentContextManager {
 type ProviderMessageBuildOptions struct {
 	ForceCompact   bool
 	Reason         string
+	Phase          string
 	TargetBytes    int
 	TriggerBytes   int
 	TriggerEntries int
@@ -172,14 +184,17 @@ func (m *agentContextManager) Build(protocol agentProtocol, messages []store.Mes
 }
 
 func (m *agentContextManager) BuildWithOptions(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, transcript *AgentTranscript, profile providerRuntimeProfile, round int, options ProviderMessageBuildOptions) ContextSnapshot {
+	options = normalizeProviderMessageBuildOptions(options)
 	compacted, actions := m.compactTranscript(transcript, profile)
 	snapshot := m.buildFromCompacted(protocol, messages, attachments, compacted, actions, profile, round)
+	snapshot.Summary.ProviderMessagePhase = options.Phase
 	payloadActions := m.compactTranscriptForPayloadPressure(compacted, profile, estimatedContextPayloadBytes(snapshot))
 	if len(payloadActions) == 0 {
 		return m.applyProviderMessageBuilder(protocol, messages, attachments, compacted, actions, profile, round, options, snapshot)
 	}
 	actions = append(actions, payloadActions...)
 	snapshot = m.buildFromCompacted(protocol, messages, attachments, compacted, actions, profile, round)
+	snapshot.Summary.ProviderMessagePhase = options.Phase
 	return m.applyProviderMessageBuilder(protocol, messages, attachments, compacted, actions, profile, round, options, snapshot)
 }
 
@@ -200,6 +215,7 @@ func (m *agentContextManager) applyProviderMessageBuilder(protocol agentProtocol
 		return snapshot
 	}
 	next := m.buildFromCompacted(protocol, result.Messages, attachments, result.Transcript, result.Actions, profile, round)
+	next.Summary.ProviderMessagePhase = result.Phase
 	next.Summary.MessageBuilderApplied = true
 	next.Summary.MessageBuilderStrategy = result.Strategy
 	next.Summary.PayloadBeforeBytes = result.PayloadBeforeBytes
@@ -208,7 +224,9 @@ func (m *agentContextManager) applyProviderMessageBuilder(protocol agentProtocol
 	next.Summary.PreservedRecentEntries = result.PreservedRecentEntries
 	next.Summary.ContinuationSummaryChars = result.ContinuationSummaryChars
 	next.Summary.PreservedChangedPaths = append([]string(nil), result.PreservedChangedPaths...)
+	next.Summary.PreservedReadRanges = append([]string(nil), result.PreservedReadRanges...)
 	next.Summary.PayloadCompactionApplied = true
+	next.Summary.ProviderContextCompacted = true
 	return next
 }
 

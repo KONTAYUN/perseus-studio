@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 type readResultSpan struct {
@@ -97,12 +98,12 @@ func readResultSpans(result *TranscriptToolResult) []readResultSpan {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(result.Content), &payload); err == nil {
-		if payload.Status == "compacted_context" {
+		if isContextReferenceStatus(payload.Status) {
 			return nil
 		}
 		add(payload.Path, payload.StartLine, payload.EndLine, payload.TotalLines, payload.Truncated, readSpanContent(payload.Content, payload.NumberedContent))
 		for _, item := range payload.Items {
-			if item.Status == "compacted_context" {
+			if isContextReferenceStatus(item.Status) {
 				continue
 			}
 			add(item.Path, item.StartLine, item.EndLine, item.TotalLines, item.Truncated, readSpanContent(item.Content, item.NumberedContent))
@@ -161,11 +162,12 @@ func compactBatchReadItemsStaleAfterMutation(result *TranscriptToolResult, mutat
 		if normalized == "" || !mutatedLater[normalized] {
 			continue
 		}
-		item["status"] = "compacted_context"
+		item["status"] = "context_reference"
 		item["content"] = ""
 		item["numbered_content"] = ""
 		item["stale_after_mutation"] = true
-		item["message"] = "This file was modified later in the transcript. Re-read this path if exact current text is needed again."
+		item["content_state"] = "stale_after_later_mutation"
+		item["next_action"] = "Read this path again before relying on exact current text."
 		if !seen[normalized] {
 			seen[normalized] = true
 			stalePaths = append(stalePaths, normalized)
@@ -177,7 +179,7 @@ func compactBatchReadItemsStaleAfterMutation(result *TranscriptToolResult, mutat
 	sort.Strings(stalePaths)
 	payload["items"] = rawItems
 	payload["stale_paths"] = stalePaths
-	payload["model_view"] = "Some batch read items were compacted because those files were modified later; unaffected items remain available."
+	payload["model_view"] = "Some batch read items are stale after later file changes; unaffected items remain available."
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return false, nil
@@ -194,7 +196,7 @@ func compactReadResultForPayload(result *TranscriptToolResult) bool {
 	if err := json.Unmarshal([]byte(result.Content), &payload); err != nil {
 		return false
 	}
-	if stringFromAny(payload["status"]) == "compacted_context" {
+	if isContextReferenceStatus(stringFromAny(payload["status"])) {
 		return false
 	}
 	changed := false
@@ -216,8 +218,8 @@ func compactReadResultForPayload(result *TranscriptToolResult) bool {
 	if !changed {
 		return false
 	}
-	payload["payload_compacted_for_model"] = true
-	payload["model_view"] = "Read content was compacted because the provider request payload was too large. Path/range metadata remains; re-read a narrower range when exact text is needed."
+	payload["provider_context_reference"] = true
+	payload["model_view"] = "Read path and line-range metadata remains available. Call read_workspace_text/read_workspace_files with the specific path and range when exact text is needed."
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return false
@@ -239,17 +241,22 @@ func compactReadPayloadObjectForPayload(payload map[string]any) bool {
 		payload["content_chars"] = len([]rune(content))
 		payload["content_bytes"] = len([]byte(content))
 		payload["content"] = ""
-		payload["content_omitted_for_model"] = true
+		payload["content_state"] = "reference_only"
 	}
 	if numbered != "" {
 		payload["numbered_content_chars"] = len([]rune(numbered))
 		payload["numbered_content_bytes"] = len([]byte(numbered))
 		payload["numbered_content"] = ""
-		payload["numbered_content_omitted_for_model"] = true
+		payload["numbered_content_state"] = "reference_only"
 	}
-	payload["status"] = "compacted_context"
-	payload["message"] = "Exact read text was omitted for payload stability. Use read_workspace_text/read_workspace_files with start_line/end_line to retrieve the needed range again."
+	payload["status"] = "context_reference"
+	payload["next_action"] = "Call read_workspace_text/read_workspace_files with start_line/end_line for exact text."
 	return true
+}
+
+func isContextReferenceStatus(status string) bool {
+	status = strings.TrimSpace(status)
+	return status == "compacted_context" || status == "context_reference"
 }
 
 func readSpanKey(span readResultSpan) string {

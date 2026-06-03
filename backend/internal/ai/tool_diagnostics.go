@@ -132,6 +132,8 @@ func toolFailureClass(toolName string, err error) string {
 		return "workspace_patch_apply_failed"
 	case toolName == "replace_workspace_lines" && strings.Contains(text, "line range"):
 		return "workspace_line_range_invalid"
+	case strings.Contains(text, "path already exists") || strings.Contains(text, "already exists"):
+		return "workspace_path_already_exists"
 	case strings.Contains(text, "all requested files failed to read"):
 		return "workspace_batch_read_all_failed"
 	case errors.Is(err, fs.ErrNotExist) || strings.Contains(text, "no such file or directory") || strings.Contains(text, "file does not exist"):
@@ -160,6 +162,7 @@ func toolFailureClass(toolName string, err error) string {
 func toolDiagnosticLevel(failureClass string) string {
 	switch failureClass {
 	case "workspace_path_not_found",
+		"workspace_path_already_exists",
 		"workspace_unsupported_file_type",
 		"workspace_exact_edit_unstable",
 		"workspace_line_range_invalid",
@@ -178,6 +181,7 @@ func toolDiagnosticLevel(failureClass string) string {
 func toolFailureRecoverableByModel(failureClass string) bool {
 	switch failureClass {
 	case "workspace_path_not_found",
+		"workspace_path_already_exists",
 		"workspace_exact_edit_unstable",
 		"workspace_line_range_invalid",
 		"workspace_patch_apply_failed",

@@ -18,9 +18,10 @@ type ProviderUsage struct {
 type transcriptEntryKind string
 
 const (
-	transcriptEntryAssistant transcriptEntryKind = "assistant"
-	transcriptEntryTool      transcriptEntryKind = "tool"
-	transcriptEntryUser      transcriptEntryKind = "user"
+	transcriptEntryAssistant         transcriptEntryKind = "assistant"
+	transcriptEntryTool              transcriptEntryKind = "tool"
+	transcriptEntryUser              transcriptEntryKind = "user"
+	transcriptEntryCompactionSummary transcriptEntryKind = "compaction_summary"
 )
 
 type AgentTranscript struct {
@@ -83,6 +84,17 @@ func (t *AgentTranscript) AppendUserText(text string, metadata map[string]any) {
 	}
 	t.Entries = append(t.Entries, TranscriptEntry{
 		Kind:     transcriptEntryUser,
+		Text:     text,
+		Metadata: cloneMapAny(metadata),
+	})
+}
+
+func (t *AgentTranscript) AppendCompactionSummary(text string, metadata map[string]any) {
+	if t == nil {
+		return
+	}
+	t.Entries = append(t.Entries, TranscriptEntry{
+		Kind:     transcriptEntryCompactionSummary,
 		Text:     text,
 		Metadata: cloneMapAny(metadata),
 	})
@@ -222,6 +234,7 @@ type AgentRuntimeCheckpoint struct {
 	ChunkWrites               map[string]workspaceChunkWriteState `json:"chunk_writes,omitempty"`
 	PerformedMutation         bool                                `json:"performed_mutation"`
 	LastToolFailed            bool                                `json:"last_tool_failed"`
+	LastToolFailure           runtimeToolFailure                  `json:"last_tool_failure,omitempty"`
 	InvalidTurns              int                                 `json:"invalid_turns"`
 	ToolCalls                 int                                 `json:"tool_calls"`
 	ConsecutiveToolErrors     int                                 `json:"consecutive_tool_errors"`
@@ -245,6 +258,7 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 		ChunkWrites:               map[string]workspaceChunkWriteState{},
 		PerformedMutation:         r.performedMutation,
 		LastToolFailed:            r.lastToolFailed,
+		LastToolFailure:           r.lastToolFailure,
 		InvalidTurns:              r.invalidTurns,
 		ToolCalls:                 r.toolCalls,
 		ConsecutiveToolErrors:     r.consecutiveToolErrors,
@@ -283,6 +297,7 @@ func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
 	}
 	r.performedMutation = checkpoint.PerformedMutation
 	r.lastToolFailed = checkpoint.LastToolFailed
+	r.lastToolFailure = checkpoint.LastToolFailure
 	r.invalidTurns = checkpoint.InvalidTurns
 	r.toolCalls = checkpoint.ToolCalls
 	r.consecutiveToolErrors = checkpoint.ConsecutiveToolErrors

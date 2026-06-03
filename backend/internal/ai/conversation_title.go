@@ -81,7 +81,7 @@ func (s *Service) generateOpenAIConversationTitle(ctx context.Context, provider 
 	path := openAIChatPath()
 	endpoint := providerSDKEndpoint(provider.BaseURL, path)
 	startedAt := time.Now()
-	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "conversation_title")
+	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "conversation_title", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
 		if !isContextCanceledError(err) {
@@ -128,7 +128,7 @@ func (s *Service) generateAnthropicConversationTitle(ctx context.Context, provid
 	path := anthropicMessagesPath(provider)
 	endpoint := providerSDKEndpoint(provider.BaseURL, path)
 	startedAt := time.Now()
-	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "conversation_title")
+	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "conversation_title", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
 		if !isContextCanceledError(err) {

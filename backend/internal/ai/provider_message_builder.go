@@ -33,6 +33,7 @@ type ProviderMessageBuildInput struct {
 type ProviderMessageBuildResult struct {
 	Applied                  bool
 	Strategy                 string
+	Phase                    string
 	Messages                 []store.Message
 	Transcript               *AgentTranscript
 	Actions                  []string
@@ -41,6 +42,7 @@ type ProviderMessageBuildResult struct {
 	PreservedRecentEntries   int
 	ContinuationSummaryChars int
 	PreservedChangedPaths    []string
+	PreservedReadRanges      []string
 }
 
 type ProviderContinuationSummary struct {
@@ -67,7 +69,7 @@ func (b ProviderMessageBuilder) Build(input ProviderMessageBuildInput) ProviderM
 	}
 	shouldCompact := options.ForceCompact || beforePayload > options.TriggerBytes || len(transcript.Entries) > options.TriggerEntries
 	if !shouldCompact {
-		return ProviderMessageBuildResult{Transcript: transcript, Messages: input.Messages, Actions: input.Actions, PayloadBeforeBytes: beforePayload}
+		return ProviderMessageBuildResult{Transcript: transcript, Messages: input.Messages, Actions: input.Actions, PayloadBeforeBytes: beforePayload, Phase: options.Phase}
 	}
 	preserveRecent := options.PreserveRecent
 	if preserveRecent <= 0 {
@@ -82,24 +84,27 @@ func (b ProviderMessageBuilder) Build(input ProviderMessageBuildInput) ProviderM
 		preserveRecent++
 	}
 	if compactedCount <= 0 {
-		return ProviderMessageBuildResult{Transcript: transcript, Messages: input.Messages, Actions: input.Actions, PayloadBeforeBytes: beforePayload}
+		return ProviderMessageBuildResult{Transcript: transcript, Messages: input.Messages, Actions: input.Actions, PayloadBeforeBytes: beforePayload, Phase: options.Phase}
 	}
 	older := transcript.Entries[:compactedCount]
 	recent := compactRecentEntriesForProvider(transcript.Entries[compactedCount:])
 	summary := buildProviderContinuationSummary(older, input.Actions)
 	preservedChangedPaths := changedPathsFromTranscript(transcript.Entries)
+	preservedReadRanges := readRangeLabelsFromTranscript(recent)
 	summaryText := formatProviderContinuationSummary(summary)
 	summaryText, _ = truncatePlainForModel(summaryText, providerMessageBuilderSummaryRunes)
 	nextTranscript := newAgentTranscript()
-	nextTranscript.AppendUserText(summaryText, map[string]any{
+	nextTranscript.AppendCompactionSummary(summaryText, map[string]any{
 		"reason":            "provider_message_builder_compaction",
 		"strategy":          strategyName(options),
 		"compacted_entries": compactedCount,
+		"source":            "environment",
 	})
 	nextTranscript.Entries = append(nextTranscript.Entries, cloneTranscriptEntries(recent)...)
 	result := ProviderMessageBuildResult{
 		Applied:                  true,
 		Strategy:                 strategyName(options),
+		Phase:                    options.Phase,
 		Messages:                 compactConversationMessagesForProvider(input.Messages),
 		Transcript:               nextTranscript,
 		Actions:                  appendProviderMessageBuilderAction(input.Actions, compactedCount, len(recent), options),
@@ -108,6 +113,7 @@ func (b ProviderMessageBuilder) Build(input ProviderMessageBuildInput) ProviderM
 		PreservedRecentEntries:   len(recent),
 		ContinuationSummaryChars: len([]rune(summaryText)),
 		PreservedChangedPaths:    preservedChangedPaths,
+		PreservedReadRanges:      preservedReadRanges,
 	}
 	return result.fitTarget(input, options)
 }
@@ -125,7 +131,7 @@ func (r ProviderMessageBuildResult) fitTarget(input ProviderMessageBuildInput, o
 		return r
 	}
 	for _, limit := range []int{2400, 1600, 1000} {
-		if len(r.Transcript.Entries) == 0 || r.Transcript.Entries[0].Kind != transcriptEntryUser {
+		if len(r.Transcript.Entries) == 0 || r.Transcript.Entries[0].Kind != transcriptEntryCompactionSummary {
 			break
 		}
 		text, truncated := truncatePlainForModel(r.Transcript.Entries[0].Text, limit)
@@ -157,6 +163,9 @@ func normalizeProviderMessageBuildOptions(options ProviderMessageBuildOptions) P
 	}
 	if strings.TrimSpace(options.Reason) == "" {
 		options.Reason = "payload_or_transcript_pressure"
+	}
+	if strings.TrimSpace(options.Phase) == "" {
+		options.Phase = options.Reason
 	}
 	return options
 }
@@ -199,9 +208,11 @@ func buildProviderContinuationSummary(entries []TranscriptEntry, actions []strin
 				summary.Notes = appendLimitedUnique(summary.Notes, "assistant: "+text, 12)
 			}
 		case transcriptEntryUser:
-			if text := compactTextPreview(entry.Text, 220); text != "" && !isProviderBuilderInternalUserText(entry) {
+			if text := compactTextPreview(entry.Text, 220); text != "" {
 				summary.Notes = appendLimitedUnique(summary.Notes, "observation: "+text, 12)
 			}
+		case transcriptEntryCompactionSummary:
+			continue
 		case transcriptEntryTool:
 			for _, result := range entry.ToolResults {
 				summary.ToolResults++
@@ -262,6 +273,29 @@ func changedPathsFromTranscript(entries []TranscriptEntry) []string {
 	return sortedBoolMapKeys(paths)
 }
 
+func readRangeLabelsFromTranscript(entries []TranscriptEntry) []string {
+	seen := map[string]bool{}
+	var labels []string
+	for _, entry := range entries {
+		if entry.Kind != transcriptEntryTool {
+			continue
+		}
+		for _, result := range entry.ToolResults {
+			if result.IsError || !isReadWorkspaceTool(result.ToolName) {
+				continue
+			}
+			for _, label := range readSpanLabels(readResultSpans(&result)) {
+				if label != "" && !seen[label] {
+					seen[label] = true
+					labels = append(labels, label)
+				}
+			}
+		}
+	}
+	sort.Strings(labels)
+	return labels
+}
+
 func compactRecentEntriesForProvider(entries []TranscriptEntry) []TranscriptEntry {
 	next := cloneTranscriptEntries(entries)
 	for entryIndex := range next {
@@ -284,7 +318,7 @@ func compactRecentEntriesForProvider(entries []TranscriptEntry) []TranscriptEntr
 
 func formatProviderContinuationSummary(summary ProviderContinuationSummary) string {
 	var b strings.Builder
-	b.WriteString("Provider continuation summary for request stability. This summarizes earlier tool-loop history; do not treat it as current file contents. Re-read workspace files when exact text is needed.\n\n")
+	b.WriteString("Internal continuation context. This is an environment-generated summary of earlier tool-loop history; it is not user input and is not current file contents.\n\n")
 	b.WriteString(fmt.Sprintf("Compacted transcript entries: %d\n", summary.CompactedEntries))
 	if summary.ToolCalls > 0 || summary.ToolResults > 0 {
 		b.WriteString(fmt.Sprintf("Earlier tool activity: %d tool calls, %d tool results.\n", summary.ToolCalls, summary.ToolResults))
@@ -295,7 +329,7 @@ func formatProviderContinuationSummary(summary ProviderContinuationSummary) stri
 	writeSummaryList(&b, "Verified changed paths", summary.ChangedPaths)
 	writeSummaryList(&b, "Earlier failures to respect", summary.Failures)
 	writeSummaryList(&b, "Relevant earlier notes", summary.Notes)
-	b.WriteString("\nContinue from this summary plus the preserved recent transcript below. Do not repeat verified workspace mutations; use changed paths above as already applied facts.")
+	b.WriteString("\nContinue from this context plus the preserved recent transcript below. Do not repeat verified workspace mutations; use changed paths above as already applied facts. If exact file text is needed, call the workspace read tool for the specific path and line range.")
 	return b.String()
 }
 
@@ -381,14 +415,6 @@ func cloneTranscriptEntries(entries []TranscriptEntry) []TranscriptEntry {
 	}
 	tmp := &AgentTranscript{Entries: entries}
 	return tmp.Clone().Entries
-}
-
-func isProviderBuilderInternalUserText(entry TranscriptEntry) bool {
-	if entry.Kind != transcriptEntryUser {
-		return false
-	}
-	reason, _ := entry.Metadata["reason"].(string)
-	return reason == "provider_message_builder_compaction"
 }
 
 func compactTextPreview(text string, limit int) string {
