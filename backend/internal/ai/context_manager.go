@@ -45,7 +45,9 @@ type ProviderRequestSummary struct {
 	PreservedChangedPaths     []string             `json:"preserved_changed_paths,omitempty"`
 	PreservedReadRanges       []string             `json:"preserved_read_ranges,omitempty"`
 	SourceReadTruncated       bool                 `json:"source_read_truncated,omitempty"`
+	ModelViewTruncated        bool                 `json:"model_view_truncated,omitempty"`
 	ProviderContextCompacted  bool                 `json:"provider_context_compacted,omitempty"`
+	LedgerResultTruncated     bool                 `json:"ledger_result_truncated,omitempty"`
 	ToolResultBytes           int                  `json:"tool_result_bytes,omitempty"`
 	ReadContentBytes          int                  `json:"read_content_bytes,omitempty"`
 	LargestToolResults        []ToolResultSizeLog  `json:"largest_tool_results,omitempty"`

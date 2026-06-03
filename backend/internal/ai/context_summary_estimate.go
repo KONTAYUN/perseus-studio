@@ -47,6 +47,9 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 				if readToolResultSourceTruncated(result.Content) {
 					summary.SourceReadTruncated = true
 				}
+				if readToolResultModelViewTruncated(result.Content) {
+					summary.ModelViewTruncated = true
+				}
 			}
 			summary.LargestToolResults = appendLargestToolResultSize(summary.LargestToolResults, ToolResultSizeLog{
 				ToolName:     result.ToolName,
@@ -101,6 +104,27 @@ func readToolResultSourceTruncated(raw string) bool {
 	}
 	for _, item := range payload.Items {
 		if item.Truncated {
+			return true
+		}
+	}
+	return false
+}
+
+func readToolResultModelViewTruncated(raw string) bool {
+	var payload struct {
+		ModelViewTruncated bool `json:"model_view_truncated"`
+		Items              []struct {
+			ModelViewTruncated bool `json:"model_view_truncated"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return false
+	}
+	if payload.ModelViewTruncated {
+		return true
+	}
+	for _, item := range payload.Items {
+		if item.ModelViewTruncated {
 			return true
 		}
 	}

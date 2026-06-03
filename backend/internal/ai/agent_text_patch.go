@@ -116,6 +116,7 @@ func stripPatchFenceResidue(text string) string {
 		text = strings.TrimSpace(strings.TrimSuffix(text, fence))
 		text = strings.TrimSpace(strings.TrimPrefix(text, fence))
 	}
+	text = strings.TrimSpace(strings.TrimPrefix(text, "*** End Patch"))
 	return text
 }
 

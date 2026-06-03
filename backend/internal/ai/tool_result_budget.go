@@ -3,6 +3,7 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 func budgetToolResultForModel(toolName, result string, profile providerRuntimeProfile) string {
@@ -51,12 +52,16 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 func preferNumberedReadContentForModel(payload map[string]any) {
 	numbered, _ := payload["numbered_content"].(string)
 	if numbered == "" {
+		if content, _ := payload["content"].(string); content != "" {
+			payload["read_content_state"] = string(ReadContentStateAvailable)
+		}
 		return
 	}
 	if _, ok := payload["content"].(string); ok {
 		delete(payload, "content")
 		payload["content_omitted_for_model"] = true
 	}
+	payload["read_content_state"] = string(ReadContentStateAvailable)
 	payload["model_view"] = "numbered_content is the single file view; re-read a narrower range if needed."
 }
 
@@ -109,7 +114,10 @@ func fitPayloadStringFieldsToBudget(payload map[string]any, keys []string, maxRu
 		}
 		payload[key] = string(runes[:nextLen])
 		payload[key+"_truncated_for_model"] = true
+		payload["model_view_truncated"] = true
+		payload["read_content_state"] = string(ReadContentStateModelViewTruncated)
 		payload[key+"_truncation_note"] = fmt.Sprintf("kept first %d chars for model stability", nextLen)
+		attachReadContinuationHint(payload)
 	}
 	return false
 }
@@ -162,7 +170,10 @@ func fitBatchReadPayloadToBudget(payload map[string]any, maxRunes int) bool {
 		}
 		item[key] = string(runes[:nextLen])
 		item[key+"_truncated_for_model"] = true
+		item["model_view_truncated"] = true
+		item["read_content_state"] = string(ReadContentStateModelViewTruncated)
 		item[key+"_truncation_note"] = fmt.Sprintf("kept first %d chars for model stability", nextLen)
+		attachReadContinuationHint(item)
 		payload["model_view"] = "Batch read contents may be truncated for model stability; path, range, and failure metadata are preserved."
 	}
 	return false
@@ -202,7 +213,7 @@ func compactToolResultJSON(toolName, raw string, maxRunes int) string {
 		"tool_name":      toolName,
 		"truncated":      truncated,
 		"raw_prefix":     prefix,
-		"model_view":     "The tool result was too large and was compacted to valid JSON for model stability. Retry with a narrower request if more detail is needed.",
+		"model_view":     "The tool result is too large for this model view. Retry with a narrower request if more detail is needed.",
 		"original_chars": len([]rune(raw)),
 	}
 	encoded, err := json.Marshal(payload)
@@ -210,6 +221,40 @@ func compactToolResultJSON(toolName, raw string, maxRunes int) string {
 		return `{"truncated":true,"model_view":"tool result was too large"}`
 	}
 	return string(encoded)
+}
+
+type ReadContentState string
+
+const (
+	ReadContentStateAvailable          ReadContentState = "available"
+	ReadContentStateModelViewTruncated ReadContentState = "model_view_truncated"
+	ReadContentStateSourceTruncated    ReadContentState = "source_truncated"
+	ReadContentStateStaleAfterMutation ReadContentState = "stale_after_mutation"
+	ReadContentStateMetadataOnly       ReadContentState = "metadata_only"
+)
+
+func attachReadContinuationHint(payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	nextStart := intFromAny(payload["end_line"])
+	total := intFromAny(payload["total_lines"])
+	if nextStart > 0 && (total == 0 || nextStart < total) {
+		payload["next_start_line"] = nextStart + 1
+	}
+	var parts []string
+	if path := strings.TrimSpace(stringFromAny(payload["path"])); path != "" {
+		parts = append(parts, "path="+path)
+	}
+	if start := intFromAny(payload["start_line"]); start > 0 {
+		parts = append(parts, fmt.Sprintf("start_line=%d", start))
+	}
+	if end := intFromAny(payload["end_line"]); end > 0 {
+		parts = append(parts, fmt.Sprintf("end_line=%d", end))
+	}
+	if len(parts) > 0 {
+		payload["next_action"] = "Use read_workspace_text or read_workspace_files with a narrower line range when exact text is needed (" + strings.Join(parts, ", ") + ")."
+	}
 }
 
 func trimMapString(payload map[string]any, key string, maxRunes int) {

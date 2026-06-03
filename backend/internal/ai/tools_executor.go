@@ -164,7 +164,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 			Error:            truncate(errorText, 500),
 			CompletedAt:      time.Now().UTC(),
 			DurationMS:       durationMS,
-			ResultJSON:       truncate(result, 20000),
+			ResultJSON:       ledgerToolResultJSON(name, result),
 			ChangedPathsJSON: changedPathsJSON,
 			VersionID:        event.VersionID,
 			ContentHash:      event.Hash,

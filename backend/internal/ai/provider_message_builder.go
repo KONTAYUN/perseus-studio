@@ -46,15 +46,11 @@ type ProviderMessageBuildResult struct {
 }
 
 type ProviderContinuationSummary struct {
-	CompactedEntries int
-	ToolCalls        int
-	ToolResults      int
 	SuccessfulTools  []string
 	FailedTools      []string
 	ReadPaths        []string
 	ChangedPaths     []string
 	Failures         []string
-	Notes            []string
 }
 
 func (b ProviderMessageBuilder) Build(input ProviderMessageBuildInput) ProviderMessageBuildResult {
@@ -87,7 +83,7 @@ func (b ProviderMessageBuilder) Build(input ProviderMessageBuildInput) ProviderM
 		return ProviderMessageBuildResult{Transcript: transcript, Messages: input.Messages, Actions: input.Actions, PayloadBeforeBytes: beforePayload, Phase: options.Phase}
 	}
 	older := transcript.Entries[:compactedCount]
-	recent := compactRecentEntriesForProvider(transcript.Entries[compactedCount:])
+	recent := cloneTranscriptEntries(transcript.Entries[compactedCount:])
 	summary := buildProviderContinuationSummary(older, input.Actions)
 	preservedChangedPaths := changedPathsFromTranscript(transcript.Entries)
 	preservedReadRanges := readRangeLabelsFromTranscript(recent)
@@ -138,12 +134,17 @@ func (r ProviderMessageBuildResult) fitTarget(input ProviderMessageBuildInput, o
 		if !truncated {
 			continue
 		}
-		r.Transcript.Entries[0].Text = text + "\n\n[provider continuation summary shortened for request stability]"
+		r.Transcript.Entries[0].Text = text
 		r.ContinuationSummaryChars = len([]rune(r.Transcript.Entries[0].Text))
 		payload = providerMessageBuilderPayloadEstimate(input.Protocol, r.Messages, input.Attachments, r.Transcript, r.Actions, input.Profile, input.Round)
 		if payload <= target {
 			break
 		}
+	}
+	allowCurrentReadCompaction := options.ForceCompact && options.Phase != "tool_loop"
+	if payload > target && compactLargeReadEntriesForProvider(r.Transcript.Entries, allowCurrentReadCompaction) {
+		r.PreservedReadRanges = readRangeLabelsFromTranscript(r.Transcript.Entries)
+		payload = providerMessageBuilderPayloadEstimate(input.Protocol, r.Messages, input.Attachments, r.Transcript, r.Actions, input.Profile, input.Round)
 	}
 	return r
 }
@@ -185,37 +186,27 @@ func appendProviderMessageBuilderAction(actions []string, compacted, preserved i
 }
 
 func buildProviderContinuationSummary(entries []TranscriptEntry, actions []string) ProviderContinuationSummary {
-	summary := ProviderContinuationSummary{CompactedEntries: len(entries)}
+	summary := ProviderContinuationSummary{}
 	successfulTools := map[string]bool{}
 	failedTools := map[string]bool{}
 	readPaths := map[string]bool{}
 	changedPaths := map[string]bool{}
 	failures := map[string]bool{}
-	for _, action := range actions {
-		if strings.HasPrefix(action, "stale_read_after_mutation:") || strings.HasPrefix(action, "superseded_read:") {
-			summary.Notes = appendLimitedUnique(summary.Notes, action, 12)
-		}
-	}
+	_ = actions
 	for _, entry := range entries {
 		switch entry.Kind {
 		case transcriptEntryAssistant:
 			for _, call := range entry.ToolCalls {
 				if strings.TrimSpace(call.Name) != "" {
-					summary.ToolCalls++
+					// Tool calls are summarized by tool name below.
 				}
 			}
-			if text := compactTextPreview(entry.Text, 220); text != "" {
-				summary.Notes = appendLimitedUnique(summary.Notes, "assistant: "+text, 12)
-			}
 		case transcriptEntryUser:
-			if text := compactTextPreview(entry.Text, 220); text != "" {
-				summary.Notes = appendLimitedUnique(summary.Notes, "observation: "+text, 12)
-			}
+			continue
 		case transcriptEntryCompactionSummary:
 			continue
 		case transcriptEntryTool:
 			for _, result := range entry.ToolResults {
-				summary.ToolResults++
 				name := strings.TrimSpace(result.ToolName)
 				if name == "" {
 					name = strings.TrimSpace(result.Event.ToolName)
@@ -296,40 +287,40 @@ func readRangeLabelsFromTranscript(entries []TranscriptEntry) []string {
 	return labels
 }
 
-func compactRecentEntriesForProvider(entries []TranscriptEntry) []TranscriptEntry {
-	next := cloneTranscriptEntries(entries)
-	for entryIndex := range next {
-		if next[entryIndex].Kind != transcriptEntryTool {
+func compactLargeReadEntriesForProvider(entries []TranscriptEntry, allowCurrentReadCompaction bool) bool {
+	currentReadCalls := currentReadWorkingSetToolCalls(&AgentTranscript{Entries: entries}, 1)
+	changed := false
+	for entryIndex := range entries {
+		if entries[entryIndex].Kind != transcriptEntryTool {
 			continue
 		}
-		for resultIndex := range next[entryIndex].ToolResults {
-			result := &next[entryIndex].ToolResults[resultIndex]
+		for resultIndex := range entries[entryIndex].ToolResults {
+			result := &entries[entryIndex].ToolResults[resultIndex]
 			if result.IsError || !isReadWorkspaceTool(result.ToolName) {
+				continue
+			}
+			if currentReadCalls[result.ToolCallID] && !allowCurrentReadCompaction {
 				continue
 			}
 			if len([]byte(result.Content)) <= 1600 || isCompactedToolResultContent(result.Content) {
 				continue
 			}
-			result.Content = compactedToolResultNotice(result.ToolName, result.Event, "Recent read output was summarized for provider request stability. Re-read this path/range if exact text is needed again.")
+			result.Content = compactedToolResultNotice(result.ToolName, result.Event, "Use the recorded path and line range as historical context. Read this path/range again if exact text is needed.")
+			changed = true
 		}
 	}
-	return next
+	return changed
 }
 
 func formatProviderContinuationSummary(summary ProviderContinuationSummary) string {
 	var b strings.Builder
-	b.WriteString("Internal continuation context. This is an environment-generated summary of earlier tool-loop history; it is not user input and is not current file contents.\n\n")
-	b.WriteString(fmt.Sprintf("Compacted transcript entries: %d\n", summary.CompactedEntries))
-	if summary.ToolCalls > 0 || summary.ToolResults > 0 {
-		b.WriteString(fmt.Sprintf("Earlier tool activity: %d tool calls, %d tool results.\n", summary.ToolCalls, summary.ToolResults))
-	}
+	b.WriteString("Earlier task context summary. This is not user input and is not current file contents.\n")
 	writeSummaryList(&b, "Successful tools", summary.SuccessfulTools)
 	writeSummaryList(&b, "Failed tools", summary.FailedTools)
 	writeSummaryList(&b, "Workspace files read earlier", summary.ReadPaths)
 	writeSummaryList(&b, "Verified changed paths", summary.ChangedPaths)
 	writeSummaryList(&b, "Earlier failures to respect", summary.Failures)
-	writeSummaryList(&b, "Relevant earlier notes", summary.Notes)
-	b.WriteString("\nContinue from this context plus the preserved recent transcript below. Do not repeat verified workspace mutations; use changed paths above as already applied facts. If exact file text is needed, call the workspace read tool for the specific path and line range.")
+	b.WriteString("\nContinue from these facts plus the preserved recent transcript below. Do not repeat verified workspace mutations; use changed paths above as already applied facts. If exact file text is needed, call the workspace read tool for the specific path and line range.")
 	return b.String()
 }
 

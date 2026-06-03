@@ -249,6 +249,32 @@ func TestProviderPatchFilteredEmitterStreamsRealTextAroundFencedPatch(t *testing
 	}
 }
 
+func TestProviderPatchFilteredEmitterSuppressesRepeatedEndPatchTail(t *testing.T) {
+	var deltas []string
+	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
+		EmitText: func(text string) {
+			deltas = append(deltas, text)
+		},
+	}))
+
+	for _, piece := range []string{
+		"*** Begin Patch\n*** Add File: draft.md\n+secret\n",
+		"*** End Patch",
+		"\n*** End Patch\n我会核对文件是否落盘。",
+	} {
+		emitter.Add(piece)
+	}
+	emitter.Flush()
+
+	got := strings.Join(deltas, "")
+	if got != "我会核对文件是否落盘。" {
+		t.Fatalf("unexpected streamed text: %q deltas=%#v", got, deltas)
+	}
+	if strings.Contains(got, "*** End Patch") || strings.Contains(got, "secret") {
+		t.Fatalf("patch marker leaked through filter: %q", got)
+	}
+}
+
 func TestParseOpenAIStreamReturnsPartialCompleteToolCallOnTransportError(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"save_workspace_file","arguments":"{\"path\":\"a.txt\",\"content\":\"x\",\"mode\":\"create\"}"}}]}}]}`,

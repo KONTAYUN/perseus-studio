@@ -203,6 +203,17 @@ func consumePostPatchWrapper(text string) (visible string, pending bool) {
 		return "", true
 	}
 	trimmedLeft := strings.TrimLeft(text, " \t\r\n")
+	if strings.HasPrefix(trimmedLeft, patchEndMarker) {
+		rest := trimmedLeft[len(patchEndMarker):]
+		if rest == "" {
+			return "", true
+		}
+		rest = strings.TrimLeft(rest, " \t\r\n")
+		if rest == "" {
+			return "", true
+		}
+		return rest, false
+	}
 	if isPatchFencePrefix(strings.TrimSpace(trimmedLeft)) {
 		return "", true
 	}

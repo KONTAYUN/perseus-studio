@@ -76,8 +76,13 @@ func TestContextManagerCompactsReadStaleAfterMutation(t *testing.T) {
 	if strings.Contains(text, "old draft content that should not be replayed") {
 		t.Fatalf("expected stale pre-mutation read content to be compacted")
 	}
-	if !strings.Contains(text, "stale_after_later_mutation") {
-		t.Fatalf("expected stale-read reference state in provider context")
+	if !strings.Contains(text, "draft.txt") || !strings.Contains(text, "read_ranges") {
+		t.Fatalf("expected clean stale-read reference metadata in provider context: %s", text)
+	}
+	for _, leaked := range []string{"stale_after_later_mutation", "context_reference", "reference_only"} {
+		if strings.Contains(text, leaked) {
+			t.Fatalf("provider-visible stale read leaked internal phrase %q in %s", leaked, text)
+		}
 	}
 }
 
@@ -120,8 +125,14 @@ func TestContextManagerTracksBatchReadPathsForCompaction(t *testing.T) {
 	if !strings.Contains(string(raw), "old a") {
 		t.Fatalf("expected unaffected batch read content to remain available")
 	}
-	if !strings.Contains(string(raw), "stale_after_later_mutation") {
-		t.Fatalf("expected partial-stale batch read reference in provider context")
+	text := string(raw)
+	if !strings.Contains(text, "b.txt") || !strings.Contains(text, "read_ranges") {
+		t.Fatalf("expected partial-stale batch read metadata in provider context: %s", text)
+	}
+	for _, leaked := range []string{"stale_after_later_mutation", "context_reference", "reference_only"} {
+		if strings.Contains(text, leaked) {
+			t.Fatalf("provider-visible batch read leaked internal phrase %q in %s", leaked, text)
+		}
 	}
 }
 
@@ -288,12 +299,8 @@ func TestContextManagerPrunesOldToolResultsForBudget(t *testing.T) {
 	if !containsActionPrefix(snapshot.Summary.CompactionActions, "budget_tool_result_pruned:run_workspace_command") {
 		t.Fatalf("expected budget pruning action, got %#v", snapshot.Summary.CompactionActions)
 	}
-	raw, err := json.Marshal(snapshot.OpenAIMessages)
-	if err != nil {
-		t.Fatalf("marshal messages: %v", err)
-	}
-	if !strings.Contains(string(raw), "reference_only") {
-		t.Fatalf("expected reference-only notice in provider context")
+	if len(snapshot.OpenAIMessages) == 0 {
+		t.Fatal("expected provider messages")
 	}
 }
 
@@ -309,7 +316,7 @@ func TestContextManagerCompactsReadResultsForPayloadPressure(t *testing.T) {
 		}}})
 		payload := map[string]any{
 			"path":             path,
-			"numbered_content": fmt.Sprintf("1: %s", strings.Repeat("payload pressure text ", 800)),
+			"numbered_content": fmt.Sprintf("1: CHAPTER_%d_UNIQUE_MARKER %s", index, strings.Repeat("payload pressure text ", 800)),
 			"start_line":       1,
 			"end_line":         200,
 			"total_lines":      200,
@@ -342,11 +349,16 @@ func TestContextManagerCompactsReadResultsForPayloadPressure(t *testing.T) {
 		t.Fatalf("marshal messages: %v", err)
 	}
 	text := string(raw)
-	if strings.Contains(text, "payload pressure text payload pressure text") {
-		t.Fatalf("expected large read body to be omitted from provider payload")
+	for _, oldMarker := range []string{"CHAPTER_0_UNIQUE_MARKER", "CHAPTER_1_UNIQUE_MARKER", "CHAPTER_2_UNIQUE_MARKER"} {
+		if strings.Contains(text, oldMarker) {
+			t.Fatalf("expected old read body %s to be omitted from provider payload", oldMarker)
+		}
 	}
-	if !strings.Contains(text, "chapter-0.txt") || !strings.Contains(text, "start_line") || !strings.Contains(text, "context_reference") {
-		t.Fatalf("expected path/range metadata and compact notice to remain, got %s", text)
+	if !strings.Contains(text, "CHAPTER_3_UNIQUE_MARKER") {
+		t.Fatalf("expected latest working-set read body to remain, got %s", text)
+	}
+	if !strings.Contains(text, "chapter-0.txt") || !strings.Contains(text, "start_line") || !strings.Contains(text, "read_ranges") {
+		t.Fatalf("expected path/range metadata and provider read view to remain, got %s", text)
 	}
 	if snapshot.Summary.SourceReadTruncated {
 		t.Fatalf("source read truncation should remain false when tool result truncated=false")
@@ -354,7 +366,7 @@ func TestContextManagerCompactsReadResultsForPayloadPressure(t *testing.T) {
 	if !snapshot.Summary.ProviderContextCompacted {
 		t.Fatalf("expected provider context compaction diagnostic")
 	}
-	for _, leaked := range []string{"compacted_context", "读取被压缩", "provider request payload", "Exact read text was omitted"} {
+	for _, leaked := range []string{"compacted_context", "context_reference", "reference_only", "provider_context_reference", "读取被压缩", "被系统压缩", "provider request payload", "Exact read text was omitted"} {
 		if strings.Contains(text, leaked) {
 			t.Fatalf("provider-visible read reference leaked internal phrase %q in %s", leaked, text)
 		}
@@ -385,8 +397,16 @@ func TestProviderMessageBuilderUsesTypedInternalSummary(t *testing.T) {
 	if !strings.Contains(text, `"role":"system"`) || !strings.Contains(text, `"name":"perseus_context_summary"`) {
 		t.Fatalf("expected OpenAI internal context summary as named system message, got %s", text)
 	}
-	if strings.Contains(text, `"role":"user","content":"Internal continuation context`) {
+	if !strings.Contains(text, "Earlier task context summary") {
+		t.Fatalf("expected task fact summary in provider payload")
+	}
+	if strings.Contains(text, `"role":"user","content":"Earlier task context summary`) {
 		t.Fatalf("internal summary should not look like a real user message: %s", text)
+	}
+	for _, leaked := range []string{"payload_pressure", "provider_message_builder_compacted", "context_reference", "reference_only", "provider payload", "compacted transcript"} {
+		if strings.Contains(text, leaked) {
+			t.Fatalf("summary leaked internal phrase %q in %s", leaked, text)
+		}
 	}
 }
 
@@ -418,7 +438,7 @@ func TestProviderMessageBuilderCompactsLongTranscriptAndPreservesFacts(t *testin
 		transcript.AppendToolResults([]TranscriptToolResult{{
 			ToolCallID: callID,
 			ToolName:   "read_workspace_text",
-			Content:    strings.Repeat("large historical read content ", 80),
+			Content:    strings.Repeat("large historical read content for "+path+" ", 80),
 			Event:      ToolEvent{ToolName: "read_workspace_text", Status: "success", Path: path},
 		}})
 	}
@@ -465,13 +485,18 @@ func TestProviderMessageBuilderCompactsLongTranscriptAndPreservesFacts(t *testin
 		t.Fatalf("marshal messages: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "Internal continuation context") {
-		t.Fatalf("expected internal continuation context in provider payload")
+	if !strings.Contains(text, "Earlier task context summary") {
+		t.Fatalf("expected task fact summary in provider payload")
 	}
-	if strings.Contains(text, `"role":"user","content":"Internal continuation context`) {
+	if strings.Contains(text, `"role":"user","content":"Earlier task context summary`) {
 		t.Fatalf("internal continuation context must not be represented as an ordinary OpenAI user message")
 	}
-	if strings.Contains(text, strings.Repeat("large historical read content ", 10)) {
+	for _, leaked := range []string{"payload_pressure", "provider_message_builder_compacted", "context_reference", "reference_only", "provider payload", "compacted transcript"} {
+		if strings.Contains(text, leaked) {
+			t.Fatalf("summary leaked internal phrase %q in %s", leaked, text)
+		}
+	}
+	if strings.Contains(text, strings.Repeat("large historical read content for draft-00.txt ", 10)) {
 		t.Fatalf("expected old large read bodies to be folded out")
 	}
 	if !strings.Contains(text, "final.md") {
@@ -500,6 +525,106 @@ func TestProviderMessageBuilderSkipsShortTranscript(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "short content") {
 		t.Fatalf("expected short read content to remain")
+	}
+}
+
+func TestProviderMessageBuilderPreservesRecentWorkingSetReadInToolLoop(t *testing.T) {
+	transcript := newAgentTranscript()
+	for index := 0; index < 18; index++ {
+		transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
+			ID:            fmt.Sprintf("cmd_%d", index),
+			Name:          "run_workspace_command",
+			ArgumentsJSON: `{"command":"echo old"}`,
+		}}})
+		transcript.AppendToolResults([]TranscriptToolResult{{
+			ToolCallID: fmt.Sprintf("cmd_%d", index),
+			ToolName:   "run_workspace_command",
+			Content:    mustJSON(map[string]any{"stdout": strings.Repeat("older command output ", 220)}),
+			Event:      ToolEvent{ToolName: "run_workspace_command", Status: "success"},
+		}})
+	}
+	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
+		ID:            "read_current",
+		Name:          "read_workspace_text",
+		ArgumentsJSON: `{"path":"draft.txt","start_line":1,"end_line":160}`,
+	}}})
+	currentRead := "1: RECENT WORKING SET READ MUST REMAIN\n" + strings.Repeat("2: current exact text\n", 360)
+	transcript.AppendToolResults([]TranscriptToolResult{{
+		ToolCallID: "read_current",
+		ToolName:   "read_workspace_text",
+		Content: mustJSON(map[string]any{
+			"path":             "draft.txt",
+			"numbered_content": currentRead,
+			"start_line":       1,
+			"end_line":         160,
+			"total_lines":      160,
+			"truncated":        false,
+		}),
+		Event: ToolEvent{ToolName: "read_workspace_text", Status: "success", Path: "draft.txt"},
+	}})
+
+	snapshot := newAgentContextManager().BuildWithOptions(agentProtocolOpenAI, []store.Message{{Role: "user", Content: "继续编辑。"}}, nil, transcript, providerRuntimeProfile{}, 20, ProviderMessageBuildOptions{
+		Phase:          "tool_loop",
+		Reason:         "tool_loop",
+		TriggerBytes:   12 * 1024,
+		TargetBytes:    8 * 1024,
+		TriggerEntries: 8,
+		PreserveRecent: 4,
+	})
+	raw, err := json.Marshal(snapshot.OpenAIMessages)
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+	text := string(raw)
+	if !snapshot.Summary.MessageBuilderApplied {
+		t.Fatalf("expected builder compaction to apply")
+	}
+	if !strings.Contains(text, "RECENT WORKING SET READ MUST REMAIN") {
+		t.Fatalf("recent working-set read body was lost: %s", text)
+	}
+	for _, leaked := range []string{"compacted_context", "reference_only", "provider payload", "读取被压缩", "被系统压缩"} {
+		if strings.Contains(text, leaked) {
+			t.Fatalf("provider-visible context leaked internal phrase %q in %s", leaked, text)
+		}
+	}
+}
+
+func TestProviderMessageBuilderMayCompactCurrentReadInForcedRecovery(t *testing.T) {
+	transcript := newAgentTranscript()
+	for index := 0; index < 4; index++ {
+		transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
+			ID:            fmt.Sprintf("cmd_recovery_%d", index),
+			Name:          "run_workspace_command",
+			ArgumentsJSON: `{"command":"echo old"}`,
+		}}})
+		transcript.AppendToolResults([]TranscriptToolResult{{
+			ToolCallID: fmt.Sprintf("cmd_recovery_%d", index),
+			ToolName:   "run_workspace_command",
+			Content:    mustJSON(map[string]any{"stdout": strings.Repeat("older recovery output ", 100)}),
+			Event:      ToolEvent{ToolName: "run_workspace_command", Status: "success"},
+		}})
+	}
+	appendReadRange(t, transcript, "read_current", "draft.txt", 1, 300, 300, strings.Repeat("forced recovery read ", 1000))
+
+	snapshot := newAgentContextManager().BuildWithOptions(agentProtocolOpenAI, []store.Message{{Role: "user", Content: "继续。"}}, nil, transcript, providerRuntimeProfile{}, 3, ProviderMessageBuildOptions{
+		ForceCompact:   true,
+		Phase:          "checkpoint_resume",
+		Reason:         "checkpoint_resume",
+		TargetBytes:    6 * 1024,
+		TriggerBytes:   6 * 1024,
+		TriggerEntries: 1,
+		PreserveRecent: 2,
+	})
+	raw, err := json.Marshal(snapshot.OpenAIMessages)
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "forced recovery read forced recovery read") {
+		t.Fatalf("forced recovery should be allowed to fold an oversized current read: %s", text)
+	}
+	if !strings.Contains(text, "draft.txt") || !strings.Contains(text, "read_ranges") {
+		t.Fatalf("expected read range metadata after forced compaction: %s", text)
 	}
 }
 

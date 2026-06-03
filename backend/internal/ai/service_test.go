@@ -2332,6 +2332,51 @@ func TestBudgetToolResultForModelBudgetsBatchNumberedContent(t *testing.T) {
 	}
 }
 
+func TestLedgerToolResultJSONKeepsLargeReadResultValid(t *testing.T) {
+	raw := mustJSON(map[string]any{
+		"tool_name": "read_workspace_files",
+		"status":    "success",
+		"items": []any{
+			map[string]any{
+				"path":             "a.txt",
+				"numbered_content": strings.Repeat("1: a long line\n", 3000),
+				"start_line":       1,
+				"end_line":         3000,
+				"total_lines":      3000,
+				"truncated":        false,
+			},
+			map[string]any{
+				"path":             "b.txt",
+				"numbered_content": strings.Repeat("1: b long line\n", 3000),
+				"start_line":       1,
+				"end_line":         3000,
+				"total_lines":      3000,
+				"truncated":        true,
+			},
+		},
+		"paths":     []string{"a.txt", "b.txt"},
+		"truncated": true,
+	})
+	ledger := ledgerToolResultJSON("read_workspace_files", raw)
+	if len([]rune(ledger)) > ledgerToolResultMaxRunes {
+		t.Fatalf("expected ledger result under max size, got %d", len([]rune(ledger)))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(ledger), &payload); err != nil {
+		t.Fatalf("ledger result should be valid JSON: %v\n%s", err, ledger)
+	}
+	if payload["ledger_result_truncated"] != true {
+		t.Fatalf("expected ledger truncation flag, got %#v", payload)
+	}
+	if payload["source_read_truncated"] != true {
+		t.Fatalf("expected source read truncation flag, got %#v", payload)
+	}
+	items, ok := payload["items"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("expected item snapshots, got %#v", payload["items"])
+	}
+}
+
 func TestToolTargetSummaryAvoidsContentAndKeepsSafeTarget(t *testing.T) {
 	saveArgs := `{"path":"drafts/chapter-1.md","content":"secret long content","mode":"overwrite"}`
 	if got := toolTargetSummary("save_workspace_file", saveArgs); got != "drafts/chapter-1.md" {
@@ -2733,6 +2778,21 @@ func TestHandleNoToolTurnRejectsPlainTextAfterReadOnlyTool(t *testing.T) {
 	}
 	if len(discarded) != 1 || !strings.Contains(discarded[0], "action_required_plain_text_rejected") {
 		t.Fatalf("expected streamed planning text to be discarded, got %#v", discarded)
+	}
+}
+
+func TestNormalizeTextPatchTurnStripsRepeatedEndPatchResidue(t *testing.T) {
+	turn, ok := turnWithExtractedTextPatch(agentModelTurn{
+		Content: "*** Begin Patch\n*** Add File: draft.md\n+hello\n*** End Patch\n*** End Patch\n我会核对文件。",
+	})
+	if !ok {
+		t.Fatal("expected patch to be captured")
+	}
+	if strings.Contains(turn.Content, "*** End Patch") || strings.Contains(turn.PublicStreamedContent, "*** End Patch") {
+		t.Fatalf("patch end marker leaked into visible content: content=%q public=%q", turn.Content, turn.PublicStreamedContent)
+	}
+	if strings.TrimSpace(turn.Content) != "我会核对文件。" {
+		t.Fatalf("unexpected visible content: %q", turn.Content)
 	}
 }
 

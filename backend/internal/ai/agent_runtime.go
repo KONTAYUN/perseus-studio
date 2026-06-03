@@ -28,8 +28,13 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 		if err != nil {
 			return Reply{}, err
 		}
+		prePatchPublicStreamed := turn.PublicTextStreamed
+		prePatchPublicContent := turn.PublicStreamedContent
 		if patchResult := normalizeTextPatchTurn(turn); patchResult.Extracted {
 			turn = patchResult.Turn
+			if prePatchPublicStreamed && strings.TrimSpace(prePatchPublicContent) != strings.TrimSpace(turn.PublicStreamedContent) {
+				r.discardActiveAssistantMessage("assistant_text_patch_reconciled")
+			}
 			patchText := ""
 			if len(turn.ToolCalls) > 0 {
 				patchText = turn.ToolCalls[0].PatchText

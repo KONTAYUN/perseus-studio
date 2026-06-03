@@ -32,7 +32,7 @@ func openAITranscriptMessages(entries []TranscriptEntry) []map[string]any {
 				items = append(items, map[string]any{
 					"role":         "tool",
 					"tool_call_id": result.ToolCallID,
-					"content":      result.Content,
+					"content":      providerToolObservationContent(result),
 				})
 			}
 		case transcriptEntryUser:
@@ -104,7 +104,7 @@ func anthropicToolResultContent(results []TranscriptToolResult) []map[string]any
 		item := map[string]any{
 			"type":        "tool_result",
 			"tool_use_id": result.ToolCallID,
-			"content":     result.Content,
+			"content":     providerToolObservationContent(result),
 		}
 		if result.IsError {
 			item["is_error"] = true

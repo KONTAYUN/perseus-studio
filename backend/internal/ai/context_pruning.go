@@ -31,6 +31,7 @@ func (m *agentContextManager) compactTranscriptForPayloadPressure(transcript *Ag
 	if recentEntryFloor < 0 {
 		recentEntryFloor = 0
 	}
+	keepCurrentRead := currentReadWorkingSetToolCalls(transcript, 1)
 	for entryIndex := 0; entryIndex < len(transcript.Entries) && current > target; entryIndex++ {
 		entry := &transcript.Entries[entryIndex]
 		if entry.Kind != transcriptEntryTool {
@@ -42,6 +43,9 @@ func (m *agentContextManager) compactTranscriptForPayloadPressure(transcript *Ag
 				continue
 			}
 			if isReadWorkspaceTool(result.ToolName) {
+				if keepCurrentRead[result.ToolCallID] {
+					continue
+				}
 				before := len([]byte(result.Content))
 				if compactReadResultForPayload(result) {
 					after := len([]byte(result.Content))
@@ -172,7 +176,19 @@ func compactedToolResultNoticeWithReason(toolName string, event ToolEvent, reaso
 		"next_action":       message,
 		"exact_text_needed": "call the relevant workspace tool for the specific path and line range",
 	}
+	if isReadWorkspaceTool(toolName) {
+		payload["read_content_state"] = readContentStateForReference(contentState)
+	}
 	return mustJSON(payload)
+}
+
+func readContentStateForReference(contentState string) string {
+	switch contentState {
+	case "stale_after_later_mutation":
+		return string(ReadContentStateStaleAfterMutation)
+	default:
+		return string(ReadContentStateMetadataOnly)
+	}
 }
 
 func compactToolResultsForBudget(transcript *AgentTranscript, profile providerRuntimeProfile) []string {
@@ -282,6 +298,31 @@ func currentSuccessfulReadToolCalls(transcript *AgentTranscript) map[string]bool
 		}
 	}
 	return current
+}
+
+func currentReadWorkingSetToolCalls(transcript *AgentTranscript, limit int) map[string]bool {
+	workingSet := map[string]bool{}
+	if transcript == nil || limit == 0 {
+		return workingSet
+	}
+	current := currentSuccessfulReadToolCalls(transcript)
+	for entryIndex := len(transcript.Entries) - 1; entryIndex >= 0 && (limit < 0 || len(workingSet) < limit); entryIndex-- {
+		entry := transcript.Entries[entryIndex]
+		if entry.Kind != transcriptEntryTool {
+			continue
+		}
+		for resultIndex := len(entry.ToolResults) - 1; resultIndex >= 0 && (limit < 0 || len(workingSet) < limit); resultIndex-- {
+			result := entry.ToolResults[resultIndex]
+			if !isReadWorkspaceTool(result.ToolName) || result.IsError || !current[result.ToolCallID] {
+				continue
+			}
+			if readToolResultContentBytes(result.Content) <= 0 {
+				continue
+			}
+			workingSet[result.ToolCallID] = true
+		}
+	}
+	return workingSet
 }
 
 func isReadWorkspaceTool(toolName string) bool {
