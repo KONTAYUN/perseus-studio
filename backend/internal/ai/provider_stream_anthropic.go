@@ -11,6 +11,7 @@ type anthropicStreamBlock struct {
 	ID               string
 	Type             string
 	Name             string
+	Input            map[string]any
 	Text             strings.Builder
 	Thinking         strings.Builder
 	Signature        string
@@ -70,6 +71,9 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 			block.Type, _ = blockRaw["type"].(string)
 			block.ID, _ = blockRaw["id"].(string)
 			block.Name, _ = blockRaw["name"].(string)
+			if input, _ := blockRaw["input"].(map[string]any); input != nil {
+				block.Input = cloneMapAny(input)
+			}
 			block.Signature, _ = blockRaw["signature"].(string)
 			block.Data, _ = blockRaw["data"].(string)
 			if block.Type == "tool_use" {
@@ -177,6 +181,15 @@ func buildAnthropicStreamTurn(content string, finishReason string, blocks map[in
 			}
 		case "tool_use":
 			args := strings.TrimSpace(block.PartialJSON.String())
+			if args == "" {
+				if block.Input != nil {
+					raw, _ := json.Marshal(block.Input)
+					args = string(raw)
+				}
+				if args == "" {
+					args = "{}"
+				}
+			}
 			var input map[string]any
 			_ = json.Unmarshal([]byte(args), &input)
 			if input == nil {

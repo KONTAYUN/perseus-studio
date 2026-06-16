@@ -44,12 +44,17 @@ func injectModelActionManifest(protocol agentProtocol, snapshot ContextSnapshot,
 
 func manifestWithWorkspaceState(manifest ModelActionManifest, snapshot ContextSnapshot) ModelActionManifest {
 	workingSet := currentReadWorkingSetFromTranscript(snapshot.Transcript, 4)
-	if !workingSet.Available {
+	if !workingSet.Available && (manifest.WorkspaceState == nil || !manifest.WorkspaceState.RecentWorkspaceReads.Available) {
 		return manifest
 	}
-	manifest.WorkspaceState = &ModelWorkspaceState{
-		CurrentReadWorkingSet: workingSet,
+	state := ModelWorkspaceState{}
+	if manifest.WorkspaceState != nil {
+		state = *manifest.WorkspaceState
 	}
+	if workingSet.Available {
+		state.CurrentReadWorkingSet = workingSet
+	}
+	manifest.WorkspaceState = &state
 	return manifest
 }
 
@@ -58,7 +63,7 @@ func modelActionManifestAnchor(manifest ModelActionManifest) string {
 	if err != nil {
 		return ""
 	}
-	return "Perseus current action manifest. This is environment-provided action state, not user input. Follow it for the next action.\n" + string(raw)
+	return actionManifestAnchorPrefix + string(raw)
 }
 
 func modelActionManifestDigest(manifest ModelActionManifest) string {

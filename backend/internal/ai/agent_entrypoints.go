@@ -10,6 +10,7 @@ func (s *Service) runOpenAIAgent(ctx context.Context, conversationID, messageID 
 	profile := runtimeProfileForProvider(provider)
 	messages = sanitizeConversationMessages(messages, profile)
 	attachments = sanitizeAttachmentPayloads(attachments, profile)
+	attachments = s.prefetchWorkspaceFileAttachments(ctx, opts.UserID, attachments)
 	runtime := &agentRuntime{
 		service:            s,
 		protocol:           agentProtocolOpenAI,
@@ -21,6 +22,7 @@ func (s *Service) runOpenAIAgent(ctx context.Context, conversationID, messageID 
 		opts:               opts,
 		profile:            profile,
 		allowTask:          opts.TaskID == "",
+		recentReadMemory:   s.recentWorkspaceReadMemory(ctx, opts.UserID, conversationID, attachments),
 		loadedToolsets:     initialAgentToolsets(opts, attachments),
 		appliedMutations:   map[string]ToolEvent{},
 		chunkWrites:        map[string]workspaceChunkWriteState{},
@@ -39,6 +41,7 @@ func (s *Service) runAnthropicAgent(ctx context.Context, conversationID, message
 	profile := runtimeProfileForProvider(provider)
 	messages = sanitizeConversationMessages(messages, profile)
 	attachments = sanitizeAttachmentPayloads(attachments, profile)
+	attachments = s.prefetchWorkspaceFileAttachments(ctx, opts.UserID, attachments)
 	runtime := &agentRuntime{
 		service:            s,
 		protocol:           agentProtocolAnthropic,
@@ -50,6 +53,7 @@ func (s *Service) runAnthropicAgent(ctx context.Context, conversationID, message
 		opts:               opts,
 		profile:            profile,
 		allowTask:          opts.TaskID == "",
+		recentReadMemory:   s.recentWorkspaceReadMemory(ctx, opts.UserID, conversationID, attachments),
 		loadedToolsets:     initialAgentToolsets(opts, attachments),
 		appliedMutations:   map[string]ToolEvent{},
 		chunkWrites:        map[string]workspaceChunkWriteState{},

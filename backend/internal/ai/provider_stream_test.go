@@ -522,7 +522,7 @@ func TestParseAnthropicStreamAccumulatesTextAndToolUse(t *testing.T) {
 	}
 }
 
-func TestParseAnthropicStreamPreservesEmptyToolArgumentsAsInvalid(t *testing.T) {
+func TestParseAnthropicStreamPreservesEmptyToolArgumentsAsObject(t *testing.T) {
 	stream := strings.Join([]string{
 		`event: content_block_start`,
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"save_workspace_file","input":{}}}`,
@@ -541,11 +541,11 @@ func TestParseAnthropicStreamPreservesEmptyToolArgumentsAsInvalid(t *testing.T) 
 	if len(turn.ToolCalls) != 1 {
 		t.Fatalf("expected one tool call, got %#v", turn.ToolCalls)
 	}
-	if turn.ToolCalls[0].ArgumentsJSON != "" {
-		t.Fatalf("empty streamed arguments must stay empty for validation, got %q", turn.ToolCalls[0].ArgumentsJSON)
+	if turn.ToolCalls[0].ArgumentsJSON != "{}" {
+		t.Fatalf("empty streamed arguments must become an object for tool validation, got %q", turn.ToolCalls[0].ArgumentsJSON)
 	}
-	if !hasIncompleteToolCallArguments(turn) {
-		t.Fatalf("expected empty tool arguments to be treated as incomplete provider output")
+	if hasIncompleteToolCallArguments(turn) {
+		t.Fatalf("expected empty object arguments to be handled by tool validation, got %#v", turn.ToolCalls[0])
 	}
 }
 

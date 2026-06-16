@@ -40,6 +40,9 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		"messages": req.Snapshot.OpenAIMessages,
 		"stream":   true,
 	}
+	if store.IsOfficialOpenAIBaseURL(req.Provider.BaseURL) {
+		payload["stream_options"] = map[string]any{"include_usage": true}
+	}
 	reasoningPolicy := applyOpenAIReasoningPayload(payload, req.Provider, req.Opts.ThinkingMode)
 	req.Snapshot.Summary.ReasoningSupport = reasoningPolicy.Support
 	req.Snapshot.Summary.ReasoningEffort = reasoningPolicy.OpenAIEffort
@@ -65,6 +68,18 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		if isContextCanceledError(err) {
 			return agentModelTurn{}, err
 		}
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       req.Provider,
+			Opts:           req.Opts,
+			ConversationID: req.ConversationID,
+			MessageID:      req.MessageID,
+			Stage:          stage,
+			RequestKind:    "chat_completions",
+			Stream:         true,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+			DurationMS:     duration.Milliseconds(),
+		})
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
 	}
@@ -140,6 +155,18 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 				return p.callNonStream(ctx, req, payload, endpoint, "provider_stream_fallback")
 			}
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
+			p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+				Provider:       req.Provider,
+				Opts:           req.Opts,
+				ConversationID: req.ConversationID,
+				MessageID:      req.MessageID,
+				Stage:          "provider_stream_parse",
+				RequestKind:    "chat_completions",
+				Stream:         true,
+				Status:         store.UsageStatusFailed,
+				ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+				DurationMS:     time.Since(startedAt).Milliseconds(),
+			})
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
 		if !turn.CompletionResultStreamed && emitCompletionResult != nil {
@@ -150,9 +177,34 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 			annotateStreamToolDiagnostics(&req.Snapshot.Summary, turn)
 			err := fmt.Errorf("provider stream returned incomplete tool call arguments")
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_incomplete_tool_arguments", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
+			p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+				Provider:       req.Provider,
+				Opts:           req.Opts,
+				ConversationID: req.ConversationID,
+				MessageID:      req.MessageID,
+				Stage:          "provider_stream_incomplete_tool_arguments",
+				RequestKind:    "chat_completions",
+				Stream:         true,
+				Status:         store.UsageStatusFailed,
+				ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+				Usage:          turn.Usage,
+				DurationMS:     time.Since(startedAt).Milliseconds(),
+			})
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
 		closeStream()
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       req.Provider,
+			Opts:           req.Opts,
+			ConversationID: req.ConversationID,
+			MessageID:      req.MessageID,
+			Stage:          stage,
+			RequestKind:    "chat_completions",
+			Stream:         true,
+			Status:         store.UsageStatusSucceeded,
+			Usage:          turn.Usage,
+			DurationMS:     time.Since(startedAt).Milliseconds(),
+		})
 		return turn, nil
 	}
 
@@ -188,6 +240,18 @@ func (p openAIProviderV2) callNonStream(ctx context.Context, reqState providerTu
 		if isContextCanceledError(err) {
 			return agentModelTurn{}, err
 		}
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       reqState.Provider,
+			Opts:           reqState.Opts,
+			ConversationID: reqState.ConversationID,
+			MessageID:      reqState.MessageID,
+			Stage:          stage,
+			RequestKind:    "chat_completions",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, reqState.Snapshot.Summary),
+			DurationMS:     duration.Milliseconds(),
+		})
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, reqState.Opts, reqState.Provider, reqState.ConversationID, reqState.MessageID, stage, "error", duration.Milliseconds(), err, reqState.Snapshot.Summary)
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
 	}
@@ -200,6 +264,18 @@ func (p openAIProviderV2) parseNonStream(ctx context.Context, req providerTurnRe
 		log.Printf("[ai] openai provider_response_error conversation=%s endpoint=%s error=%v", req.ConversationID, endpoint, err)
 		stage := diagnosticStage(req.Provider.Protocol, req.PerformedMutation, req.HasToolEvents)
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       req.Provider,
+			Opts:           req.Opts,
+			ConversationID: req.ConversationID,
+			MessageID:      req.MessageID,
+			Stage:          stage,
+			RequestKind:    "chat_completions",
+			Stream:         req.Snapshot.Summary.Stream != nil && *req.Snapshot.Summary.Stream,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+			DurationMS:     duration.Milliseconds(),
+		})
 		return agentModelTurn{}, WithDiagnosticID(fmt.Errorf("模型响应解析失败（阶段：%s）: %w", openAITimeoutStage(req.PerformedMutation, req.HasToolEvents), err), diagID)
 	}
 	if data.Error != nil {
@@ -207,6 +283,18 @@ func (p openAIProviderV2) parseNonStream(ctx context.Context, req providerTurnRe
 		err := formatProviderError(resp.StatusCode, data.Error)
 		stage := diagnosticStage(req.Provider.Protocol, req.PerformedMutation, req.HasToolEvents)
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       req.Provider,
+			Opts:           req.Opts,
+			ConversationID: req.ConversationID,
+			MessageID:      req.MessageID,
+			Stage:          stage,
+			RequestKind:    "chat_completions",
+			Stream:         req.Snapshot.Summary.Stream != nil && *req.Snapshot.Summary.Stream,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+			DurationMS:     duration.Milliseconds(),
+		})
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
 	}
 	if len(data.Choices) == 0 {
@@ -219,11 +307,14 @@ func (p openAIProviderV2) parseNonStream(ctx context.Context, req providerTurnRe
 	logOpenAIResponseSummary(req.ConversationID, choice, parsedToolCalls)
 	content := providerVisibleText(normalizeOpenAIContent(choice.Message.Content))
 	choice.Message.Content = content
+	usage := ProviderUsage{}
+	updateProviderUsageFromAny(&usage, data.Usage)
 	turn := agentModelTurn{
 		Content:       content,
 		FinishReason:  choice.FinishReason,
 		OpenAIMessage: choice.Message,
 		ToolCalls:     make([]agentToolCall, 0, len(parsedToolCalls)),
+		Usage:         usage,
 	}
 	for _, call := range parsedToolCalls {
 		turn.ToolCalls = append(turn.ToolCalls, agentToolCall{
@@ -232,5 +323,17 @@ func (p openAIProviderV2) parseNonStream(ctx context.Context, req providerTurnRe
 			ArgumentsJSON: call.Function.ArgumentsJSON(),
 		})
 	}
+	p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+		Provider:       req.Provider,
+		Opts:           req.Opts,
+		ConversationID: req.ConversationID,
+		MessageID:      req.MessageID,
+		Stage:          diagnosticStage(req.Provider.Protocol, req.PerformedMutation, req.HasToolEvents),
+		RequestKind:    "chat_completions",
+		Stream:         false,
+		Status:         store.UsageStatusSucceeded,
+		Usage:          turn.Usage,
+		DurationMS:     duration.Milliseconds(),
+	})
 	return turn, nil
 }

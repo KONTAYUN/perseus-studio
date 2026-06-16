@@ -1,8 +1,9 @@
 import React from 'react';
-import { BookOpen, ClipboardList, Users, X } from 'lucide-react';
+import { BarChart3, BookOpen, ClipboardList, Users, X } from 'lucide-react';
 import { Button, IconButton, SectionTitle, SettingsSection } from './SettingsUI';
 import UserManagement from './UserManagement';
 import DiagnosticLogsView from './DiagnosticLogsView';
+import UsageDashboard from './UsageDashboard';
 import ModelProviderSettings from './ModelProviderSettings';
 import SearchProviderSettings from './SearchProviderSettings';
 import SkillSettings from './SkillSettings';
@@ -82,6 +83,10 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
             <DiagnosticLogsView dialog={dialog} onBack={() => setSettingsView('main')} currentUser={currentUser} />
           )}
 
+          {settingsView === 'usage' && (
+            <UsageDashboard dialog={dialog} onBack={() => setSettingsView('main')} currentUser={currentUser} />
+          )}
+
           {settingsView === 'main' && (
           <>
           <SettingsSection>
@@ -121,6 +126,27 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
           <ModelProviderSettings ide={ide} />
 
           <SearchProviderSettings ide={ide} />
+
+          <SettingsSection>
+            <SectionTitle
+              icon={<BarChart3 size={15} />}
+              title="用量统计"
+              description="按用户、模型和时间查看管理员 API 配额消耗。"
+            />
+            <button
+              type="button"
+              onClick={() => setSettingsView('usage')}
+              className="motion-row settings-nav-card flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white/80 p-4 text-left hover:border-blue-200 hover:bg-blue-50/40 dark:border-white/10 dark:bg-[#2C2C2E]/75 dark:hover:border-blue-500/25 dark:hover:bg-blue-500/10"
+            >
+              <div>
+                <div className="font-bold text-gray-800 dark:text-gray-100">查看用户用量</div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  统计请求数、tokens、失败次数和已配置模型价格的估算费用
+                </div>
+              </div>
+              <BarChart3 size={18} className="text-blue-500" />
+            </button>
+          </SettingsSection>
 
           <SettingsSection>
             <SectionTitle

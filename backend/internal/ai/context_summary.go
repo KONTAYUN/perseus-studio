@@ -277,6 +277,16 @@ func (s *Service) summarizeOpenAI(ctx context.Context, provider store.ModelProvi
 	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "conversation_summary", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:    provider,
+			Opts:        opts,
+			Stage:       "conversation_summary",
+			RequestKind: "chat_completions",
+			Stream:      false,
+			Status:      store.UsageStatusFailed,
+			ErrorClass:  usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:  duration.Milliseconds(),
+		})
 		if !isContextCanceledError(err) {
 			s.recordProviderDiagnostic(ctx, opts, provider, "", "", "conversation_summary", "warn", duration, err)
 		}
@@ -284,17 +294,49 @@ func (s *Service) summarizeOpenAI(ctx context.Context, provider store.ModelProvi
 	}
 	var data openAIResponse
 	if err := decodeProviderResponse(resp, endpoint, &data); err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:    provider,
+			Opts:        opts,
+			Stage:       "conversation_summary",
+			RequestKind: "chat_completions",
+			Stream:      false,
+			Status:      store.UsageStatusFailed,
+			ErrorClass:  usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:  duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, "", "", "conversation_summary", "warn", duration, err)
 		return "", err
 	}
 	if data.Error != nil {
 		err := formatProviderError(resp.StatusCode, data.Error)
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:    provider,
+			Opts:        opts,
+			Stage:       "conversation_summary",
+			RequestKind: "chat_completions",
+			Stream:      false,
+			Status:      store.UsageStatusFailed,
+			ErrorClass:  usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:  duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, "", "", "conversation_summary", "warn", duration, err)
 		return "", err
 	}
 	if len(data.Choices) == 0 {
 		return "", fmt.Errorf("empty summary response")
 	}
+	usage := ProviderUsage{}
+	updateProviderUsageFromAny(&usage, data.Usage)
+	s.recordProviderUsage(ctx, providerUsageRecordInput{
+		Provider:    provider,
+		Opts:        opts,
+		Stage:       "conversation_summary",
+		RequestKind: "chat_completions",
+		Stream:      false,
+		Status:      store.UsageStatusSucceeded,
+		Usage:       usage,
+		DurationMS:  duration.Milliseconds(),
+	})
 	return normalizeOpenAIContent(data.Choices[0].Message.Content), nil
 }
 
@@ -313,6 +355,16 @@ func (s *Service) summarizeAnthropic(ctx context.Context, provider store.ModelPr
 	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "conversation_summary", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:    provider,
+			Opts:        opts,
+			Stage:       "conversation_summary",
+			RequestKind: "messages",
+			Stream:      false,
+			Status:      store.UsageStatusFailed,
+			ErrorClass:  usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:  duration.Milliseconds(),
+		})
 		if !isContextCanceledError(err) {
 			s.recordProviderDiagnostic(ctx, opts, provider, "", "", "conversation_summary", "warn", duration, err)
 		}
@@ -320,13 +372,45 @@ func (s *Service) summarizeAnthropic(ctx context.Context, provider store.ModelPr
 	}
 	var data anthropicResponse
 	if err := decodeProviderResponse(resp, endpoint, &data); err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:    provider,
+			Opts:        opts,
+			Stage:       "conversation_summary",
+			RequestKind: "messages",
+			Stream:      false,
+			Status:      store.UsageStatusFailed,
+			ErrorClass:  usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:  duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, "", "", "conversation_summary", "warn", duration, err)
 		return "", err
 	}
 	if data.Error != nil {
 		err := formatProviderError(resp.StatusCode, data.Error)
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:    provider,
+			Opts:        opts,
+			Stage:       "conversation_summary",
+			RequestKind: "messages",
+			Stream:      false,
+			Status:      store.UsageStatusFailed,
+			ErrorClass:  usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:  duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, "", "", "conversation_summary", "warn", duration, err)
 		return "", err
 	}
+	usage := ProviderUsage{}
+	updateProviderUsageFromAny(&usage, data.Usage)
+	s.recordProviderUsage(ctx, providerUsageRecordInput{
+		Provider:    provider,
+		Opts:        opts,
+		Stage:       "conversation_summary",
+		RequestKind: "messages",
+		Stream:      false,
+		Status:      store.UsageStatusSucceeded,
+		Usage:       usage,
+		DurationMS:  duration.Milliseconds(),
+	})
 	return data.text(), nil
 }

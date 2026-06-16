@@ -84,6 +84,18 @@ func (s *Service) generateOpenAIConversationTitle(ctx context.Context, provider 
 	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "conversation_title", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "conversation_title",
+			RequestKind:    "chat_completions",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		if !isContextCanceledError(err) {
 			s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err)
 		}
@@ -91,6 +103,18 @@ func (s *Service) generateOpenAIConversationTitle(ctx context.Context, provider 
 	}
 	data, stats, mismatch, err := decodeOpenAIConversationTitleResponse(resp, endpoint)
 	if err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "conversation_title",
+			RequestKind:    "chat_completions",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err)
 		return "", err
 	}
@@ -101,17 +125,55 @@ func (s *Service) generateOpenAIConversationTitle(ctx context.Context, provider 
 			Endpoint:    endpoint,
 			Message:     "provider_protocol_mismatch: conversation title response was SSE but contained no title text",
 		}
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "conversation_title",
+			RequestKind:    "chat_completions",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnosticSummary(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err, conversationTitleProtocolMismatchSummary(provider, "text/event-stream", stats.Chunks, stats.ChoicesSeen))
 		return "", err
 	}
 	if data.Error != nil {
 		err := formatProviderError(resp.StatusCode, data.Error)
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "conversation_title",
+			RequestKind:    "chat_completions",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err)
 		return "", err
 	}
 	if len(data.Choices) == 0 {
 		return "", fmt.Errorf("empty title response")
 	}
+	usage := ProviderUsage{}
+	updateProviderUsageFromAny(&usage, data.Usage)
+	s.recordProviderUsage(ctx, providerUsageRecordInput{
+		Provider:       provider,
+		Opts:           opts,
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		Stage:          "conversation_title",
+		RequestKind:    "chat_completions",
+		Stream:         false,
+		Status:         store.UsageStatusSucceeded,
+		Usage:          usage,
+		DurationMS:     duration.Milliseconds(),
+	})
 	return normalizeOpenAIContent(data.titleText()), nil
 }
 
@@ -131,6 +193,18 @@ func (s *Service) generateAnthropicConversationTitle(ctx context.Context, provid
 	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "conversation_title", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "conversation_title",
+			RequestKind:    "messages",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		if !isContextCanceledError(err) {
 			s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err)
 		}
@@ -138,14 +212,52 @@ func (s *Service) generateAnthropicConversationTitle(ctx context.Context, provid
 	}
 	var data anthropicResponse
 	if err := decodeProviderResponse(resp, endpoint, &data); err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "conversation_title",
+			RequestKind:    "messages",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err)
 		return "", err
 	}
 	if data.Error != nil {
 		err := formatProviderError(resp.StatusCode, data.Error)
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "conversation_title",
+			RequestKind:    "messages",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "conversation_title", "warn", duration, err)
 		return "", err
 	}
+	usage := ProviderUsage{}
+	updateProviderUsageFromAny(&usage, data.Usage)
+	s.recordProviderUsage(ctx, providerUsageRecordInput{
+		Provider:       provider,
+		Opts:           opts,
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		Stage:          "conversation_title",
+		RequestKind:    "messages",
+		Stream:         false,
+		Status:         store.UsageStatusSucceeded,
+		Usage:          usage,
+		DurationMS:     duration.Milliseconds(),
+	})
 	return data.text(), nil
 }
 

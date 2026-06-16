@@ -33,6 +33,7 @@ type Server struct {
 	configs       *store.ConfigStore
 	conversations *store.ConversationStore
 	diagnostics   *store.DiagnosticStore
+	usage         *store.UsageStore
 	users         *store.UserStore
 	sessions      *store.SessionStore
 	broker        *tasks.Broker
@@ -135,13 +136,14 @@ type chatAttachmentMetadata struct {
 	Note              string `json:"note,omitempty"`
 }
 
-func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, configStore *store.ConfigStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, userStore *store.UserStore, sessionStore *store.SessionStore, broker *tasks.Broker, runBroker *tasks.Broker, factory *usersvc.Factory, aiService *ai.Service, cfg config.Config) *Server {
+func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, configStore *store.ConfigStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, usageStore *store.UsageStore, userStore *store.UserStore, sessionStore *store.SessionStore, broker *tasks.Broker, runBroker *tasks.Broker, factory *usersvc.Factory, aiService *ai.Service, cfg config.Config) *Server {
 	s := &Server{
 		store:         taskStore,
 		runs:          runStore,
 		configs:       configStore,
 		conversations: conversationStore,
 		diagnostics:   diagnosticStore,
+		usage:         usageStore,
 		users:         userStore,
 		sessions:      sessionStore,
 		broker:        broker,
@@ -173,6 +175,10 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/admin/diagnostics/logs", s.handleAdminDiagnosticLogs)
 	s.mux.HandleFunc("/api/admin/diagnostics/logs/", s.handleAdminDiagnosticLogRoutes)
 	s.mux.HandleFunc("/api/admin/diagnostics/export", s.handleAdminDiagnosticExport)
+	s.mux.HandleFunc("/api/admin/usage/summary", s.handleAdminUsageSummary)
+	s.mux.HandleFunc("/api/admin/usage/events", s.handleAdminUsageEvents)
+	s.mux.HandleFunc("/api/admin/usage/prices", s.handleAdminUsagePrices)
+	s.mux.HandleFunc("/api/admin/usage/prices/", s.handleAdminUsagePriceRoutes)
 	s.mux.HandleFunc("/api/files/tree", s.handleFilesTree)
 	s.mux.HandleFunc("/api/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("/api/files/read", s.handleFilesRead)

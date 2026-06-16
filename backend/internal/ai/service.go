@@ -19,6 +19,7 @@ type Service struct {
 	calls   *store.ConversationStore
 	diag    *store.DiagnosticStore
 	runs    *store.AgentRunStore
+	usage   *store.UsageStore
 	client  *http.Client
 }
 
@@ -51,35 +52,35 @@ type EditorPanelContext struct {
 }
 
 type ToolEvent struct {
-	ToolCallID    string   `json:"tool_call_id,omitempty"`
-	ToolName      string   `json:"tool_name"`
-	StatusKind    string   `json:"status_kind,omitempty"`
-	Label         string   `json:"label"`
-	Status        string   `json:"status"`
-	TargetSummary string   `json:"target_summary,omitempty"`
-	OperationHash string   `json:"operation_hash,omitempty"`
-	Question      string   `json:"question,omitempty"`
-	Options       []string `json:"options,omitempty"`
-	AllowFreeform *bool    `json:"allow_freeform,omitempty"`
-	SkillID       string   `json:"skill_id,omitempty"`
-	Path          string   `json:"path,omitempty"`
-	OldPath       string   `json:"old_path,omitempty"`
-	NewPath       string   `json:"new_path,omitempty"`
-	ChangedPaths  []string `json:"changed_paths,omitempty"`
+	ToolCallID    string              `json:"tool_call_id,omitempty"`
+	ToolName      string              `json:"tool_name"`
+	StatusKind    string              `json:"status_kind,omitempty"`
+	Label         string              `json:"label"`
+	Status        string              `json:"status"`
+	TargetSummary string              `json:"target_summary,omitempty"`
+	OperationHash string              `json:"operation_hash,omitempty"`
+	Question      string              `json:"question,omitempty"`
+	Options       []string            `json:"options,omitempty"`
+	AllowFreeform *bool               `json:"allow_freeform,omitempty"`
+	SkillID       string              `json:"skill_id,omitempty"`
+	Path          string              `json:"path,omitempty"`
+	OldPath       string              `json:"old_path,omitempty"`
+	NewPath       string              `json:"new_path,omitempty"`
+	ChangedPaths  []string            `json:"changed_paths,omitempty"`
 	Moved         []WorkspacePathMove `json:"moved,omitempty"`
-	Operation     string   `json:"operation,omitempty"`
-	VersionID     string   `json:"version_id,omitempty"`
-	Hash          string   `json:"hash,omitempty"`
-	Command       string   `json:"command,omitempty"`
-	Cwd           string   `json:"cwd,omitempty"`
-	Stdout        string   `json:"stdout,omitempty"`
-	Stderr        string   `json:"stderr,omitempty"`
-	ExitCode      *int     `json:"exit_code,omitempty"`
-	TimedOut      bool     `json:"timed_out,omitempty"`
-	Provider      string   `json:"provider,omitempty"`
-	URL           string   `json:"url,omitempty"`
-	Error         string   `json:"error,omitempty"`
-	DurationMS    int64    `json:"duration_ms,omitempty"`
+	Operation     string              `json:"operation,omitempty"`
+	VersionID     string              `json:"version_id,omitempty"`
+	Hash          string              `json:"hash,omitempty"`
+	Command       string              `json:"command,omitempty"`
+	Cwd           string              `json:"cwd,omitempty"`
+	Stdout        string              `json:"stdout,omitempty"`
+	Stderr        string              `json:"stderr,omitempty"`
+	ExitCode      *int                `json:"exit_code,omitempty"`
+	TimedOut      bool                `json:"timed_out,omitempty"`
+	Provider      string              `json:"provider,omitempty"`
+	URL           string              `json:"url,omitempty"`
+	Error         string              `json:"error,omitempty"`
+	DurationMS    int64               `json:"duration_ms,omitempty"`
 }
 
 type WorkspacePathMove struct {
@@ -202,6 +203,13 @@ func (s *Service) AttachRunStore(runs *store.AgentRunStore) {
 		return
 	}
 	s.runs = runs
+}
+
+func (s *Service) AttachUsageStore(usage *store.UsageStore) {
+	if s == nil {
+		return
+	}
+	s.usage = usage
 }
 
 func (s *Service) GenerateReply(ctx context.Context, conversationID, messageID, modelProviderID string, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {

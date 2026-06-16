@@ -63,8 +63,16 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 		}
 		r.lastProviderFinishReason = turn.FinishReason
 		if len(turn.ToolCalls) == 0 {
-			allowTextCompletion := !r.actionBoundaryActive()
-			if allowTextCompletion {
+			contentPolicy := r.contentOnlyCompletionPolicy(turn)
+			r.lastContextSnapshot.Summary.ContentOnlyPolicy = contentPolicy.Reason
+			r.lastContextSnapshot.Summary.AcceptedContentOnlyAfterTools = contentPolicy.Accept && r.actionBoundaryActive()
+			emitToolLifecycleEvent(r.opts, "content_only_completion_policy", "info", map[string]any{
+				"round":  round + 1,
+				"accept": contentPolicy.Accept,
+				"reason": contentPolicy.Reason,
+				"mode":   string(r.executionMode()),
+			})
+			if contentPolicy.Accept {
 				r.commitAssistantContent(turn)
 			}
 			if reply, ok, err := r.handleNoToolTurn(ctx, turn); ok || err != nil {

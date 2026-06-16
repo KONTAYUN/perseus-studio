@@ -108,22 +108,72 @@ func (s *Service) refineOpenAIReply(ctx context.Context, conversationID, message
 	resp, err := s.openAISDKPostRaw(ctx, provider, path, payload, opts, "thinking_refinement", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "thinking_refinement",
+			RequestKind:    "chat_completions",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)
 		return "", err
 	}
 	var data openAIResponse
 	if err := decodeProviderResponse(resp, endpoint, &data); err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "thinking_refinement",
+			RequestKind:    "chat_completions",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)
 		return "", err
 	}
 	if data.Error != nil {
 		err := formatProviderError(resp.StatusCode, data.Error)
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "thinking_refinement",
+			RequestKind:    "chat_completions",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)
 		return "", err
 	}
 	if len(data.Choices) == 0 {
 		return "", fmt.Errorf("empty model response")
 	}
+	usage := ProviderUsage{}
+	updateProviderUsageFromAny(&usage, data.Usage)
+	s.recordProviderUsage(ctx, providerUsageRecordInput{
+		Provider:       provider,
+		Opts:           opts,
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		Stage:          "thinking_refinement",
+		RequestKind:    "chat_completions",
+		Stream:         false,
+		Status:         store.UsageStatusSucceeded,
+		Usage:          usage,
+		DurationMS:     duration.Milliseconds(),
+	})
 	return providerVisibleText(normalizeOpenAIContent(data.Choices[0].Message.Content)), nil
 }
 
@@ -147,18 +197,68 @@ func (s *Service) refineAnthropicReply(ctx context.Context, conversationID, mess
 	resp, err := s.anthropicSDKPostRaw(ctx, provider, path, payload, opts, "thinking_refinement", nil)
 	duration := time.Since(startedAt)
 	if err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "thinking_refinement",
+			RequestKind:    "messages",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)
 		return "", err
 	}
 	var data anthropicResponse
 	if err := decodeProviderResponse(resp, endpoint, &data); err != nil {
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "thinking_refinement",
+			RequestKind:    "messages",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)
 		return "", err
 	}
 	if data.Error != nil {
 		err := formatProviderError(resp.StatusCode, data.Error)
+		s.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       provider,
+			Opts:           opts,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Stage:          "thinking_refinement",
+			RequestKind:    "messages",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, ProviderRequestSummary{}),
+			DurationMS:     duration.Milliseconds(),
+		})
 		s.recordProviderDiagnostic(ctx, opts, provider, conversationID, messageID, "thinking_refinement", "warn", duration, err)
 		return "", err
 	}
+	usage := ProviderUsage{}
+	updateProviderUsageFromAny(&usage, data.Usage)
+	s.recordProviderUsage(ctx, providerUsageRecordInput{
+		Provider:       provider,
+		Opts:           opts,
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		Stage:          "thinking_refinement",
+		RequestKind:    "messages",
+		Stream:         false,
+		Status:         store.UsageStatusSucceeded,
+		Usage:          usage,
+		DurationMS:     duration.Milliseconds(),
+	})
 	return providerVisibleText(data.text()), nil
 }

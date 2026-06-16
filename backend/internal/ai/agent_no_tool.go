@@ -9,16 +9,17 @@ import (
 func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn) (Reply, bool, error) {
 	content := strings.TrimSpace(turn.Content)
 	actionBoundaryActive := r.actionBoundaryActive()
+	contentPolicy := r.contentOnlyCompletionPolicy(turn)
 	r.lastProviderEmptyResponse = content == ""
 	if turn.FinishReason == "timeout_after_mutation" || turn.FinishReason == "recoverable_final_response_error" {
-		if content != "" && !actionBoundaryActive {
+		if content != "" && contentPolicy.Accept {
 			emitToolLifecycleEvent(r.opts, "model_message_completed", "warn", map[string]any{"content": content})
 			return Reply{Content: content, ToolEvents: r.events}, true, nil
 		}
 		reply, err := r.fail("模型最终回复连接中断；已有工具结果已保存到断点，可继续本轮", nil)
 		return reply, true, err
 	}
-	if !actionBoundaryActive {
+	if !actionBoundaryActive || contentPolicy.Accept {
 		if content == "" {
 			err := fmt.Errorf("empty model response")
 			diagID := r.service.recordProviderDiagnostic(ctx, r.opts, r.provider, r.conversationID, r.messageID, "provider_empty_response", "warn", 0, err)
@@ -43,7 +44,11 @@ func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn
 			return Reply{}, false, nil
 		}
 		r.finalizeActiveAssistantMessage(content)
-		emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
+		emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{
+			"content":                           content,
+			"content_only_policy":               contentPolicy.Reason,
+			"accepted_content_only_after_tools": actionBoundaryActive,
+		})
 		return Reply{Content: content, ToolEvents: r.events}, true, nil
 	}
 	if content != "" {

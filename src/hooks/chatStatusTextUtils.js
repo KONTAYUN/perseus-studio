@@ -83,9 +83,9 @@ export function updateLoadingState(message, now = Date.now()) {
 export function agentEventText(type, payload = {}) {
   switch (type) {
     case 'model_call_started':
-      return playfulPendingStatus(type);
+      return '正在等待模型响应';
     case 'model_call_attempt_started':
-      return playfulPendingStatus(type);
+      return '正在等待模型响应';
     case 'model_call_retrying': {
       const attempt = Number(payload.attempt) || 1;
       const maxAttempts = Number(payload.max_attempts) || 1;
@@ -96,11 +96,11 @@ export function agentEventText(type, payload = {}) {
       return `连接中断，正在重试 ${attempt}/${maxAttempts}`;
     }
     case 'model_call_attempt_completed':
-      return playfulPendingStatus(type);
+      return '正在等待模型响应';
     case 'model_call_attempt_failed':
-      return playfulPendingStatus(type);
+      return '连接中断，正在重试';
     case 'model_stream_recovering':
-      return playfulPendingStatus(type);
+      return '连接中断，正在恢复';
     case 'tool_call_started':
       return pendingToolStatus(payload);
     case 'tool_call_completed':
@@ -114,7 +114,7 @@ export function agentEventText(type, payload = {}) {
     case 'completion_rejected':
       return '正在检查火候';
     case 'model_message_started':
-      return playfulPendingStatus(type);
+      return '正在等待模型响应';
     case 'context_compaction_started':
       return payload.reason === 'auto_threshold' ? '正在自动压缩上下文' : '正在压缩上下文';
     case 'context_compaction_completed':

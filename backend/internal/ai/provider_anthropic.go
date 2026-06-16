@@ -58,7 +58,9 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 		payload["tool_choice"] = anthropicProviderToolChoiceForReasoning(req.ToolChoice, reasoningPolicy.AnthropicAdaptiveEnabled())
 	}
 	if req.Snapshot.AnthropicSystem != "" {
-		payload["system"] = req.Snapshot.AnthropicSystem
+		cacheEnabled := anthropicPromptCacheEnabled()
+		req.Snapshot.Summary.AnthropicPromptCacheEnabled = cacheEnabled
+		payload["system"] = AnthropicSystemBlockBuilder{}.Build(req.Snapshot.AnthropicSystem, cacheEnabled)
 	}
 	annotatePayloadDiagnostics(&req.Snapshot.Summary, payload, req.Tools, req.Provider, reasoningPolicy)
 	log.Printf("[ai] request conversation=%s provider=%s protocol=%s base_url=%s model=%s tools_count=%d tools=%s tool_choice=%v round=%d",
@@ -76,6 +78,18 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 		if isContextCanceledError(err) {
 			return agentModelTurn{}, err
 		}
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       req.Provider,
+			Opts:           req.Opts,
+			ConversationID: req.ConversationID,
+			MessageID:      req.MessageID,
+			Stage:          stage,
+			RequestKind:    "messages",
+			Stream:         true,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+			DurationMS:     duration.Milliseconds(),
+		})
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
 	}
@@ -151,6 +165,18 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 				return p.callNonStream(ctx, req, payload, endpoint, "provider_stream_fallback")
 			}
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
+			p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+				Provider:       req.Provider,
+				Opts:           req.Opts,
+				ConversationID: req.ConversationID,
+				MessageID:      req.MessageID,
+				Stage:          "provider_stream_parse",
+				RequestKind:    "messages",
+				Stream:         true,
+				Status:         store.UsageStatusFailed,
+				ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+				DurationMS:     time.Since(startedAt).Milliseconds(),
+			})
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
 		if !turn.CompletionResultStreamed && emitCompletionResult != nil {
@@ -161,6 +187,19 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			annotateStreamToolDiagnostics(&req.Snapshot.Summary, turn)
 			err := fmt.Errorf("provider stream returned incomplete tool call arguments; max_tokens=%d", anthropicAgentMaxTokens)
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_incomplete_tool_arguments", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
+			p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+				Provider:       req.Provider,
+				Opts:           req.Opts,
+				ConversationID: req.ConversationID,
+				MessageID:      req.MessageID,
+				Stage:          "provider_stream_incomplete_tool_arguments",
+				RequestKind:    "messages",
+				Stream:         true,
+				Status:         store.UsageStatusFailed,
+				ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+				Usage:          turn.Usage,
+				DurationMS:     time.Since(startedAt).Milliseconds(),
+			})
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
 		closeStream()
@@ -168,6 +207,19 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			err := fmt.Errorf("empty Anthropic stream response")
 			if !providerStreamFallbackEnabled() {
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_empty_stream_response", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
+				p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+					Provider:       req.Provider,
+					Opts:           req.Opts,
+					ConversationID: req.ConversationID,
+					MessageID:      req.MessageID,
+					Stage:          "provider_empty_stream_response",
+					RequestKind:    "messages",
+					Stream:         true,
+					Status:         store.UsageStatusFailed,
+					ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+					Usage:          turn.Usage,
+					DurationMS:     time.Since(startedAt).Milliseconds(),
+				})
 				return agentModelTurn{}, WithDiagnosticID(err, diagID)
 			}
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_empty_stream_response", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
@@ -184,6 +236,18 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			req.Snapshot.Summary.StreamFallbackUsed = true
 			return p.callNonStream(ctx, req, payload, endpoint, "provider_empty_stream_fallback")
 		}
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       req.Provider,
+			Opts:           req.Opts,
+			ConversationID: req.ConversationID,
+			MessageID:      req.MessageID,
+			Stage:          stage,
+			RequestKind:    "messages",
+			Stream:         true,
+			Status:         store.UsageStatusSucceeded,
+			Usage:          turn.Usage,
+			DurationMS:     time.Since(startedAt).Milliseconds(),
+		})
 		return turn, nil
 	}
 
@@ -219,6 +283,18 @@ func (p anthropicProviderV2) callNonStream(ctx context.Context, reqState provide
 		if isContextCanceledError(err) {
 			return agentModelTurn{}, err
 		}
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       reqState.Provider,
+			Opts:           reqState.Opts,
+			ConversationID: reqState.ConversationID,
+			MessageID:      reqState.MessageID,
+			Stage:          stage,
+			RequestKind:    "messages",
+			Stream:         false,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, reqState.Snapshot.Summary),
+			DurationMS:     duration.Milliseconds(),
+		})
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, reqState.Opts, reqState.Provider, reqState.ConversationID, reqState.MessageID, stage, "error", duration.Milliseconds(), err, reqState.Snapshot.Summary)
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
 	}
@@ -231,6 +307,18 @@ func (p anthropicProviderV2) parseNonStream(ctx context.Context, req providerTur
 		log.Printf("[ai] anthropic provider_response_error conversation=%s endpoint=%s error=%v", req.ConversationID, endpoint, err)
 		stage := diagnosticStage(req.Provider.Protocol, req.PerformedMutation, req.HasToolEvents)
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       req.Provider,
+			Opts:           req.Opts,
+			ConversationID: req.ConversationID,
+			MessageID:      req.MessageID,
+			Stage:          stage,
+			RequestKind:    "messages",
+			Stream:         req.Snapshot.Summary.Stream != nil && *req.Snapshot.Summary.Stream,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+			DurationMS:     duration.Milliseconds(),
+		})
 		return agentModelTurn{}, WithDiagnosticID(fmt.Errorf("模型响应解析失败（阶段：%s）: %w", anthropicTimeoutStage(req.PerformedMutation, req.HasToolEvents), err), diagID)
 	}
 	if data.Error != nil {
@@ -238,6 +326,18 @@ func (p anthropicProviderV2) parseNonStream(ctx context.Context, req providerTur
 		err := formatProviderError(resp.StatusCode, data.Error)
 		stage := diagnosticStage(req.Provider.Protocol, req.PerformedMutation, req.HasToolEvents)
 		diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, stage, "error", duration.Milliseconds(), err, req.Snapshot.Summary)
+		p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+			Provider:       req.Provider,
+			Opts:           req.Opts,
+			ConversationID: req.ConversationID,
+			MessageID:      req.MessageID,
+			Stage:          stage,
+			RequestKind:    "messages",
+			Stream:         req.Snapshot.Summary.Stream != nil && *req.Snapshot.Summary.Stream,
+			Status:         store.UsageStatusFailed,
+			ErrorClass:     usageFailureClass(err, req.Snapshot.Summary),
+			DurationMS:     duration.Milliseconds(),
+		})
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
 	}
 	toolUses := data.toolUses()
@@ -249,11 +349,14 @@ func (p anthropicProviderV2) parseNonStream(ctx context.Context, req providerTur
 		return agentModelTurn{FinishReason: "empty_response"}, nil
 	}
 	data.Content = sanitizeAnthropicVisibleTextBlocks(data.Content)
+	usage := ProviderUsage{}
+	updateProviderUsageFromAny(&usage, data.Usage)
 	turn := agentModelTurn{
 		Content:      content,
 		FinishReason: data.StopReason,
 		AnthropicRaw: data.Content,
 		ToolCalls:    make([]agentToolCall, 0, len(toolUses)),
+		Usage:        usage,
 	}
 	for _, toolUse := range toolUses {
 		rawArgs, _ := json.Marshal(toolUse.Input)
@@ -264,6 +367,18 @@ func (p anthropicProviderV2) parseNonStream(ctx context.Context, req providerTur
 			AnthropicInput: toolUse.Input,
 		})
 	}
+	p.service.recordProviderUsage(ctx, providerUsageRecordInput{
+		Provider:       req.Provider,
+		Opts:           req.Opts,
+		ConversationID: req.ConversationID,
+		MessageID:      req.MessageID,
+		Stage:          diagnosticStage(req.Provider.Protocol, req.PerformedMutation, req.HasToolEvents),
+		RequestKind:    "messages",
+		Stream:         false,
+		Status:         store.UsageStatusSucceeded,
+		Usage:          turn.Usage,
+		DurationMS:     duration.Milliseconds(),
+	})
 	return turn, nil
 }
 

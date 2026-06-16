@@ -117,7 +117,7 @@ func (r *agentRuntime) discardStreamedCompletionResult() {
 }
 
 func (r *agentRuntime) completionRejection(attempt completionAttempt) string {
-	if r.toolLoopActive && r.toolCalls == 0 {
+	if r.toolLoopActive && r.toolCalls == 0 && !r.hasPrefetchedWorkspaceFileContent() {
 		return "当前任务已经进入工具工作流，但还没有执行任何工具。请先调用合适的工具，再使用 attempt_completion。"
 	}
 	if unverified := r.completionPathsWithoutVerifiedMutation(attempt.ChangedPaths); len(unverified) > 0 {
@@ -149,6 +149,18 @@ func (r *agentRuntime) completionRejection(attempt completionAttempt) string {
 		return "attempt_completion 正在报告未完成的 workspace 写入/修改，但本轮没有对应的工具失败结果。请继续执行真实编辑动作，或在确有工具失败后再总结缺失项。"
 	}
 	return ""
+}
+
+func (r *agentRuntime) hasPrefetchedWorkspaceFileContent() bool {
+	if r == nil {
+		return false
+	}
+	for _, attachment := range r.attachments {
+		if attachment.Kind == "workspace_file" && attachment.IncludedInContext && strings.TrimSpace(attachment.Text) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func attemptReportsFailedWork(attempt completionAttempt) bool {

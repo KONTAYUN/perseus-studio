@@ -10,6 +10,7 @@ import (
 )
 
 type openAIStreamChunk struct {
+	Usage   map[string]any `json:"usage"`
 	Choices []struct {
 		Delta struct {
 			Content   any `json:"content"`
@@ -172,6 +173,7 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 	visibleText := newProviderVisibleTextFilter()
 	toolBuilders := map[int]*openAIStreamToolBuilder{}
 	finishReason := ""
+	usage := ProviderUsage{}
 	completionResultStreamed := false
 	emitCompletionResult := func(text string) {
 		if text == "" || opts.EmitCompletionResultDelta == nil {
@@ -189,6 +191,7 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return fmt.Errorf("invalid OpenAI stream chunk: %w", err)
 		}
+		updateProviderUsageFromAny(&usage, chunk.Usage)
 		for _, choice := range chunk.Choices {
 			if choice.FinishReason != "" {
 				finishReason = choice.FinishReason
@@ -229,6 +232,7 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 		turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)
 		turn.PublicStreamedContent = deltas.StreamedContent()
 		turn.CompletionResultStreamed = completionResultStreamed
+		turn.Usage = usage
 		if hasCompleteToolCalls(turn) {
 			return agentModelTurn{}, &partialStreamTurnError{turn: turn, err: err}
 		}
@@ -237,6 +241,7 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 	turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)
 	turn.PublicStreamedContent = deltas.StreamedContent()
 	turn.CompletionResultStreamed = completionResultStreamed
+	turn.Usage = usage
 	return turn, nil
 }
 

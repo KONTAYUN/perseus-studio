@@ -55,7 +55,8 @@ type ModelActionManifest struct {
 }
 
 type ModelWorkspaceState struct {
-	CurrentReadWorkingSet CurrentReadWorkingSet `json:"current_read_working_set,omitempty"`
+	CurrentReadWorkingSet CurrentReadWorkingSet     `json:"current_read_working_set,omitempty"`
+	RecentWorkspaceReads  RecentWorkspaceReadMemory `json:"recent_workspace_reads,omitempty"`
 }
 
 type CurrentReadWorkingSet struct {

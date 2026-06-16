@@ -702,6 +702,36 @@ func TestHandleCompletionAttemptAllowsHonestUnsupportedFileFailure(t *testing.T)
 	}
 }
 
+func TestHandleCompletionAttemptRejectsToolLoopCompletionBeforeAnyEvidence(t *testing.T) {
+	runtime := &agentRuntime{toolLoopActive: true}
+	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"完成"}`)
+	if !isError || completed {
+		t.Fatalf("expected completion before tool evidence to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
+	}
+	if !strings.Contains(result, "还没有执行任何工具") {
+		t.Fatalf("expected missing tool rejection, got %s", result)
+	}
+}
+
+func TestHandleCompletionAttemptAllowsPrefetchedWorkspaceFileContent(t *testing.T) {
+	runtime := &agentRuntime{
+		toolLoopActive: true,
+		attachments: []AttachmentPayload{{
+			Kind:              "workspace_file",
+			Path:              "draft.txt",
+			Text:              "path=draft.txt\nnumbered_content:\n1: hello",
+			IncludedInContext: true,
+		}},
+	}
+	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"draft.txt 的内容是 hello。"}`)
+	if isError || !completed {
+		t.Fatalf("expected prefetched read-only completion, isError=%v completed=%v result=%s", isError, completed, result)
+	}
+	if !strings.Contains(runtime.completedContent, "hello") {
+		t.Fatalf("expected completion content to be preserved, got %q", runtime.completedContent)
+	}
+}
+
 func TestHandleCompletionAttemptDiscardsStreamedPreviewWhenRejected(t *testing.T) {
 	var discarded int
 	runtime := &agentRuntime{
@@ -2830,6 +2860,121 @@ func TestHandleNoToolTurnRejectsPlainTextAfterReadOnlyTool(t *testing.T) {
 	}
 	if len(discarded) != 1 || !strings.Contains(discarded[0], "action_required_plain_text_rejected") {
 		t.Fatalf("expected streamed planning text to be discarded, got %#v", discarded)
+	}
+}
+
+func TestHandleNoToolTurnAcceptsReadOnlyContentWithoutSelectedWorkspaceReference(t *testing.T) {
+	runtime := &agentRuntime{
+		toolLoopActive: true,
+		transcript:     newAgentTranscript(),
+		events: []ToolEvent{{
+			ToolName: "read_workspace_text",
+			Status:   "success",
+			Path:     "demo.txt",
+		}},
+	}
+	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
+		Content:      "demo.txt 的核心问题是节奏需要更紧。",
+		FinishReason: "stop",
+	})
+	if err != nil {
+		t.Fatalf("expected no hard error after read-only text, got %v", err)
+	}
+	if !ok || !strings.Contains(reply.Content, "节奏") {
+		t.Fatalf("expected read-only content completion, ok=%v reply=%#v", ok, reply)
+	}
+	if len(runtime.transcript.Entries) != 0 {
+		t.Fatalf("did not expect corrective observation, got %#v", runtime.transcript.Entries)
+	}
+}
+
+func TestHandleNoToolTurnRejectsContentAfterMutation(t *testing.T) {
+	runtime := &agentRuntime{
+		toolLoopActive:    true,
+		performedMutation: true,
+		transcript:        newAgentTranscript(),
+		events: []ToolEvent{{
+			ToolName: "apply_workspace_patch",
+			Status:   "success",
+			Path:     "demo.txt",
+		}},
+	}
+	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
+		Content:      "demo.txt 已经改好了。",
+		FinishReason: "stop",
+	})
+	if err != nil {
+		t.Fatalf("expected corrective loop, got %v", err)
+	}
+	if ok || strings.TrimSpace(reply.Content) != "" {
+		t.Fatalf("expected mutation content to be rejected, ok=%v reply=%#v", ok, reply)
+	}
+	if len(runtime.transcript.Entries) == 0 || runtime.transcript.Entries[len(runtime.transcript.Entries)-1].Kind != transcriptEntryRuntimeObservation {
+		t.Fatalf("expected corrective observation, got %#v", runtime.transcript.Entries)
+	}
+}
+
+func TestRecentWorkspaceReadMemoryUsesLedgerAndMutationInvalidation(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	conversation, err := env.conversations.CreateConversation(ctx, store.CreateConversationInput{
+		UserID: testUserID,
+		Title:  "recent reads",
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation returned error: %v", err)
+	}
+	readResult := mustJSON(map[string]any{
+		"status":           "success",
+		"tool_name":        "read_workspace_text",
+		"path":             "draft.txt",
+		"numbered_content": "1: 第一行\n2: 第二行",
+		"start_line":       1,
+		"end_line":         2,
+		"total_lines":      2,
+	})
+	if _, err := env.conversations.RecordToolCall(ctx, store.ToolCallInput{
+		UserID:         testUserID,
+		ConversationID: conversation.ID,
+		ToolName:       "read_workspace_text",
+		Status:         "success",
+		ResultJSON:     readResult,
+	}); err != nil {
+		t.Fatalf("RecordToolCall read returned error: %v", err)
+	}
+	memory := env.service.recentWorkspaceReadMemory(ctx, testUserID, conversation.ID, []AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}})
+	if !memory.Available || len(memory.Reads) != 1 || !strings.Contains(memory.Reads[0].NumberedContent, "第一行") {
+		t.Fatalf("expected recent read memory with content, got %#v", memory)
+	}
+	changedPaths, _ := json.Marshal([]string{"draft.txt"})
+	if _, err := env.conversations.RecordToolCall(ctx, store.ToolCallInput{
+		UserID:           testUserID,
+		ConversationID:   conversation.ID,
+		ToolName:         "apply_workspace_patch",
+		Status:           "success",
+		ResultJSON:       mustJSON(map[string]any{"path": "draft.txt", "changed_paths": []string{"draft.txt"}}),
+		ChangedPathsJSON: string(changedPaths),
+	}); err != nil {
+		t.Fatalf("RecordToolCall mutation returned error: %v", err)
+	}
+	memory = env.service.recentWorkspaceReadMemory(ctx, testUserID, conversation.ID, []AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}})
+	if memory.Available {
+		t.Fatalf("expected mutation to invalidate older read memory, got %#v", memory)
+	}
+}
+
+func TestAnthropicSystemBlockBuilderKeepsActionManifestDynamic(t *testing.T) {
+	system := "stable prompt\n\n" + actionManifestAnchorPrefix + `{"json_tools":[]}`
+	payload := AnthropicSystemBlockBuilder{}.Build(system, true)
+	blocks, ok := payload.([]map[string]any)
+	if !ok || len(blocks) != 2 {
+		t.Fatalf("expected two Anthropic system blocks, got %#v", payload)
+	}
+	if _, ok := blocks[0]["cache_control"]; !ok || strings.Contains(stringFromAny(blocks[0]["text"]), "current action manifest") {
+		t.Fatalf("expected only stable prompt to be cached, got %#v", blocks)
+	}
+	if !strings.Contains(stringFromAny(blocks[1]["text"]), "current action manifest") {
+		t.Fatalf("expected dynamic action manifest block, got %#v", blocks)
 	}
 }
 

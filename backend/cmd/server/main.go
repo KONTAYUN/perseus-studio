@@ -63,6 +63,10 @@ func main() {
 	if err := diagnosticStore.Migrate(context.Background()); err != nil {
 		log.Fatalf("migrate diagnostic database: %v", err)
 	}
+	usageStore := store.NewUsageStore(db)
+	if err := usageStore.Migrate(context.Background()); err != nil {
+		log.Fatalf("migrate usage database: %v", err)
+	}
 	if info := store.LastDBRuntimeInfo(); info.RiskyWALMount {
 		_, _ = diagnosticStore.Append(context.Background(), store.DiagnosticLogInput{
 			UserID:         "system",
@@ -98,6 +102,7 @@ func main() {
 	broker := tasks.NewBroker()
 	runBroker := tasks.NewBroker()
 	aiService := ai.NewService(configStore, factory, conversationStore, diagnosticStore)
+	aiService.AttachUsageStore(usageStore)
 	aiService.AttachRunStore(agentRunStore)
 	manager := tasks.NewManager(taskStore, conversationStore, diagnosticStore, aiService, factory, broker, tasks.Config{
 		WorkerCount:  cfg.WorkerCount,
@@ -109,7 +114,7 @@ func main() {
 
 	manager.Start(ctx)
 
-	handler := api.NewServer(taskStore, agentRunStore, configStore, conversationStore, diagnosticStore, userStore, sessionStore, broker, runBroker, factory, aiService, cfg)
+	handler := api.NewServer(taskStore, agentRunStore, configStore, conversationStore, diagnosticStore, usageStore, userStore, sessionStore, broker, runBroker, factory, aiService, cfg)
 	server := &http.Server{
 		Addr:    cfg.ListenAddr,
 		Handler: handler.Routes(),

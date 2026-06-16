@@ -19,7 +19,13 @@ func updateProviderUsageFromAny(usage *ProviderUsage, value any) {
 	if next := int64FromAny(raw["input_tokens"]); next > 0 {
 		usage.InputTokens = next
 	}
+	if next := int64FromAny(raw["prompt_tokens"]); next > 0 {
+		usage.InputTokens = next
+	}
 	if next := int64FromAny(raw["output_tokens"]); next > 0 {
+		usage.OutputTokens = next
+	}
+	if next := int64FromAny(raw["completion_tokens"]); next > 0 {
 		usage.OutputTokens = next
 	}
 	if next := int64FromAny(raw["cache_creation_input_tokens"]); next > 0 {
@@ -27,6 +33,12 @@ func updateProviderUsageFromAny(usage *ProviderUsage, value any) {
 	}
 	if next := int64FromAny(raw["cache_read_input_tokens"]); next > 0 {
 		usage.CacheReadTokens = next
+	}
+	if next := int64FromAny(raw["total_tokens"]); next > 0 {
+		usage.TotalTokens = next
+	}
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
 	}
 }
 

@@ -34,6 +34,7 @@ type openAIToolCall struct {
 type openAIResponse struct {
 	Error   any            `json:"error"`
 	Choices []openAIChoice `json:"choices"`
+	Usage   map[string]any `json:"usage"`
 }
 
 type openAIChoice struct {
@@ -66,6 +67,7 @@ type anthropicResponse struct {
 	Error      any              `json:"error"`
 	Content    []map[string]any `json:"content"`
 	StopReason string           `json:"stop_reason"`
+	Usage      map[string]any   `json:"usage"`
 }
 
 type anthropicToolUse struct {

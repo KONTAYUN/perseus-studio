@@ -13,6 +13,7 @@ type ProviderUsage struct {
 	OutputTokens        int64 `json:"output_tokens,omitempty"`
 	CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
 	CacheReadTokens     int64 `json:"cache_read_tokens,omitempty"`
+	TotalTokens         int64 `json:"total_tokens,omitempty"`
 }
 
 type transcriptEntryKind string

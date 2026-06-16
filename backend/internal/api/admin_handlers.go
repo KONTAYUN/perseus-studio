@@ -90,6 +90,9 @@ func (s *Server) handleAdminUserRoutes(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			_ = s.diagnostics.ClearUser(r.Context(), userID)
+			if s.usage != nil {
+				_ = s.usage.DeleteUser(r.Context(), userID)
+			}
 			if err := s.invalidateUserSessions(r.Context(), userID); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -158,7 +161,7 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodPatch:
 		var req struct {
-			AllowRegistration *bool `json:"allow_registration"`
+			AllowRegistration *bool  `json:"allow_registration"`
 			DefaultUserRole   string `json:"default_user_role"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

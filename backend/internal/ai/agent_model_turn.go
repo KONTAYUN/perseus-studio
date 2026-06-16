@@ -77,6 +77,9 @@ func (r *agentRuntime) annotateRequestSummary() {
 	r.lastContextSnapshot.Summary.ModelActionManifestDigest = modelActionManifestDigest(actionManifest)
 	r.lastContextSnapshot.Summary.ModelTextActions = modelTextActionNames(actionManifest)
 	r.lastContextSnapshot.Summary.ModelTerminalActions = modelTerminalActionNames(actionManifest)
+	r.lastContextSnapshot.Summary.RecentReadMemoryPaths = recentWorkspaceReadMemoryPaths(r.recentReadMemory)
+	r.lastContextSnapshot.Summary.RecentReadInlinedChars = recentWorkspaceReadMemoryInlinedChars(r.recentReadMemory)
+	r.lastContextSnapshot.Summary.ProviderRoundCount = r.currentRound
 	r.lastContextSnapshot.Summary.ForcedTool = strings.TrimSpace(r.opts.ForceTool)
 	r.lastContextSnapshot.Summary.ToolLoopActive = r.toolLoopActive
 	r.lastContextSnapshot.Summary.ActionBoundaryActive = r.actionBoundaryActive()
@@ -181,7 +184,14 @@ func (r *agentRuntime) currentModelActionManifest() ModelActionManifest {
 	if r == nil {
 		return modelActionManifest(nil, true, "admin")
 	}
-	return modelActionManifest(r.loadedToolsets, r.includeToolsetLoader(), r.opts.UserRole)
+	manifest := modelActionManifest(r.loadedToolsets, r.includeToolsetLoader(), r.opts.UserRole)
+	if r.recentReadMemory.Available {
+		if manifest.WorkspaceState == nil {
+			manifest.WorkspaceState = &ModelWorkspaceState{}
+		}
+		manifest.WorkspaceState.RecentWorkspaceReads = r.recentReadMemory
+	}
+	return manifest
 }
 
 func (r *agentRuntime) includeToolsetLoader() bool {

@@ -25,6 +25,9 @@ func buildUserTextWithAttachments(content string, attachments []AttachmentPayloa
 		case "workspace_file":
 			note := fmt.Sprintf("workspace file reference: path=%s, name=%s, file_type=%s。这里只提供用户明确引用的工作区路径 metadata，不包含文件内容，也不代表必须读取；需要文件真实当前内容且没有可复用 recent read observation/current_read_working_set 时，调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
 			notes = append(notes, note)
+			if attachment.IncludedInContext && strings.TrimSpace(attachment.Text) != "" {
+				textParts = append(textParts, fmt.Sprintf("current_file_content: path=%s, name=%s\n%s", attachment.Path, attachment.Name, attachment.Text))
+			}
 		case "current_file":
 			note := fmt.Sprintf("current workspace file reference: path=%s, name=%s, file_type=%s。用户说“当前文件/这个文件/这里”时优先理解为此路径；这里只提供 metadata，不包含文件内容，也不代表本轮必须读取；需要文件真实当前内容且没有可复用 recent read observation/current_read_working_set 时，调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
 			notes = append(notes, note)

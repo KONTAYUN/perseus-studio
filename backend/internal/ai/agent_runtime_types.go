@@ -50,16 +50,17 @@ type ModelResponseClassification struct {
 }
 
 type agentRuntime struct {
-	service        *Service
-	protocol       agentProtocol
-	conversationID string
-	messageID      string
-	provider       store.ModelProvider
-	messages       []store.Message
-	attachments    []AttachmentPayload
-	opts           RunOptions
-	profile        providerRuntimeProfile
-	allowTask      bool
+	service          *Service
+	protocol         agentProtocol
+	conversationID   string
+	messageID        string
+	provider         store.ModelProvider
+	messages         []store.Message
+	attachments      []AttachmentPayload
+	opts             RunOptions
+	profile          providerRuntimeProfile
+	allowTask        bool
+	recentReadMemory RecentWorkspaceReadMemory
 
 	events                    []ToolEvent
 	appliedMutations          map[string]ToolEvent
