@@ -43,7 +43,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
       }}
     >
       <div
-        className={`settings-modal-card ui-overlay-surface flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden border border-white/40 bg-white/90 backdrop-blur-3xl transition-[opacity,transform,box-shadow,border-color,background-color] duration-500 ease-apple dark:border-white/10 dark:bg-[#1C1C1E]/95 ${
+        className={`settings-modal-card ui-overlay-surface flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden border border-white/40 bg-white/90 backdrop-blur-3xl transition-[opacity,transform,box-shadow,border-color,background-color] duration-500 ease-apple dark:border-white/10 dark:bg-[#1C1C1E]/95 ${
           isClosing || !hasEntered ? 'translate-y-3 scale-[0.975] opacity-0' : 'translate-y-0 scale-100 opacity-100'
         }`}
       >

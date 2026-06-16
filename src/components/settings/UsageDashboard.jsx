@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, BarChart3, Coins, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../../api/client';
 import {
@@ -176,7 +177,15 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
       </div>
 
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <SectionTitle icon={<BarChart3 size={15} />} title={activeTitle} description={activeDescription} />
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-blue-500 text-white ring-1 ring-white/20">
+            <BarChart3 size={15} />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-[15px] font-bold text-gray-800 dark:text-gray-100">{activeTitle}</h3>
+            <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{activeDescription}</p>
+          </div>
+        </div>
         <SegmentedControl
           value={activeView}
           onChange={setActiveView}
@@ -305,9 +314,9 @@ function PriceSettingsPanel({
   onEdit,
   onDelete,
 }) {
-  return (
-    <div className="settings-expand-enter fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm dark:bg-black/55">
-      <div className="settings-modal-card ui-overlay-surface flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden border border-white/40 bg-white/95 dark:border-white/10 dark:bg-[#1C1C1E]/95">
+  const panel = (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm dark:bg-black/55">
+      <div className="settings-expand-enter settings-modal-card ui-overlay-surface flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden border border-white/40 bg-white/95 dark:border-white/10 dark:bg-[#1C1C1E]/95">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-white/10">
           <div>
             <div className="text-base font-bold text-gray-800 dark:text-gray-100">价格配置</div>
@@ -396,6 +405,9 @@ function PriceSettingsPanel({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return panel;
+  return createPortal(panel, document.body);
 }
 
 function usageQuery({ range, userId, providerId }) {
