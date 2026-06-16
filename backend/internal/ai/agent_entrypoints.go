@@ -78,7 +78,7 @@ func allAgentToolsets(allowTask bool) map[string]bool {
 }
 
 func initialAgentToolsets(opts RunOptions, attachments []AttachmentPayload) map[string]bool {
-	loaded := map[string]bool{}
+	loaded := map[string]bool{"workspace": true}
 	if opts.TaskID != "" || opts.ForceTool != "" || attachmentsRequireToolLoop(attachments) {
 		loaded["workspace"] = true
 	}

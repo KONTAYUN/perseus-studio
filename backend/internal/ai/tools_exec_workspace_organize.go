@@ -55,21 +55,15 @@ func (s *Service) execOrganizeWorkspaceMatches(ctx context.Context, userID, argu
 		return "", "", "正在整理文件...", args.TargetFolder, fmt.Errorf("no workspace items matched %q", args.MatchText)
 	}
 
-	type moveResult struct {
-		OldPath string `json:"old_path"`
-		NewPath string `json:"new_path"`
-		Status  string `json:"status"`
-		Error   string `json:"error,omitempty"`
-	}
-	var moved []moveResult
+	var moved []WorkspacePathMove
 	var changed []string
 	for _, match := range matches {
 		result, err := files.MovePath(match.Path, args.TargetFolder)
 		if err != nil {
-			moved = append(moved, moveResult{OldPath: match.Path, Status: "failed", Error: err.Error()})
+			moved = append(moved, WorkspacePathMove{OldPath: match.Path, Status: "failed", Error: err.Error()})
 			continue
 		}
-		moved = append(moved, moveResult{OldPath: result.OldPath, NewPath: result.NewPath, Status: "success"})
+		moved = append(moved, WorkspacePathMove{OldPath: result.OldPath, NewPath: result.NewPath, Status: "success"})
 		changed = append(changed, result.OldPath, result.NewPath)
 	}
 	successCount := 0
@@ -85,6 +79,7 @@ func (s *Service) execOrganizeWorkspaceMatches(ctx context.Context, userID, argu
 		return "", "", "正在整理文件...", args.TargetFolder, fmt.Errorf("failed to move all matched items")
 	}
 	payload := map[string]any{
+		"operation":       "organize",
 		"path":            args.TargetFolder,
 		"target_folder":   args.TargetFolder,
 		"match_text":      args.MatchText,

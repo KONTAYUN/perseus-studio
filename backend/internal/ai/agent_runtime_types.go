@@ -21,6 +21,34 @@ const (
 	agentProtocolAnthropic agentProtocol = "anthropic"
 )
 
+type AgentExecutionMode string
+
+const (
+	AgentExecutionModeChat             AgentExecutionMode = "chat"
+	AgentExecutionModeWorkspaceAction  AgentExecutionMode = "workspace_action"
+	AgentExecutionModeToolLoop         AgentExecutionMode = "tool_loop"
+	AgentExecutionModeTerminalPending  AgentExecutionMode = "terminal_pending"
+	AgentExecutionModeCheckpointResume AgentExecutionMode = "checkpoint_resume"
+	AgentExecutionModeBudgetSummary    AgentExecutionMode = "budget_summary"
+)
+
+type ModelResponseKind string
+
+const (
+	ModelResponseJSONToolCall         ModelResponseKind = "json_tool_call"
+	ModelResponseTextPatchAction      ModelResponseKind = "text_patch_action"
+	ModelResponseTerminalAction       ModelResponseKind = "terminal_action"
+	ModelResponseContentOnly          ModelResponseKind = "content_only"
+	ModelResponseEmptyOrReasoningOnly ModelResponseKind = "empty_or_reasoning_only"
+)
+
+type ModelResponseClassification struct {
+	Kind      ModelResponseKind
+	Turn      agentModelTurn
+	Patch     extractedTextPatchTurn
+	ToolNames []string
+}
+
 type agentRuntime struct {
 	service        *Service
 	protocol       agentProtocol

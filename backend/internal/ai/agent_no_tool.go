@@ -35,7 +35,7 @@ func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn
 				return Reply{}, true, WithDiagnosticID(err, diagID)
 			}
 			correction := "你的上一轮响应为空。请直接回答用户；如果用户要求安装 Skill、操作文件、联网或运行命令，请调用可用工具，不要返回空内容。"
-			r.transcript.AppendUserText(correction, map[string]any{"reason": "empty_model_response"})
+			r.transcript.AppendRuntimeObservation(correction, map[string]any{"reason": "empty_model_response", "observation_type": "action_rejected"})
 			if err := r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint()); err != nil {
 				return Reply{}, true, err
 			}
@@ -72,7 +72,7 @@ func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn
 		return reply, true, err
 	}
 	correction := r.correctiveMessage(content)
-	r.transcript.AppendUserText(correction, map[string]any{"reason": "missing_tool_call"})
+	r.transcript.AppendRuntimeObservation(correction, map[string]any{"reason": "missing_tool_call", "observation_type": "action_rejected"})
 	if err := r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint()); err != nil {
 		return Reply{}, true, err
 	}

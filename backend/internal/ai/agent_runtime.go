@@ -30,8 +30,16 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 		}
 		prePatchPublicStreamed := turn.PublicTextStreamed
 		prePatchPublicContent := turn.PublicStreamedContent
-		if patchResult := normalizeTextPatchTurn(turn); patchResult.Extracted {
-			turn = patchResult.Turn
+		classification := ModelResponseDispatcher{}.Classify(turn)
+		turn = classification.Turn
+		emitToolLifecycleEvent(r.opts, "model_response_classified", "info", map[string]any{
+			"round":         round + 1,
+			"kind":          string(classification.Kind),
+			"tool_names":    classification.ToolNames,
+			"mode":          string(r.executionMode()),
+			"finish_reason": turn.FinishReason,
+		})
+		if classification.Kind == ModelResponseTextPatchAction {
 			if prePatchPublicStreamed && strings.TrimSpace(prePatchPublicContent) != strings.TrimSpace(turn.PublicStreamedContent) {
 				r.discardActiveAssistantMessage("assistant_text_patch_reconciled")
 			}
@@ -48,8 +56,8 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 				"patch_sha":            hashWorkspaceText(patchText),
 				"patch_block_count":    countWorkspacePatchBlocks(patchText),
 				"detected_paths":       workspacePatchCandidatePathsLoose(patchText),
-				"discarded_tool_calls": patchResult.DiscardedToolCalls,
-				"discarded_tool_names": patchResult.DiscardedToolNames,
+				"discarded_tool_calls": classification.Patch.DiscardedToolCalls,
+				"discarded_tool_names": classification.Patch.DiscardedToolNames,
 				"action_boundary":      "assistant_text_patch_supersedes_json_tool_calls",
 			})
 		}
@@ -193,13 +201,15 @@ func (r *agentRuntime) discardActiveAssistantMessage(reason string) {
 }
 
 func (r *agentRuntime) correctiveMessage(content string) string {
+	rejectedAction := "assistant_text"
 	if strings.TrimSpace(content) == "" {
-		return "你的上一轮响应没有文本也没有工具调用。当前任务需要通过工具执行并验证；请调用合适的 workspace/search/command/skill 工具，完成后调用 attempt_completion。"
+		rejectedAction = "empty_response"
+		return r.actionRejectedObservation("empty model response while an action is required", rejectedAction, nil)
 	}
 	if r.toolLoopActive {
-		return "你的上一轮响应只是普通文本，没有继续调用工具，也没有调用 attempt_completion。当前 run 已经在工具工作流中：如果还需要继续处理，请直接调用下一个合适的工具；如果工具工作已经完成，请调用 attempt_completion 交付结果。"
+		return r.actionRejectedObservation("plain assistant text did not execute an action in the active tool workflow", rejectedAction, nil)
 	}
-	return "你的上一轮响应没有调用工具，因此不能完成当前任务。请根据用户请求调用必要工具；工具失败会以 tool_result 返回给你，修正后继续。所有需要改变 workspace 的任务完成前必须调用 attempt_completion。"
+	return r.actionRejectedObservation("plain assistant text cannot complete an action-required task", rejectedAction, nil)
 }
 
 func (r *agentRuntime) fail(message string, cause error) (Reply, error) {

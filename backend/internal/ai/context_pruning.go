@@ -65,7 +65,7 @@ func (m *agentContextManager) compactTranscriptForPayloadPressure(transcript *Ag
 				continue
 			}
 			before := len([]byte(result.Content))
-			result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "older_tool_result_reference", "reference_only", "Use this path metadata as historical context; call the tool again only when exact details are needed.")
+			result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "older_tool_result_reference", "reference_only", "Use preserved recent observations when available; call the relevant tool only when exact details are missing from current context.")
 			after := len([]byte(result.Content))
 			current -= before - after
 			action := "payload_pressure_tool_compacted:" + result.ToolName
@@ -105,7 +105,7 @@ func compactSupersededReadResults(transcript *AgentTranscript) []string {
 				}
 			}
 			if allSuperseded {
-				result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "superseded_by_newer_read", "reference_only", "A newer read of this file range exists later in the transcript. Use the newer observation, or read this path/range again if exact text is needed.")
+				result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "superseded_by_newer_read", "reference_only", "A newer read of this file range exists later in the transcript. Use the newer observation; read this path/range only if exact text is still missing.")
 				actions = append(actions, "superseded_read:"+strings.Join(readSpanLabels(spans), ","))
 			}
 			newerSpans = append(newerSpans, spans...)
@@ -235,7 +235,7 @@ func compactToolResultsForBudget(transcript *AgentTranscript, profile providerRu
 				continue
 			}
 			before := estimateTextTokens(result.Content)
-			result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "budget_reference", "reference_only", "Use this historical tool metadata only; call the relevant tool again if exact details are needed.")
+			result.Content = compactedToolResultNoticeWithReason(result.ToolName, result.Event, "budget_reference", "reference_only", "Use this historical tool metadata only; call the relevant tool only when exact details are missing from current context.")
 			after := estimateTextTokens(result.Content)
 			current -= before - after
 			actionKey := result.ToolName

@@ -13,14 +13,35 @@ type extractedTextPatchTurn struct {
 }
 
 func extractWorkspacePatchBlock(content string) (string, string, bool) {
+	envelope, ok := parseWorkspacePatchEnvelope(content)
+	return envelope.Visible, envelope.Patch, ok
+}
+
+type patchTextSpan struct {
+	start int
+	end   int
+}
+
+type WorkspacePatchEnvelope struct {
+	Visible string
+	Patch   string
+	Spans   []patchTextSpan
+}
+
+func parseWorkspacePatchEnvelope(content string) (WorkspacePatchEnvelope, bool) {
+	visible, patch, spans, ok := extractWorkspacePatchEnvelope(content)
+	return WorkspacePatchEnvelope{Visible: visible, Patch: patch, Spans: spans}, ok
+}
+
+func extractWorkspacePatchEnvelope(content string) (string, string, []patchTextSpan, bool) {
 	text := strings.TrimSpace(content)
 	if text == "" {
-		return "", "", false
+		return "", "", nil, false
 	}
 	normalized := strings.ReplaceAll(strings.ReplaceAll(content, "\r\n", "\n"), "\r", "\n")
 	patch, spans, ok := extractWorkspacePatchBlocksWithSpans(normalized)
 	if !ok {
-		return content, "", false
+		return content, "", nil, false
 	}
 	var visibleParts []string
 	cursor := 0
@@ -38,12 +59,7 @@ func extractWorkspacePatchBlock(content string) (string, string, bool) {
 		visibleParts[index] = part
 	}
 	visible := strings.TrimSpace(strings.Join(nonEmptyStrings(visibleParts...), "\n\n"))
-	return visible, patch, patch != ""
-}
-
-type patchTextSpan struct {
-	start int
-	end   int
+	return visible, patch, spans, patch != ""
 }
 
 func extractWorkspacePatchBlocksWithSpans(normalized string) (string, []patchTextSpan, bool) {

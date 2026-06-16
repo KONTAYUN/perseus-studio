@@ -57,6 +57,19 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 			IsError:    isError,
 			Event:      event,
 		})
+		if isError && call.Name == "attempt_completion" && isActionBoundaryObservation(resultContent) {
+			r.appendToolResults(results)
+			results = results[:0]
+			r.transcript.AppendRuntimeObservation(resultContent, map[string]any{
+				"reason":           "terminal_action_rejected",
+				"observation_type": "action_rejected",
+				"rejected_action":  "attempt_completion",
+			})
+			if err := r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint()); err != nil {
+				return nil, false, err
+			}
+			continue
+		}
 		if event.Status == "success" {
 			r.appendToolResults(results)
 			results = results[:0]
@@ -121,6 +134,9 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	}
 	if errText := r.normalizeAndValidateToolCall(&call); errText != "" {
 		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
+		if call.Name == "apply_workspace_patch" {
+			return r.actionRejectedObservation(errText, "apply_workspace_patch_json_tool_call", nil), true, nil, false, nil
+		}
 		event := r.invalidToolCallEvent(ctx, call, errText)
 		r.events = append(r.events, event)
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil

@@ -25,6 +25,8 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 		return agentModelTurn{}, err
 	}
 	r.lastContextSnapshot = r.contextManager.BuildWithOptions(r.protocol, r.messages, r.attachments, r.transcript, r.profile, round+1, r.providerMessageBuildOptions())
+	actionManifest := r.currentModelActionManifest()
+	r.lastContextSnapshot = injectModelActionManifest(r.protocol, r.lastContextSnapshot, actionManifest)
 	r.annotateRequestSummary()
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	turn, err := r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
@@ -48,6 +50,7 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 		log.Printf("[ai] context overflow compaction skipped conversation=%s error=%v", r.conversationID, retryErr)
 	}
 	r.lastContextSnapshot = r.contextManager.BuildWithOptions(r.protocol, r.messages, r.attachments, r.transcript, r.profile, round+1, r.providerMessageBuildOptionsForPhase("overflow_recovery", true))
+	r.lastContextSnapshot = injectModelActionManifest(r.protocol, r.lastContextSnapshot, r.currentModelActionManifest())
 	r.annotateRequestSummary()
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	return r.service.providerV2(r.protocol).Turn(ctx, providerTurnRequest{
@@ -66,13 +69,18 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 }
 
 func (r *agentRuntime) annotateRequestSummary() {
+	actionManifest := manifestWithWorkspaceState(r.currentModelActionManifest(), r.lastContextSnapshot)
 	r.lastContextSnapshot.Summary.ProviderAttempts = r.providerAttempts
 	r.lastContextSnapshot.Summary.CheckpointResumeAttempt = r.checkpointResumeAttempts
 	r.lastContextSnapshot.Summary.LoadedToolsets = loadedToolsetNames(r.loadedToolsets)
 	r.lastContextSnapshot.Summary.LoadedCapabilities = loadedToolsetCapabilitiesForDiagnostics(r.loadedToolsets)
+	r.lastContextSnapshot.Summary.ModelActionManifestDigest = modelActionManifestDigest(actionManifest)
+	r.lastContextSnapshot.Summary.ModelTextActions = modelTextActionNames(actionManifest)
+	r.lastContextSnapshot.Summary.ModelTerminalActions = modelTerminalActionNames(actionManifest)
 	r.lastContextSnapshot.Summary.ForcedTool = strings.TrimSpace(r.opts.ForceTool)
 	r.lastContextSnapshot.Summary.ToolLoopActive = r.toolLoopActive
 	r.lastContextSnapshot.Summary.ActionBoundaryActive = r.actionBoundaryActive()
+	r.lastContextSnapshot.Summary.AgentExecutionMode = string(r.executionMode())
 	if r.checkpointResumeAttempts > 0 {
 		r.lastContextSnapshot.Summary.RecoverableTransientError = true
 	}
@@ -169,6 +177,13 @@ func (r *agentRuntime) tools() []map[string]any {
 	}
 }
 
+func (r *agentRuntime) currentModelActionManifest() ModelActionManifest {
+	if r == nil {
+		return modelActionManifest(nil, true, "admin")
+	}
+	return modelActionManifest(r.loadedToolsets, r.includeToolsetLoader(), r.opts.UserRole)
+}
+
 func (r *agentRuntime) includeToolsetLoader() bool {
 	return r != nil && r.opts.TaskID == ""
 }
@@ -186,4 +201,23 @@ func (r *agentRuntime) actionBoundaryActive() bool {
 		strings.TrimSpace(r.opts.ForceTool) != "" ||
 		strings.TrimSpace(r.opts.TaskID) != "" ||
 		attachmentsRequireToolLoop(r.attachments)
+}
+
+func (r *agentRuntime) executionMode() AgentExecutionMode {
+	if r == nil {
+		return AgentExecutionModeChat
+	}
+	if r.checkpointResumeAttempts > 0 {
+		return AgentExecutionModeCheckpointResume
+	}
+	if r.requiresCompletion {
+		return AgentExecutionModeTerminalPending
+	}
+	if r.toolLoopActive || strings.TrimSpace(r.opts.ForceTool) != "" || strings.TrimSpace(r.opts.TaskID) != "" {
+		return AgentExecutionModeToolLoop
+	}
+	if attachmentsRequireToolLoop(r.attachments) {
+		return AgentExecutionModeWorkspaceAction
+	}
+	return AgentExecutionModeChat
 }

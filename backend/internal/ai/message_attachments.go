@@ -23,10 +23,10 @@ func buildUserTextWithAttachments(content string, attachments []AttachmentPayloa
 			}
 			textParts = append(textParts, text)
 		case "workspace_file":
-			note := fmt.Sprintf("workspace file reference: path=%s, name=%s, file_type=%s。这里只提供用户明确引用的工作区路径 metadata，不包含文件内容；需要内容时必须调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
+			note := fmt.Sprintf("workspace file reference: path=%s, name=%s, file_type=%s。这里只提供用户明确引用的工作区路径 metadata，不包含文件内容，也不代表必须读取；需要文件真实当前内容且没有可复用 recent read observation/current_read_working_set 时，调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
 			notes = append(notes, note)
 		case "current_file":
-			note := fmt.Sprintf("current workspace file reference: path=%s, name=%s, file_type=%s。用户说“当前文件/这个文件/这里”时优先理解为此路径；这里只提供 metadata，不包含文件内容；需要内容时必须调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
+			note := fmt.Sprintf("current workspace file reference: path=%s, name=%s, file_type=%s。用户说“当前文件/这个文件/这里”时优先理解为此路径；这里只提供 metadata，不包含文件内容，也不代表本轮必须读取；需要文件真实当前内容且没有可复用 recent read observation/current_read_working_set 时，调用 read_workspace_text 或 read_workspace_files。", attachment.Path, attachment.Name, attachment.FileType)
 			notes = append(notes, note)
 		case "editor_panels_context":
 			var lines []string
@@ -38,7 +38,7 @@ func buildUserTextWithAttachments(content string, attachments []AttachmentPayloa
 				lines = append(lines, fmt.Sprintf("%s: panel_id=%s, active_file=%s, open_tabs=[%s]", panel.PositionLabel, panel.PanelID, panel.ActiveFilePath, tabs))
 			}
 			if len(lines) > 0 {
-				notes = append(notes, "当前打开的编辑器面板如下。用户提到左边/右边/中间编辑栏时按 position_label 定位；这里只提供路径和标签页，不包含文件全文；需要内容时请调用 read_workspace_text 或 read_workspace_files。\n  "+strings.Join(lines, "\n  "))
+				notes = append(notes, "当前打开的编辑器面板如下。用户提到左边/右边/中间编辑栏时按 position_label 定位；这里只提供路径和标签页，不包含文件全文，也不代表必须读取；需要文件真实当前内容且没有可复用 recent read observation/current_read_working_set 时，请调用 read_workspace_text 或 read_workspace_files。\n  "+strings.Join(lines, "\n  "))
 			}
 		case "selected_skill":
 			if attachment.Text != "" {

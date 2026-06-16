@@ -8,15 +8,19 @@ const (
 )
 
 type providerPatchBlockFilter struct {
-	buffer     string
-	inside     bool
-	afterPatch bool
+	parser WorkspacePatchEnvelopeParser
 }
 
 type providerPatchFilteredEmitter struct {
 	inner    *toolGatedStreamDeltaEmitter
 	filter   *providerPatchBlockFilter
 	streamed strings.Builder
+}
+
+type WorkspacePatchEnvelopeParser struct {
+	buffer     string
+	inside     bool
+	afterPatch bool
 }
 
 func newProviderPatchFilteredEmitter(inner *toolGatedStreamDeltaEmitter) *providerPatchFilteredEmitter {
@@ -70,6 +74,20 @@ func (e *providerPatchFilteredEmitter) StreamedContent() string {
 }
 
 func (f *providerPatchBlockFilter) Feed(text string) string {
+	if f == nil {
+		return ""
+	}
+	return f.parser.Feed(text)
+}
+
+func (f *providerPatchBlockFilter) Close() string {
+	if f == nil {
+		return ""
+	}
+	return f.parser.Close()
+}
+
+func (f *WorkspacePatchEnvelopeParser) Feed(text string) string {
 	if f == nil || text == "" {
 		return ""
 	}
@@ -111,7 +129,7 @@ func (f *providerPatchBlockFilter) Feed(text string) string {
 	}
 }
 
-func (f *providerPatchBlockFilter) Close() string {
+func (f *WorkspacePatchEnvelopeParser) Close() string {
 	if f == nil {
 		return ""
 	}
@@ -155,7 +173,7 @@ func patchBoundarySuffixLen(text, marker string) int {
 	return best
 }
 
-func (f *providerPatchBlockFilter) consumeHiddenPatch() bool {
+func (f *WorkspacePatchEnvelopeParser) consumeHiddenPatch() bool {
 	end := strings.Index(f.buffer, patchEndMarker)
 	if end < 0 {
 		keep := patchBoundarySuffixLen(f.buffer, patchEndMarker)

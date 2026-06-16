@@ -223,30 +223,32 @@ export function shouldReloadWorkspaceForToolEvents(toolEvents) {
 export function isWorkspaceFileChangeEvent(item) {
   if (!item) return false;
   if (item.type === 'workspace_file_changed') return true;
-  if (Array.isArray(item.changed_paths) && item.changed_paths.length > 0) return true;
-  return item.status_kind === 'workspace_edit' || item.statusKind === 'workspace_edit';
+  return false;
 }
 
 export function isWorkspaceRefreshEvent(item) {
-  return (
-    isWorkspaceFileChangeEvent(item) ||
-    ['manage_workspace_path', 'organize_workspace_matches', 'run_workspace_command'].includes(item?.tool_name)
-  );
+  return isWorkspaceFileChangeEvent(item);
 }
 
 export function editorToolEventKey(item) {
-  if (!item?.tool_name || item.status !== 'success') return '';
+  if (!item || item.status !== 'success' || !isWorkspaceRefreshEvent(item)) return '';
   const changedPaths = Array.isArray(item.changed_paths) ? item.changed_paths.join('|') : '';
+  const moved = Array.isArray(item.moved)
+    ? item.moved.map((move) => `${move?.old_path || ''}>${move?.new_path || ''}:${move?.status || ''}`).join('|')
+    : '';
   return [
+    item.type || '',
     item.tool_call_id || '',
     item.operation_hash || '',
     item.tool_name || '',
+    item.operation || '',
     item.path || '',
     item.old_path || '',
     item.new_path || '',
     item.hash || '',
     item.version_id || '',
     changedPaths,
+    moved,
   ].join('\u0001');
 }
 

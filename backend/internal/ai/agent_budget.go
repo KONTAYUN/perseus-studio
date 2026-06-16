@@ -136,7 +136,7 @@ func (r *agentRuntime) fallbackBudgetSummary(info *BudgetExhaustionInfo) string 
 func (r *agentRuntime) budgetResumeCheckpoint(info *BudgetExhaustionInfo) AgentRuntimeCheckpoint {
 	checkpoint := r.checkpoint()
 	checkpoint.Transcript = newAgentTranscript()
-	checkpoint.Transcript.AppendUserText("上一轮已达到执行预算上限，并已向用户总结当前进度。请根据上一条 assistant 总结、当前 workspace 状态和已验证工具事件继续；不要重复已经成功执行的 workspace 变更。需要更多信息时继续调用工具，完成后调用 attempt_completion。", map[string]any{
+	checkpoint.Transcript.AppendRuntimeObservation("上一轮已达到执行预算上限，并已向用户总结当前进度。请根据上一条 assistant 总结、当前 workspace 状态和已验证工具事件继续；不要重复已经成功执行的 workspace 变更。需要更多信息时继续调用工具，完成后调用 attempt_completion。", map[string]any{
 		"reason":         IncompleteReasonBudgetExhausted,
 		"budget_reason":  info.Reason,
 		"max_rounds":     info.MaxRounds,

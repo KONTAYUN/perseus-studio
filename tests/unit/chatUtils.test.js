@@ -220,7 +220,7 @@ test('shouldReloadWorkspaceForToolEvents reloads for AI file writes', () => {
   );
   assert.equal(
     shouldReloadWorkspaceForToolEvents([{ tool_name: 'legacy_unknown', status: 'success', changed_paths: ['new-file.md'] }]),
-    true
+    false
   );
   assert.equal(
     shouldReloadWorkspaceForToolEvents([{ tool_name: 'save_workspace_file', status: 'failed', path: 'new-file.md' }]),

@@ -18,10 +18,11 @@ type ProviderUsage struct {
 type transcriptEntryKind string
 
 const (
-	transcriptEntryAssistant         transcriptEntryKind = "assistant"
-	transcriptEntryTool              transcriptEntryKind = "tool"
-	transcriptEntryUser              transcriptEntryKind = "user"
-	transcriptEntryCompactionSummary transcriptEntryKind = "compaction_summary"
+	transcriptEntryAssistant          transcriptEntryKind = "assistant"
+	transcriptEntryTool               transcriptEntryKind = "tool"
+	transcriptEntryUser               transcriptEntryKind = "user"
+	transcriptEntryRuntimeObservation transcriptEntryKind = "runtime_observation"
+	transcriptEntryCompactionSummary  transcriptEntryKind = "compaction_summary"
 )
 
 type AgentTranscript struct {
@@ -84,6 +85,17 @@ func (t *AgentTranscript) AppendUserText(text string, metadata map[string]any) {
 	}
 	t.Entries = append(t.Entries, TranscriptEntry{
 		Kind:     transcriptEntryUser,
+		Text:     text,
+		Metadata: cloneMapAny(metadata),
+	})
+}
+
+func (t *AgentTranscript) AppendRuntimeObservation(text string, metadata map[string]any) {
+	if t == nil {
+		return
+	}
+	t.Entries = append(t.Entries, TranscriptEntry{
+		Kind:     transcriptEntryRuntimeObservation,
 		Text:     text,
 		Metadata: cloneMapAny(metadata),
 	})

@@ -64,6 +64,9 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 			}
 		}
 	}
+	workingSet := currentReadWorkingSetFromTranscript(transcript, 4)
+	summary.CurrentReadWorkingSetPaths = currentReadWorkingSetPaths(workingSet)
+	summary.CurrentReadWorkingSetRanges = currentReadWorkingSetLabels(workingSet)
 	for _, item := range messages {
 		size := estimateMessageChars(item)
 		summary.EstimatedChars += size

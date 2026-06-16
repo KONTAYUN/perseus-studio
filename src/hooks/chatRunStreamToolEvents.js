@@ -7,6 +7,7 @@ export function toolEventFromPayload(payload = {}) {
     old_path: payload.old_path || '',
     new_path: payload.new_path || '',
     changed_paths: payload.changed_paths || [],
+    operation: payload.operation || '',
     hash: payload.hash || '',
     version_id: payload.version_id || '',
   };

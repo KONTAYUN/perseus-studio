@@ -62,7 +62,7 @@ func preferNumberedReadContentForModel(payload map[string]any) {
 		payload["content_omitted_for_model"] = true
 	}
 	payload["read_content_state"] = string(ReadContentStateAvailable)
-	payload["model_view"] = "numbered_content is the single file view; re-read a narrower range if needed."
+	payload["model_view"] = "numbered_content is the reusable current file view for this range; re-read only if exact text outside this range is needed, this view is truncated, or the file changed later."
 }
 
 func trimReadContentFields(payload map[string]any, maxRunes int) {
@@ -84,7 +84,7 @@ func budgetBatchReadPayload(payload map[string]any, profile providerRuntimeProfi
 		trimReadContentFields(object, profile.MaxReadFileContentRunes)
 	}
 	payload["items"] = rawItems
-	payload["model_view"] = "Batch read items use one file view per item; re-read narrower ranges if needed."
+	payload["model_view"] = "Batch read items use one reusable file view per item; re-read a specific path/range only when its exact text is missing, truncated, or stale after a later file change."
 }
 
 func fitPayloadStringFieldsToBudget(payload map[string]any, keys []string, maxRunes int) bool {

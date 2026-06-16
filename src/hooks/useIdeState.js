@@ -155,13 +155,13 @@ export default function useIdeState(options = {}) {
     }
     for (const event of freshSuccessfulEvents) {
       if (
-        event.tool_name === 'manage_workspace_path' &&
+        (event.operation === 'move' || event.operation === 'rename' || event.operation === 'organize') &&
         event.old_path &&
         event.new_path &&
         !isAnyTrashPath(event.new_path)
       ) {
         applyPathUpdate(event.old_path, event.new_path);
-      } else if (event.tool_name === 'manage_workspace_path' && isAnyTrashPath(event.new_path)) {
+      } else if ((event.operation === 'delete' || event.operation === 'trash') && isAnyTrashPath(event.new_path)) {
         clearPathState(event.old_path || event.path);
       }
     }

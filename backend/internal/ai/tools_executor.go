@@ -9,6 +9,7 @@ import (
 
 	"webide-backend/internal/idgen"
 	"webide-backend/internal/store"
+	"webide-backend/internal/workspace"
 )
 
 func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, messageID, name, argumentsJSON, operationHash string, opts RunOptions, profile providerRuntimeProfile) (string, ToolEvent, error) {
@@ -112,6 +113,8 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 			OldPath       string   `json:"old_path"`
 			NewPath       string   `json:"new_path"`
 			ChangedPaths  []string `json:"changed_paths"`
+			Moved         []WorkspacePathMove `json:"moved"`
+			Operation     string   `json:"operation"`
 			Question      string   `json:"question"`
 			Options       []string `json:"options"`
 			AllowFreeform *bool    `json:"allow_freeform"`
@@ -134,6 +137,8 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 			event.OldPath = meta.OldPath
 			event.NewPath = meta.NewPath
 			event.ChangedPaths = meta.ChangedPaths
+			event.Moved = meta.Moved
+			event.Operation = meta.Operation
 			event.Question = meta.Question
 			event.Options = meta.Options
 			event.AllowFreeform = meta.AllowFreeform
@@ -207,6 +212,13 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		if len(event.ChangedPaths) > 0 {
 			eventPayload["changed_paths"] = event.ChangedPaths
 		}
+		if len(event.Moved) > 0 {
+			eventPayload["moved"] = event.Moved
+		}
+		event.Operation = workspaceFileChangedOperation(name, event)
+		if event.Operation != "" {
+			eventPayload["operation"] = event.Operation
+		}
 		if event.Hash != "" {
 			eventPayload["hash"] = event.Hash
 		}
@@ -228,6 +240,8 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 				"old_path":       event.OldPath,
 				"new_path":       event.NewPath,
 				"changed_paths":  event.ChangedPaths,
+				"moved":          event.Moved,
+				"operation":      event.Operation,
 				"hash":           event.Hash,
 				"version_id":     event.VersionID,
 				"operation_hash": event.OperationHash,
@@ -261,4 +275,32 @@ func shouldEmitWorkspaceFileChanged(name string, event ToolEvent) bool {
 		return true
 	}
 	return name == "run_workspace_command" && len(event.ChangedPaths) > 0
+}
+
+func workspaceFileChangedOperation(name string, event ToolEvent) string {
+	if event.Operation != "" {
+		return event.Operation
+	}
+	switch name {
+	case "apply_workspace_patch":
+		return "patch"
+	case "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write", "edit_workspace_text", "replace_workspace_lines":
+		return "update"
+	case "organize_workspace_matches":
+		return "organize"
+	case "run_workspace_command":
+		if len(event.ChangedPaths) > 0 {
+			return "command_unknown"
+		}
+	case "manage_workspace_path":
+		switch {
+		case event.OldPath != "" && event.NewPath != "" && (workspace.IsTrashPath(event.NewPath) || workspace.IsLegacyTrashPath(event.NewPath)):
+			return "trash"
+		case event.OldPath != "" && event.NewPath != "":
+			return "move"
+		case event.Path != "":
+			return "mkdir"
+		}
+	}
+	return ""
 }

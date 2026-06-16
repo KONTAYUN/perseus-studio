@@ -66,6 +66,8 @@ type ToolEvent struct {
 	OldPath       string   `json:"old_path,omitempty"`
 	NewPath       string   `json:"new_path,omitempty"`
 	ChangedPaths  []string `json:"changed_paths,omitempty"`
+	Moved         []WorkspacePathMove `json:"moved,omitempty"`
+	Operation     string   `json:"operation,omitempty"`
 	VersionID     string   `json:"version_id,omitempty"`
 	Hash          string   `json:"hash,omitempty"`
 	Command       string   `json:"command,omitempty"`
@@ -78,6 +80,13 @@ type ToolEvent struct {
 	URL           string   `json:"url,omitempty"`
 	Error         string   `json:"error,omitempty"`
 	DurationMS    int64    `json:"duration_ms,omitempty"`
+}
+
+type WorkspacePathMove struct {
+	OldPath string `json:"old_path"`
+	NewPath string `json:"new_path,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 type WebSearchResult struct {

@@ -18,14 +18,25 @@ const (
 
 const ToolCapabilityFileContentEditing = "file_content_editing"
 
+type ModelActionKind string
+
+const (
+	ModelActionJSONTool ModelActionKind = "json_tool"
+	ModelActionText     ModelActionKind = "text_action"
+	ModelActionTerminal ModelActionKind = "terminal_action"
+)
+
 type ToolManifestEntry struct {
 	Name                string
 	Toolset             string
 	Group               ToolGroup
 	ProviderVisible     bool
+	ModelVisible        bool
 	Mutation            bool
 	LegacyCompat        bool
 	Transport           ToolTransport
+	ActionKind          ModelActionKind
+	Terminal            bool
 	StatusKind          string
 	Label               string
 	RecoveryProtocol    string
@@ -33,34 +44,85 @@ type ToolManifestEntry struct {
 	Description         string
 }
 
-var toolManifestEntries = []ToolManifestEntry{
-	{Name: "attempt_completion", Group: ToolGroupCompletion, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已完成任务", StatusKind: "completion"},
-	{Name: "ask_followup_question", Group: ToolGroupQuestion, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已询问用户", StatusKind: "question"},
-	{Name: "load_perseus_toolset", Group: ToolGroupTask, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已处理", StatusKind: "toolset"},
+type ModelActionManifest struct {
+	JSONTools          []ModelJSONToolAction `json:"json_tools,omitempty"`
+	TextActions        []ModelTextAction     `json:"text_actions,omitempty"`
+	TerminalActions    []ModelTerminalAction `json:"terminal_actions,omitempty"`
+	Capabilities       map[string]any        `json:"capabilities,omitempty"`
+	WorkspaceState     *ModelWorkspaceState  `json:"workspace_state,omitempty"`
+	NextActionRules    []string              `json:"next_action_rules,omitempty"`
+	ToolManifestDigest string                `json:"tool_manifest_digest,omitempty"`
+}
 
-	{Name: "find_workspace_files", Toolset: "workspace", Group: ToolGroupSearch, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已查看工作区", StatusKind: "workspace_search"},
-	{Name: "search_workspace_text", Toolset: "workspace", Group: ToolGroupSearch, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已查看工作区", StatusKind: "workspace_search"},
-	{Name: "inspect_workspace", Toolset: "workspace", Group: ToolGroupSearch, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已查看工作区", StatusKind: "workspace_search"},
-	{Name: "read_workspace_text", Toolset: "workspace", Group: ToolGroupRead, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已读取文件", StatusKind: "workspace_read"},
-	{Name: "read_workspace_files", Toolset: "workspace", Group: ToolGroupRead, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已读取文件", StatusKind: "workspace_read"},
-	{Name: "manage_workspace_path", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, Mutation: true, Transport: ToolTransportJSON, Label: "已管理路径", StatusKind: "workspace_path"},
-	{Name: "organize_workspace_matches", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, Mutation: true, Transport: ToolTransportJSON, Label: "已整理文件", StatusKind: "workspace_path"},
-	{Name: "apply_workspace_patch", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, Transport: ToolTransportAssistantTextPatch, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch", PrimaryEditProtocol: true},
+type ModelWorkspaceState struct {
+	CurrentReadWorkingSet CurrentReadWorkingSet `json:"current_read_working_set,omitempty"`
+}
+
+type CurrentReadWorkingSet struct {
+	Available bool                  `json:"available"`
+	Spans     []CurrentReadSpanView `json:"spans,omitempty"`
+}
+
+type CurrentReadSpanView struct {
+	Path                            string `json:"path"`
+	StartLine                       int    `json:"start_line,omitempty"`
+	EndLine                         int    `json:"end_line,omitempty"`
+	TotalLines                      int    `json:"total_lines,omitempty"`
+	ReadContentState                string `json:"read_content_state"`
+	ContentAvailableInRecentContext bool   `json:"content_available_in_recent_context"`
+}
+
+type ModelJSONToolAction struct {
+	Name      string        `json:"name"`
+	Toolset   string        `json:"toolset,omitempty"`
+	Group     ToolGroup     `json:"group,omitempty"`
+	Transport ToolTransport `json:"transport"`
+}
+
+type ModelTextAction struct {
+	Name      string        `json:"name"`
+	Toolset   string        `json:"toolset,omitempty"`
+	Group     ToolGroup     `json:"group,omitempty"`
+	Transport ToolTransport `json:"transport"`
+	Syntax    string        `json:"syntax,omitempty"`
+	Primary   bool          `json:"primary,omitempty"`
+}
+
+type ModelTerminalAction struct {
+	Name      string        `json:"name"`
+	Group     ToolGroup     `json:"group,omitempty"`
+	Transport ToolTransport `json:"transport"`
+	Terminal  bool          `json:"terminal"`
+}
+
+var toolManifestEntries = []ToolManifestEntry{
+	{Name: "attempt_completion", Group: ToolGroupCompletion, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionTerminal, Terminal: true, Label: "已完成任务", StatusKind: "completion"},
+	{Name: "ask_followup_question", Group: ToolGroupQuestion, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已询问用户", StatusKind: "question"},
+	{Name: "load_perseus_toolset", Group: ToolGroupTask, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已处理", StatusKind: "toolset"},
+
+	{Name: "find_workspace_files", Toolset: "workspace", Group: ToolGroupSearch, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已查看工作区", StatusKind: "workspace_search"},
+	{Name: "search_workspace_text", Toolset: "workspace", Group: ToolGroupSearch, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已查看工作区", StatusKind: "workspace_search"},
+	{Name: "inspect_workspace", Toolset: "workspace", Group: ToolGroupSearch, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已查看工作区", StatusKind: "workspace_search"},
+	{Name: "read_workspace_text", Toolset: "workspace", Group: ToolGroupRead, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已读取文件", StatusKind: "workspace_read"},
+	{Name: "read_workspace_files", Toolset: "workspace", Group: ToolGroupRead, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已读取文件", StatusKind: "workspace_read"},
+	{Name: "manage_workspace_path", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已管理路径", StatusKind: "workspace_path"},
+	{Name: "organize_workspace_matches", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已整理文件", StatusKind: "workspace_path"},
+	{Name: "apply_workspace_patch", Toolset: "workspace", Group: ToolGroupEdit, ModelVisible: true, Mutation: true, Transport: ToolTransportAssistantTextPatch, ActionKind: ModelActionText, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch", PrimaryEditProtocol: true},
 	{Name: "edit_workspace_text", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
 	{Name: "replace_workspace_lines", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
 	{Name: "save_workspace_file", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
 	{Name: "write_workspace_chunk", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
 	{Name: "finalize_workspace_write", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
 
-	{Name: "run_workspace_command", Toolset: "command", Group: ToolGroupCommand, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已运行命令", StatusKind: "command"},
-	{Name: "perseus_search_web", Toolset: "search", Group: ToolGroupWeb, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已搜索资料", StatusKind: "web"},
+	{Name: "run_workspace_command", Toolset: "command", Group: ToolGroupCommand, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已运行命令", StatusKind: "command"},
+	{Name: "perseus_search_web", Toolset: "search", Group: ToolGroupWeb, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已搜索资料", StatusKind: "web"},
 	{Name: "web_search", Toolset: "search", Group: ToolGroupWeb, Transport: ToolTransportLegacyCompat, Label: "已搜索资料", StatusKind: "web"},
-	{Name: "web_extract", Toolset: "search", Group: ToolGroupWeb, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已读取网页", StatusKind: "web"},
-	{Name: "list_skills", Toolset: "skills", Group: ToolGroupSkill, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已处理技能", StatusKind: "skill"},
-	{Name: "read_skill", Toolset: "skills", Group: ToolGroupSkill, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已处理技能", StatusKind: "skill"},
-	{Name: "install_skill_from_attachment", Toolset: "skills", Group: ToolGroupSkill, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已处理技能", StatusKind: "skill"},
-	{Name: "delete_skill", Toolset: "skills", Group: ToolGroupSkill, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已处理技能", StatusKind: "skill"},
-	{Name: "start_background_task", Toolset: "task", Group: ToolGroupTask, ProviderVisible: true, Transport: ToolTransportJSON, Label: "已启动后台任务", StatusKind: "task"},
+	{Name: "web_extract", Toolset: "search", Group: ToolGroupWeb, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已读取网页", StatusKind: "web"},
+	{Name: "list_skills", Toolset: "skills", Group: ToolGroupSkill, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已处理技能", StatusKind: "skill"},
+	{Name: "read_skill", Toolset: "skills", Group: ToolGroupSkill, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已处理技能", StatusKind: "skill"},
+	{Name: "install_skill_from_attachment", Toolset: "skills", Group: ToolGroupSkill, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已处理技能", StatusKind: "skill"},
+	{Name: "delete_skill", Toolset: "skills", Group: ToolGroupSkill, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已处理技能", StatusKind: "skill"},
+	{Name: "start_background_task", Toolset: "task", Group: ToolGroupTask, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已启动后台任务", StatusKind: "task"},
 }
 
 var toolManifestByName = buildToolManifestByName()
@@ -80,14 +142,17 @@ func toolManifestEntry(name string) (ToolManifestEntry, bool) {
 
 func toolManifestDigest() string {
 	type digestEntry struct {
-		Name                string        `json:"name"`
-		Toolset             string        `json:"toolset,omitempty"`
-		Group               ToolGroup     `json:"group,omitempty"`
-		ProviderVisible     bool          `json:"provider_visible,omitempty"`
-		Mutation            bool          `json:"mutation,omitempty"`
-		LegacyCompat        bool          `json:"legacy_compat,omitempty"`
-		Transport           ToolTransport `json:"transport,omitempty"`
-		PrimaryEditProtocol bool          `json:"primary_edit_protocol,omitempty"`
+		Name                string          `json:"name"`
+		Toolset             string          `json:"toolset,omitempty"`
+		Group               ToolGroup       `json:"group,omitempty"`
+		ProviderVisible     bool            `json:"provider_visible,omitempty"`
+		ModelVisible        bool            `json:"model_visible,omitempty"`
+		Mutation            bool            `json:"mutation,omitempty"`
+		LegacyCompat        bool            `json:"legacy_compat,omitempty"`
+		Transport           ToolTransport   `json:"transport,omitempty"`
+		ActionKind          ModelActionKind `json:"action_kind,omitempty"`
+		Terminal            bool            `json:"terminal,omitempty"`
+		PrimaryEditProtocol bool            `json:"primary_edit_protocol,omitempty"`
 	}
 	items := make([]digestEntry, 0, len(toolManifestEntries))
 	for _, entry := range toolManifestEntries {
@@ -96,9 +161,12 @@ func toolManifestDigest() string {
 			Toolset:             entry.Toolset,
 			Group:               entry.Group,
 			ProviderVisible:     entry.ProviderVisible,
+			ModelVisible:        entry.ModelVisible,
 			Mutation:            entry.Mutation,
 			LegacyCompat:        entry.LegacyCompat,
 			Transport:           entry.Transport,
+			ActionKind:          entry.ActionKind,
+			Terminal:            entry.Terminal,
 			PrimaryEditProtocol: entry.PrimaryEditProtocol,
 		})
 	}
@@ -164,7 +232,7 @@ func toolsetInstruction(toolset string) string {
 	if toolset != "workspace" {
 		return "Continue with the newly loaded JSON tools when they are needed for the user's request."
 	}
-	return "json_tools lists JSON-callable workspace tools for locating, reading, and managing paths. File content editing is provided by capabilities.file_content_editing: output a complete *** Begin Patch / *** End Patch patch block directly in assistant text, and the backend captures, verifies, and applies it as the workspace edit."
+	return "json_tools lists JSON-callable workspace tools for locating, reading, and managing paths. text_actions lists first-class non-JSON actions. File content editing uses the apply_workspace_patch text action: output one complete *** Begin Patch / *** End Patch block directly in assistant text, and the backend captures, verifies, and applies it as the workspace edit. terminal_actions lists final-only actions; attempt_completion cannot create or modify files."
 }
 
 func providerVisibleToolNames(loaded map[string]bool, includeLoader bool, role string) []string {
@@ -228,6 +296,93 @@ func manifestToolIsMutation(name string) bool {
 func manifestToolIsLegacyCompat(name string) bool {
 	entry, ok := toolManifestEntry(name)
 	return ok && entry.LegacyCompat
+}
+
+func modelActionManifest(loaded map[string]bool, includeLoader bool, role string) ModelActionManifest {
+	role = normalizeRunUserRole(role)
+	loaded = normalizeModelActionLoadedToolsets(loaded)
+	manifest := ModelActionManifest{
+		Capabilities:       map[string]any{},
+		ToolManifestDigest: toolManifestDigest(),
+	}
+	for _, entry := range toolManifestEntries {
+		if !entry.ModelVisible || !toolVisibleForRole(entry.Name, role) {
+			continue
+		}
+		if entry.Toolset != "" && !loaded[entry.Toolset] {
+			continue
+		}
+		if entry.Toolset == "" && entry.Name == "load_perseus_toolset" && !includeLoader {
+			continue
+		}
+		switch entry.ActionKind {
+		case ModelActionTerminal:
+			manifest.TerminalActions = append(manifest.TerminalActions, ModelTerminalAction{
+				Name:      entry.Name,
+				Group:     entry.Group,
+				Transport: entry.Transport,
+				Terminal:  true,
+			})
+		case ModelActionText:
+			manifest.TextActions = append(manifest.TextActions, ModelTextAction{
+				Name:      entry.Name,
+				Toolset:   entry.Toolset,
+				Group:     entry.Group,
+				Transport: entry.Transport,
+				Syntax:    textActionSyntax(entry),
+				Primary:   entry.PrimaryEditProtocol,
+			})
+		default:
+			if !entry.ProviderVisible {
+				continue
+			}
+			manifest.JSONTools = append(manifest.JSONTools, ModelJSONToolAction{
+				Name:      entry.Name,
+				Toolset:   entry.Toolset,
+				Group:     entry.Group,
+				Transport: entry.Transport,
+			})
+		}
+	}
+	if loaded["workspace"] {
+		manifest.Capabilities = toolsetCapabilities("workspace")
+	}
+	if len(manifest.Capabilities) == 0 {
+		manifest.Capabilities = nil
+	}
+	manifest.NextActionRules = modelActionRules(loaded)
+	return manifest
+}
+
+func normalizeModelActionLoadedToolsets(loaded map[string]bool) map[string]bool {
+	next := map[string]bool{"workspace": true}
+	for key, value := range loaded {
+		if value && strings.TrimSpace(key) != "" {
+			next[key] = true
+		}
+	}
+	return next
+}
+
+func textActionSyntax(entry ToolManifestEntry) string {
+	if entry.PrimaryEditProtocol && entry.Transport == ToolTransportAssistantTextPatch {
+		return "*** Begin Patch ... *** End Patch"
+	}
+	return ""
+}
+
+func modelActionRules(loaded map[string]bool) []string {
+	rules := []string{
+		"Use json_tools for locating current state, reading file ranges, managing paths, asking follow-up questions, or loading optional toolsets.",
+		"Reuse current_read_working_set and recent read observations when read_content_state is available; do not reread the same current file just because current_file_context metadata is present.",
+		"Read workspace text only when exact current file content is needed and no usable recent read exists, or when the needed range is missing, truncated, stale after mutation, or outside the preserved recent context.",
+		"Use text_actions.apply_workspace_patch for any file content creation, update, delete, or move; output the complete patch block as assistant text, not JSON.",
+		"Use terminal_actions.attempt_completion only after required tool/text actions have succeeded or an unrecoverable failure is honestly reported.",
+	}
+	if loaded["workspace"] {
+		rules = append(rules, "Workspace file content changes are not performed by attempt_completion; they require a verified workspace edit action first.")
+	}
+	return rules
 }
 
 func manifestToolTransport(name string) ToolTransport {

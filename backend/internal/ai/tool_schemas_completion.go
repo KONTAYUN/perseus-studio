@@ -13,11 +13,10 @@ func completionParams() map[string]any {
 		"type":     "object",
 		"required": []string{"result"},
 		"properties": map[string]any{
-			"result":        map[string]any{"type": "string", "description": "Final user-visible answer. Include the actual requested steps, answer, or deliverable here; do not merely summarize that it was prepared."},
-			"summary":       map[string]any{"type": "string", "description": "Optional concise metadata summary of what was completed. This is not a substitute for result."},
-			"changed_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Workspace paths changed, created, moved, or deleted during this task. Include at least one verified path for every successful workspace mutation."},
-			"failed_items":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Items that could not be completed, if any."},
-			"notes":         map[string]any{"type": "string", "description": "Optional short caveats or follow-up notes."},
+			"result":       map[string]any{"type": "string", "description": "Final user-visible answer. Include the actual requested answer or completion note. This terminal action cannot create, modify, move, or delete workspace files."},
+			"summary":      map[string]any{"type": "string", "description": "Optional concise metadata summary of what was completed. This is not a substitute for result."},
+			"failed_items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Items that could not be completed after a real tool/action failure, if any."},
+			"notes":        map[string]any{"type": "string", "description": "Optional short caveats or follow-up notes."},
 		},
 	}
 }

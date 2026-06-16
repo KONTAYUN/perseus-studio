@@ -731,6 +731,52 @@ func TestAttemptCompletionSchemaRequiresResult(t *testing.T) {
 	if _, ok := props["result"]; !ok {
 		t.Fatalf("attempt_completion properties missing result: %#v", props)
 	}
+	if _, ok := props["changed_paths"]; ok {
+		t.Fatalf("attempt_completion schema must not expose changed_paths; backend derives verified paths")
+	}
+}
+
+func TestModelActionManifestExposesPatchAsTextAction(t *testing.T) {
+	manifest := modelActionManifest(map[string]bool{"workspace": true}, true, "admin")
+	if !containsModelJSONTool(manifest, "read_workspace_text") || !containsModelJSONTool(manifest, "manage_workspace_path") {
+		t.Fatalf("workspace JSON tools missing from action manifest: %#v", manifest.JSONTools)
+	}
+	if !containsModelTextAction(manifest, "apply_workspace_patch") {
+		t.Fatalf("apply_workspace_patch must be a model-visible text action: %#v", manifest.TextActions)
+	}
+	if !containsModelTerminalAction(manifest, "attempt_completion") {
+		t.Fatalf("attempt_completion must be terminal action: %#v", manifest.TerminalActions)
+	}
+	if containsModelJSONTool(manifest, "apply_workspace_patch") {
+		t.Fatalf("apply_workspace_patch must not be a JSON tool action: %#v", manifest.JSONTools)
+	}
+}
+
+func containsModelJSONTool(manifest ModelActionManifest, name string) bool {
+	for _, item := range manifest.JSONTools {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func containsModelTextAction(manifest ModelActionManifest, name string) bool {
+	for _, item := range manifest.TextActions {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func containsModelTerminalAction(manifest ModelActionManifest, name string) bool {
+	for _, item := range manifest.TerminalActions {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAgentRecoveryDefaultsFollowMatureRetryPolicy(t *testing.T) {
@@ -1836,7 +1882,7 @@ func TestExecuteAndRecordRunWorkspaceCommandEmitsWorkspaceChangeWhenFilesChange(
 	if event.Status != "success" || len(event.ChangedPaths) != 1 || event.ChangedPaths[0] != "command-output.txt" {
 		t.Fatalf("expected command mutation event, got %#v", event)
 	}
-	if changed == nil || !containsAnyPath(changed["changed_paths"], "command-output.txt") || changed["tool_name"] != "run_workspace_command" {
+	if changed == nil || !containsAnyPath(changed["changed_paths"], "command-output.txt") || changed["tool_name"] != "run_workspace_command" || changed["operation"] != "command_unknown" {
 		t.Fatalf("expected workspace_file_changed event for command mutation, events=%#v changed=%#v", events, changed)
 	}
 	read, err := files.ReadFile("command-output.txt")
@@ -2715,8 +2761,11 @@ func TestHandleNoToolTurnRejectsPlainTextBeforeToolSucceeds(t *testing.T) {
 		t.Fatal("expected corrective message appended to transcript")
 	}
 	last := runtime.transcript.Entries[len(runtime.transcript.Entries)-1]
-	if last.Kind != transcriptEntryUser || !strings.Contains(last.Text, "没有继续调用工具") {
+	if last.Kind != transcriptEntryRuntimeObservation || !strings.Contains(last.Text, `"status":"action_rejected"`) || strings.Contains(last.Text, `"required_next_action":"apply_workspace_patch"`) {
 		t.Fatalf("unexpected corrective transcript entry: %#v", last)
+	}
+	if !strings.Contains(last.Text, `"allowed_next_actions"`) {
+		t.Fatalf("expected allowed next actions in corrective observation: %#v", last)
 	}
 }
 
@@ -2739,8 +2788,11 @@ func TestHandleNoToolTurnUsesWorkspaceReferenceActionBoundary(t *testing.T) {
 		t.Fatal("expected corrective message appended to transcript")
 	}
 	last := runtime.transcript.Entries[len(runtime.transcript.Entries)-1]
-	if last.Kind != transcriptEntryUser || !strings.Contains(last.Text, "不能完成当前任务") {
+	if last.Kind != transcriptEntryRuntimeObservation || !strings.Contains(last.Text, `"status":"action_rejected"`) || !strings.Contains(last.Text, `"model_action_manifest"`) {
 		t.Fatalf("unexpected corrective transcript entry: %#v", last)
+	}
+	if strings.Contains(last.Text, `"required_next_action":"apply_workspace_patch"`) {
+		t.Fatalf("read-only workspace reference should not force patch action: %#v", last)
 	}
 }
 

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -66,13 +67,46 @@ func (r *agentRuntime) restoreLatestCheckpointForRecovery(ctx context.Context, e
 		return false
 	}
 	r.restoreCheckpoint(checkpoint)
-	r.transcript.AppendUserText("上一轮模型供应商连接中断。请从已有工具结果和当前断点继续，不要重复已经成功执行的 workspace 变更；需要更多信息时继续调用工具，完成后调用 attempt_completion。", map[string]any{
+	r.transcript.AppendRuntimeObservation(r.recoveryObservation("provider_connection_interrupted", err, checkpoint.Seq), map[string]any{
 		"reason":         "checkpoint_resume_after_provider_error",
 		"attempt":        r.checkpointResumeAttempts,
 		"checkpoint_seq": checkpoint.Seq,
 		"diagnostic_id":  diagID,
 	})
 	return true
+}
+
+type RecoveryObservation struct {
+	Status               string   `json:"status"`
+	ReasonCode           string   `json:"reason_code"`
+	Message              string   `json:"message"`
+	Attempt              int      `json:"attempt"`
+	MaxAttempts          int      `json:"max_attempts"`
+	CheckpointSeq        int64    `json:"checkpoint_seq,omitempty"`
+	VerifiedChangedPaths []string `json:"verified_changed_paths,omitempty"`
+	RequiredRule         string   `json:"required_rule"`
+}
+
+func (r *agentRuntime) recoveryObservation(reasonCode string, err error, checkpointSeq int64) string {
+	observation := RecoveryObservation{
+		Status:               "recovery_observation",
+		ReasonCode:           strings.TrimSpace(reasonCode),
+		Message:              "A provider connection failed after checkpointed work. Continue from verified tool results and current workspace facts; do not repeat verified workspace mutations.",
+		Attempt:              r.checkpointResumeAttempts,
+		MaxAttempts:          agentMaxCheckpointResumes(),
+		CheckpointSeq:        checkpointSeq,
+		VerifiedChangedPaths: r.verifiedWorkspaceChangedPaths(),
+		RequiredRule:         "Use a valid next action; call attempt_completion only after required actions have succeeded or an unrecoverable failure is honestly reported.",
+	}
+	if observation.ReasonCode == "" && err != nil {
+		observation.ReasonCode = providerTransportFailureClass(err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"observation":           observation,
+		"workspace_edit_state":  r.workspaceEditActionState(),
+		"model_action_manifest": r.currentModelActionManifest(),
+	})
+	return string(raw)
 }
 
 func (r *agentRuntime) emitCheckpointRecoveryCompleted() {

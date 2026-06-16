@@ -77,7 +77,7 @@ test('filterTabsOutsidePath removes deleted file or folder descendants', () => {
 
 test('isSuccessfulEditorToolEvent accepts only successful editor-affecting tools', () => {
   assert.equal(isSuccessfulEditorToolEvent({ status: 'success', type: 'workspace_file_changed', changed_paths: ['notes/a.md'] }), true);
-  assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'unknown_tool', changed_paths: ['notes/a.md'] }), true);
+  assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'unknown_tool', changed_paths: ['notes/a.md'] }), false);
   assert.equal(isSuccessfulEditorToolEvent({ status: 'failed', tool_name: 'save_workspace_file' }), false);
   assert.equal(isSuccessfulEditorToolEvent({ status: 'success', tool_name: 'web_search' }), false);
 });
@@ -99,7 +99,7 @@ test('buildActiveFileToolPlan refreshes clean active file after AI write', () =>
 
 test('buildActiveFileToolPlan refreshes clean active file after precise AI edit', () => {
   const plan = buildActiveFileToolPlan(
-    [{ status_kind: 'workspace_edit', path: 'notes/a.md', hash: 'h-edit', version_id: 'v-edit' }],
+    [{ type: 'workspace_file_changed', operation: 'patch', path: 'notes/a.md', changed_paths: ['notes/a.md'], hash: 'h-edit', version_id: 'v-edit' }],
     { activePath: 'notes/a.md', dirty: false }
   );
 
@@ -141,18 +141,13 @@ test('buildActiveFileToolPlan refreshes active file from changed_paths', () => {
   });
 });
 
-test('buildActiveFileToolPlan uses status kind for historical mutation refresh', () => {
+test('buildActiveFileToolPlan ignores historical mutation events without workspace change type', () => {
   const plan = buildActiveFileToolPlan(
     [{ tool_name: 'historical_write', status_kind: 'workspace_edit', changed_paths: ['drafts/long.txt'], hash: 'h-final' }],
     { activePath: 'drafts/long.txt', dirty: false }
   );
 
-  assert.deepEqual(plan.reloadPlan, {
-    path: 'drafts/long.txt',
-    hash: 'h-final',
-    versionId: '',
-    statusMessage: '',
-  });
+  assert.deepEqual(plan.reloadPlan, null);
 });
 
 test('buildActiveFileToolPlan marks dirty active file conflict after AI write', () => {
@@ -172,7 +167,7 @@ test('buildActiveFileToolPlan marks dirty active file conflict after AI write', 
 
 test('buildActiveFileToolPlan remaps active file after rename', () => {
   const plan = buildActiveFileToolPlan(
-    [{ tool_name: 'manage_workspace_path', old_path: 'docs', new_path: 'notes', hash: 'h2' }],
+    [{ type: 'workspace_file_changed', operation: 'rename', old_path: 'docs', new_path: 'notes', changed_paths: ['docs', 'notes'], hash: 'h2' }],
     { activePath: 'docs/a.md', dirty: false }
   );
 
@@ -187,7 +182,7 @@ test('buildActiveFileToolPlan remaps active file after rename', () => {
 
 test('buildActiveFileToolPlan closes active file after delete', () => {
   const plan = buildActiveFileToolPlan(
-    [{ tool_name: 'manage_workspace_path', old_path: 'docs', new_path: `${TRASH_DIR}/docs` }],
+    [{ type: 'workspace_file_changed', operation: 'trash', old_path: 'docs', new_path: `${TRASH_DIR}/docs`, changed_paths: ['docs', `${TRASH_DIR}/docs`] }],
     { activePath: 'docs/a.md', dirty: true }
   );
 
@@ -199,7 +194,7 @@ test('buildActiveFileToolPlan closes active file after delete', () => {
 
 test('buildActiveFileToolPlan still recognizes legacy trash events', () => {
   const plan = buildActiveFileToolPlan(
-    [{ tool_name: 'manage_workspace_path', old_path: 'docs', new_path: `${LEGACY_TRASH_DIR}/docs` }],
+    [{ type: 'workspace_file_changed', operation: 'trash', old_path: 'docs', new_path: `${LEGACY_TRASH_DIR}/docs`, changed_paths: ['docs', `${LEGACY_TRASH_DIR}/docs`] }],
     { activePath: 'docs/a.md', dirty: false }
   );
 
@@ -210,8 +205,12 @@ test('buildActiveFileToolPlan still recognizes legacy trash events', () => {
 test('pathMovesFromToolEvent extracts batch organize path pairs', () => {
   assert.deepEqual(
     pathMovesFromToolEvent({
-      tool_name: 'organize_workspace_matches',
-      changed_paths: ['episodes/e29-a.md', 'episode-29/e29-a.md', 'episodes/e29-b.md', 'episode-29/e29-b.md'],
+      type: 'workspace_file_changed',
+      operation: 'organize',
+      moved: [
+        { old_path: 'episodes/e29-a.md', new_path: 'episode-29/e29-a.md', status: 'success' },
+        { old_path: 'episodes/e29-b.md', new_path: 'episode-29/e29-b.md', status: 'success' },
+      ],
     }),
     [
       { oldPath: 'episodes/e29-a.md', newPath: 'episode-29/e29-a.md' },
@@ -224,8 +223,12 @@ test('buildActiveFileToolPlan remaps active file after batch organize', () => {
   const plan = buildActiveFileToolPlan(
     [
       {
-        tool_name: 'organize_workspace_matches',
-        changed_paths: ['episodes/e29-a.md', 'episode-29/e29-a.md', 'episodes/e29-b.md', 'episode-29/e29-b.md'],
+        type: 'workspace_file_changed',
+        operation: 'organize',
+        moved: [
+          { old_path: 'episodes/e29-a.md', new_path: 'episode-29/e29-a.md', status: 'success' },
+          { old_path: 'episodes/e29-b.md', new_path: 'episode-29/e29-b.md', status: 'success' },
+        ],
       },
     ],
     { activePath: 'episodes/e29-b.md', dirty: false }
@@ -243,7 +246,8 @@ test('buildActiveFileToolPlan remaps active file after batch organize', () => {
 test('pathMovesFromToolEvent extracts direct move event', () => {
   assert.deepEqual(
     pathMovesFromToolEvent({
-      tool_name: 'manage_workspace_path',
+      type: 'workspace_file_changed',
+      operation: 'move',
       old_path: 'drafts',
       new_path: 'archive/drafts',
     }),

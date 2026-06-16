@@ -582,6 +582,21 @@ func TestProviderMessageBuilderPreservesRecentWorkingSetReadInToolLoop(t *testin
 	if !strings.Contains(text, "RECENT WORKING SET READ MUST REMAIN") {
 		t.Fatalf("recent working-set read body was lost: %s", text)
 	}
+	if !containsContextAction(snapshot.Summary.CurrentReadWorkingSetPaths, "draft.txt") {
+		t.Fatalf("expected working-set diagnostics to include draft.txt, got %#v", snapshot.Summary.CurrentReadWorkingSetPaths)
+	}
+	if !containsContextAction(snapshot.Summary.CurrentReadWorkingSetRanges, "draft.txt:1-160") {
+		t.Fatalf("expected working-set range diagnostic, got %#v", snapshot.Summary.CurrentReadWorkingSetRanges)
+	}
+	injected := injectModelActionManifest(agentProtocolOpenAI, snapshot, modelActionManifest(nil, true, "admin"))
+	injectedRaw, err := json.Marshal(injected.OpenAIMessages)
+	if err != nil {
+		t.Fatalf("marshal injected messages: %v", err)
+	}
+	injectedText := string(injectedRaw)
+	if !strings.Contains(injectedText, "current_read_working_set") || !strings.Contains(injectedText, "content_available_in_recent_context") {
+		t.Fatalf("expected action manifest to expose reusable current read working set: %s", injectedText)
+	}
 	for _, leaked := range []string{"compacted_context", "reference_only", "provider payload", "读取被压缩", "被系统压缩"} {
 		if strings.Contains(text, leaked) {
 			t.Fatalf("provider-visible context leaked internal phrase %q in %s", leaked, text)
@@ -625,6 +640,56 @@ func TestProviderMessageBuilderMayCompactCurrentReadInForcedRecovery(t *testing.
 	}
 	if !strings.Contains(text, "draft.txt") || !strings.Contains(text, "read_ranges") {
 		t.Fatalf("expected read range metadata after forced compaction: %s", text)
+	}
+}
+
+func TestCurrentFileAttachmentDoesNotForceReadLanguage(t *testing.T) {
+	content := buildUserTextWithAttachments("中文写吧", []AttachmentPayload{{
+		Kind:     "current_file",
+		Path:     "draft.txt",
+		Name:     "draft.txt",
+		FileType: "text",
+	}})
+	if strings.Contains(content, "需要内容时必须调用") || strings.Contains(content, "需要内容时请调用") {
+		t.Fatalf("current file attachment should not unconditionally force read: %s", content)
+	}
+	for _, want := range []string{"不代表本轮必须读取", "没有可复用 recent read observation/current_read_working_set"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected balanced read guidance %q in %s", want, content)
+		}
+	}
+}
+
+func TestModelActionManifestOmitsStaleCurrentReadWorkingSetAfterMutation(t *testing.T) {
+	transcript := newAgentTranscript()
+	appendReadRange(t, transcript, "read_1", "draft.txt", 1, 40, 80, "old exact text")
+	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
+		ID:            "patch_1",
+		Name:          "apply_workspace_patch",
+		ArgumentsJSON: `{"transport":"assistant_text_patch"}`,
+	}}})
+	transcript.AppendToolResults([]TranscriptToolResult{{
+		ToolCallID: "patch_1",
+		ToolName:   "apply_workspace_patch",
+		Content:    `{"status":"success","changed_paths":["draft.txt"]}`,
+		Event:      ToolEvent{ToolName: "apply_workspace_patch", Status: "success", Path: "draft.txt", ChangedPaths: []string{"draft.txt"}},
+	}})
+
+	snapshot := newAgentContextManager().Build(agentProtocolOpenAI, []store.Message{{Role: "user", Content: "继续编辑。"}}, nil, transcript, providerRuntimeProfile{}, 3)
+	injected := injectModelActionManifest(agentProtocolOpenAI, snapshot, modelActionManifest(nil, true, "admin"))
+	raw, err := json.Marshal(injected.OpenAIMessages)
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, `"current_read_working_set"`) {
+		t.Fatalf("stale read should not be exposed as reusable working set: %s", text)
+	}
+	if len(snapshot.Summary.CurrentReadWorkingSetPaths) != 0 || len(snapshot.Summary.CurrentReadWorkingSetRanges) != 0 {
+		t.Fatalf("stale read should not appear in working-set diagnostics: %#v %#v", snapshot.Summary.CurrentReadWorkingSetPaths, snapshot.Summary.CurrentReadWorkingSetRanges)
+	}
+	if strings.Contains(text, "old exact text") {
+		t.Fatalf("stale read body should be compacted after mutation: %s", text)
 	}
 }
 

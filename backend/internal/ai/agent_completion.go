@@ -24,22 +24,15 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 		r.recordToolError("attempt_completion", argumentsJSON, reason)
 		r.discardStreamedCompletionResult()
 		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
-		return r.toolErrorJSON("attempt_completion", reason), true, false
+		return r.actionRejectedObservation(reason, "attempt_completion", attempt.ChangedPaths), true, false
 	}
 	if r.performedMutation {
-		if len(attempt.ChangedPaths) == 0 {
-			reason := "workspace 变更任务完成时必须在 changed_paths 中列出已验证的变更路径。"
+		if !r.hasSuccessfulWorkspaceMutation() {
+			reason := "workspace 变更任务尚未产生后端已验证的成功变更，不能完成；attempt_completion 不能创建或修改文件。"
 			r.recordToolError("attempt_completion", argumentsJSON, reason)
 			r.discardStreamedCompletionResult()
 			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
-			return r.toolErrorJSON("attempt_completion", reason), true, false
-		}
-		if missing := r.completionPathsMissingMutations(attempt.ChangedPaths); len(missing) > 0 {
-			reason := "attempt_completion 的 changed_paths 没有覆盖本轮已验证的 workspace 变更：" + strings.Join(missing, ", ")
-			r.recordToolError("attempt_completion", argumentsJSON, reason)
-			r.discardStreamedCompletionResult()
-			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason, "missing_paths": missing})
-			return r.toolErrorJSON("attempt_completion", reason), true, false
+			return r.actionRejectedObservation(reason, "attempt_completion", attempt.ChangedPaths), true, false
 		}
 	}
 	previousFailure := r.lastToolFailure
@@ -52,17 +45,32 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 		}
 		r.discardStreamedCompletionResult()
 		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": rejected})
-		return r.toolErrorJSON("attempt_completion", rejected), true, false
+		return r.actionRejectedObservation(rejected, "attempt_completion", attempt.ChangedPaths), true, false
 	}
 	r.clearToolErrors()
-	content := attempt.Result
-	if strings.TrimSpace(attempt.Notes) != "" {
-		content += "\n\n" + strings.TrimSpace(attempt.Notes)
-	}
+	content := renderCompletionUserVisibleContent(attempt)
 	r.completedContent = content
 	r.finalizeActiveAssistantMessage(content)
 	emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
-	return mustJSON(map[string]any{"result": attempt.Result, "summary": attempt.Summary, "changed_paths": attempt.ChangedPaths, "failed_items": attempt.FailedItems, "notes": attempt.Notes}), false, true
+	payload := map[string]any{"result": attempt.Result, "summary": attempt.Summary, "failed_items": attempt.FailedItems, "notes": attempt.Notes}
+	if changed := r.verifiedWorkspaceChangedPaths(); len(changed) > 0 {
+		payload["changed_paths"] = changed
+	}
+	return mustJSON(payload), false, true
+}
+
+func renderCompletionUserVisibleContent(attempt completionAttempt) string {
+	var parts []string
+	if result := strings.TrimSpace(attempt.Result); result != "" {
+		parts = append(parts, result)
+	}
+	if len(attempt.FailedItems) > 0 {
+		parts = append(parts, "未完成项："+strings.Join(attempt.FailedItems, "、"))
+	}
+	if notes := strings.TrimSpace(attempt.Notes); notes != "" {
+		parts = append(parts, notes)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
 func invalidCompletionUserVisibleContent(result, notes string) string {
@@ -113,7 +121,7 @@ func (r *agentRuntime) completionRejection(attempt completionAttempt) string {
 		return "当前任务已经进入工具工作流，但还没有执行任何工具。请先调用合适的工具，再使用 attempt_completion。"
 	}
 	if unverified := r.completionPathsWithoutVerifiedMutation(attempt.ChangedPaths); len(unverified) > 0 {
-		return "attempt_completion 声明了未被真实 workspace 变更验证的 changed_paths：" + strings.Join(unverified, ", ") + "。请先执行真实 workspace 编辑动作，或移除未验证路径。"
+		return "attempt_completion 声明了未被真实 workspace 变更验证的 changed_paths：" + strings.Join(unverified, ", ") + "。请先执行真实 workspace 编辑动作；attempt_completion 不能创建或修改文件。"
 	}
 	if r.performedMutation && !r.hasSuccessfulWorkspaceMutation() {
 		return "workspace 变更任务尚未产生可验证的成功变更，不能完成。请继续执行或修正 workspace 工具。"

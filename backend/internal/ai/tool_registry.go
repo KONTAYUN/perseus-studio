@@ -150,15 +150,20 @@ func execLoadPerseusToolsetForRole(argumentsJSON, role string) (string, string, 
 		return "", "", "正在加载工具...", "", fmt.Errorf("invalid load_perseus_toolset arguments: %w", err)
 	}
 	args.Toolset = strings.TrimSpace(args.Toolset)
-	availableTools, ok := toolsForToolsetRole(args.Toolset, role)
+	actions, ok := actionsForToolsetRole(args.Toolset, role)
 	if !ok {
 		return "", "", "正在加载工具...", "", fmt.Errorf("unknown toolset: %s", args.Toolset)
 	}
+	loaded := map[string]bool{args.Toolset: true}
+	manifest := modelActionManifest(loaded, false, role)
 	result := mustJSON(map[string]any{
 		"loaded_toolset":       args.Toolset,
-		"available_tools":      availableTools,
-		"json_tools":           availableTools,
+		"available_tools":      actions.JSONTools,
+		"json_tools":           actions.JSONTools,
+		"text_actions":         actions.TextActions,
+		"terminal_actions":     actions.TerminalActions,
 		"capabilities":         toolsetCapabilities(args.Toolset),
+		"next_action_rules":    manifest.NextActionRules,
 		"instruction":          toolsetInstruction(args.Toolset),
 		"tool_manifest_digest": toolManifestDigest(),
 	})

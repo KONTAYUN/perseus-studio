@@ -167,7 +167,7 @@ func compactBatchReadItemsStaleAfterMutation(result *TranscriptToolResult, mutat
 		item["numbered_content"] = ""
 		item["stale_after_mutation"] = true
 		item["content_state"] = "stale_after_later_mutation"
-		item["next_action"] = "Read this path again before relying on exact current text."
+		item["next_action"] = "Read this path again before relying on exact current text because it changed later."
 		if !seen[normalized] {
 			seen[normalized] = true
 			stalePaths = append(stalePaths, normalized)
@@ -219,7 +219,7 @@ func compactReadResultForPayload(result *TranscriptToolResult) bool {
 		return false
 	}
 	payload["provider_context_reference"] = true
-	payload["model_view"] = "Read path and line-range metadata remains available. Call read_workspace_text/read_workspace_files with the specific path and range when exact text is needed."
+	payload["model_view"] = "Read path and line-range metadata remains available. Use preserved recent reads when available; call read_workspace_text/read_workspace_files with the specific path and range only when exact text is missing."
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return false
@@ -250,7 +250,7 @@ func compactReadPayloadObjectForPayload(payload map[string]any) bool {
 		payload["numbered_content_state"] = "reference_only"
 	}
 	payload["status"] = "context_reference"
-	payload["next_action"] = "Call read_workspace_text/read_workspace_files with start_line/end_line for exact text."
+	payload["next_action"] = "Use a preserved recent read when available; call read_workspace_text/read_workspace_files with start_line/end_line only when exact text is missing."
 	return true
 }
 
@@ -274,6 +274,99 @@ func readSpanLabels(spans []readResultSpan) []string {
 	}
 	sort.Strings(labels)
 	return labels
+}
+
+func currentReadWorkingSetFromTranscript(transcript *AgentTranscript, limit int) CurrentReadWorkingSet {
+	set := CurrentReadWorkingSet{}
+	if transcript == nil || limit == 0 {
+		return set
+	}
+	current := currentSuccessfulReadToolCalls(transcript)
+	seen := map[string]bool{}
+	for entryIndex := len(transcript.Entries) - 1; entryIndex >= 0; entryIndex-- {
+		entry := transcript.Entries[entryIndex]
+		if entry.Kind != transcriptEntryTool {
+			continue
+		}
+		for resultIndex := len(entry.ToolResults) - 1; resultIndex >= 0; resultIndex-- {
+			result := entry.ToolResults[resultIndex]
+			if !isReadWorkspaceTool(result.ToolName) || result.IsError || !current[result.ToolCallID] {
+				continue
+			}
+			contentAvailable := readToolResultContentBytes(result.Content) > 0
+			for _, span := range readResultSpans(&result) {
+				if span.Path == "" {
+					continue
+				}
+				key := readSpanKey(span)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				state := readContentStateAvailableForSpan(span, contentAvailable)
+				set.Spans = append(set.Spans, CurrentReadSpanView{
+					Path:                            span.Path,
+					StartLine:                       span.StartLine,
+					EndLine:                         span.EndLine,
+					TotalLines:                      span.TotalLines,
+					ReadContentState:                state,
+					ContentAvailableInRecentContext: contentAvailable && state == string(ReadContentStateAvailable),
+				})
+				if limit > 0 && len(set.Spans) >= limit {
+					set.Available = len(set.Spans) > 0
+					return set
+				}
+			}
+		}
+	}
+	set.Available = len(set.Spans) > 0
+	return set
+}
+
+func readContentStateAvailableForSpan(span readResultSpan, contentAvailable bool) string {
+	if span.Truncated {
+		return string(ReadContentStateSourceTruncated)
+	}
+	if contentAvailable && strings.TrimSpace(span.Content) != "" {
+		return string(ReadContentStateAvailable)
+	}
+	return string(ReadContentStateMetadataOnly)
+}
+
+func currentReadWorkingSetLabels(set CurrentReadWorkingSet) []string {
+	if len(set.Spans) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(set.Spans))
+	for _, span := range set.Spans {
+		if span.Path == "" {
+			continue
+		}
+		if span.StartLine > 0 && span.EndLine > 0 {
+			labels = append(labels, fmt.Sprintf("%s:%d-%d", span.Path, span.StartLine, span.EndLine))
+			continue
+		}
+		labels = append(labels, span.Path)
+	}
+	sort.Strings(labels)
+	return labels
+}
+
+func currentReadWorkingSetPaths(set CurrentReadWorkingSet) []string {
+	if len(set.Spans) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	paths := make([]string, 0, len(set.Spans))
+	for _, span := range set.Spans {
+		if span.Path == "" || seen[span.Path] {
+			continue
+		}
+		seen[span.Path] = true
+		paths = append(paths, span.Path)
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 func readSpanSupersededByAny(older readResultSpan, newerSpans []readResultSpan) bool {

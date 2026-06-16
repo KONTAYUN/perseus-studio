@@ -6,13 +6,13 @@ import (
 )
 
 type ProviderObservationView struct {
-	ToolName     string                     `json:"tool_name"`
-	Status       string                     `json:"status"`
-	Path         string                     `json:"path,omitempty"`
-	ChangedPaths []string                   `json:"changed_paths,omitempty"`
-	Summary      string                     `json:"summary,omitempty"`
+	ToolName     string                      `json:"tool_name"`
+	Status       string                      `json:"status"`
+	Path         string                      `json:"path,omitempty"`
+	ChangedPaths []string                    `json:"changed_paths,omitempty"`
+	Summary      string                      `json:"summary,omitempty"`
 	ReadRanges   []ProviderReadReferenceView `json:"read_ranges,omitempty"`
-	NextAction   string                     `json:"next_action,omitempty"`
+	NextAction   string                      `json:"next_action,omitempty"`
 }
 
 type ProviderReadReferenceView struct {
@@ -88,7 +88,7 @@ func buildProviderObservationView(result TranscriptToolResult, payload map[strin
 	}
 	if isReadWorkspaceTool(view.ToolName) {
 		view.ReadRanges = providerReadReferenceViews(result, payload)
-		view.NextAction = "For exact text, call read_workspace_text or read_workspace_files with the path and line range."
+		view.NextAction = "Use preserved numbered_content when available; call read_workspace_text or read_workspace_files with the path and line range only when exact text is missing, truncated, stale, or outside the available range."
 		return view
 	}
 	if view.Summary == "" {
@@ -134,7 +134,7 @@ func providerReadObservationPayload(result TranscriptToolResult, payload map[str
 		copyStringField(next, payload, "content")
 		copyStringField(next, payload, "numbered_content")
 	}
-	next["next_action"] = "Use read_workspace_text or read_workspace_files with path and line range when exact text is needed."
+	next["next_action"] = "Use preserved numbered_content when available; read by path and line range only when exact text is missing, truncated, stale, or outside the available range."
 	return next
 }
 
@@ -146,7 +146,7 @@ func providerReadObservationItem(result TranscriptToolResult, item map[string]an
 			"path":               view.Path,
 			"read_content_state": view.ReadContentState,
 			"read_ranges":        []ProviderReadReferenceView{view},
-			"next_action":        "Use read_workspace_text or read_workspace_files with this path and line range when exact text is needed.",
+			"next_action":        "Read this path and line range only if exact text is needed and not already available in recent context.",
 		}
 	}
 	next := map[string]any{}

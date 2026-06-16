@@ -58,7 +58,7 @@ export function createEditorToolRefreshActions({
         for (const move of moves) {
           applyPathUpdate(move.oldPath, move.newPath);
         }
-      } else if (event.tool_name === 'manage_workspace_path' && isAnyTrashPath(event.new_path)) {
+      } else if ((event.operation === 'delete' || event.operation === 'trash') && isAnyTrashPath(event.new_path)) {
         clearPathState(event.old_path || event.path);
       }
       await refreshMatchingOpenTabs(event);
@@ -96,10 +96,10 @@ export function createEditorToolRefreshActions({
   }
 
   async function refreshMatchingOpenTabs(event) {
-    if (!event?.tool_name) return;
+    if (!event) return;
     const tabs = openTabsRef.current;
     if (tabs.length === 0) return;
-    if (event.tool_name === 'manage_workspace_path' || event.tool_name === 'organize_workspace_matches') {
+    if (event.operation === 'move' || event.operation === 'rename' || event.operation === 'organize') {
       const moves = pathMovesFromToolEvent(event);
       if (moves.length > 0) {
         setOpenTabs((current) =>

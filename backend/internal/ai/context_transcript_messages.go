@@ -40,6 +40,12 @@ func openAITranscriptMessages(entries []TranscriptEntry) []map[string]any {
 				"role":    "user",
 				"content": entry.Text,
 			})
+		case transcriptEntryRuntimeObservation:
+			items = append(items, map[string]any{
+				"role":    "system",
+				"content": entry.Text,
+				"name":    "perseus_runtime_observation",
+			})
 		case transcriptEntryCompactionSummary:
 			items = append(items, map[string]any{
 				"role":    "system",
@@ -88,6 +94,11 @@ func anthropicTranscriptMessages(entries []TranscriptEntry) []map[string]any {
 			items = append(items, map[string]any{"role": "user", "content": content})
 		case transcriptEntryUser:
 			items = append(items, map[string]any{"role": "user", "content": entry.Text})
+		case transcriptEntryRuntimeObservation:
+			items = append(items, map[string]any{"role": "user", "content": []map[string]any{{
+				"type": "text",
+				"text": "Perseus runtime observation. This is environment feedback, not user input.\n" + entry.Text,
+			}}})
 		case transcriptEntryCompactionSummary:
 			items = append(items, map[string]any{"role": "user", "content": []map[string]any{{
 				"type": "text",

@@ -60,20 +60,15 @@ function isWorkspaceFileChangedEvent(event) {
 
 export function pathMovesFromToolEvent(event) {
   if (!event) return [];
-  if (event.old_path && event.new_path && !isAnyTrashPath(event.new_path)) {
+  if (Array.isArray(event.moved) && event.moved.length > 0) {
+    return event.moved
+      .filter((item) => item?.old_path && item?.new_path && item.status !== 'failed' && !isAnyTrashPath(item.new_path))
+      .map((item) => ({ oldPath: item.old_path, newPath: item.new_path }));
+  }
+  if ((event.operation === 'move' || event.operation === 'rename' || event.operation === 'organize') && event.old_path && event.new_path && !isAnyTrashPath(event.new_path)) {
     return [{ oldPath: event.old_path, newPath: event.new_path }];
   }
-  if (!Array.isArray(event.changed_paths)) return [];
-
-  const moves = [];
-  for (let index = 0; index < event.changed_paths.length - 1; index += 2) {
-    const oldPath = event.changed_paths[index];
-    const newPath = event.changed_paths[index + 1];
-    if (oldPath && newPath && !isAnyTrashPath(newPath)) {
-      moves.push({ oldPath, newPath });
-    }
-  }
-  return moves;
+  return [];
 }
 
 export function buildActiveFileToolPlan(events, { activePath = '', dirty = false } = {}) {
@@ -85,7 +80,7 @@ export function buildActiveFileToolPlan(events, { activePath = '', dirty = false
   for (const event of events || []) {
     if (!nextActivePath) continue;
 
-    if (event.tool_name === 'run_workspace_command') {
+    if (event.operation === 'command_unknown') {
       if (dirty) {
         conflictPlan = {
           reloadPath: nextActivePath,
@@ -131,7 +126,7 @@ export function buildActiveFileToolPlan(events, { activePath = '', dirty = false
       continue;
     }
 
-    if (event.tool_name === 'manage_workspace_path' && event.old_path && event.new_path && isAnyTrashPath(event.new_path)) {
+    if ((event.operation === 'delete' || event.operation === 'trash') && event.old_path && event.new_path && isAnyTrashPath(event.new_path)) {
       const deletedPath = event.old_path || event.path;
       if (pathMatches(nextActivePath, deletedPath)) {
         nextActivePath = '';

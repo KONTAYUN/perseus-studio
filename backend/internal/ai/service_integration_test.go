@@ -722,7 +722,7 @@ func TestGenerateReplyOpenAIToolLoopRequiresToolAndSuppressesInvalidText(t *test
 			writeOpenAIStreamText(t, w, "好，我先看一下 workspace。")
 		case 2:
 			assertOpenAIToolChoiceAuto(t, payload)
-			assertLastUserReminderContains(t, payload, "没有继续调用工具")
+			assertLastUserActionRejected(t, payload, "action_rejected")
 			writeOpenAIToolCall(t, w, "call_inspect_1", "inspect_workspace", `{"path":"","max_depth":1}`)
 		case 3:
 			assertOpenAIToolChoiceAuto(t, payload)
@@ -1578,7 +1578,7 @@ func TestGenerateReplyOpenAIWorkspaceReferencePlainTextDoesNotFinishEarly(t *tes
 				},
 			})
 		case 2:
-			assertLastUserReminderContains(t, payload, "没有继续调用工具")
+			assertLastUserActionRejected(t, payload, "action_rejected")
 			writeOpenAIToolCall(t, w, "call_read_1", "read_workspace_text", `{"path":"draft.txt"}`)
 		case 3:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已读取 draft.txt 并确认后续步骤。"} `)
@@ -1675,13 +1675,11 @@ func TestGenerateReplyOpenAIReadOnlyThenPlanningTextMustUseCompletionAction(t *t
 			writeOpenAIStreamText(t, w, "我已经读完三份文档，接下来会用补丁整体重写。")
 		case 3:
 			assertOpenAIToolChoiceAuto(t, payload)
-			assertLastUserReminderContains(t, payload, "没有继续调用工具")
+			assertLastUserActionRejected(t, payload, "action_rejected")
 			writeOpenAIToolCall(t, w, "done_1", "attempt_completion", `{"result":"已读取三份文档，但尚未修改文件。需要继续执行真实编辑动作。","failed_items":["project/a.md","project/b.md","project/c.md"]}`)
 		case 4:
 			assertOpenAIToolChoiceAuto(t, payload)
-			if content := lastOpenAIToolContent(t, payload); !strings.Contains(content, "没有对应的工具失败结果") {
-				t.Fatalf("expected completion rejection for missing failed observation, got %s", content)
-			}
+			assertOpenAIHasActionRejectedReason(t, payload, "没有对应的工具失败结果")
 			writeOpenAIStreamText(t, w, "*** Begin Patch\n*** Update File: project/a.md\n@@\n-旧设定 A\n+轻爽版 A\n*** Update File: project/b.md\n@@\n-旧设定 B\n+轻爽版 B\n*** Update File: project/c.md\n@@\n-旧设定 C\n+轻爽版 C\n*** End Patch")
 		case 5:
 			assertOpenAIToolChoiceAuto(t, payload)
@@ -2530,9 +2528,12 @@ func TestGenerateReplyCheckpointResumeAfterTransientProviderError(t *testing.T) 
 		if err != nil {
 			t.Fatalf("ReadAll returned error: %v", err)
 		}
-		body := string(raw)
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
 		count := requestCount.Add(1)
-		if strings.Contains(body, "上一轮模型供应商连接中断") {
+		if openAIProviderMessageContentContainsAll(payload, `"status":"recovery_observation"`, `"reason_code":"provider_connection_interrupted"`) {
 			writeJSON(t, w, map[string]any{
 				"choices": []map[string]any{
 					{
@@ -2720,8 +2721,8 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 			if payload["stream"] != true {
 				t.Fatalf("expected checkpoint resume to rebuild a streaming provider turn, got %#v", payload["stream"])
 			}
-			if !strings.Contains(string(raw), "上一轮模型供应商连接中断") {
-				t.Fatalf("expected checkpoint recovery reminder in request %d: %s", requestCount.Load(), string(raw))
+			if !openAIProviderMessageContentContainsAll(payload, `"status":"recovery_observation"`, `"reason_code":"provider_connection_interrupted"`) {
+				t.Fatalf("expected checkpoint recovery observation in request %d: %s", requestCount.Load(), string(raw))
 			}
 			writeOpenAIToolCall(t, w, "done_after_resume", "attempt_completion", `{"result":"已从断点继续并完成。"}`)
 		default:
@@ -3237,6 +3238,68 @@ func TestGenerateReplyRejectsNoWriteChannelCompletionAfterExistingFolderMkdir(t 
 	}
 }
 
+func TestGenerateReplyRecoversPrematureCompletionWithPatchActionObservation(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	if _, err := env.files.MkdirNew("人间烟火系统：开局一个盒饭摊"); err != nil {
+		t.Fatalf("MkdirNew returned error: %v", err)
+	}
+
+	var requestCount atomic.Int32
+	var rejectedPayloads []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		_ = json.Unmarshal(body, &payload)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch requestCount.Add(1) {
+		case 1:
+			assertOpenAIWorkspaceToolsLoaded(t, payload)
+			assertOpenAIActionManifestIncludesPatch(t, payload)
+			writeOpenAIToolCall(t, w, "load_workspace", "load_perseus_toolset", `{"toolset":"workspace"}`)
+		case 2:
+			assertOpenAIActionManifestIncludesPatch(t, payload)
+			writeOpenAIToolCall(t, w, "premature_done", "attempt_completion", `{"result":"已创建开局版本对比.md。","changed_paths":["人间烟火系统：开局一个盒饭摊/开局版本对比.md"]}`)
+		case 3:
+			toolContent := lastOpenAIToolContent(t, payload)
+			var observation map[string]any
+			if err := json.Unmarshal([]byte(toolContent), &observation); err != nil {
+				t.Fatalf("expected typed action rejection JSON, got %v content=%s", err, toolContent)
+			}
+			rejectedPayloads = append(rejectedPayloads, observation)
+			rawObservation, _ := observation["observation"].(map[string]any)
+			if rawObservation["status"] != "action_rejected" || rawObservation["required_next_action"] != "apply_workspace_patch" {
+				t.Fatalf("expected patch required action observation, got %#v", observation)
+			}
+			writeOpenAIStreamText(t, w, "*** Begin Patch\n*** Add File: 人间烟火系统：开局一个盒饭摊/开局版本对比.md\n+# 开局版本对比\n+\n+盒饭摊版本。\n*** End Patch")
+		case 4:
+			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建开局版本对比.md。"}`)
+		default:
+			t.Fatalf("unexpected request %d", requestCount.Load())
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "在工作区里面新建文档写进去吧，不要发到对话里面。写道人间烟火系统这个文件夹里面")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+		UserID: testUserID,
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if requestCount.Load() != 4 {
+		t.Fatalf("expected completion rejection, patch, then terminal completion; requests=%d reply=%#v", requestCount.Load(), reply)
+	}
+	if len(rejectedPayloads) != 1 {
+		t.Fatalf("expected one typed rejection observation, got %#v", rejectedPayloads)
+	}
+	read, err := env.files.ReadFile("人间烟火系统：开局一个盒饭摊/开局版本对比.md")
+	if err != nil || !strings.Contains(read.Content, "盒饭摊版本") {
+		t.Fatalf("expected patch-created file, content=%q err=%v", read.Content, err)
+	}
+}
+
 func TestGenerateReplyCapturesMixedTextPatchAndJSONToolCallAsPatchAction(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -3703,18 +3766,65 @@ func assertOpenAIWorkspaceToolsLoaded(t *testing.T, payload map[string]any) {
 	}
 }
 
+func assertOpenAIActionManifestIncludesPatch(t *testing.T, payload map[string]any) {
+	t.Helper()
+	rawMessages, ok := payload["messages"].([]any)
+	if !ok || len(rawMessages) == 0 {
+		t.Fatalf("messages missing from payload")
+	}
+	var manifestPayload map[string]any
+	for _, raw := range rawMessages {
+		message, _ := raw.(map[string]any)
+		if message["name"] != "perseus_action_manifest" {
+			continue
+		}
+		content, _ := message["content"].(string)
+		prefix := "Perseus current action manifest. This is environment-provided action state, not user input. Follow it for the next action.\n"
+		if !strings.HasPrefix(content, prefix) {
+			t.Fatalf("unexpected action manifest anchor: %s", content)
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(content, prefix)), &manifestPayload); err != nil {
+			t.Fatalf("action manifest anchor is not JSON: %v content=%s", err, content)
+		}
+		break
+	}
+	if manifestPayload == nil {
+		t.Fatalf("action manifest anchor missing from payload messages: %#v", rawMessages)
+	}
+	textActions, _ := manifestPayload["text_actions"].([]any)
+	foundPatch := false
+	for _, raw := range textActions {
+		action, _ := raw.(map[string]any)
+		if action["name"] == "apply_workspace_patch" && action["transport"] == "assistant_text_patch" {
+			foundPatch = true
+		}
+	}
+	if !foundPatch {
+		t.Fatalf("action manifest missing apply_workspace_patch text action: %#v", manifestPayload)
+	}
+	terminalActions, _ := manifestPayload["terminal_actions"].([]any)
+	foundCompletion := false
+	for _, raw := range terminalActions {
+		action, _ := raw.(map[string]any)
+		if action["name"] == "attempt_completion" && action["terminal"] == true {
+			foundCompletion = true
+		}
+	}
+	if !foundCompletion {
+		t.Fatalf("action manifest missing terminal completion: %#v", manifestPayload)
+	}
+}
+
 func assertOnlyCoreToolsLoaded(t *testing.T, payload map[string]any) {
 	t.Helper()
 
 	names := openAIToolNamesFromPayload(t, payload)
-	for _, expected := range []string{"attempt_completion", "ask_followup_question", "load_perseus_toolset"} {
+	for _, expected := range []string{"attempt_completion", "ask_followup_question", "load_perseus_toolset", "inspect_workspace", "find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "manage_workspace_path", "organize_workspace_matches"} {
 		if !names[expected] {
 			t.Fatalf("expected core tool %q in payload, got %#v", expected, names)
 		}
 	}
 	for _, unexpected := range []string{
-		"inspect_workspace",
-		"read_workspace_text",
 		"apply_workspace_patch",
 		"edit_workspace_text",
 		"replace_workspace_lines",
@@ -3751,10 +3861,11 @@ func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any)
 	for _, fragment := range []string{
 		"标准 Agent Loop",
 		"工具工作完成后，必须调用 attempt_completion",
+		"attempt_completion 是终止动作，不能创建、修改、移动或删除文件",
 		"当前文件上下文和编辑器面板上下文只是 metadata",
 		"find_workspace_files 按名称/路径/glob 找文件",
 		"改文件统一直接输出以 *** Begin Patch 开始、*** End Patch 结束的 patch 块",
-		"任何文件内容变更都使用 *** Begin Patch / *** End Patch patch 块表达，这是唯一的文件内容编辑协议",
+		"任何文件内容变更都使用 *** Begin Patch / *** End Patch patch 块表达，这是唯一的文件内容编辑动作",
 		"run_workspace_command 在 workspace 内运行命令",
 		"不可以永久删除文件",
 		"不可以访问 workspace 之外的路径",
@@ -3810,6 +3921,92 @@ func assertLastUserReminderContains(t *testing.T, payload map[string]any, expect
 	if role != "user" || !strings.Contains(content, expected) {
 		t.Fatalf("unexpected reminder message: role=%q content=%q", role, content)
 	}
+}
+
+func assertLastUserActionRejected(t *testing.T, payload map[string]any, expectedStatus string) {
+	t.Helper()
+	rawMessages, ok := payload["messages"].([]any)
+	if !ok || len(rawMessages) == 0 {
+		t.Fatalf("messages missing from payload")
+	}
+	var last map[string]any
+	for index := len(rawMessages) - 1; index >= 0; index-- {
+		message, _ := rawMessages[index].(map[string]any)
+		name, _ := message["name"].(string)
+		role, _ := message["role"].(string)
+		if name == "perseus_runtime_observation" || role == "user" {
+			last = message
+			break
+		}
+	}
+	if last == nil {
+		t.Fatalf("runtime action observation missing from payload: %#v", payload["messages"])
+	}
+	role, _ := last["role"].(string)
+	content, _ := last["content"].(string)
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(content), &decoded); err != nil {
+		t.Fatalf("expected typed action observation JSON, got role=%q content=%q err=%v", role, content, err)
+	}
+	observation, _ := decoded["observation"].(map[string]any)
+	name, _ := last["name"].(string)
+	if role != "system" && role != "user" {
+		t.Fatalf("unexpected action observation role=%q decoded=%#v", role, decoded)
+	}
+	if role == "system" && name != "perseus_runtime_observation" {
+		t.Fatalf("unexpected action observation system name=%q decoded=%#v", name, decoded)
+	}
+	if observation["status"] != expectedStatus || decoded["model_action_manifest"] == nil {
+		t.Fatalf("unexpected action observation: role=%q decoded=%#v", role, decoded)
+	}
+}
+
+func assertOpenAIHasActionRejectedReason(t *testing.T, payload map[string]any, expected string) {
+	t.Helper()
+	content := openAIProviderMessageContentContaining(payload, "action_rejected")
+	if content == "" || !strings.Contains(content, expected) {
+		t.Fatalf("expected action rejection containing %q, got %q", expected, content)
+	}
+}
+
+func openAIProviderMessageContentContaining(payload map[string]any, expected string) string {
+	rawMessages, ok := payload["messages"].([]any)
+	if !ok {
+		return ""
+	}
+	for index := len(rawMessages) - 1; index >= 0; index-- {
+		message, _ := rawMessages[index].(map[string]any)
+		content, _ := message["content"].(string)
+		if strings.Contains(content, expected) {
+			return content
+		}
+	}
+	return ""
+}
+
+func openAIProviderMessageContentContainsAll(payload map[string]any, expected ...string) bool {
+	rawMessages, ok := payload["messages"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rawMessage := range rawMessages {
+		message, _ := rawMessage.(map[string]any)
+		content, _ := message["content"].(string)
+		if content == "" {
+			continue
+		}
+		matches := true
+		for _, item := range expected {
+			if !strings.Contains(content, item) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 func assertToolCallRecord(t *testing.T, env *testAIEnv, toolName, status string) {
@@ -3998,10 +4195,38 @@ func assertWorkspaceToolsetResultSupportsPatchEditing(t *testing.T, content stri
 			t.Fatalf("toolset result missing %s list: %#v", key, result)
 		}
 		for _, raw := range rawTools {
-			if raw == "apply_workspace_patch" || raw == "save_workspace_file" || raw == "write_workspace_chunk" {
+			if raw == "attempt_completion" || raw == "apply_workspace_patch" || raw == "save_workspace_file" || raw == "write_workspace_chunk" {
 				t.Fatalf("workspace text edit protocol must not be exposed as a JSON tool in %s: %#v", key, rawTools)
 			}
 		}
+	}
+	textActions, ok := result["text_actions"].([]any)
+	if !ok {
+		t.Fatalf("toolset result missing text_actions: %#v", result)
+	}
+	foundPatchAction := false
+	for _, raw := range textActions {
+		action, _ := raw.(map[string]any)
+		if action["name"] == "apply_workspace_patch" && action["transport"] == "assistant_text_patch" {
+			foundPatchAction = true
+		}
+	}
+	if !foundPatchAction {
+		t.Fatalf("toolset result must expose apply_workspace_patch as text action: %#v", textActions)
+	}
+	terminalActions, ok := result["terminal_actions"].([]any)
+	if !ok || len(terminalActions) == 0 {
+		t.Fatalf("toolset result missing terminal_actions: %#v", result)
+	}
+	foundCompletionAction := false
+	for _, raw := range terminalActions {
+		action, _ := raw.(map[string]any)
+		if action["name"] == "attempt_completion" && action["terminal"] == true {
+			foundCompletionAction = true
+		}
+	}
+	if !foundCompletionAction {
+		t.Fatalf("terminal_actions must expose attempt_completion: %#v", terminalActions)
 	}
 	capabilities, ok := result["capabilities"].(map[string]any)
 	if !ok {
@@ -4015,7 +4240,7 @@ func assertWorkspaceToolsetResultSupportsPatchEditing(t *testing.T, content stri
 		t.Fatalf("toolset result missing manifest digest: %#v", result)
 	}
 	instruction, _ := result["instruction"].(string)
-	for _, fragment := range []string{"File content editing", "*** Begin Patch", "*** End Patch", "backend captures, verifies, and applies"} {
+	for _, fragment := range []string{"text_actions", "apply_workspace_patch", "*** Begin Patch", "*** End Patch", "attempt_completion cannot create or modify files"} {
 		if !strings.Contains(instruction, fragment) {
 			t.Fatalf("toolset instruction missing %q: %s", fragment, instruction)
 		}
