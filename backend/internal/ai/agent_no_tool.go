@@ -54,6 +54,7 @@ func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn
 	if content != "" {
 		r.discardActiveAssistantMessage("action_required_plain_text_rejected")
 	}
+	r.loopGuard.ContentRejectionCount++
 	r.invalidTurns++
 	if content == "" {
 		diagID := r.service.recordProviderDiagnostic(ctx, r.opts, r.provider, r.conversationID, r.messageID, "provider_empty_response", "warn", 0, fmt.Errorf("empty model response"))

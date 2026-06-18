@@ -15,6 +15,13 @@ import (
 
 func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 	for {
+		if _, triggered, stop := r.loopGuardTriggered(); triggered && stop {
+			message := r.loopGuardFailureMessage()
+			if message == "" {
+				message = "agent workflow loop guard stopped this run"
+			}
+			return r.fail(message, nil)
+		}
 		maxRounds, maxToolCalls := r.loopLimits()
 		if r.currentRound >= maxRounds {
 			return r.handleBudgetExhausted(ctx, "max_rounds", maxRounds, maxToolCalls)
@@ -81,6 +88,9 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 				}
 				return reply, err
 			}
+			if r.appendLoopGuardObservation("content_only_turn") {
+				return r.fail(r.loopGuardFailureMessage(), nil)
+			}
 			continue
 		}
 		turn.ToolCalls = normalizeAgentToolCallIDs(turn.ToolCalls)
@@ -107,11 +117,11 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 				"safe_boundary": "after_each_tool",
 			})
 		}
-		r.commitAssistantContent(turn)
+		r.commitAssistantActionPreamble(turn, classification.Kind)
 		if r.opts.OnAssistantToolBoundary != nil {
 			r.opts.OnAssistantToolBoundary()
 		}
-		if strings.TrimSpace(turn.Content) != "" {
+		if r.shouldFinalizeActionPreamble(turn, classification.Kind) {
 			r.finalizeActiveAssistantMessage(turn.Content)
 		}
 		r.invalidTurns = 0
@@ -129,6 +139,9 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 				r.emitCheckpointRecoveryCompleted()
 				return Reply{Content: r.completedContent, ToolEvents: r.events}, nil
 			}
+		}
+		if r.appendLoopGuardObservation("tool_turn") {
+			return r.fail(r.loopGuardFailureMessage(), nil)
 		}
 	}
 }
@@ -158,6 +171,27 @@ func (r *agentRuntime) commitAssistantContent(turn agentModelTurn) {
 		return
 	}
 	r.ensureActiveAssistantMessage(turn.PublicStreamedContent)
+}
+
+func (r *agentRuntime) commitAssistantActionPreamble(turn agentModelTurn, kind ModelResponseKind) {
+	if strings.TrimSpace(turn.Content) == "" {
+		return
+	}
+	if kind == ModelResponseTextPatchAction || kind == ModelResponseTerminalAction || kind == ModelResponseJSONToolCall {
+		emitToolLifecycleEvent(r.opts, "assistant_action_preamble_held", "info", map[string]any{
+			"kind":  string(kind),
+			"chars": len([]rune(turn.Content)),
+		})
+		return
+	}
+	r.commitAssistantContent(turn)
+}
+
+func (r *agentRuntime) shouldFinalizeActionPreamble(turn agentModelTurn, kind ModelResponseKind) bool {
+	if strings.TrimSpace(turn.Content) == "" {
+		return false
+	}
+	return kind != ModelResponseTextPatchAction && kind != ModelResponseTerminalAction && kind != ModelResponseJSONToolCall
 }
 
 func (r *agentRuntime) appendAssistantTurn(turn agentModelTurn) {
@@ -247,6 +281,7 @@ func (r *agentRuntime) recordToolError(toolName, argumentsJSON, message string) 
 		Mutation:     isWorkspaceMutationTool(toolName) || (toolName == "run_workspace_command" && strings.TrimSpace(argumentsJSON) != ""),
 		Recoverable:  toolFailureRecoverableByModel(failureClass),
 	}
+	r.recordConditionSatisfiedFromToolError(toolName, argumentsJSON, message)
 	r.consecutiveToolErrors++
 	key := repeatedToolErrorKey(toolName, argumentsJSON, message)
 	if key != "" && key == r.repeatedToolErrorKey {

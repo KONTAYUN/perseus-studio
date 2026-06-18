@@ -233,7 +233,7 @@ func TestApplyWorkspacePatchIsInternalTextPatchChannel(t *testing.T) {
 	if errText := runtime.validateToolCall(agentToolCall{
 		Name:          "apply_workspace_patch",
 		ArgumentsJSON: `{"patch":"*** Begin Patch\n*** Add File: draft.md\n+hello\n*** End Patch"}`,
-	}); !strings.Contains(errText, "internal assistant text patch channel") {
+	}); !strings.Contains(errText, "assistant text patch channel") {
 		t.Fatalf("JSON patch function calls should be rejected, got %q", errText)
 	}
 }
@@ -629,8 +629,8 @@ func TestHandleCompletionAttemptRejectsAfterExistingFolderMkdirFailure(t *testin
 	if !isError || completed {
 		t.Fatalf("expected existing-folder failure to reject completion, isError=%v completed=%v result=%s", isError, completed, result)
 	}
-	if !strings.Contains(result, "上一项可恢复工具调用失败") {
-		t.Fatalf("expected recoverable path failure rejection, got %s", result)
+	if !strings.Contains(result, "目录条件已满足不等于文件已写入") || strings.Contains(result, "上一项可恢复工具调用失败") {
+		t.Fatalf("expected condition-satisfied edit rejection, got %s", result)
 	}
 	if !runtime.lastToolFailed || !runtime.lastToolFailure.Recoverable || runtime.lastToolFailure.FailureClass != "workspace_path_already_exists" {
 		t.Fatalf("expected recoverable already_exists failure to remain active, got %#v", runtime.lastToolFailure)
@@ -779,6 +779,16 @@ func TestModelActionManifestExposesPatchAsTextAction(t *testing.T) {
 	}
 	if containsModelJSONTool(manifest, "apply_workspace_patch") {
 		t.Fatalf("apply_workspace_patch must not be a JSON tool action: %#v", manifest.JSONTools)
+	}
+}
+
+func TestModelActionManifestCanExposeNativePatchTool(t *testing.T) {
+	manifest := modelActionManifestForProvider(map[string]bool{"workspace": true}, true, "admin", true)
+	if !containsModelJSONTool(manifest, "apply_workspace_patch") {
+		t.Fatalf("native patch provider should expose apply_workspace_patch JSON tool: %#v", manifest.JSONTools)
+	}
+	if !containsModelTextAction(manifest, "apply_workspace_patch") {
+		t.Fatalf("fallback text action should remain documented: %#v", manifest.TextActions)
 	}
 }
 
@@ -1163,6 +1173,43 @@ func TestExecuteAndRecordToolApplyWorkspacePatchFailureKeepsStructuredPayload(t 
 	}
 	if read.Content != "alpha\n" {
 		t.Fatalf("patch failure should not modify file, got %q", read.Content)
+	}
+}
+
+func TestExecuteAndRecordToolWorkspaceMutationMarksTypedChangeEvent(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	patch := "*** Begin Patch\n" +
+		"*** Add File: typed-change.md\n" +
+		"+hello\n" +
+		"*** End Patch"
+	var changedPayload map[string]any
+	_, event, err := env.service.executeAndRecordTool(ctx, "conv-typed", "msg-typed", "apply_workspace_patch", mustJSON(map[string]any{
+		"patch":     patch,
+		"transport": "assistant_text_patch",
+	}), "", RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			if eventType == "workspace_file_changed" {
+				changedPayload = payload
+			}
+		},
+	}, runtimeProfileForProvider(store.ModelProvider{}))
+	if err != nil {
+		t.Fatalf("executeAndRecordTool returned execution error: %v", err)
+	}
+	if event.Type != "workspace_file_changed" || event.Status != "success" {
+		t.Fatalf("expected typed successful ToolEvent, got %#v", event)
+	}
+	if event.Operation != "patch" || !stringSliceContains(event.ChangedPaths, "typed-change.md") {
+		t.Fatalf("expected patch change event, got %#v", event)
+	}
+	if changedPayload == nil {
+		t.Fatal("expected workspace_file_changed lifecycle event")
+	}
+	if changedPayload["type"] != "workspace_file_changed" || changedPayload["operation"] != "patch" || !containsPathValueAny(changedPayload["changed_paths"], "typed-change.md") {
+		t.Fatalf("unexpected workspace_file_changed payload: %#v", changedPayload)
 	}
 }
 
@@ -3498,6 +3545,25 @@ func containsPathValue(value any, expected string) bool {
 	}
 	for _, item := range items {
 		if text, ok := item.(string); ok && text == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPathValueAny(value any, expected string) bool {
+	if containsPathValue(value, expected) {
+		return true
+	}
+	if items, ok := value.([]string); ok {
+		return stringSliceContains(items, expected)
+	}
+	return false
+}
+
+func stringSliceContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
 			return true
 		}
 	}

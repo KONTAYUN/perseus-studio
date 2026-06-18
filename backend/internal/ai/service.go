@@ -52,6 +52,7 @@ type EditorPanelContext struct {
 }
 
 type ToolEvent struct {
+	Type          string              `json:"type,omitempty"`
 	ToolCallID    string              `json:"tool_call_id,omitempty"`
 	ToolName      string              `json:"tool_name"`
 	StatusKind    string              `json:"status_kind,omitempty"`

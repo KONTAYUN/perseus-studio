@@ -28,6 +28,7 @@ type ModelProvider struct {
 	AutoCompactThresholdPercent int             `json:"auto_compact_threshold_percent"`
 	CompactReservedTokens       int             `json:"compact_reserved_tokens"`
 	PruneToolOutputsEnabled     bool            `json:"prune_tool_outputs_enabled"`
+	NativePatchToolEnabled      bool            `json:"native_patch_tool_enabled"`
 	CreatedAt                   time.Time       `json:"created_at"`
 	UpdatedAt                   time.Time       `json:"updated_at"`
 }
@@ -62,6 +63,7 @@ type ModelProviderInput struct {
 	AutoCompactThresholdPercent int    `json:"auto_compact_threshold_percent"`
 	CompactReservedTokens       int    `json:"compact_reserved_tokens"`
 	PruneToolOutputsEnabled     *bool  `json:"prune_tool_outputs_enabled"`
+	NativePatchToolEnabled      *bool  `json:"native_patch_tool_enabled"`
 }
 
 type SearchProviderInput struct {
@@ -127,6 +129,7 @@ CREATE TABLE IF NOT EXISTS search_providers (
 		{"auto_compact_threshold_percent", "INTEGER NOT NULL DEFAULT 80"},
 		{"compact_reserved_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"prune_tool_outputs_enabled", "INTEGER NOT NULL DEFAULT 1"},
+		{"native_patch_tool_enabled", "INTEGER NOT NULL DEFAULT 0"},
 		{"reasoning_capability", "TEXT NOT NULL DEFAULT 'auto'"},
 		{"reasoning_capability_source", "TEXT NOT NULL DEFAULT ''"},
 		{"reasoning_profile_levels", "TEXT NOT NULL DEFAULT ''"},

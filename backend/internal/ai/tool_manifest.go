@@ -57,6 +57,7 @@ type ModelActionManifest struct {
 type ModelWorkspaceState struct {
 	CurrentReadWorkingSet CurrentReadWorkingSet     `json:"current_read_working_set,omitempty"`
 	RecentWorkspaceReads  RecentWorkspaceReadMemory `json:"recent_workspace_reads,omitempty"`
+	ActionState           ActionSelectionState      `json:"action_state,omitempty"`
 }
 
 type CurrentReadWorkingSet struct {
@@ -353,6 +354,28 @@ func modelActionManifest(loaded map[string]bool, includeLoader bool, role string
 	}
 	manifest.NextActionRules = modelActionRules(loaded)
 	return manifest
+}
+
+func modelActionManifestForProvider(loaded map[string]bool, includeLoader bool, role string, nativePatch bool) ModelActionManifest {
+	manifest := modelActionManifest(loaded, includeLoader, role)
+	if nativePatch && normalizeModelActionLoadedToolsets(loaded)["workspace"] && !containsModelJSONToolName(manifest.JSONTools, "apply_workspace_patch") {
+		manifest.JSONTools = append(manifest.JSONTools, ModelJSONToolAction{
+			Name:      "apply_workspace_patch",
+			Toolset:   "workspace",
+			Group:     ToolGroupEdit,
+			Transport: ToolTransportJSON,
+		})
+	}
+	return manifest
+}
+
+func containsModelJSONToolName(tools []ModelJSONToolAction, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeModelActionLoadedToolsets(loaded map[string]bool) map[string]bool {

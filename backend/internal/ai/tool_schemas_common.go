@@ -9,11 +9,18 @@ func openAIToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool, ro
 	if len(roles) > 0 {
 		role = normalizeRunUserRole(roles[0])
 	}
+	return openAIToolsForLoadedToolsetsWithNativePatch(loaded, includeLoader, role, false)
+}
+
+func openAIToolsForLoadedToolsetsWithNativePatch(loaded map[string]bool, includeLoader bool, role string, nativePatch bool) []map[string]any {
 	var tools []map[string]any
 	for _, name := range providerVisibleToolNames(loaded, includeLoader, role) {
 		if tool := openAIToolByName(name); tool != nil {
 			tools = append(tools, tool)
 		}
+	}
+	if nativePatch && normalizeModelActionLoadedToolsets(loaded)["workspace"] {
+		tools = append(tools, openAIWorkspaceToolByName("apply_workspace_patch"))
 	}
 	return tools
 }

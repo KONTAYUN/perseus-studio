@@ -114,7 +114,7 @@ func TestGenerateReplyOpenAIAskFollowupQuestionCompletesRun(t *testing.T) {
 	assertToolCallRecord(t, env, "ask_followup_question", "success")
 }
 
-func TestGenerateReplyOpenAIToolLoopUpgradesFromChatToWorkspaceRoundLimit(t *testing.T) {
+func TestGenerateReplyOpenAIToolLoopStopsRepeatedInspectLoop(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 
@@ -139,20 +139,17 @@ func TestGenerateReplyOpenAIToolLoopUpgradesFromChatToWorkspaceRoundLimit(t *tes
 			writeOpenAIToolCall(t, w, fmt.Sprintf("call_inspect_%d", count), "inspect_workspace", `{"path":"","max_depth":1}`)
 			return
 		}
-		writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已完成长工具任务。"}`)
+		t.Fatalf("loop guard should stop before request %d", count)
 	}))
 	defer server.Close()
 
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "请连续检查工作区并完成")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error after workspace tool loop exceeded chat rounds: %v", err)
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "重复相同工具动作") {
+		t.Fatalf("expected loop guard failure, got %v", err)
 	}
-	if !strings.Contains(reply.Content, "已完成长工具任务") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
-	}
-	if requestCount.Load() <= agentChatMaxRounds+1 {
-		t.Fatalf("expected more than chat max rounds, got %d", requestCount.Load())
+	if requestCount.Load() >= int32(agentChatMaxRounds) {
+		t.Fatalf("loop guard should stop before chat max rounds, got %d", requestCount.Load())
 	}
 }
 
@@ -1815,7 +1812,7 @@ func TestGenerateReplyOpenAIRejectsCompletionThatLeaksPatchProtocol(t *testing.T
 	assertToolCallRecord(t, env, "apply_workspace_patch", "success")
 }
 
-func TestGenerateReplyEmitsMultipleAssistantSegments(t *testing.T) {
+func TestGenerateReplySuppressesActionPreamblesAndEmitsFinalSegment(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 
@@ -1877,6 +1874,7 @@ func TestGenerateReplyEmitsMultipleAssistantSegments(t *testing.T) {
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "创建一个文件夹并写入第一章")
 	var currentSegment strings.Builder
 	var assistantBodies []string
+	var heldPreambles int
 	flushSegment := func(finalContent string) {
 		content := finalContent
 		if strings.TrimSpace(content) == "" {
@@ -1899,6 +1897,8 @@ func TestGenerateReplyEmitsMultipleAssistantSegments(t *testing.T) {
 			case "model_message_completed":
 				content, _ := payload["content"].(string)
 				flushSegment(content)
+			case "assistant_action_preamble_held":
+				heldPreambles++
 			}
 		},
 		OnAssistantToolBoundary: func() {
@@ -1912,13 +1912,16 @@ func TestGenerateReplyEmitsMultipleAssistantSegments(t *testing.T) {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
 	flushSegment("")
-	if len(assistantBodies) != 3 {
-		t.Fatalf("expected 3 assistant segments, got %#v", assistantBodies)
+	if heldPreambles != 2 {
+		t.Fatalf("expected two held action preambles, got %d segments=%#v", heldPreambles, assistantBodies)
 	}
-	if !strings.Contains(strings.Join(assistantBodies, "\n"), "我先创建文件夹") || !strings.Contains(strings.Join(assistantBodies, "\n"), "我现在写第一章内容") {
-		t.Fatalf("expected assistant content to include both stages, got %#v", assistantBodies)
+	if len(assistantBodies) != 1 {
+		t.Fatalf("expected only final assistant segment, got %#v", assistantBodies)
 	}
-	if !strings.Contains(assistantBodies[2], "chapter-1.txt") {
+	if strings.Contains(strings.Join(assistantBodies, "\n"), "我先创建文件夹") || strings.Contains(strings.Join(assistantBodies, "\n"), "我现在写第一章内容") {
+		t.Fatalf("action preambles should not be committed as visible assistant content, got %#v", assistantBodies)
+	}
+	if !strings.Contains(assistantBodies[0], "chapter-1.txt") {
 		t.Fatalf("expected final segment to include completion summary, got %#v", assistantBodies)
 	}
 }
@@ -3170,6 +3173,68 @@ func TestGenerateReplyCapturesTextPatchWithoutStreamingPatchToClient(t *testing.
 	}
 }
 
+func TestGenerateReplyUsesNativePatchToolWhenProviderCapabilityEnabled(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		_ = json.Unmarshal(body, &payload)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch requestCount.Add(1) {
+		case 1:
+			names := openAIToolNamesFromPayload(t, payload)
+			if !names["apply_workspace_patch"] {
+				t.Fatalf("native patch capability should expose native patch tool, got %#v", names)
+			}
+			writeOpenAIToolCall(t, w, "patch_native", "apply_workspace_patch", `{"patch":"*** Begin Patch\n*** Add File: native-patch.md\n+native\n*** End Patch"}`)
+		case 2:
+			writeOpenAIToolCall(t, w, "done_native", "attempt_completion", `{"result":"已创建 native-patch.md。"}`)
+		default:
+			t.Fatalf("unexpected request %d", requestCount.Load())
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "创建 native-patch.md")
+	nativePatchEnabled := true
+	if _, err := env.configs.UpdateModelProvider(ctx, provider.UserID, provider.ID, store.ModelProviderInput{
+		Name:                        provider.Name,
+		Visibility:                  provider.Visibility,
+		Protocol:                    provider.Protocol,
+		BaseURL:                     server.URL,
+		ModelID:                     provider.ModelID,
+		Enabled:                     provider.Enabled,
+		IsDefault:                   provider.IsDefault,
+		ReasoningCapability:         provider.ReasoningCapability,
+		ReasoningCapabilitySource:   provider.ReasoningCapabilitySource,
+		ReasoningProfileLevels:      provider.ReasoningProfileLevels,
+		ContextWindowTokens:         provider.ContextWindowTokens,
+		AutoCompactEnabled:          &provider.AutoCompactEnabled,
+		AutoCompactThresholdPercent: provider.AutoCompactThresholdPercent,
+		CompactReservedTokens:       provider.CompactReservedTokens,
+		PruneToolOutputsEnabled:     &provider.PruneToolOutputsEnabled,
+		NativePatchToolEnabled:      &nativePatchEnabled,
+	}); err != nil {
+		t.Fatalf("UpdateModelProvider returned error: %v", err)
+	}
+
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if !strings.Contains(reply.Content, "native-patch.md") {
+		t.Fatalf("unexpected reply: %#v", reply)
+	}
+	read, err := env.files.ReadFile("native-patch.md")
+	if err != nil || read.Content != "native\n" {
+		t.Fatalf("expected native patch-created file, content=%q err=%v", read.Content, err)
+	}
+}
+
 func TestGenerateReplyRejectsNoWriteChannelCompletionAfterExistingFolderMkdir(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -3178,7 +3243,7 @@ func TestGenerateReplyRejectsNoWriteChannelCompletionAfterExistingFolderMkdir(t 
 	}
 
 	var requestCount atomic.Int32
-	var rejected []string
+	var rejectedPayloads []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		_, _ = io.ReadAll(r.Body)
@@ -3207,9 +3272,7 @@ func TestGenerateReplyRejectsNoWriteChannelCompletionAfterExistingFolderMkdir(t 
 		UserID: testUserID,
 		Event: func(eventType, _ string, payload map[string]any) {
 			if eventType == "completion_rejected" {
-				if reason, _ := payload["reason"].(string); reason != "" {
-					rejected = append(rejected, reason)
-				}
+				rejectedPayloads = append(rejectedPayloads, payload)
 			}
 		},
 	})
@@ -3219,8 +3282,11 @@ func TestGenerateReplyRejectsNoWriteChannelCompletionAfterExistingFolderMkdir(t 
 	if requestCount.Load() != 6 {
 		t.Fatalf("expected model to continue after rejected completion, requests=%d reply=%#v", requestCount.Load(), reply)
 	}
-	if len(rejected) == 0 || !strings.Contains(strings.Join(rejected, "\n"), "上一项可恢复工具调用失败") {
-		t.Fatalf("expected no-write-channel completion to be rejected after recoverable path failure, got %#v", rejected)
+	if len(rejectedPayloads) == 0 {
+		t.Fatalf("expected no-write-channel completion to be rejected")
+	}
+	if strings.Contains(fmt.Sprint(rejectedPayloads), "上一项可恢复工具调用失败") {
+		t.Fatalf("existing folder should be treated as condition_satisfied, not blocking failure: %#v", rejectedPayloads)
 	}
 	read, err := env.files.ReadFile("向北方/修改版3/向北方_10集大纲.txt")
 	if err != nil || read.Content != "恐怖元素版大纲\n" {

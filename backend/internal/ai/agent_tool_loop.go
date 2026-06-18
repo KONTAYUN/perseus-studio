@@ -57,6 +57,7 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 			IsError:    isError,
 			Event:      event,
 		})
+		r.recordLoopGuardAction(call, isError, event, resultContent)
 		if isError && call.Name == "attempt_completion" && isActionBoundaryObservation(resultContent) {
 			r.appendToolResults(results)
 			results = results[:0]
@@ -238,6 +239,7 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		r.clearToolErrors()
 	} else {
 		r.recordToolError(call.Name, executionToolArgumentsJSON(call), event.Error)
+		r.recordConditionSatisfiedFromToolResult(call, event, result)
 	}
 	emitToolLifecycleEvent(r.opts, "tool_result_returned", eventLevel(event.Status), map[string]any{
 		"tool_call_id": call.ID,
@@ -341,7 +343,20 @@ func (r *agentRuntime) normalizedToolArguments(call agentToolCall) (string, stri
 	}
 	if call.Name == "apply_workspace_patch" {
 		if strings.TrimSpace(call.PatchText) == "" {
-			return "", "apply_workspace_patch is an internal assistant text patch channel; output a complete *** Begin Patch / *** End Patch patch block instead of calling it as a JSON tool"
+			if providerNativePatchEnabled(r.provider) {
+				argumentsJSON := strings.TrimSpace(executionToolArgumentsJSON(call))
+				var decoded map[string]any
+				if err := json.Unmarshal([]byte(argumentsJSON), &decoded); err != nil {
+					return "", "tool arguments must be valid JSON: " + err.Error()
+				}
+				if strings.TrimSpace(stringFromAny(decoded["patch"])) == "" {
+					return "", "patch is required"
+				}
+				decoded["transport"] = "provider_native_tool"
+				raw, _ := json.Marshal(decoded)
+				return string(raw), ""
+			}
+			return "", "apply_workspace_patch is an assistant text patch channel for this provider; output a complete *** Begin Patch / *** End Patch patch block instead of calling it as a JSON tool"
 		}
 		argumentsJSON := strings.TrimSpace(executionToolArgumentsJSON(call))
 		var decoded any

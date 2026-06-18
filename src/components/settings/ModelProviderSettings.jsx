@@ -44,6 +44,7 @@ const emptyModel = applyContextPreset({
   enabled: true,
   is_default: false,
   reasoning_capability: 'auto',
+  native_patch_tool_enabled: false,
 }, DEFAULT_CONTEXT_PRESET_ID);
 
 export default function ModelProviderSettings({ ide }) {
@@ -92,6 +93,7 @@ export default function ModelProviderSettings({ ide }) {
       auto_compact_threshold_percent: item.auto_compact_threshold_percent || 80,
       compact_reserved_tokens: item.compact_reserved_tokens || 0,
       prune_tool_outputs_enabled: item.prune_tool_outputs_enabled !== false,
+      native_patch_tool_enabled: Boolean(item.native_patch_tool_enabled),
     });
     clearDiscoveryState();
     clearTestState();
@@ -382,6 +384,11 @@ export default function ModelProviderSettings({ ide }) {
                     label="压缩旧工具输出"
                     checked={draft.prune_tool_outputs_enabled}
                     onChange={(value) => setDraft({ ...draft, prune_tool_outputs_enabled: value })}
+                  />
+                  <Checkbox
+                    label="原生 Patch 工具"
+                    checked={draft.native_patch_tool_enabled}
+                    onChange={(value) => setDraft({ ...draft, native_patch_tool_enabled: value })}
                   />
                 </div>
               </div>

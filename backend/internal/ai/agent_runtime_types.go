@@ -49,6 +49,53 @@ type ModelResponseClassification struct {
 	ToolNames []string
 }
 
+type ProviderNativePatchCapability string
+
+const (
+	ProviderNativePatchDisabled ProviderNativePatchCapability = "disabled"
+	ProviderNativePatchEnabled  ProviderNativePatchCapability = "enabled"
+)
+
+type WorkspaceEditAction struct {
+	Name      string                        `json:"name"`
+	Provider  ProviderNativePatchCapability `json:"provider_native_patch"`
+	Transport ToolTransport                 `json:"transport"`
+}
+
+type ActionSelectionState struct {
+	WorkspaceLoaded              bool     `json:"workspace_loaded"`
+	RequiresWorkspaceMutation    bool     `json:"requires_workspace_mutation"`
+	HasVerifiedMutation          bool     `json:"has_verified_mutation"`
+	VerifiedChangedPaths         []string `json:"verified_changed_paths,omitempty"`
+	TargetPaths                  []string `json:"target_paths,omitempty"`
+	DirectoryConditionsSatisfied []string `json:"directory_conditions_satisfied,omitempty"`
+	LastFailureTool              string   `json:"last_failure_tool,omitempty"`
+	LastFailureBlocking          bool     `json:"last_failure_blocking,omitempty"`
+	NativePatchToolAvailable     bool     `json:"native_patch_tool_available,omitempty"`
+}
+
+type ActionProgressLedger struct {
+	ConditionSatisfiedPaths []string `json:"condition_satisfied_paths,omitempty"`
+	LastProgressRound       int      `json:"last_progress_round,omitempty"`
+}
+
+type AgentLoopGuard struct {
+	LastActionKey           string `json:"last_action_key,omitempty"`
+	RepeatedActionCount     int    `json:"repeated_action_count,omitempty"`
+	TerminalRejectionCount  int    `json:"terminal_rejection_count,omitempty"`
+	ContentRejectionCount   int    `json:"content_rejection_count,omitempty"`
+	NoProgressRoundCount    int    `json:"no_progress_round_count,omitempty"`
+	LastProgressFingerprint string `json:"last_progress_fingerprint,omitempty"`
+}
+
+type LoopGuardObservation struct {
+	Status             string   `json:"status"`
+	ReasonCode         string   `json:"reason_code"`
+	RequiredNextAction string   `json:"required_next_action,omitempty"`
+	AllowedNextActions []string `json:"allowed_next_actions,omitempty"`
+	Message            string   `json:"message"`
+}
+
 type agentRuntime struct {
 	service          *Service
 	protocol         agentProtocol
@@ -89,6 +136,8 @@ type agentRuntime struct {
 	activeAssistantMessageID  string
 	activeAssistantSegment    int
 	providerAttempts          int
+	actionProgress            ActionProgressLedger
+	loopGuard                 AgentLoopGuard
 }
 
 type runtimeToolFailure struct {

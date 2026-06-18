@@ -109,26 +109,26 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	event := ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: label, Status: status, TargetSummary: targetSummary, OperationHash: operationHash, Path: path, Error: errorText, DurationMS: durationMS}
 	if status == "success" {
 		var meta struct {
-			Path          string   `json:"path"`
-			OldPath       string   `json:"old_path"`
-			NewPath       string   `json:"new_path"`
-			ChangedPaths  []string `json:"changed_paths"`
+			Path          string              `json:"path"`
+			OldPath       string              `json:"old_path"`
+			NewPath       string              `json:"new_path"`
+			ChangedPaths  []string            `json:"changed_paths"`
 			Moved         []WorkspacePathMove `json:"moved"`
-			Operation     string   `json:"operation"`
-			Question      string   `json:"question"`
-			Options       []string `json:"options"`
-			AllowFreeform *bool    `json:"allow_freeform"`
-			VersionID     string   `json:"version_id"`
-			Hash          string   `json:"hash"`
-			SkillID       string   `json:"skill_id"`
-			Command       string   `json:"command"`
-			Cwd           string   `json:"cwd"`
-			Stdout        string   `json:"stdout"`
-			Stderr        string   `json:"stderr"`
-			ExitCode      *int     `json:"exit_code"`
-			TimedOut      bool     `json:"timed_out"`
-			Provider      string   `json:"provider"`
-			URL           string   `json:"url"`
+			Operation     string              `json:"operation"`
+			Question      string              `json:"question"`
+			Options       []string            `json:"options"`
+			AllowFreeform *bool               `json:"allow_freeform"`
+			VersionID     string              `json:"version_id"`
+			Hash          string              `json:"hash"`
+			SkillID       string              `json:"skill_id"`
+			Command       string              `json:"command"`
+			Cwd           string              `json:"cwd"`
+			Stdout        string              `json:"stdout"`
+			Stderr        string              `json:"stderr"`
+			ExitCode      *int                `json:"exit_code"`
+			TimedOut      bool                `json:"timed_out"`
+			Provider      string              `json:"provider"`
+			URL           string              `json:"url"`
 		}
 		if err := json.Unmarshal([]byte(result), &meta); err == nil {
 			if meta.Path != "" {
@@ -229,9 +229,13 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	if status == "success" {
 		log.Printf("[ai] tool conversation=%s name=%s status=%s path=%s", conversationID, name, status, path)
 		logTask(opts, "info", fmt.Sprintf("tool call done: %s", name))
+		if shouldEmitWorkspaceFileChanged(name, event) {
+			event.Type = "workspace_file_changed"
+		}
 		emitToolLifecycleEvent(opts, "tool_call_completed", "info", eventPayload)
 		if shouldEmitWorkspaceFileChanged(name, event) {
 			emitToolLifecycleEvent(opts, "workspace_file_changed", "info", map[string]any{
+				"type":           "workspace_file_changed",
 				"tool_call_id":   toolCallID,
 				"tool_name":      name,
 				"status_kind":    manifestStatusKind(name),
@@ -278,9 +282,6 @@ func shouldEmitWorkspaceFileChanged(name string, event ToolEvent) bool {
 }
 
 func workspaceFileChangedOperation(name string, event ToolEvent) string {
-	if event.Operation != "" {
-		return event.Operation
-	}
 	switch name {
 	case "apply_workspace_patch":
 		return "patch"
@@ -301,6 +302,9 @@ func workspaceFileChangedOperation(name string, event ToolEvent) string {
 		case event.Path != "":
 			return "mkdir"
 		}
+	}
+	if event.Operation != "" {
+		return event.Operation
 	}
 	return ""
 }

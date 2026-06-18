@@ -6,37 +6,48 @@ import (
 )
 
 type ActionBoundaryObservation struct {
-	Status               string              `json:"status"`
-	Reason               string              `json:"reason"`
-	ReasonCode           string              `json:"reason_code,omitempty"`
-	RejectedAction       string              `json:"rejected_action,omitempty"`
-	AllowedNextActions   []string            `json:"allowed_next_actions,omitempty"`
-	RequiredNextAction   string              `json:"required_next_action,omitempty"`
-	TargetPaths          []string            `json:"target_paths,omitempty"`
-	VerifiedChangedPaths []string            `json:"verified_changed_paths,omitempty"`
-	LastFailure          *runtimeToolFailure `json:"last_failure,omitempty"`
-	Message              string              `json:"message"`
+	Status                     string               `json:"status"`
+	Reason                     string               `json:"reason"`
+	ReasonCode                 string               `json:"reason_code,omitempty"`
+	RejectedAction             string               `json:"rejected_action,omitempty"`
+	AllowedNextActions         []string             `json:"allowed_next_actions,omitempty"`
+	RequiredNextAction         string               `json:"required_next_action,omitempty"`
+	NarrowedAllowedNextActions []string             `json:"narrowed_allowed_next_actions,omitempty"`
+	TargetPaths                []string             `json:"target_paths,omitempty"`
+	VerifiedChangedPaths       []string             `json:"verified_changed_paths,omitempty"`
+	BlockedBy                  []string             `json:"blocked_by,omitempty"`
+	ConditionSatisfied         []string             `json:"condition_satisfied,omitempty"`
+	ActionState                ActionSelectionState `json:"action_state,omitempty"`
+	LastFailure                *runtimeToolFailure  `json:"last_failure,omitempty"`
+	Message                    string               `json:"message"`
 }
 
 type WorkspaceEditActionState struct {
-	WorkspaceLoaded        bool     `json:"workspace_loaded"`
-	HasVerifiedMutation    bool     `json:"has_verified_mutation"`
-	VerifiedChangedPaths   []string `json:"verified_changed_paths,omitempty"`
-	LastFailureRecoverable bool     `json:"last_failure_recoverable,omitempty"`
-	LastFailureTool        string   `json:"last_failure_tool,omitempty"`
+	WorkspaceLoaded          bool     `json:"workspace_loaded"`
+	HasVerifiedMutation      bool     `json:"has_verified_mutation"`
+	VerifiedChangedPaths     []string `json:"verified_changed_paths,omitempty"`
+	LastFailureRecoverable   bool     `json:"last_failure_recoverable,omitempty"`
+	LastFailureTool          string   `json:"last_failure_tool,omitempty"`
+	NativePatchToolAvailable bool     `json:"native_patch_tool_available,omitempty"`
 }
 
 func (r *agentRuntime) actionRejectedObservation(reason, rejectedAction string, targetPaths []string) string {
+	state := r.actionSelectionState(targetPaths)
+	allowed := r.narrowedAllowedNextActions(state)
 	observation := ActionBoundaryObservation{
-		Status:               "action_rejected",
-		Reason:               strings.TrimSpace(reason),
-		ReasonCode:           actionRejectedReasonCode(reason, rejectedAction),
-		RejectedAction:       strings.TrimSpace(rejectedAction),
-		AllowedNextActions:   r.allowedNextActionsForBoundary(),
-		RequiredNextAction:   r.requiredNextActionForRejectedBoundary(rejectedAction, targetPaths),
-		TargetPaths:          normalizedProviderPaths(targetPaths),
-		VerifiedChangedPaths: r.verifiedWorkspaceChangedPaths(),
-		Message:              "The previous response did not execute an accepted action. Continue with one of the allowed next actions. Do not claim completion until an action succeeds and terminal completion is accepted.",
+		Status:                     "action_rejected",
+		Reason:                     strings.TrimSpace(reason),
+		ReasonCode:                 actionRejectedReasonCode(reason, rejectedAction),
+		RejectedAction:             strings.TrimSpace(rejectedAction),
+		AllowedNextActions:         allowed,
+		RequiredNextAction:         r.requiredNextActionForRejectedBoundary(rejectedAction, targetPaths),
+		NarrowedAllowedNextActions: allowed,
+		TargetPaths:                state.TargetPaths,
+		VerifiedChangedPaths:       r.verifiedWorkspaceChangedPaths(),
+		BlockedBy:                  actionStateBlockedBy(state),
+		ConditionSatisfied:         state.DirectoryConditionsSatisfied,
+		ActionState:                state,
+		Message:                    "The previous response did not execute an accepted action. Continue with one of the allowed next actions. Do not claim completion until an action succeeds and terminal completion is accepted.",
 	}
 	if r != nil && r.lastToolFailed {
 		failure := r.lastToolFailure
@@ -71,10 +82,14 @@ func (r *agentRuntime) requiredNextActionForRejectedBoundary(rejectedAction stri
 	if r == nil {
 		return ""
 	}
+	state := r.actionSelectionState(targetPaths)
+	if state.RequiresWorkspaceMutation && !state.HasVerifiedMutation {
+		return "apply_workspace_patch"
+	}
 	if len(normalizedProviderPaths(targetPaths)) > 0 {
 		return "apply_workspace_patch"
 	}
-	if r.lastToolFailed && r.lastToolFailure.Recoverable && isWorkspaceMutationTool(r.lastToolFailure.ToolName) {
+	if r.lastToolFailed && r.lastToolFailure.Recoverable && isWorkspaceMutationTool(r.lastToolFailure.ToolName) && !r.lastFailureConditionSatisfied() {
 		return "apply_workspace_patch"
 	}
 	if r.lastToolFailed && r.lastToolFailure.Recoverable && r.lastToolFailure.ToolName == "apply_workspace_patch" {
@@ -84,6 +99,10 @@ func (r *agentRuntime) requiredNextActionForRejectedBoundary(rejectedAction stri
 }
 
 func (r *agentRuntime) allowedNextActionsForBoundary() []string {
+	return r.narrowedAllowedNextActions(r.actionSelectionState(nil))
+}
+
+func (r *agentRuntime) allowedNextActionsForBoundaryUnscoped() []string {
 	if r == nil {
 		return nil
 	}
@@ -136,6 +155,7 @@ func (r *agentRuntime) workspaceEditActionState() WorkspaceEditActionState {
 		state.LastFailureRecoverable = r.lastToolFailure.Recoverable
 		state.LastFailureTool = r.lastToolFailure.ToolName
 	}
+	state.NativePatchToolAvailable = providerNativePatchEnabled(r.provider)
 	return state
 }
 

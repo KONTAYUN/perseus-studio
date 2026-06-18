@@ -24,6 +24,7 @@ type publicModelProviderView struct {
 	AutoCompactThresholdPercent int                   `json:"auto_compact_threshold_percent"`
 	CompactReservedTokens       int                   `json:"compact_reserved_tokens"`
 	PruneToolOutputsEnabled     bool                  `json:"prune_tool_outputs_enabled"`
+	NativePatchToolEnabled      bool                  `json:"native_patch_tool_enabled"`
 	CreatedAt                   time.Time             `json:"created_at"`
 	UpdatedAt                   time.Time             `json:"updated_at"`
 }
@@ -72,6 +73,7 @@ func modelProvidersForResponse(role string, items []store.ModelProvider) any {
 			AutoCompactThresholdPercent: item.AutoCompactThresholdPercent,
 			CompactReservedTokens:       item.CompactReservedTokens,
 			PruneToolOutputsEnabled:     item.PruneToolOutputsEnabled,
+			NativePatchToolEnabled:      item.NativePatchToolEnabled,
 			CreatedAt:                   item.CreatedAt,
 			UpdatedAt:                   item.UpdatedAt,
 		})

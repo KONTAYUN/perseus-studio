@@ -72,6 +72,9 @@ type ProviderRequestSummary struct {
 	ProviderVisibleTools          []string             `json:"provider_visible_tools,omitempty"`
 	LoadedCapabilities            map[string]any       `json:"loaded_capabilities,omitempty"`
 	InternalEditProtocol          string               `json:"internal_edit_protocol,omitempty"`
+	NativePatchToolEnabled        bool                 `json:"native_patch_tool_enabled,omitempty"`
+	ActionSelectionState          ActionSelectionState `json:"action_selection_state,omitempty"`
+	LoopGuardState                AgentLoopGuard       `json:"loop_guard_state,omitempty"`
 	UnsupportedOpenAIParams       []string             `json:"unsupported_openai_params,omitempty"`
 	ProviderHost                  string               `json:"provider_host,omitempty"`
 	ModelID                       string               `json:"model_id,omitempty"`

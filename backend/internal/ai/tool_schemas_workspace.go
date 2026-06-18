@@ -36,6 +36,8 @@ func openAIWorkspaceToolByName(name string) map[string]any {
 		return openAIFunctionTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams())
 	case "organize_workspace_matches":
 		return openAIFunctionTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
+	case "apply_workspace_patch":
+		return openAIFunctionTool(name, "Apply one complete workspace patch to create, update, delete, or move text files. Use this as the primary file content editing action. The backend parses, verifies, and applies the patch atomically.", workspacePatchParams())
 	default:
 		return nil
 	}

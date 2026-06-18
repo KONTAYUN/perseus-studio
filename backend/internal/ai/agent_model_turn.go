@@ -84,6 +84,9 @@ func (r *agentRuntime) annotateRequestSummary() {
 	r.lastContextSnapshot.Summary.ToolLoopActive = r.toolLoopActive
 	r.lastContextSnapshot.Summary.ActionBoundaryActive = r.actionBoundaryActive()
 	r.lastContextSnapshot.Summary.AgentExecutionMode = string(r.executionMode())
+	r.lastContextSnapshot.Summary.NativePatchToolEnabled = providerNativePatchEnabled(r.provider)
+	r.lastContextSnapshot.Summary.ActionSelectionState = r.actionSelectionState(nil)
+	r.lastContextSnapshot.Summary.LoopGuardState = r.loopGuard
 	if r.checkpointResumeAttempts > 0 {
 		r.lastContextSnapshot.Summary.RecoverableTransientError = true
 	}
@@ -176,7 +179,7 @@ func (r *agentRuntime) tools() []map[string]any {
 	case agentProtocolAnthropic:
 		return anthropicToolsForLoadedToolsets(r.loadedToolsets, includeLoader, r.opts.UserRole)
 	default:
-		return openAIToolsForLoadedToolsets(r.loadedToolsets, includeLoader, r.opts.UserRole)
+		return openAIToolsForLoadedToolsetsWithNativePatch(r.loadedToolsets, includeLoader, r.opts.UserRole, providerNativePatchEnabled(r.provider))
 	}
 }
 
@@ -184,13 +187,17 @@ func (r *agentRuntime) currentModelActionManifest() ModelActionManifest {
 	if r == nil {
 		return modelActionManifest(nil, true, "admin")
 	}
-	manifest := modelActionManifest(r.loadedToolsets, r.includeToolsetLoader(), r.opts.UserRole)
+	manifest := modelActionManifestForProvider(r.loadedToolsets, r.includeToolsetLoader(), r.opts.UserRole, providerNativePatchEnabled(r.provider))
 	if r.recentReadMemory.Available {
 		if manifest.WorkspaceState == nil {
 			manifest.WorkspaceState = &ModelWorkspaceState{}
 		}
 		manifest.WorkspaceState.RecentWorkspaceReads = r.recentReadMemory
 	}
+	if manifest.WorkspaceState == nil {
+		manifest.WorkspaceState = &ModelWorkspaceState{}
+	}
+	manifest.WorkspaceState.ActionState = r.actionSelectionState(nil)
 	return manifest
 }
 

@@ -123,6 +123,12 @@ func (r *agentRuntime) completionRejection(attempt completionAttempt) string {
 	if unverified := r.completionPathsWithoutVerifiedMutation(attempt.ChangedPaths); len(unverified) > 0 {
 		return "attempt_completion 声明了未被真实 workspace 变更验证的 changed_paths：" + strings.Join(unverified, ", ") + "。请先执行真实 workspace 编辑动作；attempt_completion 不能创建或修改文件。"
 	}
+	state := r.actionSelectionState(attempt.ChangedPaths)
+	if attemptReportsFailedWork(attempt) && state.RequiresWorkspaceMutation && !state.HasVerifiedMutation && r.lastToolFailed && r.lastToolFailure.Mutation {
+		if r.lastFailureConditionSatisfied() {
+			return "attempt_completion 正在报告 workspace 写入/修改未完成，但目录条件已满足不等于文件已写入。请继续执行真实编辑动作。"
+		}
+	}
 	if r.performedMutation && !r.hasSuccessfulWorkspaceMutation() {
 		return "workspace 变更任务尚未产生可验证的成功变更，不能完成。请继续执行或修正 workspace 工具。"
 	}
@@ -131,6 +137,9 @@ func (r *agentRuntime) completionRejection(attempt completionAttempt) string {
 			if attemptReportsFailedWork(attempt) {
 				return "attempt_completion 正在报告未完成的 workspace 写入/修改，但本轮没有对应的工具失败结果。请继续执行真实编辑动作，或在确有工具失败后再总结缺失项。"
 			}
+			return ""
+		}
+		if r.lastFailureConditionSatisfied() {
 			return ""
 		}
 		if r.lastToolFailure.Recoverable {

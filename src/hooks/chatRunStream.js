@@ -316,7 +316,7 @@ export async function waitForAgentRunStream({
       }
     } else if (item?.type === 'workspace_file_changed') {
       if (payload.status === 'success' && payload.tool_name) {
-        await onAssistantToolEvents?.([toolEventFromPayload(payload)]);
+        await onAssistantToolEvents?.([toolEventFromPayload(payload, item.type)]);
       }
     } else if (item?.type === 'run_failed') {
       await refreshFromLatestAssistantMessage();

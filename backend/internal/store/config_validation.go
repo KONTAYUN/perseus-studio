@@ -82,6 +82,7 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 	var isDefault int
 	var autoCompactEnabled int
 	var pruneToolOutputsEnabled int
+	var nativePatchToolEnabled int
 	err := s.Scan(
 		&item.ID,
 		&item.UserID,
@@ -98,6 +99,7 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 		&item.AutoCompactThresholdPercent,
 		&item.CompactReservedTokens,
 		&pruneToolOutputsEnabled,
+		&nativePatchToolEnabled,
 		&item.ReasoningCapability,
 		&item.ReasoningCapabilitySource,
 		&item.ReasoningProfileLevels,
@@ -109,6 +111,7 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 	item.Visibility = NormalizeResourceVisibility(item.Visibility)
 	item.AutoCompactEnabled = autoCompactEnabled == 1
 	item.PruneToolOutputsEnabled = pruneToolOutputsEnabled == 1
+	item.NativePatchToolEnabled = nativePatchToolEnabled == 1
 	item.ReasoningCapability = NormalizeReasoningCapability(item.ReasoningCapability)
 	item.ReasoningCapabilitySource = NormalizeReasoningCapabilitySource(item.ReasoningCapabilitySource)
 	item.ReasoningProfileLevels = NormalizeReasoningProfileLevels(item.ReasoningProfileLevels)
@@ -124,6 +127,7 @@ type modelProviderContextSettings struct {
 	AutoCompactThresholdPercent int
 	CompactReservedTokens       int
 	PruneToolOutputsEnabled     bool
+	NativePatchToolEnabled      bool
 }
 
 func normalizeModelProviderContextSettings(input ModelProviderInput) modelProviderContextSettings {
@@ -135,6 +139,10 @@ func normalizeModelProviderContextSettings(input ModelProviderInput) modelProvid
 	if input.PruneToolOutputsEnabled != nil {
 		pruneToolOutputsEnabled = *input.PruneToolOutputsEnabled
 	}
+	nativePatchToolEnabled := false
+	if input.NativePatchToolEnabled != nil {
+		nativePatchToolEnabled = *input.NativePatchToolEnabled
+	}
 	threshold := input.AutoCompactThresholdPercent
 	if threshold == 0 {
 		threshold = 80
@@ -145,6 +153,7 @@ func normalizeModelProviderContextSettings(input ModelProviderInput) modelProvid
 		AutoCompactThresholdPercent: threshold,
 		CompactReservedTokens:       input.CompactReservedTokens,
 		PruneToolOutputsEnabled:     pruneToolOutputsEnabled,
+		NativePatchToolEnabled:      nativePatchToolEnabled,
 	}
 }
 
