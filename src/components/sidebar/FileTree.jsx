@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChevronDown, ChevronRight, Download, FileCode2, FolderClosed, FolderOpen, Pencil, Trash2, Upload } from 'lucide-react';
 import { getFileTreeDropZone, getParentPath, pathMatches } from '../../hooks/ideUtils';
+import { shouldStartFileTreeItemDrag } from '../../hooks/fileTreeDragUtils';
 
 export default function FileTree({ items, depth = 0, ide }) {
   return items.map((item) => {
@@ -47,8 +48,13 @@ export default function FileTree({ items, depth = 0, ide }) {
         data-testid={`file-row-${item.path}`}
         data-file-path={item.path}
         data-file-type={item.type}
-        draggable
+        draggable={!isInlineRenaming}
         onDragStart={(e) => {
+          if (!shouldStartFileTreeItemDrag({ target: e.target, isInlineRenaming })) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
           ide.handleFileDragStart(e, item.id, item.path);
           e.dataTransfer.effectAllowed = 'move';
           const selectedRefs =
@@ -352,10 +358,15 @@ function InlineRenameInput({ item, ide }) {
     <input
       ref={inputRef}
       data-testid={`inline-rename-${item.path}`}
+      data-file-tree-drag-suppressed="true"
+      draggable={false}
       value={ide.inlineRenameDraft}
       onChange={(e) => ide.setInlineRenameDraft(e.target.value)}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
+      onDragStart={(e) => {
+        e.stopPropagation();
+      }}
       onBlur={() => {
         ide.commitInlineRename?.().catch((error) => console.error(error));
       }}
