@@ -326,7 +326,7 @@ func currentReadWorkingSetToolCalls(transcript *AgentTranscript, limit int) map[
 }
 
 func isReadWorkspaceTool(toolName string) bool {
-	return toolName == "read_workspace_text" || toolName == "read_workspace_files"
+	return toolName == "read_workspace_note_view" || toolName == "read_workspace_text" || toolName == "read_workspace_files"
 }
 
 func isCompactedToolResultContent(content string) bool {

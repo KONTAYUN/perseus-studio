@@ -151,7 +151,7 @@ func toolTargetSummary(name, argumentsJSON string) string {
 		return quotedSummary(stringField(decoded, "query", "pattern"))
 	case "search_workspace_text", "perseus_search_web", "web_search":
 		return quotedSummary(stringField(decoded, "query"))
-	case "inspect_workspace", "read_workspace_text", "apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
+	case "inspect_workspace", "read_workspace_note_view", "read_workspace_text", "apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
 		if name == "apply_workspace_patch" {
 			if path := firstPatchPathFromText(stringField(decoded, "patch")); path != "" {
 				return pathSummary(path)

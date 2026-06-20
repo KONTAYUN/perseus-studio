@@ -37,6 +37,29 @@ async function request(path, options = {}) {
   }
 }
 
+async function requestBlob(path, options = {}) {
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: 'include',
+      ...options,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      const error = new Error(text || 'Request failed');
+      error.status = response.status;
+      throw error;
+    }
+    return {
+      blob: await response.blob(),
+      contentDisposition: response.headers.get('content-disposition') || '',
+      contentType: response.headers.get('content-type') || '',
+    };
+  } catch (error) {
+    console.error(`[api] ${options.method || 'GET'} ${path} failed`, error);
+    throw error;
+  }
+}
+
 export function apiGet(path) {
   return request(path);
 }
@@ -54,6 +77,10 @@ export function apiPostForm(path, formData) {
     headers: {},
     body: formData,
   });
+}
+
+export function apiGetBlob(path) {
+  return requestBlob(path);
 }
 
 export function apiPostFormWithSignal(path, formData, signal) {
@@ -96,6 +123,10 @@ export async function apiUploadFile(path, file, overwrite = false) {
     headers: {},
     body: formData,
   });
+}
+
+export function workspaceFileContentUrl(path) {
+  return `${API_BASE_URL}/api/files/content?path=${encodeURIComponent(path)}`;
 }
 
 export { API_BASE_URL };

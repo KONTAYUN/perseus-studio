@@ -173,7 +173,7 @@ export function pendingToolStatus(input) {
   const byKind = pendingStatusByKind(statusKind, target);
   if (byKind) return byKind;
   if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return target ? `正在查看 ${target}` : '正在查看工作区';
-  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return target ? `正在读取 ${target}` : '正在读取文件';
+  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files' || toolName === 'read_workspace_note_view') return target ? `正在读取 ${target}` : '正在读取文件';
   if (toolName === 'manage_workspace_path') return target ? `正在管理 ${target}` : '正在管理路径';
   if (toolName === 'organize_workspace_matches') return target ? `正在整理 ${target}` : '正在整理文件';
   if (toolName === 'run_workspace_command') return target ? `正在运行 ${target} 的命令` : '正在运行命令';
@@ -189,7 +189,7 @@ export function completedToolStatus(input) {
   const byKind = completedStatusByKind(statusKind, target);
   if (byKind) return byKind;
   if (toolName === 'find_workspace_files' || toolName === 'search_workspace_text' || toolName === 'inspect_workspace') return target ? `已查看 ${target}` : '已查看工作区';
-  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files') return target ? `已读取 ${target}` : '已读取文件';
+  if (toolName === 'read_workspace_text' || toolName === 'read_workspace_files' || toolName === 'read_workspace_note_view') return target ? `已读取 ${target}` : '已读取文件';
   if (toolName === 'manage_workspace_path') return target ? `已管理 ${target}` : '已管理路径';
   if (toolName === 'organize_workspace_matches') return target ? `已整理 ${target}` : '已整理文件';
   if (toolName === 'run_workspace_command') return target ? `已运行 ${target} 的命令` : '已运行命令';

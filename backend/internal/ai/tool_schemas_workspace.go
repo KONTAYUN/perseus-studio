@@ -30,6 +30,8 @@ func openAIWorkspaceToolByName(name string) map[string]any {
 		return openAIFunctionTool(name, "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams())
 	case "read_workspace_text":
 		return openAIFunctionTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams())
+	case "read_workspace_note_view":
+		return openAIFunctionTool(name, "Read an HTML note as a model-friendly view. Prefer structure for content edits, text for plain extraction, format for lightweight style awareness, and raw only for precise formatting changes.", workspaceNoteViewParams())
 	case "read_workspace_files":
 		return openAIFunctionTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
 	case "manage_workspace_path":
@@ -53,6 +55,8 @@ func anthropicWorkspaceToolByName(name string) map[string]any {
 		return anthropicTool(name, "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams())
 	case "read_workspace_text":
 		return anthropicTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams())
+	case "read_workspace_note_view":
+		return anthropicTool(name, "Read an HTML note as a model-friendly view. Prefer structure for content edits, text for plain extraction, format for lightweight style awareness, and raw only for precise formatting changes.", workspaceNoteViewParams())
 	case "read_workspace_files":
 		return anthropicTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
 	case "manage_workspace_path":
@@ -74,6 +78,8 @@ func workspaceToolInputSchemaByName(name string) map[string]any {
 		return workspaceListParams()
 	case "read_workspace_text":
 		return workspaceReadParams()
+	case "read_workspace_note_view":
+		return workspaceNoteViewParams()
 	case "read_workspace_files":
 		return workspaceReadFilesParams()
 	case "manage_workspace_path":
@@ -167,6 +173,24 @@ func workspaceReadParams() map[string]any {
 			"start_line": map[string]any{"type": "integer", "description": "Optional 1-based first line to read."},
 			"end_line":   map[string]any{"type": "integer", "description": "Optional 1-based last line to read."},
 			"max_chars":  map[string]any{"type": "integer", "description": "Maximum characters to return. Default 20000, maximum 50000."},
+		},
+	}
+}
+
+func workspaceNoteViewParams() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"path", "view"},
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Workspace-relative .html note path.",
+			},
+			"view": map[string]any{
+				"type":        "string",
+				"enum":        []string{"text", "structure", "format", "raw"},
+				"description": "text returns plain body text; structure returns headings/paragraphs/lists/tables/images; format returns lightweight formatting hints; raw returns the original HTML fragment.",
+			},
 		},
 	}
 }

@@ -1,10 +1,15 @@
 import React, { useRef, useState } from 'react';
 import { Download, FileCode2, PanelTop, X } from 'lucide-react';
-import { Button } from '../ui';
+import { getNoteTitle, isNotePath } from '../../hooks/noteTreeUtils.js';
+import { AnchoredPopover, Button } from '../ui';
+import RichTextEditor from './richText/RichTextEditor.jsx';
 
 export default function EditorPanel({ ide, editor, panelId }) {
   const tabsStripRef = useRef(null);
+  const exportButtonRef = useRef(null);
   const [tabDropIndicator, setTabDropIndicator] = useState(null);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const isCurrentNote = isNotePath(editor.currentFilePath);
 
   const scrollTabsWithWheel = (event) => {
     const strip = tabsStripRef.current;
@@ -174,7 +179,9 @@ export default function EditorPanel({ ide, editor, panelId }) {
                       />
                     )}
                     <FileCode2 size={14} className="shrink-0 text-blue-500" />
-                    <span className="min-w-0 flex-1 truncate font-medium">{tab.path.split('/').pop() || tab.path}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {isNotePath(tab.path) ? getNoteTitle(tab.path) : tab.path.split('/').pop() || tab.path}
+                    </span>
                     {dirty && <span className="shrink-0 text-[10px] text-orange-500">●</span>}
                     <button
                       type="button"
@@ -196,6 +203,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <Button
+            ref={exportButtonRef}
             data-testid="editor-download"
             type="button"
             variant="subtle"
@@ -207,19 +215,56 @@ export default function EditorPanel({ ide, editor, panelId }) {
             }}
             onClick={(e) => {
               e.stopPropagation();
+              if (isCurrentNote) {
+                setIsExportMenuOpen((current) => !current);
+                return;
+              }
               ide.downloadFile(editor.currentFilePath).catch((error) => console.error(error));
             }}
             disabled={!editor.currentFilePath || !editor.isTextFile}
             className="h-8 px-2"
           >
             <Download size={13} />
-            <span className="hidden xl:inline">下载</span>
+            <span className="hidden xl:inline">{isCurrentNote ? '导出' : '下载'}</span>
           </Button>
+          <AnchoredPopover
+            anchorRef={exportButtonRef}
+            width={176}
+            minWidth={176}
+            maxHeight={220}
+            open={isExportMenuOpen && isCurrentNote}
+            onClose={() => setIsExportMenuOpen(false)}
+            testId="note-export-menu"
+            className="py-1"
+          >
+            {[
+              ['html', 'HTML (.html)'],
+              ['md', 'Markdown (.md)'],
+              ['docx', 'Word (.docx)'],
+            ].map(([format, label]) => (
+              <button
+                key={format}
+                type="button"
+                className="motion-row flex w-full items-center px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-500/20"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsExportMenuOpen(false);
+                  ide.exportNotes?.({
+                    path: editor.currentFilePath,
+                    type: 'file',
+                    format,
+                  }).catch((error) => console.error(error));
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </AnchoredPopover>
         </div>
       </div>
 
       <div
-        className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#FAFAFA] font-mono text-[14px] leading-7 tracking-[0.012em] text-gray-800 dark:bg-[#1E1E1E] dark:text-gray-300"
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#FAFAFA] text-[14px] leading-7 tracking-[0.012em] text-gray-800 dark:bg-[#1E1E1E] dark:text-gray-300"
         onDragOver={(e) => {
           const hasPath = e.dataTransfer?.types?.includes('workspace_path') || e.dataTransfer?.types?.includes('editor_tab_path');
           if (!hasPath) return;
@@ -308,6 +353,13 @@ export default function EditorPanel({ ide, editor, panelId }) {
               <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
                 {editor.currentFileNotice}
               </div>
+            ) : isCurrentNote ? (
+              <RichTextEditor
+                filePath={editor.currentFilePath}
+                html={editor.currentFileContent}
+                onHtmlChange={editor.setCurrentFileContent}
+                onStatusMessage={editor.setEditorStatusMessage}
+              />
             ) : (
               <textarea
                 data-testid="editor-textarea"

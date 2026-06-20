@@ -69,6 +69,16 @@ type LineReplaceResult struct {
 	TotalLinesAfter  int             `json:"total_lines_after"`
 }
 
+type FileVersion struct {
+	ID        string    `json:"id"`
+	Path      string    `json:"path"`
+	Size      int64     `json:"size"`
+	Hash      string    `json:"hash"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+	IsCurrent bool      `json:"is_current,omitempty"`
+}
+
 type TextReadResult struct {
 	Path            string `json:"path"`
 	Content         string `json:"content"`

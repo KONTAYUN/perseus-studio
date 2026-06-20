@@ -37,6 +37,31 @@ func (s *Service) ReadFile(path string) (FileReadResult, error) {
 	}, nil
 }
 
+func (s *Service) ReadBytes(path string) ([]byte, string, error) {
+	cleanPath, absPath, err := s.sanitizePath(path)
+	if err != nil {
+		return nil, "", err
+	}
+	if isAnyTrashPath(cleanPath) {
+		return nil, "", trashManagedOnlyError()
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", fmt.Errorf("file does not exist")
+		}
+		return nil, "", err
+	}
+	if info.IsDir() {
+		return nil, "", fmt.Errorf("path is a directory")
+	}
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, "", err
+	}
+	return content, cleanPath, nil
+}
+
 func (s *Service) ReadTextFile(path string, maxChars int) (TextReadResult, error) {
 	return s.ReadTextFileRange(path, 0, 0, maxChars)
 }

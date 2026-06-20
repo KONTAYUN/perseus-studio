@@ -119,7 +119,7 @@ func (r *agentRuntime) narrowedAllowedNextActions(state ActionSelectionState) []
 	if state.RequiresWorkspaceMutation && !state.HasVerifiedMutation {
 		actions := []string{"apply_workspace_patch", "ask_followup_question"}
 		if !r.hasAnySuccessfulReadOrSearch() {
-			actions = append([]string{"read_workspace_text", "read_workspace_files", "find_workspace_files", "search_workspace_text"}, actions...)
+			actions = append([]string{"read_workspace_note_view", "read_workspace_text", "read_workspace_files", "find_workspace_files", "search_workspace_text"}, actions...)
 		}
 		return dedupeStrings(actions)
 	}
@@ -135,7 +135,7 @@ func (r *agentRuntime) hasAnySuccessfulReadOrSearch() bool {
 			continue
 		}
 		switch event.ToolName {
-		case "read_workspace_text", "read_workspace_files", "find_workspace_files", "search_workspace_text", "inspect_workspace":
+		case "read_workspace_note_view", "read_workspace_text", "read_workspace_files", "find_workspace_files", "search_workspace_text", "inspect_workspace":
 			return true
 		}
 	}

@@ -359,7 +359,7 @@ func userFriendlyToolLabel(toolName string) string {
 	switch toolName {
 	case "find_workspace_files", "search_workspace_text", "inspect_workspace":
 		return "已查看工作区"
-	case "read_workspace_text", "read_workspace_files":
+	case "read_workspace_note_view", "read_workspace_text", "read_workspace_files":
 		return "已读取文件"
 	case "apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
 		return "已编辑文件"

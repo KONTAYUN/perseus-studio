@@ -16,9 +16,21 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
     event.currentTarget.contains(event.target.closest('[data-file-type="folder"]'));
 
   const uploadToRoot = (files) => {
-    ide.uploadFiles(files).catch((error) => {
-      console.error(error);
-    });
+    const fileItems = Array.from(files || []);
+    const importable = fileItems.filter((file) => /\.(html?|md|markdown|docx|zip)$/i.test(file.name || ''));
+    const generic = fileItems.filter((file) => !importable.includes(file));
+    Promise.resolve()
+      .then(async () => {
+        for (const file of importable) {
+          await ide.importNotes?.(file);
+        }
+        if (generic.length > 0) {
+          await ide.uploadFiles(generic);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+      });
   };
 
   return (
@@ -152,7 +164,7 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
                 onClick={() => ide.openCreateFileModal().catch((error) => console.error(error))}
                 className="motion-row flex w-full items-center px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-500/20"
               >
-                <FilePlus size={14} className="mr-2 opacity-70" /> 新建文件
+                <FilePlus size={14} className="mr-2 opacity-70" /> 新建笔记
               </button>
               <button
                 data-testid="workspace-create-folder"
@@ -169,7 +181,7 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
                 }}
                 className="motion-row flex w-full items-center px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-500/20"
               >
-                <Upload size={14} className="mr-2 opacity-70" /> 上传文本
+                <Upload size={14} className="mr-2 opacity-70" /> 导入/上传
               </button>
           </AnchoredPopover>
           <FileSearchPopover ide={ide} anchorRef={searchButtonRef} />
@@ -182,6 +194,7 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
         data-testid="workspace-upload-input"
         type="file"
         multiple
+        accept=".html,.htm,.md,.markdown,.docx,.zip,text/*,image/*"
         className="hidden"
         onChange={(e) => {
           uploadToRoot(e.target.files);

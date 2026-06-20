@@ -48,6 +48,8 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 		return s.execSearchWorkspaceText(ctx, opts.UserID, argumentsJSON)
 	case "read_workspace_text":
 		return s.execReadWorkspaceFile(ctx, opts.UserID, argumentsJSON)
+	case "read_workspace_note_view":
+		return s.execReadWorkspaceNoteView(ctx, opts.UserID, argumentsJSON)
 	case "read_workspace_files":
 		return s.execReadWorkspaceFiles(ctx, opts.UserID, argumentsJSON)
 	case "apply_workspace_patch":

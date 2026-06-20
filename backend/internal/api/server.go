@@ -84,6 +84,16 @@ type restoreTrashRequest struct {
 	Overwrite bool   `json:"overwrite"`
 }
 
+type restoreFileVersionRequest struct {
+	Path      string `json:"path"`
+	VersionID string `json:"version_id"`
+}
+
+type deleteFileVersionRequest struct {
+	Path      string `json:"path"`
+	VersionID string `json:"version_id"`
+}
+
 type createConversationRequest struct {
 	Title                   string `json:"title"`
 	SelectedModelProviderID string `json:"selected_model_provider_id"`
@@ -182,6 +192,14 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/files/tree", s.handleFilesTree)
 	s.mux.HandleFunc("/api/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("/api/files/read", s.handleFilesRead)
+	s.mux.HandleFunc("/api/files/content", s.handleFilesContent)
+	s.mux.HandleFunc("/api/files/history", s.handleFilesHistory)
+	s.mux.HandleFunc("/api/files/history/read", s.handleFilesHistoryRead)
+	s.mux.HandleFunc("/api/files/history/restore", s.handleFilesHistoryRestore)
+	s.mux.HandleFunc("/api/files/history/delete", s.handleFilesHistoryDelete)
+	s.mux.HandleFunc("/api/files/history/clear", s.handleFilesHistoryClear)
+	s.mux.HandleFunc("/api/files/export", s.handleFilesExport)
+	s.mux.HandleFunc("/api/files/import", s.handleFilesImport)
 	s.mux.HandleFunc("/api/files/upload", s.handleFilesUpload)
 	s.mux.HandleFunc("/api/files/write", s.handleFilesWrite)
 	s.mux.HandleFunc("/api/files/create", s.handleFilesCreate)

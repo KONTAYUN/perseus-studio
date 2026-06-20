@@ -50,7 +50,7 @@ func (r *agentRuntime) hasSuccessfulReadOnlyWorkspaceEvent() bool {
 			continue
 		}
 		switch event.ToolName {
-		case "read_workspace_text", "read_workspace_files", "find_workspace_files", "search_workspace_text", "inspect_workspace":
+		case "read_workspace_note_view", "read_workspace_text", "read_workspace_files", "find_workspace_files", "search_workspace_text", "inspect_workspace":
 			return true
 		}
 	}

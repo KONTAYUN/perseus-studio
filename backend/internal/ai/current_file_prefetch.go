@@ -50,6 +50,9 @@ func (s *Service) prefetchWorkspaceFileAttachments(ctx context.Context, userID s
 }
 
 func workspaceAttachmentLooksTextual(attachment AttachmentPayload) bool {
+	if strings.EqualFold(filepath.Ext(attachment.Path), ".html") {
+		return false
+	}
 	fileType := strings.ToLower(strings.TrimSpace(attachment.FileType))
 	if fileType == "" || fileType == "text" || fileType == "markdown" || fileType == "code" {
 		return true
@@ -59,7 +62,7 @@ func workspaceAttachmentLooksTextual(attachment AttachmentPayload) bool {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(attachment.Path)) {
-	case ".txt", ".md", ".markdown", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".csv", ".tsv", ".js", ".ts", ".tsx", ".jsx", ".go", ".py", ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".css", ".scss", ".html", ".xml":
+	case ".txt", ".md", ".markdown", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".csv", ".tsv", ".js", ".ts", ".tsx", ".jsx", ".go", ".py", ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".css", ".scss", ".xml":
 		return true
 	default:
 		return false

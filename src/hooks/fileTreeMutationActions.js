@@ -1,5 +1,6 @@
 import { apiPost, apiUploadFile } from '../api/client';
 import { buildUploadPath, getParentPath, pathMatches } from './ideUtils';
+import { buildNotePath, isNotePath } from './noteTreeUtils.js';
 import {
   defaultCreateBasePath,
   nextAvailablePathInTree,
@@ -108,7 +109,7 @@ export function createFileTreeMutationActions({
     if (!oldPath) return;
     const oldName = oldPath.split('/').pop() || oldPath;
     const parent = getParentPath(oldPath);
-    const nextName = inlineRenameDraft.trim();
+    let nextName = inlineRenameDraft.trim();
 
     setInlineRenamePath('');
     setInlineRenameDraft('');
@@ -117,6 +118,9 @@ export function createFileTreeMutationActions({
     if (nextName.includes('/') || nextName.includes('\\')) {
       setErrorMessage('请输入文件名，不要输入路径');
       return;
+    }
+    if (isNotePath(oldPath)) {
+      nextName = buildNotePath(nextName);
     }
 
     const nextPath = parent ? `${parent}/${nextName}` : nextName;
@@ -197,7 +201,7 @@ export function createFileTreeMutationActions({
   }
 
   async function openCreateFileModal(basePath = getDefaultCreateBasePath()) {
-    const path = nextAvailablePath(basePath, '新建 文本文档.txt');
+    const path = nextAvailablePath(basePath, buildNotePath('新建笔记'));
     await createFile(path, '', { renameAfterCreate: true, openAfterCreate: false });
     setIsAddMenuOpen?.(false);
   }

@@ -33,6 +33,7 @@ RUN apt-get update \
       ca-certificates \
       curl \
       git \
+      pandoc \
       python3 \
       python3-pip \
       unzip \

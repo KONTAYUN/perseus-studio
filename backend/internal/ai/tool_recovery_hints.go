@@ -14,10 +14,10 @@ func toolFailureRecoveryHint(toolName, errorText string) string {
 	}
 	switch toolName {
 	case "find_workspace_files":
-		return "Search returned paths. Use read_workspace_text before relying on file contents, or search_workspace_text for symbols/text."
+		return "Search returned paths. Use read_workspace_note_view for .html notes, read_workspace_text for ordinary text files, or search_workspace_text for symbols/text."
 	case "search_workspace_text":
 		return "Search returned matching lines. Read the relevant file/range before editing unless the exact replacement is already fully clear."
-	case "read_workspace_text", "read_workspace_files":
+	case "read_workspace_note_view", "read_workspace_text", "read_workspace_files":
 		if strings.Contains(lowerError, "unsupported file type") {
 			return "This workspace tool only reads supported plain-text files. Do not retry the same binary/document path with read_workspace_text; explain that this file type is not readable by the current workspace text tools unless the user provides text content or a supported text export."
 		}

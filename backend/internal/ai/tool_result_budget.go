@@ -26,6 +26,12 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 			raw, _ := json.Marshal(payload)
 			return string(raw)
 		}
+	case "read_workspace_note_view":
+		trimMapString(payload, "content", profile.MaxReadFileContentRunes)
+		if fitPayloadStringFieldsToBudget(payload, []string{"content"}, profile.MaxToolResultRunes) {
+			raw, _ := json.Marshal(payload)
+			return string(raw)
+		}
 	case "read_workspace_files":
 		budgetBatchReadPayload(payload, profile)
 		if fitBatchReadPayloadToBudget(payload, profile.MaxToolResultRunes) {

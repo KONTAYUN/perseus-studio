@@ -6,8 +6,10 @@ import {
   persistOpenFolders,
   readStoredOpenFolders,
 } from './ideUtils';
+import { filterNoteTree } from './noteTreeUtils.js';
 import { createFileTreeDownloadActions } from './fileTreeDownloadActions';
 import { createFileTreeMutationActions } from './fileTreeMutationActions';
+import { createNoteTransferActions } from './noteTransferActions.js';
 import { useFileDialogState } from './useFileDialogState';
 import { useFileDragState } from './useFileDragState';
 import { useFileSearchState } from './useFileSearchState';
@@ -39,7 +41,7 @@ export default function useFileTree({
     openConfirmDialog,
     submitFileDialog,
   } = useFileDialogState();
-  const files = decorateTree(treeData, openFolders);
+  const files = decorateTree(filterNoteTree(treeData), openFolders);
   const flatFiles = flattenTree(files);
   const {
     clearSelection,
@@ -168,6 +170,18 @@ export default function useFileTree({
     setSelectedPaths,
     setUploadStatus,
   });
+  const {
+    exportNotes,
+    importNotes,
+  } = createNoteTransferActions({
+    getDefaultCreateBasePath,
+    loadTree,
+    selectedItems,
+    selectedItemPath,
+    selectedItemType,
+    setErrorMessage,
+    setUploadStatus,
+  });
 
   useEffect(() => {
     selectedItemPathRef.current = selectedItemPath;
@@ -229,6 +243,7 @@ export default function useFileTree({
     draggingFilePath,
     emptyTrash,
     errorMessage,
+    exportNotes,
     fileDialog,
     fileDropIndicator,
     fileDragOverId,
@@ -248,6 +263,7 @@ export default function useFileTree({
     isTreeLoading,
     isTrashLoading,
     isTrashPanelOpen,
+    importNotes,
     loadTrashItems,
     loadTree,
     movePath,

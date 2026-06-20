@@ -2,6 +2,7 @@ import React from 'react';
 import { ChevronDown, ChevronRight, Download, FileCode2, FolderClosed, FolderOpen, Pencil, Trash2, Upload } from 'lucide-react';
 import { getFileTreeDropZone, getParentPath, pathMatches } from '../../hooks/ideUtils';
 import { shouldStartFileTreeItemDrag } from '../../hooks/fileTreeDragUtils';
+import { getNoteTitle, isNotePath } from '../../hooks/noteTreeUtils.js';
 
 export default function FileTree({ items, depth = 0, ide }) {
   return items.map((item) => {
@@ -335,9 +336,10 @@ function DropInsertionLine({ depth }) {
 }
 
 function FileTreeLabel({ item }) {
+  const label = item.type === 'file' && isNotePath(item.path) ? getNoteTitle(item.path) : item.name;
   return (
     <span className="file-tree-label min-w-0 select-none" title={item.name}>
-      <span className="file-tree-label-text">{item.name}</span>
+      <span className="file-tree-label-text">{label}</span>
     </span>
   );
 }
