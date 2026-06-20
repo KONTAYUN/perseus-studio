@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	htmlstd "html"
 	"net/url"
 	"os"
 	"os/exec"
@@ -216,12 +218,43 @@ func materializeHTMLAssets(html, notePath, tempRoot string, files *workspace.Ser
 		if err := materializeWorkspaceAsset(tempRoot, files, assetPath, materializedPaths); err != nil {
 			continue
 		}
-		replacements[tag] = noteImageSrcPattern.ReplaceAllString(tag, fmt.Sprintf(`src="%s"`, dataNoteSrc))
+		replacements[tag] = setHTMLAttribute(tag, "src", dataNoteSrc)
 	}
 	for oldTag, newTag := range replacements {
 		html = strings.ReplaceAll(html, oldTag, newTag)
 	}
 	return html, nil
+}
+
+func inlineHTMLAssetsForExport(html, notePath string, files *workspace.Service) string {
+	noteCleanPath, err := cleanWorkspaceReferencePath(notePath)
+	if err != nil {
+		return html
+	}
+	replacements := make(map[string]string)
+	matches := noteImageTagPattern.FindAllStringSubmatch(html, -1)
+	for _, match := range matches {
+		tag := match[0]
+		dataNoteSrc := strings.TrimSpace(match[1])
+		if !isLocalAssetReference(dataNoteSrc) {
+			continue
+		}
+		assetPath := resolveWorkspaceAssetPath(noteCleanPath, dataNoteSrc)
+		if assetPath == "" {
+			continue
+		}
+		assetBytes, cleanAssetPath, err := files.ReadBytes(assetPath)
+		if err != nil {
+			continue
+		}
+		mimeType := detectAttachmentMIME(cleanAssetPath, assetBytes)
+		dataURI := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(assetBytes))
+		replacements[tag] = setHTMLAttribute(tag, "src", dataURI)
+	}
+	for oldTag, newTag := range replacements {
+		html = strings.ReplaceAll(html, oldTag, newTag)
+	}
+	return html
 }
 
 func materializeWorkspaceAsset(tempRoot string, files *workspace.Service, assetPath string, materializedPaths map[string]struct{}) error {
@@ -299,7 +332,8 @@ func isLocalAssetReference(reference string) bool {
 		!strings.HasPrefix(lower, "https://") &&
 		!strings.HasPrefix(lower, "data:") &&
 		!strings.HasPrefix(lower, "mailto:") &&
-		!strings.HasPrefix(lower, "#")
+		!strings.HasPrefix(lower, "#") &&
+		!strings.HasPrefix(lower, "/api/")
 }
 
 func normalizeWorkspacePath(path string) string {
@@ -340,9 +374,24 @@ func buildAttachmentDisposition(fileName string) string {
 	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, fallback, url.PathEscape(fileName))
 }
 
+func setHTMLAttribute(tag, name, value string) string {
+	escaped := htmlstd.EscapeString(value)
+	attrPattern := regexp.MustCompile(`(?is)\s+` + regexp.QuoteMeta(name) + `\s*=\s*("([^"]*)"|'([^']*)'|[^\s>]+)`)
+	if attrPattern.MatchString(tag) {
+		return attrPattern.ReplaceAllStringFunc(tag, func(string) string {
+			return ` ` + name + `="` + escaped + `"`
+		})
+	}
+	end := strings.LastIndex(tag, ">")
+	if end < 0 {
+		return tag
+	}
+	before := strings.TrimRight(tag[:end], " \t\r\n")
+	return before + ` ` + name + `="` + escaped + `"` + tag[end:]
+}
+
 var (
 	noteImageTagPattern  = regexp.MustCompile(`(?is)<img\b[^>]*\bdata-note-src="([^"]+)"[^>]*>`)
-	noteImageSrcPattern  = regexp.MustCompile(`(?i)\bsrc="[^"]*"`)
 	invalidFilenameChars = regexp.MustCompile(`[\\/:*?"<>|]+`)
 	whitespaceRuns       = regexp.MustCompile(`\s+`)
 )

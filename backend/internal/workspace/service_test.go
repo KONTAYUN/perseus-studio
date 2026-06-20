@@ -130,6 +130,53 @@ func TestReorderPathRejectsMovingFolderIntoItself(t *testing.T) {
 	}
 }
 
+func TestMoveHTMLNoteRewritesLocalAssetReferences(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.CreateBytes(ctx, ".assets/Note/cover.png", []byte("image")); err != nil {
+		t.Fatalf("CreateBytes asset returned error: %v", err)
+	}
+	html := `<p>hello</p><img src="/api/files/content?path=.assets%2FNote%2Fcover.png" data-note-src=".assets/Note/cover.png" alt="cover">`
+	if _, err := files.CreateFile(ctx, "Note.html", "<p>draft</p>"); err != nil {
+		t.Fatalf("CreateFile note returned error: %v", err)
+	}
+	if _, err := files.WriteFile(ctx, "Note.html", html, "test_write"); err != nil {
+		t.Fatalf("WriteFile note returned error: %v", err)
+	}
+	if _, err := files.MkdirNew("archive"); err != nil {
+		t.Fatalf("MkdirNew returned error: %v", err)
+	}
+
+	result, err := files.MovePath("Note.html", "archive")
+	if err != nil {
+		t.Fatalf("MovePath returned error: %v", err)
+	}
+	if result.NewPath != "archive/Note.html" {
+		t.Fatalf("unexpected move result: %#v", result)
+	}
+	read, err := files.ReadFile("archive/Note.html")
+	if err != nil {
+		t.Fatalf("ReadFile moved note returned error: %v", err)
+	}
+	if !strings.Contains(read.Content, `data-note-src="../.assets/Note/cover.png"`) {
+		t.Fatalf("moved note did not rewrite data-note-src: %s", read.Content)
+	}
+	if !strings.Contains(read.Content, `src="../.assets/Note/cover.png"`) {
+		t.Fatalf("moved note did not rewrite src: %s", read.Content)
+	}
+	if _, _, err := files.ReadBytes(".assets/Note/cover.png"); err != nil {
+		t.Fatalf("asset should remain at original workspace path: %v", err)
+	}
+	versions, err := files.ListFileVersions(ctx, "archive/Note.html", 10)
+	if err != nil {
+		t.Fatalf("ListFileVersions moved note returned error: %v", err)
+	}
+	if len(versions) < 2 {
+		t.Fatalf("expected moved note to retain prior versions, got %#v", versions)
+	}
+}
+
 func TestSearchFindsPathsAndSkipsTrash(t *testing.T) {
 	ctx := context.Background()
 	files := newTestService(t)

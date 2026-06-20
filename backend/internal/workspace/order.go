@@ -311,6 +311,21 @@ WHERE user_id = ? AND parent_path LIKE ?
 		return err
 	}
 
+	if _, err := tx.Exec(`
+UPDATE file_versions
+SET path = ?
+WHERE user_id = ? AND path = ?
+`, newPath, s.userID, oldPath); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+UPDATE file_versions
+SET path = ? || substr(path, ?)
+WHERE user_id = ? AND path LIKE ?
+`, newPath, utf8.RuneCountInString(oldPath)+1, s.userID, oldPath+"/%"); err != nil {
+		return err
+	}
+
 	return tx.Commit()
 }
 

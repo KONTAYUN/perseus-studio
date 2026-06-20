@@ -94,9 +94,10 @@ func (s *Server) handleFilesExport(w http.ResponseWriter, r *http.Request) {
 		baseName := filepath.Base(result.Path)
 		switch format {
 		case "html":
+			exportHTML := inlineHTMLAssetsForExport(result.Content, result.Path, files)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Content-Disposition", buildAttachmentDisposition(baseName))
-			_, _ = w.Write([]byte(wrapHTMLDocument(strings.TrimSuffix(baseName, filepath.Ext(baseName)), result.Content)))
+			_, _ = w.Write([]byte(wrapHTMLDocument(strings.TrimSuffix(baseName, filepath.Ext(baseName)), exportHTML)))
 		case "md":
 			markdown, err := newPandocConverter().HTMLToMarkdown(r.Context(), result.Content)
 			if err != nil {
@@ -316,6 +317,7 @@ func importMarkdownNote(ctx context.Context, files *workspace.Service, parentPat
 	if err != nil {
 		return nil, err
 	}
+	htmlContent = sanitizeHTMLFragment(htmlContent)
 	name := sanitizeImportedPath(convertImportNoteExtension(filename, ".html"))
 	if name == "" {
 		name = "Imported Note.html"
@@ -334,6 +336,7 @@ func importDocxNote(ctx context.Context, files *workspace.Service, parentPath, f
 	if err != nil {
 		return nil, err
 	}
+	htmlContent = sanitizeHTMLFragment(htmlContent)
 	noteName := buildDocxImportNoteName(filename)
 	targetPath := joinImportTarget(parentPath, noteName)
 	finalPath, err := writeImportedFile(ctx, files, targetPath, []byte(htmlContent))
@@ -342,6 +345,7 @@ func importDocxNote(ctx context.Context, files *workspace.Service, parentPath, f
 	}
 	noteTitle := strings.TrimSuffix(filepath.Base(finalPath), filepath.Ext(finalPath))
 	htmlContent = rewriteImportedHTMLAssets(htmlContent, noteTitle, assets)
+	htmlContent = sanitizeHTMLFragment(htmlContent)
 	if _, err := files.WriteBytes(ctx, finalPath, []byte(htmlContent), "import_docx"); err != nil {
 		return nil, err
 	}
@@ -368,12 +372,20 @@ func convertImportNoteExtension(filename, ext string) string {
 func extractHTMLFragment(content string) string {
 	bodyPattern := regexp.MustCompile(`(?is)<body\b[^>]*>(.*?)</body>`)
 	if match := bodyPattern.FindStringSubmatch(content); len(match) > 1 {
-		return strings.TrimSpace(match[1])
+		return sanitizeHTMLFragment(match[1])
 	}
 	content = regexp.MustCompile(`(?is)<!doctype[^>]*>`).ReplaceAllString(content, "")
 	content = regexp.MustCompile(`(?is)</?html\b[^>]*>`).ReplaceAllString(content, "")
 	content = regexp.MustCompile(`(?is)<head\b[^>]*>.*?</head>`).ReplaceAllString(content, "")
-	return strings.TrimSpace(content)
+	return sanitizeHTMLFragment(content)
+}
+
+func sanitizeHTMLFragment(fragment string) string {
+	fragment = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script>`).ReplaceAllString(fragment, "")
+	fragment = regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style>`).ReplaceAllString(fragment, "")
+	fragment = regexp.MustCompile(`(?is)\s+on[a-z]+\s*=\s*("([^"]*)"|'([^']*)'|[^\s>]+)`).ReplaceAllString(fragment, "")
+	fragment = regexp.MustCompile(`(?is)\s+(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)`).ReplaceAllString(fragment, "")
+	return strings.TrimSpace(fragment)
 }
 
 func importZipNotes(ctx context.Context, files *workspace.Service, parentPath string, content []byte) ([]string, error) {
@@ -401,6 +413,9 @@ func importZipNotes(ctx context.Context, files *workspace.Service, parentPath st
 		_ = rc.Close()
 		if err != nil {
 			return nil, err
+		}
+		if isNoteLikePath(relative) {
+			raw = []byte(extractHTMLFragment(string(raw)))
 		}
 		targetPath := joinImportTarget(parentPath, relative)
 		finalPath, err := writeImportedFile(ctx, files, targetPath, raw)

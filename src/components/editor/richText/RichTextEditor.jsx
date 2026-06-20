@@ -174,6 +174,32 @@ function createHiddenBlockToolbarState() {
   };
 }
 
+function shallowSameObject(left, right) {
+  if (left === right) return true;
+  if (!left || !right) return !left && !right;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
+function sameToolbarState(left, right) {
+  if (!left || !right) return left === right;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    if (key === 'position' || key === 'range' || key === 'triggerPosition' || key === 'toolbarPosition') {
+      if (!shallowSameObject(left[key], right[key])) return false;
+      continue;
+    }
+    if (left[key] !== right[key]) return false;
+  }
+  return true;
+}
+
+function preserveToolbarState(current, next) {
+  return sameToolbarState(current, next) ? current : next;
+}
+
 function clampImageWidth(value) {
   return String(Math.min(100, Math.max(20, Number(value) || 100)));
 }
@@ -376,23 +402,29 @@ export default function RichTextEditor({
   );
 
   const syncSelectionToolbar = React.useCallback((nextEditor) => {
+    const hide = () =>
+      setSelectionToolbarState((current) =>
+        preserveToolbarState(current, createHiddenFloatingToolbarState({ range: null }))
+      );
     if (!nextEditor) {
-      setSelectionToolbarState(createHiddenFloatingToolbarState({ range: null }));
+      hide();
       return;
     }
     if (isPointerSelectingRef.current) {
       setSelectionToolbarState((current) =>
-        current.visible ? { ...current, visible: false, position: null } : current
+        current.visible
+          ? preserveToolbarState(current, { ...current, visible: false, position: null })
+          : current
       );
       return;
     }
     const { from, to, empty } = nextEditor.state.selection;
     if (!(nextEditor.state.selection instanceof TextSelection)) {
-      setSelectionToolbarState(createHiddenFloatingToolbarState({ range: null }));
+      hide();
       return;
     }
     if (empty || from === to) {
-      setSelectionToolbarState(createHiddenFloatingToolbarState({ range: null }));
+      hide();
       return;
     }
     const start = nextEditor.view.coordsAtPos(from);
@@ -409,20 +441,26 @@ export default function RichTextEditor({
     });
 
     lastSelectionToolbarPlacementRef.current = placement;
-    setSelectionToolbarState({
-      visible: true,
-      position: {
-        left: (start.left + end.right) / 2,
-        top,
-      },
-      range: { from, to },
-      placement,
-    });
+    setSelectionToolbarState((current) =>
+      preserveToolbarState(current, {
+        visible: true,
+        position: {
+          left: (start.left + end.right) / 2,
+          top,
+        },
+        range: { from, to },
+        placement,
+      })
+    );
   }, []);
 
   const syncTableToolbar = React.useCallback((nextEditor) => {
+    const hide = () =>
+      setTableToolbarState((current) =>
+        preserveToolbarState(current, createHiddenFloatingToolbarState({ caption: '' }))
+      );
     if (!nextEditor || !nextEditor.isActive('table')) {
-      setTableToolbarState(createHiddenFloatingToolbarState({ caption: '' }));
+      hide();
       return;
     }
 
@@ -433,7 +471,7 @@ export default function RichTextEditor({
     const tableElement = baseNode?.closest?.('table');
 
     if (!tableElement) {
-      setTableToolbarState(createHiddenFloatingToolbarState({ caption: '' }));
+      hide();
       return;
     }
 
@@ -449,15 +487,17 @@ export default function RichTextEditor({
     });
 
     lastTableToolbarPlacementRef.current = placement;
-    setTableToolbarState({
-      caption: tableElement.getAttribute('data-caption') || '',
-      visible: true,
-      position: {
-        left: anchorRect.left + anchorRect.width / 2,
-        top,
-      },
-      placement,
-    });
+    setTableToolbarState((current) =>
+      preserveToolbarState(current, {
+        caption: tableElement.getAttribute('data-caption') || '',
+        visible: true,
+        position: {
+          left: anchorRect.left + anchorRect.width / 2,
+          top,
+        },
+        placement,
+      })
+    );
   }, []);
 
   const syncBlockToolbarTrigger = React.useCallback(
@@ -471,13 +511,15 @@ export default function RichTextEditor({
 
       const { selection } = nextEditor.state;
       if (!selection.empty || nextEditor.isActive('table')) {
-        setBlockToolbarState((current) => ({
-          ...current,
-          triggerVisible: false,
-          triggerPosition: null,
-          toolbarVisible: false,
-          toolbarPosition: null,
-        }));
+        setBlockToolbarState((current) =>
+          preserveToolbarState(current, {
+            ...current,
+            triggerVisible: false,
+            triggerPosition: null,
+            toolbarVisible: false,
+            toolbarPosition: null,
+          })
+        );
         return;
       }
 
@@ -489,26 +531,30 @@ export default function RichTextEditor({
       );
 
       if (!blockElement) {
-        setBlockToolbarState((current) => ({
-          ...current,
-          triggerVisible: false,
-          triggerPosition: null,
-          toolbarVisible: false,
-          toolbarPosition: null,
-        }));
+        setBlockToolbarState((current) =>
+          preserveToolbarState(current, {
+            ...current,
+            triggerVisible: false,
+            triggerPosition: null,
+            toolbarVisible: false,
+            toolbarPosition: null,
+          })
+        );
         return;
       }
 
       const blockRect = blockElement.getBoundingClientRect();
       const editorRect = nextEditor.view.dom.getBoundingClientRect();
       if (blockRect.bottom <= editorRect.top || blockRect.top >= editorRect.bottom) {
-        setBlockToolbarState((current) => ({
-          ...current,
-          triggerVisible: false,
-          triggerPosition: null,
-          toolbarVisible: false,
-          toolbarPosition: null,
-        }));
+        setBlockToolbarState((current) =>
+          preserveToolbarState(current, {
+            ...current,
+            triggerVisible: false,
+            triggerPosition: null,
+            toolbarVisible: false,
+            toolbarPosition: null,
+          })
+        );
         return;
       }
 
@@ -518,21 +564,23 @@ export default function RichTextEditor({
         editorRect.top + 6
       );
 
-      setBlockToolbarState((current) => ({
-        triggerVisible: true,
-        triggerPosition: {
-          left: triggerLeft,
-          top: triggerTop,
-        },
-        toolbarVisible: current.toolbarVisible,
-        toolbarPosition:
-          current.toolbarVisible
-            ? {
-                left: triggerLeft - 2,
-                top: triggerTop + 28,
-              }
-            : null,
-      }));
+      setBlockToolbarState((current) =>
+        preserveToolbarState(current, {
+          triggerVisible: true,
+          triggerPosition: {
+            left: triggerLeft,
+            top: triggerTop,
+          },
+          toolbarVisible: current.toolbarVisible,
+          toolbarPosition:
+            current.toolbarVisible
+              ? {
+                  left: triggerLeft - 2,
+                  top: triggerTop + 28,
+                }
+              : null,
+        })
+      );
     },
     [historyOpen]
   );
@@ -540,6 +588,7 @@ export default function RichTextEditor({
   const editor = useEditor({
     content: decorateHtmlWithAssetUrls(filePath, html || ''),
     immediatelyRender: false,
+    shouldRerenderOnTransaction: false,
     extensions: [
       StarterKit,
       Underline,
@@ -609,7 +658,6 @@ export default function RichTextEditor({
       const normalizedHtml = getSanitizedEditorHtml(nextEditor);
       if (normalizedHtml !== lastCommittedHtmlRef.current) {
         lastCommittedHtmlRef.current = normalizedHtml;
-        nextEditor.commands.setContent(decorateHtmlWithAssetUrls(filePath, normalizedHtml), false);
         onHtmlChange?.(normalizedHtml);
       }
       syncTableToolbar(nextEditor);

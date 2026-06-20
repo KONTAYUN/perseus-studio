@@ -260,6 +260,9 @@ func (s *Server) handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
+	if isNoteLikePath(req.Path) {
+		req.Content = sanitizeHTMLFragment(req.Content)
+	}
 	result, err := files.WriteFile(r.Context(), req.Path, req.Content, "write")
 	if err != nil {
 		s.writeFileError(w, err)
@@ -282,6 +285,9 @@ func (s *Server) handleFilesCreate(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
+	}
+	if isNoteLikePath(req.Path) {
+		req.Content = sanitizeHTMLFragment(req.Content)
 	}
 	result, err := files.CreateFile(r.Context(), req.Path, req.Content)
 	if err != nil {

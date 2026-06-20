@@ -175,6 +175,18 @@ func (s *Service) renameValidated(cleanOld, cleanNew string) (PathChangeResult, 
 	if err := os.Rename(absOld, absNew); err != nil {
 		return PathChangeResult{}, err
 	}
+	if isHTMLNotePath(cleanOld) && isHTMLNotePath(cleanNew) {
+		raw, err := os.ReadFile(absNew)
+		if err != nil {
+			return PathChangeResult{}, err
+		}
+		next := rewriteMovedHTMLNoteAssetRefs(string(raw), cleanOld, cleanNew)
+		if next != string(raw) {
+			if err := writeAtomic(absNew, []byte(next)); err != nil {
+				return PathChangeResult{}, err
+			}
+		}
+	}
 	if err := s.moveOrderMetadata(cleanOld, cleanNew); err != nil {
 		return PathChangeResult{}, err
 	}
