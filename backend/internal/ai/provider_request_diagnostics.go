@@ -284,7 +284,11 @@ func providerMessageShapes(value any) []ProviderMessageLog {
 }
 
 func providerMessageProtocolWarnings(value any, protocol string) []string {
-	if strings.ToLower(strings.TrimSpace(protocol)) != "openai" {
+	normalized := strings.ToLower(strings.TrimSpace(protocol))
+	if normalized == "anthropic" {
+		return anthropicProviderMessageProtocolWarnings(value)
+	}
+	if normalized != "openai" {
 		return nil
 	}
 	items := mapSliceFromAny(value)
@@ -327,6 +331,62 @@ func providerMessageProtocolWarnings(value any, protocol string) []string {
 		warnings = append(warnings, "openai_unpaired_tool_call:assistant_index="+strconv.Itoa(pending[id])+":tool_call_id="+id)
 	}
 	return warnings
+}
+
+func anthropicProviderMessageProtocolWarnings(value any) []string {
+	items := mapSliceFromAny(value)
+	if len(items) == 0 {
+		return nil
+	}
+	var warnings []string
+	for index, item := range items {
+		if stringFromAny(item["role"]) != "assistant" {
+			continue
+		}
+		toolUseIDs := anthropicMessageToolUseIDs(item)
+		if len(toolUseIDs) == 0 {
+			continue
+		}
+		if index+1 >= len(items) || stringFromAny(items[index+1]["role"]) != "user" {
+			for _, id := range toolUseIDs {
+				warnings = append(warnings, "anthropic_unpaired_tool_use:assistant_index="+strconv.Itoa(index)+":tool_use_id="+id)
+			}
+			continue
+		}
+		resultIDs := anthropicMessageToolResultIDs(items[index+1])
+		for _, id := range toolUseIDs {
+			if !resultIDs[id] {
+				warnings = append(warnings, "anthropic_missing_immediate_tool_result:assistant_index="+strconv.Itoa(index)+":tool_use_id="+id)
+			}
+		}
+	}
+	return warnings
+}
+
+func anthropicMessageToolUseIDs(item map[string]any) []string {
+	var ids []string
+	for _, part := range mapSliceFromAny(item["content"]) {
+		if part["type"] != "tool_use" {
+			continue
+		}
+		if id := strings.TrimSpace(stringFromAny(part["id"])); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func anthropicMessageToolResultIDs(item map[string]any) map[string]bool {
+	ids := map[string]bool{}
+	for _, part := range mapSliceFromAny(item["content"]) {
+		if part["type"] != "tool_result" {
+			continue
+		}
+		if id := strings.TrimSpace(stringFromAny(part["tool_use_id"])); id != "" {
+			ids[id] = true
+		}
+	}
+	return ids
 }
 
 func messageHasToolCalls(item map[string]any) bool {

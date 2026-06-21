@@ -3,6 +3,8 @@ package ai
 import (
 	"encoding/json"
 	"strings"
+
+	"webide-backend/internal/idgen"
 )
 
 type extractedTextPatchTurn struct {
@@ -142,7 +144,7 @@ func textPatchToolCall(patch string) agentToolCall {
 		"transport": "assistant_text_patch",
 	})
 	return agentToolCall{
-		ID:            "text_patch_1",
+		ID:            idgen.New("text_patch"),
 		Name:          "apply_workspace_patch",
 		ArgumentsJSON: args,
 		PatchText:     patch,

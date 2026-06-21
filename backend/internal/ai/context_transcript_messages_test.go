@@ -47,6 +47,45 @@ func TestProviderMessageProtocolWarningsAllowsPendingLastAssistantToolCall(t *te
 	}
 }
 
+func TestProviderMessageProtocolWarningsDetectsAnthropicToolUseWithoutImmediateResult(t *testing.T) {
+	messages := []map[string]any{
+		{"role": "user", "content": "请修改文件"},
+		{"role": "assistant", "content": []map[string]any{{
+			"type": "tool_use",
+			"id":   "text_patch_1",
+			"name": "apply_workspace_patch",
+		}}},
+		{"role": "user", "content": []map[string]any{{
+			"type": "text",
+			"text": "runtime observation inserted in between",
+		}}},
+	}
+
+	warnings := providerMessageProtocolWarnings(messages, "anthropic")
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "anthropic_missing_immediate_tool_result:assistant_index=1:tool_use_id=text_patch_1") {
+		t.Fatalf("expected Anthropic tool-result adjacency warning, got %#v", warnings)
+	}
+}
+
+func TestProviderMessageProtocolWarningsAllowsAnthropicImmediateToolResult(t *testing.T) {
+	messages := []map[string]any{
+		{"role": "assistant", "content": []map[string]any{{
+			"type": "tool_use",
+			"id":   "text_patch_1",
+			"name": "apply_workspace_patch",
+		}}},
+		{"role": "user", "content": []map[string]any{{
+			"type":        "tool_result",
+			"tool_use_id": "text_patch_1",
+			"content":     "ok",
+		}}},
+	}
+
+	if warnings := providerMessageProtocolWarnings(messages, "anthropic"); len(warnings) != 0 {
+		t.Fatalf("expected valid Anthropic tool-result adjacency, got %#v", warnings)
+	}
+}
+
 func TestAnthropicTranscriptMessagesCoalescesAdjacentToolResults(t *testing.T) {
 	transcript := newAgentTranscript()
 	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{
@@ -104,5 +143,57 @@ func TestAnthropicTranscriptMessagesPreservesThinkingBlocks(t *testing.T) {
 		if block["type"] == "text" && strings.Contains(block["text"].(string), "private reasoning") {
 			t.Fatalf("thinking leaked into visible text: %#v", content)
 		}
+	}
+}
+
+func TestAnthropicTranscriptMessagesRewritesDuplicateToolUseIDs(t *testing.T) {
+	transcript := newAgentTranscript()
+	for index, path := range []string{"a.txt", "b.txt"} {
+		transcript.AppendAssistantTurn(agentModelTurn{
+			AnthropicRaw: []map[string]any{{
+				"type":  "tool_use",
+				"id":    "text_patch_1",
+				"name":  "apply_workspace_patch",
+				"input": map[string]any{"transport": "assistant_text_patch"},
+			}},
+			ToolCalls: []agentToolCall{{
+				ID:            "text_patch_1",
+				Name:          "apply_workspace_patch",
+				ArgumentsJSON: `{"transport":"assistant_text_patch"}`,
+			}},
+		})
+		transcript.AppendToolResults([]TranscriptToolResult{{
+			ToolCallID: "text_patch_1",
+			ToolName:   "apply_workspace_patch",
+			Content:    `{"status":"success"}`,
+			Event:      ToolEvent{ToolName: "apply_workspace_patch", Status: "success", Path: path, ChangedPaths: []string{path}},
+		}})
+		if index == 0 {
+			transcript.AppendRuntimeObservation(`{"status":"ok"}`, nil)
+		}
+	}
+
+	messages := anthropicTranscriptMessages(transcript.Entries)
+	var toolUseIDs []string
+	var toolResultIDs []string
+	for _, message := range messages {
+		content, _ := message["content"].([]map[string]any)
+		for _, block := range content {
+			switch block["type"] {
+			case "tool_use":
+				toolUseIDs = append(toolUseIDs, stringFromAny(block["id"]))
+			case "tool_result":
+				toolResultIDs = append(toolResultIDs, stringFromAny(block["tool_use_id"]))
+			}
+		}
+	}
+	if len(toolUseIDs) != 2 || len(toolResultIDs) != 2 {
+		t.Fatalf("expected two tool pairs, got uses=%#v results=%#v messages=%#v", toolUseIDs, toolResultIDs, messages)
+	}
+	if toolUseIDs[0] != "text_patch_1" || toolResultIDs[0] != "text_patch_1" {
+		t.Fatalf("expected first legacy id to stay paired, got uses=%#v results=%#v", toolUseIDs, toolResultIDs)
+	}
+	if toolUseIDs[1] == "text_patch_1" || toolUseIDs[1] != toolResultIDs[1] {
+		t.Fatalf("expected duplicate legacy id to be rewritten and paired, got uses=%#v results=%#v", toolUseIDs, toolResultIDs)
 	}
 }
