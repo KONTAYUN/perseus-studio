@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,6 +27,30 @@ func TestInlineHTMLAssetsForExportEmbedsLocalImages(t *testing.T) {
 	}
 	if !strings.Contains(got, `data-note-src=".assets/Note/pixel.png"`) {
 		t.Fatalf("exported HTML should retain data-note-src metadata: %s", got)
+	}
+}
+
+func TestMaterializeHTMLAssetsUsesPandocWorkingDirectoryRelativePath(t *testing.T) {
+	files := newAPITestWorkspace(t)
+	if _, err := files.CreateBytes(context.Background(), ".assets/Note/pixel.png", []byte("pngdata")); err != nil {
+		t.Fatalf("CreateBytes returned error: %v", err)
+	}
+	tempRoot := t.TempDir()
+	html := `<p>hello</p><img src="../.assets/Note/pixel.png" data-note-src="../.assets/Note/pixel.png" alt="pixel">`
+
+	got, err := materializeHTMLAssets(html, "archive/Note.html", tempRoot, files)
+	if err != nil {
+		t.Fatalf("materializeHTMLAssets returned error: %v", err)
+	}
+
+	if !strings.Contains(got, `src=".assets/Note/pixel.png"`) {
+		t.Fatalf("materialized HTML should use temp root relative asset path for pandoc: %s", got)
+	}
+	if !strings.Contains(got, `data-note-src="../.assets/Note/pixel.png"`) {
+		t.Fatalf("materialized HTML should preserve note metadata: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(tempRoot, ".assets", "Note", "pixel.png")); err != nil {
+		t.Fatalf("expected materialized asset under temp root: %v", err)
 	}
 }
 

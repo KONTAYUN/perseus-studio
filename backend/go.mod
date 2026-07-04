@@ -6,6 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.4.0
 	github.com/openai/openai-go v0.1.0-beta.2
 	golang.org/x/crypto v0.50.0
+	golang.org/x/net v0.52.0
 	modernc.org/sqlite v1.36.0
 )
 

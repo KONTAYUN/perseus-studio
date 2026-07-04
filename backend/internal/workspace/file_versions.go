@@ -173,3 +173,71 @@ WHERE user_id = ? AND path = ?
 `, s.userID, cleanPath)
 	return err
 }
+
+func (s *Service) rewriteMovedHTMLNoteVersions(oldNotePath, newNotePath string) error {
+	if !isHTMLNotePath(oldNotePath) || !isHTMLNotePath(newNotePath) {
+		return nil
+	}
+
+	rows, err := s.db.Query(`
+SELECT id, content_text
+FROM file_versions
+WHERE user_id = ? AND path = ?
+`, s.userID, oldNotePath)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type versionUpdate struct {
+		id      string
+		content string
+	}
+	var updates []versionUpdate
+	for rows.Next() {
+		var (
+			id      string
+			content sql.NullString
+		)
+		if err := rows.Scan(&id, &content); err != nil {
+			return err
+		}
+		if !content.Valid {
+			continue
+		}
+		next := rewriteMovedHTMLNoteAssetRefs(content.String, oldNotePath, newNotePath)
+		if next != content.String {
+			updates = append(updates, versionUpdate{id: id, content: next})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+UPDATE file_versions
+SET content_text = ?, size_bytes = ?, content_hash = ?
+WHERE user_id = ? AND id = ?
+`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, update := range updates {
+		content := []byte(update.content)
+		if _, err := stmt.Exec(update.content, len(content), hashBytes(content), s.userID, update.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

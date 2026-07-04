@@ -1041,6 +1041,35 @@ func TestExecuteToolApplyWorkspacePatchAddUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestExecuteToolApplyWorkspacePatchSanitizesHTMLNotes(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	ctx := context.Background()
+
+	patch := "*** Begin Patch\n" +
+		"*** Add File: Note.html\n" +
+		"+<h1 onclick=\"run()\">Title</h1>\n" +
+		"+<p style=\"color:red\">safe<a href=\"javascript:alert(1)\">link</a><img src='javascript:alert(2)' alt=\"x\"></p>\n" +
+		"+<script>alert(3)</script><style>body{color:red}</style>\n" +
+		"*** End Patch"
+	args := mustJSON(map[string]any{"patch": patch})
+	if _, _, _, _, err := service.executeTool(ctx, "apply_workspace_patch", args, RunOptions{UserID: testUserID}); err != nil {
+		t.Fatalf("executeTool apply_workspace_patch returned error: %v", err)
+	}
+
+	read, err := files.ReadFile("Note.html")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	for _, forbidden := range []string{"<script", "<style", "onclick=", "javascript:"} {
+		if strings.Contains(strings.ToLower(read.Content), forbidden) {
+			t.Fatalf("AI patch HTML write still contains %q: %s", forbidden, read.Content)
+		}
+	}
+	if !strings.Contains(read.Content, `style="color:red"`) || !strings.Contains(read.Content, "safe") {
+		t.Fatalf("AI patch HTML write removed expected safe content: %s", read.Content)
+	}
+}
+
 func TestExecuteToolApplyWorkspacePatchMergesMultiplePatchBlocksAtomically(t *testing.T) {
 	service, _, _, files := newTestAIService(t)
 	ctx := context.Background()

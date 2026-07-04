@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Download, FileCode2, FolderClosed, FolderOpe
 import { getFileTreeDropZone, getParentPath, pathMatches } from '../../hooks/ideUtils';
 import { shouldStartFileTreeItemDrag } from '../../hooks/fileTreeDragUtils';
 import { getNoteTitle, isNotePath } from '../../hooks/noteTreeUtils.js';
+import { AnchoredPopover } from '../ui';
 
 export default function FileTree({ items, depth = 0, ide }) {
   return items.map((item) => {
@@ -11,6 +12,7 @@ export default function FileTree({ items, depth = 0, ide }) {
     const showInsertAfter = indicator?.position === 'after';
     const isInlineRenaming = ide.inlineRenamePath === item.path;
     const isTextFile = item.type === 'file' && ide.isTextPath(item.path);
+    const isActiveRow = ide.selectedPaths.has(item.path) || item.path === ide.currentFilePath;
     const actionCount = item.type === 'folder' ? 5 : isTextFile ? 3 : 2;
     const actionWidth = actionCount * 20 + Math.max(0, actionCount - 1) * 4 + 2;
 
@@ -49,6 +51,7 @@ export default function FileTree({ items, depth = 0, ide }) {
         data-testid={`file-row-${item.path}`}
         data-file-path={item.path}
         data-file-type={item.type}
+        data-file-active={isActiveRow ? 'true' : undefined}
         draggable={!isInlineRenaming}
         onDragStart={(e) => {
           if (!shouldStartFileTreeItemDrag({ target: e.target, isInlineRenaming })) {
@@ -269,7 +272,8 @@ export default function FileTree({ items, depth = 0, ide }) {
             >
               <Pencil size={12} />
             </button>
-            {isTextFile && (
+            {isTextFile && isNotePath(item.path) && <NoteTreeExportButton item={item} ide={ide} />}
+            {isTextFile && !isNotePath(item.path) && (
               <button
                 data-testid={`download-${item.path}`}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -321,6 +325,64 @@ export default function FileTree({ items, depth = 0, ide }) {
     </div>
     );
   });
+}
+
+function NoteTreeExportButton({ item, ide }) {
+  const anchorRef = React.useRef(null);
+  const [isOpen, setIsOpen] = React.useState(false);
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        data-testid={`download-${item.path}`}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          ide.selectItem?.(item.path, item.type);
+          setIsOpen((current) => !current);
+        }}
+        className="motion-button ui-icon-button ui-icon-button-compact h-5 w-5"
+        title="导出笔记"
+      >
+        <Download size={12} />
+      </button>
+      <AnchoredPopover
+        anchorRef={anchorRef}
+        width={176}
+        minWidth={176}
+        maxHeight={220}
+        open={isOpen}
+        onClose={() => setIsOpen(false)}
+        testId={`note-tree-export-menu-${item.path}`}
+        className="py-1"
+      >
+        {[
+          ['html', 'HTML (.html)'],
+          ['md', 'Markdown (.md)'],
+          ['docx', 'Word (.docx)'],
+        ].map(([format, label]) => (
+          <button
+            key={format}
+            type="button"
+            className="motion-row flex w-full items-center px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-500/20"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsOpen(false);
+              ide.exportNotes?.({
+                path: item.path,
+                type: 'file',
+                format,
+              }).catch((error) => console.error(error));
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </AnchoredPopover>
+    </>
+  );
 }
 
 function DropInsertionLine({ depth }) {

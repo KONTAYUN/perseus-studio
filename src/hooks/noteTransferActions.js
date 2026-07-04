@@ -1,20 +1,6 @@
-import { apiGetBlob, apiPostForm } from '../api/client';
-import { downloadBlob } from './fileTreeDownloadUtils';
+import { API_BASE_URL, apiPostForm } from '../api/client';
 import { topLevelSelectedItems } from './fileTreeUtils.js';
-import { getNoteTitle, isNotePath } from './noteTreeUtils.js';
-
-function parseDownloadFileName(contentDisposition, fallback = 'perseus-notes.zip') {
-  const utf8Match = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(contentDisposition || '');
-  if (utf8Match?.[1]) {
-    try {
-      return decodeURIComponent(utf8Match[1]);
-    } catch (_error) {
-      // fall through to legacy filename parsing
-    }
-  }
-  const match = /filename="?([^"]+)"?/i.exec(contentDisposition || '');
-  return match?.[1] || fallback;
-}
+import { isNotePath } from './noteTreeUtils.js';
 
 export function createNoteTransferActions({
   getDefaultCreateBasePath,
@@ -37,26 +23,19 @@ export function createNoteTransferActions({
 
     try {
       const isMultiSelection = exportSelection.length > 1;
-      const fallbackName =
-        isMultiSelection
-          ? 'selected-notes.zip'
-          : exportType === 'file' && isNotePath(exportPath)
-            ? `${getNoteTitle(exportPath) || 'note'}.${exportExtensionForFormat(format)}`
-            : `${getNoteTitle(exportPath) || 'perseus-notes'}.zip`;
-      const { blob, contentDisposition } = await apiGetBlob(`/api/files/export${buildExportQuery(exportPath, exportSelection, format)}`);
-      downloadBlob(parseDownloadFileName(contentDisposition, fallbackName), blob);
+      triggerBrowserDownload(`/api/files/export${buildExportQuery(exportPath, exportSelection, format)}`);
       setUploadStatus(
         isMultiSelection
-          ? '\u6279\u91cf\u5bfc\u51fa\u6210\u529f'
+          ? '\u6279\u91cf\u5bfc\u51fa\u5df2\u5f00\u59cb'
           : format === 'docx'
-            ? '\u7b14\u8bb0 Word \u6587\u6863\u5bfc\u51fa\u6210\u529f'
+            ? '\u7b14\u8bb0 Word \u6587\u6863\u5bfc\u51fa\u5df2\u5f00\u59cb'
           : format === 'md'
-            ? '\u7b14\u8bb0 Markdown \u6587\u6863\u5bfc\u51fa\u6210\u529f'
+            ? '\u7b14\u8bb0 Markdown \u6587\u6863\u5bfc\u51fa\u5df2\u5f00\u59cb'
           : format === 'html'
-            ? '\u7b14\u8bb0 HTML \u6587\u6863\u5bfc\u51fa\u6210\u529f'
+            ? '\u7b14\u8bb0 HTML \u6587\u6863\u5bfc\u51fa\u5df2\u5f00\u59cb'
           : exportPath
-            ? '\u7b14\u8bb0\u5bfc\u51fa\u6210\u529f'
-            : '\u6574\u68f5\u7b14\u8bb0\u6811\u5bfc\u51fa\u6210\u529f'
+            ? '\u7b14\u8bb0\u5bfc\u51fa\u5df2\u5f00\u59cb'
+            : '\u6574\u68f5\u7b14\u8bb0\u6811\u5bfc\u51fa\u5df2\u5f00\u59cb'
       );
       window.setTimeout(() => setUploadStatus(''), 1800);
     } catch (error) {
@@ -100,13 +79,6 @@ export function createNoteTransferActions({
   };
 }
 
-function exportExtensionForFormat(format) {
-  if (format === 'docx') return 'docx';
-  if (format === 'md') return 'md';
-  if (format === 'html') return 'html';
-  return 'zip';
-}
-
 function buildExportQuery(exportPath, exportSelection, format = 'zip') {
   if (exportSelection.length > 1) {
     return `?paths_json=${encodeURIComponent(JSON.stringify(exportSelection.map((item) => item.path)))}&format=${encodeURIComponent(format)}`;
@@ -116,4 +88,15 @@ function buildExportQuery(exportPath, exportSelection, format = 'zip') {
   if (format) params.set('format', format);
   const query = params.toString();
   return query ? `?${query}` : '';
+}
+
+function triggerBrowserDownload(path) {
+  const anchor = document.createElement('a');
+  anchor.href = `${API_BASE_URL}${path}`;
+  anchor.download = '';
+  anchor.rel = 'noopener';
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }

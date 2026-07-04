@@ -186,6 +186,9 @@ func (s *Service) renameValidated(cleanOld, cleanNew string) (PathChangeResult, 
 				return PathChangeResult{}, err
 			}
 		}
+		if err := s.rewriteMovedHTMLNoteVersions(cleanOld, cleanNew); err != nil {
+			return PathChangeResult{}, err
+		}
 	}
 	if err := s.moveOrderMetadata(cleanOld, cleanNew); err != nil {
 		return PathChangeResult{}, err

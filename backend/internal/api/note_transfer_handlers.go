@@ -26,6 +26,12 @@ func wrapHTMLDocument(title, fragment string) string {
 		"\n</body>\n</html>\n"
 }
 
+func wrapHTMLFragmentDocument(fragment string) string {
+	return "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n</head>\n<body>\n" +
+		fragment +
+		"\n</body>\n</html>\n"
+}
+
 func (s *Server) handleFilesExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
@@ -381,11 +387,7 @@ func extractHTMLFragment(content string) string {
 }
 
 func sanitizeHTMLFragment(fragment string) string {
-	fragment = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script>`).ReplaceAllString(fragment, "")
-	fragment = regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style>`).ReplaceAllString(fragment, "")
-	fragment = regexp.MustCompile(`(?is)\s+on[a-z]+\s*=\s*("([^"]*)"|'([^']*)'|[^\s>]+)`).ReplaceAllString(fragment, "")
-	fragment = regexp.MustCompile(`(?is)\s+(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)`).ReplaceAllString(fragment, "")
-	return strings.TrimSpace(fragment)
+	return workspace.SanitizeHTMLFragment(fragment)
 }
 
 func importZipNotes(ctx context.Context, files *workspace.Service, parentPath string, content []byte) ([]string, error) {

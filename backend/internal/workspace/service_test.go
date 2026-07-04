@@ -70,6 +70,28 @@ func TestReorderPathPersistsMixedManualOrder(t *testing.T) {
 	}
 }
 
+func TestHTMLWritesAreSanitizedBeforeSave(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	unsafe := `<h1 onclick="run()">Title</h1><p style="color:red">safe<a href="javascript:alert(1)">link</a><img src='javascript:alert(2)' alt="x"></p><script>alert(3)</script><style>body{color:red}</style>`
+	if _, err := files.CreateFile(ctx, "Note.html", unsafe); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	read, err := files.ReadFile("Note.html")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	for _, forbidden := range []string{"<script", "<style", "onclick=", "javascript:"} {
+		if strings.Contains(strings.ToLower(read.Content), forbidden) {
+			t.Fatalf("sanitized HTML still contains %q: %s", forbidden, read.Content)
+		}
+	}
+	if !strings.Contains(read.Content, `style="color:red"`) || !strings.Contains(read.Content, "safe") {
+		t.Fatalf("sanitized HTML removed expected safe content: %s", read.Content)
+	}
+}
+
 func TestReorderPathMovesAcrossFolders(t *testing.T) {
 	ctx := context.Background()
 	files := newTestService(t)
@@ -138,11 +160,15 @@ func TestMoveHTMLNoteRewritesLocalAssetReferences(t *testing.T) {
 		t.Fatalf("CreateBytes asset returned error: %v", err)
 	}
 	html := `<p>hello</p><img src="/api/files/content?path=.assets%2FNote%2Fcover.png" data-note-src=".assets/Note/cover.png" alt="cover">`
+	htmlUpdated := `<p>updated</p><img src="/api/files/content?path=.assets%2FNote%2Fcover.png" data-note-src=".assets/Note/cover.png" alt="cover">`
 	if _, err := files.CreateFile(ctx, "Note.html", "<p>draft</p>"); err != nil {
 		t.Fatalf("CreateFile note returned error: %v", err)
 	}
 	if _, err := files.WriteFile(ctx, "Note.html", html, "test_write"); err != nil {
 		t.Fatalf("WriteFile note returned error: %v", err)
+	}
+	if _, err := files.WriteFile(ctx, "Note.html", htmlUpdated, "test_update"); err != nil {
+		t.Fatalf("WriteFile updated note returned error: %v", err)
 	}
 	if _, err := files.MkdirNew("archive"); err != nil {
 		t.Fatalf("MkdirNew returned error: %v", err)
@@ -174,6 +200,42 @@ func TestMoveHTMLNoteRewritesLocalAssetReferences(t *testing.T) {
 	}
 	if len(versions) < 2 {
 		t.Fatalf("expected moved note to retain prior versions, got %#v", versions)
+	}
+	var imageVersionID string
+	for _, item := range versions {
+		if item.ID == "current" {
+			continue
+		}
+		version, err := files.ReadFileVersion(ctx, "archive/Note.html", item.ID)
+		if err != nil {
+			t.Fatalf("ReadFileVersion returned error: %v", err)
+		}
+		if strings.Contains(version.Content, "cover.png") {
+			imageVersionID = item.ID
+			if !strings.Contains(version.Content, `data-note-src="../.assets/Note/cover.png"`) {
+				t.Fatalf("moved note version did not rewrite data-note-src: %s", version.Content)
+			}
+			if !strings.Contains(version.Content, `src="../.assets/Note/cover.png"`) {
+				t.Fatalf("moved note version did not rewrite src: %s", version.Content)
+			}
+			break
+		}
+	}
+	if imageVersionID == "" {
+		t.Fatalf("expected at least one prior image version, got %#v", versions)
+	}
+	if _, err := files.RestoreFileVersion(ctx, "archive/Note.html", imageVersionID); err != nil {
+		t.Fatalf("RestoreFileVersion returned error: %v", err)
+	}
+	restored, err := files.ReadFile("archive/Note.html")
+	if err != nil {
+		t.Fatalf("ReadFile restored note returned error: %v", err)
+	}
+	if !strings.Contains(restored.Content, `data-note-src="../.assets/Note/cover.png"`) {
+		t.Fatalf("restored note did not keep rewritten data-note-src: %s", restored.Content)
+	}
+	if !strings.Contains(restored.Content, `src="../.assets/Note/cover.png"`) {
+		t.Fatalf("restored note did not keep rewritten src: %s", restored.Content)
 	}
 }
 

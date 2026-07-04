@@ -40,12 +40,14 @@
 }
 
 .file-tree-row:hover .file-tree-label,
-.file-tree-row:focus-within .file-tree-label {
+.file-tree-row:focus-within .file-tree-label,
+.file-tree-row[data-file-active='true'] .file-tree-label {
   padding-right: calc(var(--file-tree-action-width) + 12px);
 }
 
 .file-tree-row:hover .file-tree-actions,
-.file-tree-row:focus-within .file-tree-actions {
+.file-tree-row:focus-within .file-tree-actions,
+.file-tree-row[data-file-active='true'] .file-tree-actions {
   opacity: 1;
   pointer-events: auto;
 }

@@ -25,6 +25,9 @@ func (s *Service) WriteBytes(ctx context.Context, path string, content []byte, s
 	if source == "" {
 		source = "manual_write"
 	}
+	if isHTMLNotePath(cleanPath) {
+		content = []byte(SanitizeHTMLFragment(string(content)))
+	}
 
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return FileWriteResult{}, err

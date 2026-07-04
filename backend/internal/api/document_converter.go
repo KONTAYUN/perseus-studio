@@ -54,7 +54,7 @@ func (c *pandocConverter) HTMLToDocx(ctx context.Context, files *workspace.Servi
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(sourcePath, []byte(wrapHTMLDocument(filepath.Base(noteCleanPath), html)), 0o644); err != nil {
+	if err := os.WriteFile(sourcePath, []byte(wrapHTMLFragmentDocument(html)), 0o644); err != nil {
 		return nil, err
 	}
 	outputPath := strings.TrimSuffix(sourcePath, filepath.Ext(sourcePath)) + ".docx"
@@ -63,6 +63,7 @@ func (c *pandocConverter) HTMLToDocx(ctx context.Context, files *workspace.Servi
 		"pandoc",
 		"--from=html",
 		"--to=docx",
+		"--resource-path", tempRoot,
 		"--output", outputPath,
 		sourcePath,
 	)
@@ -70,7 +71,11 @@ func (c *pandocConverter) HTMLToDocx(ctx context.Context, files *workspace.Servi
 	if output, err := docxCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("pandoc docx export failed: %s", strings.TrimSpace(string(output)))
 	}
-	return os.ReadFile(outputPath)
+	docxBytes, err := os.ReadFile(outputPath)
+	if err != nil {
+		return nil, err
+	}
+	return enhanceDocxRichTextStyles(docxBytes, html), nil
 }
 
 func (c *pandocConverter) MarkdownToHTML(ctx context.Context, markdown string) (string, error) {
@@ -174,6 +179,7 @@ func (c *pandocConverter) DocxToHTML(ctx context.Context, content []byte) (strin
 	if err != nil {
 		return "", nil, err
 	}
+	htmlContent := enhanceImportedDocxHTML(content, strings.TrimSpace(string(rawHTML)))
 	assets := make(map[string][]byte)
 	if info, err := os.Stat(mediaDir); err == nil && info.IsDir() {
 		err = filepath.Walk(mediaDir, func(current string, info os.FileInfo, walkErr error) error {
@@ -198,7 +204,7 @@ func (c *pandocConverter) DocxToHTML(ctx context.Context, content []byte) (strin
 			return "", nil, err
 		}
 	}
-	return strings.TrimSpace(string(rawHTML)), assets, nil
+	return htmlContent, assets, nil
 }
 
 func materializeHTMLAssets(html, notePath, tempRoot string, files *workspace.Service) (string, error) {
@@ -218,7 +224,7 @@ func materializeHTMLAssets(html, notePath, tempRoot string, files *workspace.Ser
 		if err := materializeWorkspaceAsset(tempRoot, files, assetPath, materializedPaths); err != nil {
 			continue
 		}
-		replacements[tag] = setHTMLAttribute(tag, "src", dataNoteSrc)
+		replacements[tag] = setHTMLAttribute(tag, "src", assetPath)
 	}
 	for oldTag, newTag := range replacements {
 		html = strings.ReplaceAll(html, oldTag, newTag)
