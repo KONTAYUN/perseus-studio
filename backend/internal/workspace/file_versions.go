@@ -12,26 +12,37 @@ import (
 )
 
 func (s *Service) ListFileVersions(ctx context.Context, path string, limit int) ([]FileVersion, error) {
-	cleanPath, _, err := s.sanitizePath(path)
-	if err != nil {
-		return nil, err
+	path = strings.TrimSpace(path)
+	var (
+		cleanPath string
+		err       error
+	)
+	if path != "" {
+		cleanPath, _, err = s.sanitizePath(path)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if limit <= 0 || limit > 100 {
-		limit = 30
+	if limit <= 0 || limit > maxGlobalFileVersions {
+		limit = maxGlobalFileVersions
 	}
 
-	current, currentErr := s.ReadFile(cleanPath)
-	if currentErr != nil && !IsNotExist(currentErr) {
-		return nil, currentErr
-	}
-
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 SELECT id, path, size_bytes, content_hash, source, created_at
 FROM file_versions
-WHERE user_id = ? AND path = ?
-ORDER BY created_at DESC
+WHERE user_id = ?
+`
+	args := []any{s.userID}
+	if cleanPath != "" {
+		query += ` AND path = ?`
+		args = append(args, cleanPath)
+	}
+	query += `
+ORDER BY created_at DESC, id DESC
 LIMIT ?
-`, s.userID, cleanPath, limit)
+`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -48,26 +59,11 @@ LIMIT ?
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
-	if currentErr == nil {
-		versions = append([]FileVersion{{
-			ID:        "current",
-			Path:      cleanPath,
-			Size:      current.Size,
-			Hash:      current.Hash,
-			Source:    "current",
-			CreatedAt: current.ModifiedAt,
-			IsCurrent: true,
-		}}, versions...)
-	}
 	return versions, nil
 }
 
 func (s *Service) RestoreFileVersion(ctx context.Context, path, versionID string) (FileWriteResult, error) {
-	cleanPath, absPath, err := s.sanitizePath(path)
-	if err != nil {
-		return FileWriteResult{}, err
-	}
+	path = strings.TrimSpace(path)
 	versionID = strings.TrimSpace(versionID)
 	if versionID == "" || versionID == "current" {
 		return FileWriteResult{}, ErrInvalidPath
@@ -75,7 +71,7 @@ func (s *Service) RestoreFileVersion(ctx context.Context, path, versionID string
 
 	var versionPath string
 	var content sql.NullString
-	err = s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(ctx, `
 SELECT path, content_text
 FROM file_versions
 WHERE user_id = ? AND id = ?
@@ -86,22 +82,38 @@ WHERE user_id = ? AND id = ?
 		}
 		return FileWriteResult{}, err
 	}
-	if versionPath != cleanPath {
-		return FileWriteResult{}, ErrInvalidPath
+	targetPath := versionPath
+	if path != "" {
+		cleanPath, _, err := s.sanitizePath(path)
+		if err != nil {
+			return FileWriteResult{}, err
+		}
+		if versionPath != cleanPath {
+			return FileWriteResult{}, ErrInvalidPath
+		}
+		targetPath = cleanPath
+	}
+	cleanTargetPath, absPath, err := s.sanitizePath(targetPath)
+	if err != nil {
+		return FileWriteResult{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return FileWriteResult{}, err
 	}
-	return s.WriteFile(ctx, cleanPath, content.String, "restore_version")
+	return s.WriteFile(ctx, cleanTargetPath, content.String, "restore_version")
 }
 
 func (s *Service) ReadFileVersion(ctx context.Context, path, versionID string) (FileReadResult, error) {
-	cleanPath, _, err := s.sanitizePath(path)
-	if err != nil {
-		return FileReadResult{}, err
-	}
+	path = strings.TrimSpace(path)
 	versionID = strings.TrimSpace(versionID)
 	if versionID == "" || versionID == "current" {
+		if path == "" {
+			return FileReadResult{}, ErrInvalidPath
+		}
+		cleanPath, _, err := s.sanitizePath(path)
+		if err != nil {
+			return FileReadResult{}, err
+		}
 		return s.ReadFile(cleanPath)
 	}
 
@@ -112,7 +124,7 @@ func (s *Service) ReadFileVersion(ctx context.Context, path, versionID string) (
 		hash        string
 		createdAt   time.Time
 	)
-	err = s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(ctx, `
 SELECT path, content_text, size_bytes, content_hash, created_at
 FROM file_versions
 WHERE user_id = ? AND id = ?
@@ -123,11 +135,17 @@ WHERE user_id = ? AND id = ?
 		}
 		return FileReadResult{}, err
 	}
-	if versionPath != cleanPath {
-		return FileReadResult{}, ErrInvalidPath
+	if path != "" {
+		cleanPath, _, err := s.sanitizePath(path)
+		if err != nil {
+			return FileReadResult{}, err
+		}
+		if versionPath != cleanPath {
+			return FileReadResult{}, ErrInvalidPath
+		}
 	}
 	return FileReadResult{
-		Path:       cleanPath,
+		Path:       versionPath,
 		Content:    content.String,
 		Size:       size,
 		Hash:       hash,
@@ -136,19 +154,26 @@ WHERE user_id = ? AND id = ?
 }
 
 func (s *Service) DeleteFileVersion(ctx context.Context, path, versionID string) error {
-	cleanPath, _, err := s.sanitizePath(path)
-	if err != nil {
-		return err
-	}
+	path = strings.TrimSpace(path)
 	versionID = strings.TrimSpace(versionID)
 	if versionID == "" || versionID == "current" {
 		return ErrInvalidPath
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	query := `
 DELETE FROM file_versions
-WHERE user_id = ? AND path = ? AND id = ?
-`, s.userID, cleanPath, versionID)
+WHERE user_id = ? AND id = ?
+`
+	args := []any{s.userID, versionID}
+	if path != "" {
+		cleanPath, _, err := s.sanitizePath(path)
+		if err != nil {
+			return err
+		}
+		query += ` AND path = ?`
+		args = append(args, cleanPath)
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -163,6 +188,14 @@ WHERE user_id = ? AND path = ? AND id = ?
 }
 
 func (s *Service) DeleteAllFileVersions(ctx context.Context, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		_, err := s.db.ExecContext(ctx, `
+DELETE FROM file_versions
+WHERE user_id = ?
+`, s.userID)
+		return err
+	}
 	cleanPath, _, err := s.sanitizePath(path)
 	if err != nil {
 		return err

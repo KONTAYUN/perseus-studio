@@ -12,6 +12,7 @@ export default function useIdeState(options = {}) {
   const isEnabled = options.enabled !== false;
   const dialog = options.dialog || {};
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const layout = useLayoutState({ userId: options.currentUser?.id || options.currentUser?.user_id || '' });
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const settings = useSettingsData({ enabled: isEnabled });
@@ -216,6 +217,7 @@ export default function useIdeState(options = {}) {
     deletePath,
     deleteSelectedItems,
     deleteTrashItem,
+    clearFileHistory: activeEditor.clearFileHistory,
     detectFileType,
     downloadCurrentFile,
     downloadFile,
@@ -251,6 +253,7 @@ export default function useIdeState(options = {}) {
     isEditorLoading: activeEditor.isEditorLoading,
     isFileSearchLoading,
     isFileSearchOpen,
+    isHistoryOpen,
     isSavingFile: activeEditor.isSavingFile,
     isSettingsOpen,
     isTextFile: activeEditor.isTextFile,
@@ -286,6 +289,8 @@ export default function useIdeState(options = {}) {
     restoreTrashItem,
     returnChatHome: chat.returnChatHome,
     saveCurrentFile: activeEditor.saveCurrentFile,
+    deleteFileVersion: activeEditor.deleteFileVersion,
+    restoreFileVersion: activeEditor.restoreFileVersion,
     selectConversation: chat.selectConversation,
     selectItem,
     selectTreeItem,
@@ -303,6 +308,7 @@ export default function useIdeState(options = {}) {
     setInlineRenameDraft,
     setIsAddMenuOpen,
     setIsConversationMenuOpen: chat.setIsConversationMenuOpen,
+    setIsHistoryOpen,
     setIsSettingsOpen,
     submitFileDialog,
     toggleFolder,

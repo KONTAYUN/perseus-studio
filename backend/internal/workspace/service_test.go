@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -236,6 +238,131 @@ func TestMoveHTMLNoteRewritesLocalAssetReferences(t *testing.T) {
 	}
 	if !strings.Contains(restored.Content, `src="../.assets/Note/cover.png"`) {
 		t.Fatalf("restored note did not keep rewritten src: %s", restored.Content)
+	}
+}
+
+func TestGlobalFileVersionsListRestoreAndClear(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.CreateFile(ctx, "A.html", "<p>a0</p>"); err != nil {
+		t.Fatalf("CreateFile A returned error: %v", err)
+	}
+	if _, err := files.CreateFile(ctx, "B.html", "<p>b0</p>"); err != nil {
+		t.Fatalf("CreateFile B returned error: %v", err)
+	}
+	if _, err := files.WriteFile(ctx, "A.html", "<p>a1</p>", "write_a1"); err != nil {
+		t.Fatalf("WriteFile A1 returned error: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := files.WriteFile(ctx, "B.html", "<p>b1</p>", "write_b1"); err != nil {
+		t.Fatalf("WriteFile B1 returned error: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := files.WriteFile(ctx, "A.html", "<p>a2</p>", "write_a2"); err != nil {
+		t.Fatalf("WriteFile A2 returned error: %v", err)
+	}
+
+	versions, err := files.ListFileVersions(ctx, "", 30)
+	if err != nil {
+		t.Fatalf("ListFileVersions global returned error: %v", err)
+	}
+	if len(versions) != 3 {
+		t.Fatalf("expected 3 global history entries, got %#v", versions)
+	}
+	if versions[0].Path != "A.html" || versions[0].Source != "write_a2" {
+		t.Fatalf("expected newest global version to be A write_a2, got %#v", versions[0])
+	}
+
+	var bVersionID string
+	for _, item := range versions {
+		if item.Path == "B.html" {
+			bVersionID = item.ID
+			break
+		}
+	}
+	if bVersionID == "" {
+		t.Fatalf("expected B version in global history, got %#v", versions)
+	}
+	bVersion, err := files.ReadFileVersion(ctx, "", bVersionID)
+	if err != nil {
+		t.Fatalf("ReadFileVersion global returned error: %v", err)
+	}
+	if bVersion.Path != "B.html" || bVersion.Content != "<p>b0</p>" {
+		t.Fatalf("unexpected B version read: %#v", bVersion)
+	}
+	if _, err := files.RestoreFileVersion(ctx, "", bVersionID); err != nil {
+		t.Fatalf("RestoreFileVersion global returned error: %v", err)
+	}
+	aRead, err := files.ReadFile("A.html")
+	if err != nil {
+		t.Fatalf("ReadFile A returned error: %v", err)
+	}
+	bRead, err := files.ReadFile("B.html")
+	if err != nil {
+		t.Fatalf("ReadFile B returned error: %v", err)
+	}
+	if aRead.Content != "<p>a2</p>" {
+		t.Fatalf("restoring B should not change A, got %s", aRead.Content)
+	}
+	if bRead.Content != "<p>b0</p>" {
+		t.Fatalf("expected B to restore to prior content, got %s", bRead.Content)
+	}
+
+	if err := files.DeleteAllFileVersions(ctx, ""); err != nil {
+		t.Fatalf("DeleteAllFileVersions global returned error: %v", err)
+	}
+	versions, err = files.ListFileVersions(ctx, "", 30)
+	if err != nil {
+		t.Fatalf("ListFileVersions after clear returned error: %v", err)
+	}
+	if len(versions) != 0 {
+		t.Fatalf("expected global history to be cleared, got %#v", versions)
+	}
+}
+
+func TestGlobalFileVersionsPruneAndSkipUnchangedWrites(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+
+	if _, err := files.CreateFile(ctx, "Note.html", "<p>0</p>"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	if _, err := files.WriteFile(ctx, "Note.html", "<p>0</p>", "same_content"); err != nil {
+		t.Fatalf("WriteFile same content returned error: %v", err)
+	}
+	versions, err := files.ListFileVersions(ctx, "", 30)
+	if err != nil {
+		t.Fatalf("ListFileVersions after same content returned error: %v", err)
+	}
+	if len(versions) != 0 {
+		t.Fatalf("same content write should not create history, got %#v", versions)
+	}
+	if _, err := files.CreateBytes(ctx, ".assets/pic.png", []byte("image-1")); err != nil {
+		t.Fatalf("CreateBytes asset returned error: %v", err)
+	}
+	if _, err := files.WriteBytes(ctx, ".assets/pic.png", []byte("image-2"), "asset_update"); err != nil {
+		t.Fatalf("WriteBytes asset returned error: %v", err)
+	}
+	versions, err = files.ListFileVersions(ctx, "", 30)
+	if err != nil {
+		t.Fatalf("ListFileVersions after asset write returned error: %v", err)
+	}
+	if len(versions) != 0 {
+		t.Fatalf("binary asset write should not create history, got %#v", versions)
+	}
+
+	for i := 1; i <= maxGlobalFileVersions+5; i++ {
+		if _, err := files.WriteFile(ctx, "Note.html", fmt.Sprintf("<p>%d</p>", i), "bulk_write"); err != nil {
+			t.Fatalf("WriteFile %d returned error: %v", i, err)
+		}
+	}
+	versions, err = files.ListFileVersions(ctx, "", 100)
+	if err != nil {
+		t.Fatalf("ListFileVersions after bulk writes returned error: %v", err)
+	}
+	if len(versions) != maxGlobalFileVersions {
+		t.Fatalf("expected history to be pruned to %d entries, got %d", maxGlobalFileVersions, len(versions))
 	}
 }
 

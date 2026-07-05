@@ -8,20 +8,21 @@ export function createEditorHistoryActions({
   setErrorMessage,
 }) {
   async function restoreFileVersion(versionId) {
-    const path = currentFilePathRef.current;
-    if (!path || !versionId || versionId === 'current') return false;
+    if (!versionId || versionId === 'current') return false;
     setErrorMessage?.('');
-    setEditorStatusMessage?.('正在恢复历史版本...');
+    setEditorStatusMessage?.('正在恢复历史记录...');
     try {
       const result = await apiPost('/api/files/history/restore', {
-        path,
         version_id: versionId,
       });
-      await loadFileIntoEditor(path, {
-        hash: result.hash || '',
-        versionId: result.version_id || '',
-        statusMessage: '已恢复到所选历史版本',
-      });
+      const restoredPath = result.path || currentFilePathRef.current;
+      if (restoredPath) {
+        await loadFileIntoEditor(restoredPath, {
+          hash: result.hash || '',
+          versionId: result.version_id || '',
+          statusMessage: '已恢复到所选历史记录',
+        });
+      }
       await loadTree?.();
       return true;
     } catch (error) {
@@ -33,16 +34,14 @@ export function createEditorHistoryActions({
   }
 
   async function deleteFileVersion(versionId) {
-    const path = currentFilePathRef.current;
-    if (!path || !versionId || versionId === 'current') return false;
+    if (!versionId || versionId === 'current') return false;
     setErrorMessage?.('');
-    setEditorStatusMessage?.('正在删除历史版本...');
+    setEditorStatusMessage?.('正在删除历史记录...');
     try {
       await apiPost('/api/files/history/delete', {
-        path,
         version_id: versionId,
       });
-      setEditorStatusMessage?.('已删除所选历史版本');
+      setEditorStatusMessage?.('已删除所选历史记录');
       return true;
     } catch (error) {
       console.error('deleteFileVersion failed', error);
@@ -53,13 +52,11 @@ export function createEditorHistoryActions({
   }
 
   async function clearFileHistory() {
-    const path = currentFilePathRef.current;
-    if (!path) return false;
     setErrorMessage?.('');
-    setEditorStatusMessage?.('正在清空历史版本...');
+    setEditorStatusMessage?.('正在清空历史记录...');
     try {
-      await apiPost('/api/files/history/clear', { path });
-      setEditorStatusMessage?.('已清空历史版本');
+      await apiPost('/api/files/history/clear', {});
+      setEditorStatusMessage?.('已清空历史记录');
       return true;
     } catch (error) {
       console.error('clearFileHistory failed', error);

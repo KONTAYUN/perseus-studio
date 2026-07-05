@@ -1,14 +1,12 @@
 import React, { useRef, useState } from 'react';
 import { Download, FileCode2, PanelTop, X } from 'lucide-react';
 import { getNoteTitle, isNotePath } from '../../hooks/noteTreeUtils.js';
-import { AnchoredPopover, Button } from '../ui';
+import { Button } from '../ui';
 import RichTextEditor from './richText/RichTextEditor.jsx';
 
 export default function EditorPanel({ ide, editor, panelId }) {
   const tabsStripRef = useRef(null);
-  const exportButtonRef = useRef(null);
   const [tabDropIndicator, setTabDropIndicator] = useState(null);
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const isCurrentNote = isNotePath(editor.currentFilePath);
 
   const scrollTabsWithWheel = (event) => {
@@ -202,64 +200,28 @@ export default function EditorPanel({ ide, editor, panelId }) {
           </div>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <Button
-            ref={exportButtonRef}
-            data-testid="editor-download"
-            type="button"
-            variant="subtle"
-            size="xs"
-            draggable={Boolean(editor.currentFilePath && editor.isTextFile)}
-            onDragStart={(e) => {
-              e.stopPropagation();
-              ide.handleDownloadDragStart(e, editor.currentFilePath, editor.currentFileContent);
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (isCurrentNote) {
-                setIsExportMenuOpen((current) => !current);
-                return;
-              }
-              ide.downloadFile(editor.currentFilePath).catch((error) => console.error(error));
-            }}
-            disabled={!editor.currentFilePath || !editor.isTextFile}
-            className="h-8 px-2"
-          >
-            <Download size={13} />
-            <span className="hidden xl:inline">{isCurrentNote ? '导出' : '下载'}</span>
-          </Button>
-          <AnchoredPopover
-            anchorRef={exportButtonRef}
-            width={176}
-            minWidth={176}
-            maxHeight={220}
-            open={isExportMenuOpen && isCurrentNote}
-            onClose={() => setIsExportMenuOpen(false)}
-            testId="note-export-menu"
-            className="py-1"
-          >
-            {[
-              ['html', 'HTML (.html)'],
-              ['md', 'Markdown (.md)'],
-              ['docx', 'Word (.docx)'],
-            ].map(([format, label]) => (
-              <button
-                key={format}
-                type="button"
-                className="motion-row flex w-full items-center px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-500/20"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setIsExportMenuOpen(false);
-                  ide.exportNotes?.({
-                    path: editor.currentFilePath,
-                    type: 'file',
-                    format,
-                  }).catch((error) => console.error(error));
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </AnchoredPopover>
+          {editor.currentFilePath && editor.isTextFile && !isCurrentNote && (
+            <Button
+              data-testid="editor-download"
+              type="button"
+              variant="subtle"
+              size="xs"
+              draggable
+              onDragStart={(e) => {
+                e.stopPropagation();
+                ide.handleDownloadDragStart(e, editor.currentFilePath, editor.currentFileContent);
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                ide.downloadFile(editor.currentFilePath).catch((error) => console.error(error));
+              }}
+              className="h-8 px-2"
+              title="下载"
+            >
+              <Download size={13} />
+              <span className="hidden xl:inline">下载</span>
+            </Button>
+          )}
         </div>
       </div>
 

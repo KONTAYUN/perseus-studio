@@ -12,16 +12,37 @@ import (
 	"webide-backend/internal/idgen"
 )
 
+const maxGlobalFileVersions = 30
+
 func (s *Service) createFileVersion(ctx context.Context, path string, content []byte, source string) (string, error) {
+	hash := hashBytes(content)
 	versionID := idgen.New("fv")
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO file_versions (id, user_id, path, content_text, size_bytes, content_hash, source, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`, versionID, s.userID, path, string(content), len(content), hashBytes(content), source, time.Now().UTC())
+`, versionID, s.userID, path, string(content), len(content), hash, source, time.Now().UTC())
 	if err != nil {
 		return "", err
 	}
+	if err := s.pruneGlobalFileVersions(ctx); err != nil {
+		return "", err
+	}
 	return versionID, nil
+}
+
+func (s *Service) pruneGlobalFileVersions(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `
+DELETE FROM file_versions
+WHERE user_id = ?
+  AND id NOT IN (
+    SELECT id
+    FROM file_versions
+    WHERE user_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT ?
+  )
+`, s.userID, s.userID, maxGlobalFileVersions)
+	return err
 }
 
 func writeAtomic(target string, content []byte) error {

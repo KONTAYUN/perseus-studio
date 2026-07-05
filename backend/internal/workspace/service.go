@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS workspace_item_orders (
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_file_versions_path_created_at ON file_versions(path, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_file_versions_user_id ON file_versions(user_id);
+CREATE INDEX IF NOT EXISTS idx_file_versions_user_created_at ON file_versions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trash_items_user_id ON trash_items(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_trash_items_user_path ON trash_items(user_id, trash_path);
 CREATE INDEX IF NOT EXISTS idx_workspace_item_orders_parent ON workspace_item_orders(user_id, parent_path, position);

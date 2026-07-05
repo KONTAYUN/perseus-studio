@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import {
   ClipboardList,
+  History,
   MessageSquare,
   Moon,
   PanelLeft,
@@ -22,6 +23,7 @@ export default function AppHeader({
   onCloseDraggedPanel,
   onPanelTrashOver,
   onOpenSettings,
+  onOpenHistory,
   onOpenTasks,
   onToggleDarkMode,
   onLogout,
@@ -193,8 +195,20 @@ export default function AppHeader({
         <div className="h-4 w-px bg-gray-300 dark:bg-gray-700 mx-1" />
 
         <button
+          data-testid="history-button"
+          onClick={onOpenHistory}
+          className="motion-button ui-icon-button h-9 w-9"
+          title="最近修改"
+          aria-label="最近修改"
+        >
+          <History size={18} />
+        </button>
+
+        <button
           onClick={onToggleDarkMode}
           className="motion-button ui-icon-button h-9 w-9"
+          title={isDarkMode ? '切换到浅色模式' : '切换到深色模式'}
+          aria-label={isDarkMode ? '切换到浅色模式' : '切换到深色模式'}
         >
           {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
         </button>
@@ -204,6 +218,8 @@ export default function AppHeader({
             data-testid="settings-button"
             onClick={onOpenSettings}
             className="motion-button ui-icon-button h-9 w-9"
+            title="设置"
+            aria-label="设置"
           >
             <Settings size={18} />
           </button>

@@ -39,9 +39,11 @@ func (s *Service) WriteBytes(ctx context.Context, path string, content []byte, s
 		if err != nil {
 			return FileWriteResult{}, err
 		}
-		versionID, err = s.createFileVersion(ctx, cleanPath, oldContent, source)
-		if err != nil {
-			return FileWriteResult{}, err
+		if isTextPath(cleanPath) && hashBytes(oldContent) != hashBytes(content) {
+			versionID, err = s.createFileVersion(ctx, cleanPath, oldContent, source)
+			if err != nil {
+				return FileWriteResult{}, err
+			}
 		}
 	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return FileWriteResult{}, statErr

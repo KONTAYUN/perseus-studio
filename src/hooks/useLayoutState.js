@@ -33,6 +33,35 @@ function readStoredTheme(userId) {
   return value === 'dark' || value === 'light' ? value : null;
 }
 
+function setPanelDragImage(event) {
+  if (typeof document === 'undefined' || !event.dataTransfer?.setDragImage) return;
+  const dragImage = document.createElement('div');
+  dragImage.setAttribute('aria-hidden', 'true');
+  dragImage.style.position = 'fixed';
+  dragImage.style.left = '-1000px';
+  dragImage.style.top = '-1000px';
+  dragImage.style.width = '30px';
+  dragImage.style.height = '30px';
+  dragImage.style.display = 'flex';
+  dragImage.style.alignItems = 'center';
+  dragImage.style.justifyContent = 'center';
+  dragImage.style.borderRadius = '999px';
+  dragImage.style.color = 'rgb(254 226 226)';
+  dragImage.style.background = 'rgb(248 113 113 / 0.58)';
+  dragImage.style.boxShadow = 'inset 0 0 0 1px rgb(254 202 202 / 0.22)';
+  dragImage.style.pointerEvents = 'none';
+  dragImage.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect width="18" height="14" x="3" y="5" rx="2" />
+      <path d="M3 10h18" />
+    </svg>
+  `;
+  document.body.appendChild(dragImage);
+  event.dataTransfer.setDragImage(dragImage, 15, 15);
+  window.setTimeout(() => dragImage.remove(), 0);
+}
+
 export default function useLayoutState({ userId = '' } = {}) {
   const [layoutColumns, setLayoutColumnsValue] = useState(3);
   const [panels, setPanels] = useState(PRESETS[3]);
@@ -199,6 +228,7 @@ export default function useLayoutState({ userId = '' } = {}) {
     e.stopPropagation();
     e.dataTransfer.setData('panel_id', id);
     e.dataTransfer.effectAllowed = 'move';
+    setPanelDragImage(e);
     setTimeout(() => {
       setDraggingPanelId(id);
       setIsDraggingMode(true);

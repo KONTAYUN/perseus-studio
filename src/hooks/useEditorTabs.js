@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { apiPost } from '../api/client';
 import { createEditorFileLoader } from './createEditorFileLoader';
+import { createEditorHistoryActions } from './createEditorHistoryActions';
 import { createEditorToolRefreshActions } from './editorToolRefreshActions';
 import { detectFileType } from './ideUtils';
 import {
@@ -116,6 +117,18 @@ export default function useEditorTabs({
     setSavedFileContent,
     setSelectedItemPath,
     setSelectedItemType,
+  });
+
+  const {
+    clearFileHistory,
+    deleteFileVersion,
+    restoreFileVersion,
+  } = createEditorHistoryActions({
+    currentFilePathRef,
+    loadFileIntoEditor,
+    loadTree,
+    setEditorStatusMessage,
+    setErrorMessage,
   });
 
   async function openFile(path) {
@@ -389,6 +402,7 @@ export default function useEditorTabs({
     closeCurrentFile,
     closeTab,
     detachTab,
+    clearFileHistory,
     currentFileContent,
     currentFileHash,
     currentFileNotice,
@@ -414,6 +428,8 @@ export default function useEditorTabs({
     reloadCurrentFileFromConflict,
     reorderTab,
     saveCurrentFile,
+    deleteFileVersion,
+    restoreFileVersion,
     setCurrentFileContent,
     setEditorStatusMessage,
   };

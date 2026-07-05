@@ -104,7 +104,7 @@ func (s *Server) handleFilesHistory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	versions, err := files.ListFileVersions(r.Context(), r.URL.Query().Get("path"), 40)
+	versions, err := files.ListFileVersions(r.Context(), r.URL.Query().Get("path"), 30)
 	if err != nil {
 		s.writeFileError(w, err)
 		return

@@ -2,6 +2,7 @@ import React from 'react';
 import AppHeader from './components/layout/AppHeader';
 import AppDialog, { useAppDialog } from './components/common/AppDialog';
 import MainPanels from './components/layout/MainPanels';
+import RichTextHistoryPanel from './components/editor/richText/RichTextHistoryPanel';
 import SettingsModal from './components/settings/SettingsModal';
 import TaskPanel from './components/tasks/TaskPanel';
 import { apiGet, apiPost } from './api/client';
@@ -170,6 +171,7 @@ export default function App() {
         onCloseDraggedPanel={ide.closeDraggedPanel}
         onPanelTrashOver={ide.setIsPanelTrashOver}
         onOpenSettings={isAdmin ? () => ide.setIsSettingsOpen(true) : undefined}
+        onOpenHistory={() => ide.setIsHistoryOpen(true)}
         onOpenTasks={tasks.openTaskPanel}
         onToggleDarkMode={() => ide.setIsDarkMode((value) => !value)}
         onLogout={handleLogout}
@@ -184,6 +186,16 @@ export default function App() {
       />
 
       <MainPanels ide={{ ...ide, tasks }} />
+
+      {ide.isHistoryOpen && (
+        <RichTextHistoryPanel
+          open={ide.isHistoryOpen}
+          onClearHistory={ide.clearFileHistory}
+          onDeleteVersion={ide.deleteFileVersion}
+          onRestoreVersion={ide.restoreFileVersion}
+          onClose={() => ide.setIsHistoryOpen(false)}
+        />
+      )}
 
       {isAdmin && ide.isSettingsOpen && (
         <SettingsModal ide={ide} dialog={appDialog.api} onClose={() => ide.setIsSettingsOpen(false)} currentUser={auth.user} />

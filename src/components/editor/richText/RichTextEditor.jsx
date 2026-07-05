@@ -24,7 +24,6 @@ import {
   resolveNoteAssetPath,
 } from '../../../hooks/noteTreeUtils.js';
 import { BlockSpacing, FontSize, PinnedSelection } from './noteEditorExtensions';
-import RichTextHistoryPanel from './RichTextHistoryPanel';
 import RichTextImageNodeView from './RichTextImageNodeView';
 import RichTextSelectionToolbar from './RichTextSelectionToolbar';
 import RichTextTableToolbar from './RichTextTableToolbar';
@@ -342,16 +341,11 @@ const NoteTable = Table.extend({
 });
 
 export default function RichTextEditor({
-  historyOpen = false,
-  onClearHistory,
   filePath,
-  onHistoryOpenChange,
   html,
   onHtmlChange,
-  onDeleteVersion,
   onSelectionChange,
   onStatusMessage,
-  onRestoreVersion,
   clearSelectionVersion = 0,
   pinnedSelections = [],
 }) {
@@ -502,7 +496,7 @@ export default function RichTextEditor({
 
   const syncBlockToolbarTrigger = React.useCallback(
     (nextEditor) => {
-      if (!nextEditor || historyOpen) {
+      if (!nextEditor) {
         setBlockToolbarState((current) =>
           current.triggerVisible || current.toolbarVisible ? createHiddenBlockToolbarState() : current
         );
@@ -558,7 +552,10 @@ export default function RichTextEditor({
         return;
       }
 
-      const triggerLeft = Math.max(editorRect.left + 22, 20);
+      const triggerLeft = Math.max(
+        editorRect.left + 14,
+        Math.min(blockRect.left - 34, editorRect.right - 38)
+      );
       const triggerTop = Math.max(
         blockRect.top + Math.max(Math.min((blockRect.height - 24) / 2, 12), 0),
         editorRect.top + 6
@@ -582,7 +579,7 @@ export default function RichTextEditor({
         })
       );
     },
-    [historyOpen]
+    []
   );
 
   const editor = useEditor({
@@ -614,7 +611,7 @@ export default function RichTextEditor({
     editorProps: {
       attributes: {
         class:
-          'rich-text-editor-content custom-scrollbar h-full overflow-y-auto px-16 py-8 pb-32 outline-none max-[900px]:px-10 max-[640px]:px-6',
+          'rich-text-editor-content prose prose-neutral dark:prose-invert max-w-none custom-scrollbar h-full overflow-y-auto px-16 py-8 pb-32 outline-none max-[900px]:px-10 max-[640px]:px-6',
       },
       handlePaste: (_view, event) => {
         const items = Array.from(event?.clipboardData?.items || []);
@@ -769,6 +766,29 @@ export default function RichTextEditor({
     syncBlockToolbarTrigger(editor);
   }, [editor, syncBlockToolbarTrigger]);
 
+  React.useEffect(() => {
+    if (!editor || typeof ResizeObserver === 'undefined') return undefined;
+    const editorDom = editor.view.dom;
+    const scroller = editorDom.parentElement;
+    let frame = 0;
+    const scheduleRefresh = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        refreshSelectionToolbar();
+        refreshTableToolbar();
+        refreshBlockToolbarTrigger();
+      });
+    };
+    const observer = new ResizeObserver(scheduleRefresh);
+    observer.observe(editorDom);
+    if (scroller) observer.observe(scroller);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [editor, refreshBlockToolbarTrigger, refreshSelectionToolbar, refreshTableToolbar]);
+
   useFloatingToolbarViewportBehavior({
     visible: selectionToolbarState.visible,
     onScroll: hideSelectionToolbar,
@@ -827,15 +847,6 @@ export default function RichTextEditor({
     };
   }, [editor, hideSelectionToolbar, syncBlockToolbarTrigger, syncSelectionToolbar]);
 
-  React.useEffect(() => {
-    if (!historyOpen) return;
-    lastSelectionToolbarPlacementRef.current = 'above';
-    lastTableToolbarPlacementRef.current = 'above';
-    setSelectionToolbarState(createHiddenFloatingToolbarState({ range: null }));
-    setTableToolbarState(createHiddenFloatingToolbarState({ caption: '' }));
-    setBlockToolbarState(createHiddenBlockToolbarState());
-  }, [historyOpen]);
-
   const handlePinSelection = React.useCallback(() => {
     if (!editor || !selectionToolbarState.range) return;
     const currentSelections = Array.isArray(pinnedSelections) ? pinnedSelections : [];
@@ -866,7 +877,7 @@ export default function RichTextEditor({
         placement={selectionToolbarState.placement}
         position={selectionToolbarState.position}
         range={selectionToolbarState.range}
-        visible={selectionToolbarState.visible && !historyOpen && !tableToolbarState.visible}
+        visible={selectionToolbarState.visible && !tableToolbarState.visible}
         onPinSelection={handlePinSelection}
         onRequestClose={hideSelectionToolbar}
       />
@@ -875,14 +886,14 @@ export default function RichTextEditor({
         editor={editor}
         placement={tableToolbarState.placement}
         position={tableToolbarState.position}
-        visible={tableToolbarState.visible && !historyOpen}
+        visible={tableToolbarState.visible}
       />
       <RichTextToolbar
         editor={editor}
         floating
         pendingTableConfig={pendingTableConfig}
         position={blockToolbarState.toolbarPosition}
-        visible={blockToolbarState.toolbarVisible && !historyOpen && !tableToolbarState.visible}
+        visible={blockToolbarState.toolbarVisible && !tableToolbarState.visible}
         onApplyTableConfig={(nextConfig) => {
           const rows = Math.min(12, Math.max(1, Number(nextConfig.rows) || 3));
           const cols = Math.min(8, Math.max(1, Number(nextConfig.cols) || 3));
@@ -911,7 +922,6 @@ export default function RichTextEditor({
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {blockToolbarState.triggerVisible &&
           blockToolbarState.triggerPosition &&
-          !historyOpen &&
           !tableToolbarState.visible &&
           typeof document !== 'undefined' &&
           createPortal(
@@ -950,15 +960,6 @@ export default function RichTextEditor({
             document.body
           )}
         <EditorContent editor={editor} className="rich-text-editor-host h-full min-h-0" />
-        <RichTextHistoryPanel
-          currentHtml={html}
-          filePath={filePath}
-          open={historyOpen}
-          onClearHistory={onClearHistory}
-          onClose={() => onHistoryOpenChange?.(false)}
-          onDeleteVersion={onDeleteVersion}
-          onRestoreVersion={onRestoreVersion}
-        />
       </div>
     </div>
   );

@@ -98,7 +98,11 @@ export function usePanelActiveGlow({
     clearActiveGlowSchedule();
 
     const nextPanelId =
-      activePanel && activePanel !== 'none' && activePanel !== 'chat-input' ? activePanel : '';
+      dragType === 'reorder' || draggingPanelId
+        ? ''
+        : activePanel && activePanel !== 'none' && activePanel !== 'chat-input'
+        ? activePanel
+        : '';
 
     const fadeExistingLayers = () => {
       setActiveGlowLayersValue((layers) => layers.map((layer) => ({ ...layer, visible: false })));
@@ -163,7 +167,7 @@ export function usePanelActiveGlow({
       window.removeEventListener('scroll', updateRect, true);
       observer.disconnect();
     };
-  }, [activePanel]);
+  }, [activePanel, dragType, draggingPanelId]);
 
   useLayoutEffect(() => {
     syncActiveGlowRect();
