@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 const EDITOR_PANEL_IDS = ['editor_1', 'editor_2', 'editor_3'];
 const MAX_TOTAL_PANELS = 5;
 const MAX_EDITOR_PANELS = 3;
+const DEFAULT_LAYOUT_WIDTHS = { fileTree: 300, chat: 500 };
 
 function minWidthForPanelType(type) {
   if (type === 'chat') return 340;
@@ -73,7 +74,7 @@ export default function useLayoutState({ userId = '' } = {}) {
   const [isDarkMode, setIsDarkMode] = useState(() => readStoredTheme(userId) === 'dark');
   const [activePanel, setActivePanel] = useState('none');
   const [activeEditorPanelId, setActiveEditorPanelId] = useState('editor_1');
-  const [widths, setWidths] = useState({ fileTree: 260, chat: 400 });
+  const [widths, setWidths] = useState(DEFAULT_LAYOUT_WIDTHS);
   const [isDraggingMode, setIsDraggingMode] = useState(false);
   const [dragType, setDragType] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
@@ -104,7 +105,7 @@ export default function useLayoutState({ userId = '' } = {}) {
     setLayoutAnimationAction({ kind: 'preset', key: Date.now() });
     setLayoutColumnsValue(columns);
     setPanels(PRESETS[columns] || PRESETS[3]);
-    setWidths({ fileTree: 260, chat: 400 });
+    setWidths(DEFAULT_LAYOUT_WIDTHS);
     setActivePanel('none');
     setPanelAddMenuOpen(false);
     setRecentlyAddedPanelId('');

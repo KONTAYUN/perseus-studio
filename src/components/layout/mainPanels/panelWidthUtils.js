@@ -8,9 +8,9 @@ export function isCenteredSingleChatPanel(panels = []) {
 }
 
 export function defaultWidthForPanel(panel, { centerSinglePanel = false, contentWidth = 0 } = {}) {
-  if (panel.type === 'fileTree') return 260;
+  if (panel.type === 'fileTree') return 300;
   if (panel.type === 'chat') {
-    return centerSinglePanel ? Math.min(1120, Math.max(760, contentWidth)) : 420;
+    return centerSinglePanel ? Math.min(1120, Math.max(760, contentWidth)) : 500;
   }
   return 520;
 }
