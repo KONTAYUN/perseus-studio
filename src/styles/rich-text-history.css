@@ -1,0 +1,67 @@
+.rich-text-history-restore-button {
+  height: 2rem;
+  flex-shrink: 0;
+  padding-inline: 0.5rem;
+}
+
+.rich-text-history-card {
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.rich-text-history-overlay {
+  isolation: isolate;
+}
+
+.rich-text-history-overlay-surface {
+  background: rgb(0 0 0 / 0.4);
+  backdrop-filter: blur(16px);
+}
+
+.rich-text-history-shell {
+  backdrop-filter: blur(24px);
+}
+
+.rich-text-history-shell-surface {
+  border-color: rgb(255 255 255 / 0.4);
+  border-radius: var(--radius-shell);
+}
+
+.dark .rich-text-history-shell-surface {
+  border-color: rgb(255 255 255 / 0.1);
+}
+
+.rich-text-history-list-item {
+  background: transparent;
+}
+
+.rich-text-history-list-item:hover {
+  background: rgb(255 255 255 / 0.72);
+}
+
+.rich-text-history-list-item-active {
+  background: rgb(239 246 255 / 0.9);
+}
+
+.dark .rich-text-history-list-item:hover {
+  background: rgb(255 255 255 / 0.04);
+}
+
+.dark .rich-text-history-list-item-active {
+  background: rgb(59 130 246 / 0.15);
+}
+
+.rich-text-history-ai-badge {
+  color: rgb(37 99 235);
+  background: rgb(219 234 254 / 0.88);
+}
+
+.dark .rich-text-history-ai-badge {
+  color: rgb(191 219 254);
+  background: rgb(59 130 246 / 0.14);
+}
+
+.rich-text-history-preview {
+  min-height: 100%;
+}

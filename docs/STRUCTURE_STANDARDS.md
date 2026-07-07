@@ -1,6 +1,6 @@
 # Perseus Structure Standards
 
-This document is the stable structure contract for Perseus. Future AI agents and developers must use these boundaries before doing structural refactors. The goal is not periodic rewrites; the goal is small maintenance inside known seams.
+This document is the stable structure contract for Perseus. Future AI agents and developers must use these boundaries before doing structural refactors. The goal is not periodic rewrites; the goal is small maintenance inside known responsibility areas.
 
 ## Core Principle
 
@@ -14,14 +14,16 @@ When a file grows too large, split it by the responsibility it already contains.
 - Keep public APIs, tool names, HTTP routes, JSON fields, SSE event names, CSS class names, and user-visible UI behavior stable during structure work.
 - Thin facade files may compose modules and expose a stable API, but must not contain business detail.
 - If a boundary itself needs to change, update this document, `ARCHITECTURE.md`, and `docs/PROJECT_HEALTH_SCORECARD.md` first, with the migration reason.
-- Do not do scheduled big rewrites. Split only when a feature touches an area, a file exceeds budget, or responsibilities are mixed.
+- Do not do scheduled big rewrites. Split only when a feature touches an area, a file crosses the review threshold, or responsibilities are mixed.
 
-## File Budgets
+## File Review Thresholds
 
-- Frontend production JS/JSX: fewer than 450 lines.
-- Backend ordinary production Go: fewer than 450 lines.
-- CSS section files: fewer than 450 lines.
+- Frontend production JS/JSX: 450 lines triggers a responsibility review.
+- Backend ordinary production Go: 450 lines triggers a responsibility review.
+- CSS section files: 450 lines triggers a responsibility review.
 - Large integration tests and fixtures may exceed 450 lines, but production structure scores do not use test exceptions to hide runtime complexity.
+
+The threshold is not a hard split rule. A file may stay over the threshold when its responsibility is clear, a split would create worse navigation, and `docs/PROJECT_HEALTH_SCORECARD.md` records the decision. If a file is both over the threshold and mixed in responsibility, split by responsibility before adding a scorecard entry.
 
 ## Frontend Boundaries
 
@@ -43,9 +45,15 @@ When a file grows too large, split it by the responsibility it already contains.
 - `src/styles/motion.css`: animation keyframes/classes, motion primitives, shared interactive control motion.
 - `src/styles/controls.css`: shared interactive control geometry and states.
 - `src/styles/chat.css`: chat messages, assistant progress, recovery notices, and chat-only message surfaces.
+- `src/styles/chat-markdown.css`: rendered assistant Markdown, code blocks, tables, and chat content scroll affordances.
 - `src/styles/chat-composer.css`: composer shell, input, bottom action bar, model status, and scroll-to-bottom control.
 - `src/styles/chat-composer-queue.css`: pending input queue, running steer previews, and follow-up question panels above the composer.
 - `src/styles/editor.css`: editor tabs, editor textarea, editor drop states.
+- `src/styles/rich-text-toolbar.css`: rich text floating toolbar, selection toolbar, color/font/table controls, and block trigger surfaces.
+- `src/styles/rich-text-history.css`: global recent changes panel and history preview controls.
+- `src/styles/rich-text-content.css`: rich text body typography, prose density, headings, lists, quotes, inline code, and document-width behavior.
+- `src/styles/rich-text-image.css`: note image frames, resize handles, image toolbar, and alignment/width visuals.
+- `src/styles/rich-text-table.css`: rich text table, table cell, selected cell, and table-editing visuals.
 - `src/styles/file-tree.css`: file tree rows, file labels, inline rename/drop indicators.
 - `src/styles/settings.css`: settings modal/card/view-specific transitions.
 - `src/styles/utilities.css`: narrow global utility overrides that do not fit a domain.
@@ -77,10 +85,10 @@ Tool concepts must stay separate: registry, policy/scope, argument normalization
 
 `npm run test:structure` enforces this contract:
 
-- frontend production JS/JSX budget,
-- backend production Go budget,
-- CSS entrypoint and section budgets,
+- frontend production JS/JSX review entries for files over the threshold,
+- backend production Go review entries for files over the threshold,
+- CSS entrypoint order and review entries for section files over the threshold,
 - composer anti-regression patterns,
 - Pretext residue ban.
 
-If the gate fails, fix the boundary or document a deliberate exception before continuing.
+If the gate fails, fix the boundary or document a deliberate responsibility review before continuing. Do not split only to reduce line count.

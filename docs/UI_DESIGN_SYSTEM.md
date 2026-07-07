@@ -54,7 +54,7 @@ Available primitives:
 - `Input`, `Textarea`, `Select`, `Checkbox`, `Switch`, `Badge`.
 - `AnchoredPopover`, `PopoverSurface`, `DialogActions`, `SettingsSection`, `PanelHeader`.
 
-Use raw `<button>` only when a component needs special semantics such as a full-row menu item or draggable chip. It must include a standard class such as `motion-button`, `motion-row`, `motion-chip`, `ui-icon-button`, `settings-nav-card`, or `composer-icon-button`.
+Use raw `<button>` only when a component needs special semantics such as a full-row menu item, draggable chip, editor block trigger, color swatch, table picker cell, or image resize handle. It must include a standard class such as `motion-button`, `motion-row`, `motion-chip`, `ui-icon-button`, `settings-nav-card`, `composer-icon-button`, `rich-text-block-trigger`, `rich-text-color-swatch`, `rich-text-table-menu-item`, `table-size-picker-cell`, `note-image-toolbar-button`, or `note-image-resize-handle`.
 
 ## Tokens
 
@@ -206,6 +206,19 @@ Rules:
 - Destructive action: red tone.
 - Disabled states must visibly mute color and remove transform.
 - Button text must fit on mobile; do not rely on viewport-scaled font sizes.
+
+### Rich Text Editor Controls
+
+The rich text editor has a few controls whose DOM semantics are tied to Tiptap node views, pointer capture, or inline editor geometry. These may use raw `<button>` only with a named editor class:
+
+- `rich-text-block-trigger`: six-dot block action trigger beside a text block.
+- `rich-text-color-swatch`: color/background swatches inside the floating toolbar.
+- `rich-text-table-menu-item`: toolbar table commands that behave like compact menu rows.
+- `table-size-picker-cell`: table size picker cells.
+- `note-image-toolbar-button`: image alignment/width toolbar buttons.
+- `note-image-resize-handle`: left/right image resize handles.
+
+These classes are exceptions to the shared Button/IconButton rule because forcing them through generic primitives would weaken editor behavior. Their visual styling must stay in the rich text CSS section files, not in long JSX class strings.
 
 ### Segmented Controls
 

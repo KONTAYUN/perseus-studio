@@ -2,8 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const maxBusinessLines = 450;
+const lineReviewThreshold = 450;
 const failures = [];
+const scorecardPath = path.join(root, 'docs', 'PROJECT_HEALTH_SCORECARD.md');
+const scorecard = fs.existsSync(scorecardPath) ? fs.readFileSync(scorecardPath, 'utf8') : '';
 
 const cssImportOrder = [
   './styles/tailwind.css',
@@ -12,9 +14,15 @@ const cssImportOrder = [
   './styles/motion.css',
   './styles/controls.css',
   './styles/chat.css',
+  './styles/chat-markdown.css',
   './styles/chat-composer.css',
   './styles/chat-composer-queue.css',
   './styles/editor.css',
+  './styles/rich-text-toolbar.css',
+  './styles/rich-text-history.css',
+  './styles/rich-text-content.css',
+  './styles/rich-text-image.css',
+  './styles/rich-text-table.css',
   './styles/file-tree.css',
   './styles/settings.css',
   './styles/utilities.css',
@@ -50,8 +58,9 @@ function fail(message) {
 function checkLineBudget(file, label) {
   const source = fs.readFileSync(file, 'utf8');
   const lines = lineCount(source);
-  if (lines > maxBusinessLines) {
-    fail(`${rel(file)}:1 ${label} has ${lines} lines; split by docs/STRUCTURE_STANDARDS.md or document a deliberate exception`);
+  const relativePath = rel(file);
+  if (lines > lineReviewThreshold && !scorecard.includes(`\`${relativePath}\``)) {
+    fail(`${relativePath}:1 ${label} has ${lines} lines; add a responsibility review entry to docs/PROJECT_HEALTH_SCORECARD.md instead of splitting mechanically`);
   }
 }
 

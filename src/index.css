@@ -8,6 +8,11 @@
 @import './styles/chat-composer.css';
 @import './styles/chat-composer-queue.css';
 @import './styles/editor.css';
+@import './styles/rich-text-toolbar.css';
+@import './styles/rich-text-history.css';
+@import './styles/rich-text-content.css';
+@import './styles/rich-text-image.css';
+@import './styles/rich-text-table.css';
 @import './styles/file-tree.css';
 @import './styles/settings.css';
 @import './styles/utilities.css';

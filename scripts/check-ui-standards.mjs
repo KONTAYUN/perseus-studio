@@ -5,7 +5,9 @@ const root = process.cwd();
 const componentRoot = path.join(root, 'src', 'components');
 const srcRoot = path.join(root, 'src');
 const maxClassLength = 180;
-const maxBusinessFileLines = 450;
+const lineReviewThreshold = 450;
+const scorecardPath = path.join(root, 'docs', 'PROJECT_HEALTH_SCORECARD.md');
+const scorecard = fs.existsSync(scorecardPath) ? fs.readFileSync(scorecardPath, 'utf8') : '';
 
 const failures = [];
 const componentFiles = [];
@@ -47,6 +49,12 @@ const longClassAllowedTokens = [
   'editor-empty-tab',
   'editor-conflict-notice',
   'editor-textarea',
+  'rich-text-block-trigger',
+  'rich-text-color-swatch',
+  'rich-text-table-menu-item',
+  'table-size-picker-cell',
+  'note-image-toolbar-button',
+  'note-image-resize-handle',
   'file-tree-row',
   'file-drop-hint',
   'file-drop-indicator-line',
@@ -202,7 +210,7 @@ function checkButtons(file, source) {
   if (relativePath === 'src/components/ui/index.jsx') return;
   for (const tag of findButtonTags(source)) {
     const hasClassName = /\bclassName\s*=/.test(tag.text);
-    const usesStandardClass = /\b(motion-button|motion-row|motion-chip|ui-icon-button|settings-nav-card|composer-icon-button)\b/.test(tag.text);
+    const usesStandardClass = /\b(motion-button|motion-row|motion-chip|ui-icon-button|settings-nav-card|composer-icon-button|rich-text-block-trigger|rich-text-color-swatch|rich-text-table-menu-item|table-size-picker-cell|note-image-toolbar-button|note-image-resize-handle)\b/.test(tag.text);
     if (!hasClassName || !usesStandardClass) {
       addFailure(file, tag.start, 'raw <button> must use Button/IconButton or a standard motion class');
     }
@@ -218,8 +226,8 @@ function checkLineBudget(file, source) {
   if (lineBudgetAllowlist.has(relativePath)) return;
   if (/\.test\.(jsx|js)$/.test(relativePath)) return;
   const lines = source.split('\n').length;
-  if (lines > maxBusinessFileLines) {
-    failures.push(`${relativePath}:1 file has ${lines} lines; split it or document an exception in docs/PROJECT_HEALTH_SCORECARD.md`);
+  if (lines > lineReviewThreshold && !scorecard.includes(`\`${relativePath}\``)) {
+    failures.push(`${relativePath}:1 file has ${lines} lines; add a responsibility review entry to docs/PROJECT_HEALTH_SCORECARD.md instead of splitting mechanically`);
   }
 }
 

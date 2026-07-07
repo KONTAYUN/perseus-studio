@@ -1,0 +1,135 @@
+.note-image-node {
+  position: relative;
+}
+
+.note-image-frame {
+  position: relative;
+  max-width: 100%;
+}
+
+.note-image-frame img {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+}
+
+.note-image-toolbar {
+  position: absolute;
+  left: 50%;
+  top: -0.85rem;
+  z-index: 1100;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  transform: translate(-50%, -100%);
+  border: 1px solid rgb(229 231 235 / 0.94);
+  border-radius: 0.9rem;
+  background: rgb(250 250 252);
+  box-shadow: 0 16px 42px rgb(15 23 42 / 0.18);
+  padding: 0.45rem;
+}
+
+.dark .note-image-toolbar {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(30 32 37);
+}
+
+.note-image-property-panel {
+  position: absolute;
+  left: 50%;
+  top: -1.25rem;
+  z-index: 1110;
+  width: min(92vw, 340px);
+  transform: translate(-50%, -100%);
+  border: 1px solid rgb(229 231 235 / 0.92);
+  border-radius: 1rem;
+  background: rgb(250 250 252);
+  box-shadow: 0 20px 48px rgb(15 23 42 / 0.24);
+  padding: 1rem;
+}
+
+.dark .note-image-property-panel {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(28 30 34);
+}
+
+.note-image-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.note-image-toolbar-group + .note-image-toolbar-group {
+  border-left: 1px solid rgb(229 231 235 / 0.9);
+  padding-left: 0.45rem;
+}
+
+.dark .note-image-toolbar-group + .note-image-toolbar-group {
+  border-left-color: rgb(255 255 255 / 0.1);
+}
+
+.note-image-toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding-inline: 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 0.7rem;
+  background: transparent;
+  color: rgb(75 85 99);
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+
+.note-image-toolbar-button:hover {
+  background: rgb(243 244 246);
+  color: rgb(17 24 39);
+}
+
+.note-image-toolbar-button.is-active {
+  background: rgb(59 130 246);
+  color: rgb(255 255 255);
+}
+
+.dark .note-image-toolbar-button {
+  color: rgb(209 213 219);
+}
+
+.dark .note-image-toolbar-button:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(255 255 255);
+}
+
+.dark .note-image-toolbar-button.is-active {
+  background: rgb(59 130 246);
+  color: rgb(255 255 255);
+}
+
+.note-image-resize-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 1090;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 2px solid rgb(255 255 255);
+  border-radius: 9999px;
+  background: rgb(59 130 246);
+  box-shadow: 0 4px 16px rgb(15 23 42 / 0.2);
+  transform: translateY(-50%);
+}
+
+.note-image-resize-handle-left {
+  left: -0.45rem;
+  cursor: ew-resize;
+}
+
+.note-image-resize-handle-right {
+  right: -0.45rem;
+  cursor: ew-resize;
+}
