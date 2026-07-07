@@ -30,11 +30,16 @@
     "@tiptap/extension-underline": "^2.26.1",
     "@tiptap/react": "^2.26.1",
     "@tiptap/starter-kit": "^2.26.1",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^0.525.0",
     "marked": "^15.0.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
     "react-textarea-autosize": "^8.5.9",
+    "rehype-highlight": "^7.0.2",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "turndown": "^7.2.0"
   },
   "devDependencies": {

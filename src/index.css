@@ -4,6 +4,7 @@
 @import './styles/motion.css';
 @import './styles/controls.css';
 @import './styles/chat.css';
+@import './styles/chat-markdown.css';
 @import './styles/chat-composer.css';
 @import './styles/chat-composer-queue.css';
 @import './styles/editor.css';

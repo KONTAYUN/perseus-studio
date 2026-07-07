@@ -9,3 +9,117 @@ input[type='number']::-webkit-inner-spin-button {
   appearance: none;
   -webkit-appearance: none;
 }
+
+.custom-scrollbar::-webkit-scrollbar,
+.chat-code-block-body::-webkit-scrollbar,
+.chat-markdown-table-wrapper::-webkit-scrollbar,
+.rich-text-editor-content pre::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-button,
+*::-webkit-scrollbar-button:single-button,
+*::-webkit-scrollbar-button:vertical,
+*::-webkit-scrollbar-button:horizontal,
+*::-webkit-scrollbar-button:vertical:decrement,
+*::-webkit-scrollbar-button:vertical:increment,
+*::-webkit-scrollbar-button:horizontal:decrement,
+*::-webkit-scrollbar-button:horizontal:increment,
+*::-webkit-scrollbar-button:vertical:start:decrement,
+*::-webkit-scrollbar-button:vertical:end:increment,
+*::-webkit-scrollbar-button:horizontal:start:decrement,
+*::-webkit-scrollbar-button:horizontal:end:increment,
+.custom-scrollbar::-webkit-scrollbar-button,
+.chat-code-block-body::-webkit-scrollbar-button,
+.chat-markdown-table-wrapper::-webkit-scrollbar-button,
+.rich-text-editor-content pre::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  -webkit-appearance: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track-piece,
+.chat-code-block-body::-webkit-scrollbar-track,
+.chat-code-block-body::-webkit-scrollbar-track-piece,
+.chat-markdown-table-wrapper::-webkit-scrollbar-track,
+.chat-markdown-table-wrapper::-webkit-scrollbar-track-piece,
+.rich-text-editor-content pre::-webkit-scrollbar-track,
+.rich-text-editor-content pre::-webkit-scrollbar-track-piece {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb,
+.chat-code-block-body::-webkit-scrollbar-thumb,
+.chat-markdown-table-wrapper::-webkit-scrollbar-thumb,
+.rich-text-editor-content pre::-webkit-scrollbar-thumb {
+  min-width: 42px;
+  min-height: 42px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: rgb(148 163 184 / 0.58);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb,
+.dark .chat-code-block-body::-webkit-scrollbar-thumb,
+.dark .chat-markdown-table-wrapper::-webkit-scrollbar-thumb,
+.dark .rich-text-editor-content pre::-webkit-scrollbar-thumb {
+  background-color: rgb(107 114 128 / 0.72);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
+.chat-code-block-body::-webkit-scrollbar-thumb:hover,
+.chat-markdown-table-wrapper::-webkit-scrollbar-thumb:hover,
+.rich-text-editor-content pre::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(100 116 139 / 0.78);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover,
+.dark .chat-code-block-body::-webkit-scrollbar-thumb:hover,
+.dark .chat-markdown-table-wrapper::-webkit-scrollbar-thumb:hover,
+.dark .rich-text-editor-content pre::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(156 163 175 / 0.82);
+}
+
+.custom-scrollbar::-webkit-scrollbar-corner,
+.custom-scrollbar::-webkit-resizer,
+.chat-code-block-body::-webkit-scrollbar-corner,
+.chat-code-block-body::-webkit-resizer,
+.chat-markdown-table-wrapper::-webkit-scrollbar-corner,
+.chat-markdown-table-wrapper::-webkit-resizer,
+.rich-text-editor-content pre::-webkit-scrollbar-corner,
+.rich-text-editor-content pre::-webkit-resizer {
+  background: transparent;
+}
+
+@supports (-moz-appearance: none) {
+  .custom-scrollbar,
+  .chat-code-block-body,
+  .chat-markdown-table-wrapper,
+  .rich-text-editor-content pre {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(148 163 184 / 0.58) transparent;
+  }
+
+  .dark .custom-scrollbar,
+  .dark .chat-code-block-body,
+  .dark .chat-markdown-table-wrapper,
+  .dark .rich-text-editor-content pre {
+    scrollbar-color: rgb(107 114 128 / 0.72) transparent;
+  }
+}
+
+.scrollbar-rounded-clip {
+  clip-path: inset(0 round 0 0 14px 14px);
+  scrollbar-gutter: stable;
+}
+
+.editor-panel-root {
+  container-type: inline-size;
+}

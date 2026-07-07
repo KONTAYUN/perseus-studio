@@ -43,6 +43,7 @@ func (s *Server) handleFilesExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targetPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	versionID := strings.TrimSpace(r.URL.Query().Get("version_id"))
 	format := normalizeExportFormat(r.URL.Query().Get("format"))
 	if format == "invalid" {
 		writeError(w, http.StatusBadRequest, "unsupported export format")
@@ -54,11 +55,15 @@ func (s *Server) handleFilesExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if format == "" {
-		if len(targetPaths) == 0 && targetPath != "" && isNoteLikePath(targetPath) {
+		if len(targetPaths) == 0 && (versionID != "" || (targetPath != "" && isNoteLikePath(targetPath))) {
 			format = "html"
 		} else {
 			format = "zip"
 		}
+	}
+	if versionID != "" && len(targetPaths) > 0 {
+		writeError(w, http.StatusBadRequest, "version export only supports a single note")
+		return
 	}
 	if len(targetPaths) > 1 && format != "zip" {
 		writeError(w, http.StatusBadRequest, "HTML, Markdown, and Word export are only supported for a single note")
@@ -91,10 +96,22 @@ func (s *Server) handleFilesExport(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(buffer.Bytes())
 		return
 	}
-	if targetPath != "" && isNoteLikePath(targetPath) {
-		result, readErr := files.ReadFile(targetPath)
+	if versionID != "" || (targetPath != "" && isNoteLikePath(targetPath)) {
+		var (
+			result  workspace.FileReadResult
+			readErr error
+		)
+		if versionID != "" {
+			result, readErr = files.ReadFileVersion(r.Context(), targetPath, versionID)
+		} else {
+			result, readErr = files.ReadFile(targetPath)
+		}
 		if readErr != nil {
 			s.writeFileError(w, readErr)
+			return
+		}
+		if !isNoteLikePath(result.Path) {
+			writeError(w, http.StatusBadRequest, "HTML, Markdown, and Word export are only supported for a single note")
 			return
 		}
 		baseName := filepath.Base(result.Path)

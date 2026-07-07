@@ -195,6 +195,21 @@ function sameToolbarState(left, right) {
   return true;
 }
 
+function resolveBlockTriggerLeft(blockElement, blockRect, editorRect) {
+  const listItem = blockElement?.closest?.('li');
+  const listElement = listItem?.closest?.('ul, ol');
+  const quoteElement = blockElement?.closest?.('blockquote');
+  const anchorElement = listElement || quoteElement || blockElement;
+  const anchorRect = anchorElement?.getBoundingClientRect?.() || blockRect;
+  const needsExtraGutter = Boolean(listElement || quoteElement);
+  const minLeft = Math.max(editorRect.left + (needsExtraGutter ? -18 : 6), 4);
+  const maxLeft = editorRect.right - 38;
+  const offset = needsExtraGutter ? 44 : 34;
+  const anchorLeft = Math.min(blockRect.left, anchorRect.left);
+
+  return Math.max(minLeft, Math.min(anchorLeft - offset, maxLeft));
+}
+
 function preserveToolbarState(current, next) {
   return sameToolbarState(current, next) ? current : next;
 }
@@ -552,10 +567,7 @@ export default function RichTextEditor({
         return;
       }
 
-      const triggerLeft = Math.max(
-        editorRect.left + 14,
-        Math.min(blockRect.left - 34, editorRect.right - 38)
-      );
+      const triggerLeft = resolveBlockTriggerLeft(blockElement, blockRect, editorRect);
       const triggerTop = Math.max(
         blockRect.top + Math.max(Math.min((blockRect.height - 24) / 2, 12), 0),
         editorRect.top + 6

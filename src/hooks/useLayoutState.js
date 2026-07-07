@@ -62,6 +62,11 @@ function setPanelDragImage(event) {
   window.setTimeout(() => dragImage.remove(), 0);
 }
 
+function getPanelWrapperElement(panelId) {
+  if (typeof document === 'undefined' || !panelId) return null;
+  return document.getElementById(`panel-wrapper-${panelId}`);
+}
+
 export default function useLayoutState({ userId = '' } = {}) {
   const [layoutColumns, setLayoutColumnsValue] = useState(3);
   const [panels, setPanels] = useState(PRESETS[3]);
@@ -194,30 +199,52 @@ export default function useLayoutState({ userId = '' } = {}) {
     const minRightW = Math.min(minWidthForPanelType(rightPanelType), Math.max(120, initialRightW));
     const minDelta = minLeftW - initialLeftW;
     const maxDelta = initialRightW - minRightW;
+    const leftPanelElement = getPanelWrapperElement(leftPanelId);
+    const rightPanelElement = getPanelWrapperElement(rightPanelId);
+    const canResizeDom = Boolean(leftPanelElement && rightPanelElement && initialLeftW && initialRightW);
     setWidths(initialWidths);
     let animationFrameId = null;
+    let latestClientX = initialX;
+
+    const nextWidthsForClientX = (clientX) => {
+      const deltaX = clientX - initialX;
+      const clampedDelta = Math.max(minDelta, Math.min(deltaX, maxDelta));
+      const next = { ...initialWidths };
+      if (initialLeftW) next[leftPanelId] = Math.round(initialLeftW + clampedDelta);
+      if (initialRightW) next[rightPanelId] = Math.round(initialRightW - clampedDelta);
+      return next;
+    };
+
+    const applyDomWidths = (next) => {
+      if (!canResizeDom) return;
+      leftPanelElement.style.width = `${next[leftPanelId]}px`;
+      rightPanelElement.style.width = `${next[rightPanelId]}px`;
+    };
 
     const onMouseMove = (moveEvent) => {
       window.getSelection()?.removeAllRanges();
+      latestClientX = moveEvent.clientX;
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       animationFrameId = requestAnimationFrame(() => {
-        const deltaX = moveEvent.clientX - initialX;
-        setWidths(() => {
-          const next = { ...initialWidths };
-          const clampedDelta = Math.max(minDelta, Math.min(deltaX, maxDelta));
-          if (initialLeftW) next[leftPanelId] = Math.round(initialLeftW + clampedDelta);
-          if (initialRightW) next[rightPanelId] = Math.round(initialRightW - clampedDelta);
-          return next;
-        });
+        const next = nextWidthsForClientX(latestClientX);
+        if (canResizeDom) {
+          applyDomWidths(next);
+        } else {
+          setWidths(next);
+        }
       });
     };
 
-    const onMouseUp = () => {
+    const onMouseUp = (upEvent) => {
       setIsDraggingMode(false);
       setDragType(null);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      const finalClientX = typeof upEvent?.clientX === 'number' ? upEvent.clientX : latestClientX;
+      const finalWidths = nextWidthsForClientX(finalClientX);
+      applyDomWidths(finalWidths);
+      setWidths(finalWidths);
     };
 
     window.addEventListener('mousemove', onMouseMove);

@@ -149,20 +149,6 @@ export default function App() {
         ide.isDarkMode ? 'dark bg-[#121212] text-gray-200' : 'bg-[#F5F5F7] text-gray-800'
       }`}
     >
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.4); border-radius: 10px; }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(107, 114, 128, 0.4); }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(107, 114, 128, 0.7); }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.7); }
-        .scrollbar-rounded-clip {
-          clip-path: inset(0 round 0 0 14px 14px);
-          scrollbar-gutter: stable;
-        }
-        .editor-panel-root { container-type: inline-size; }
-      `}</style>
-
       <AppHeader
         isDarkMode={ide.isDarkMode}
         layoutColumns={ide.layoutColumns}

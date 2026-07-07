@@ -13,6 +13,30 @@ function readPanelGlowRect(panelId) {
   };
 }
 
+function readActiveGlowElement(panelId) {
+  if (typeof document === 'undefined' || !panelId) return null;
+  const elements = document.querySelectorAll('.panel-active-glow-fixed[data-panel-id]');
+  for (const element of elements) {
+    if (element.dataset.panelId === panelId && element.dataset.visible === 'true') {
+      return element;
+    }
+  }
+  for (const element of elements) {
+    if (element.dataset.panelId === panelId) {
+      return element;
+    }
+  }
+  return null;
+}
+
+function applyGlowRectToElement(element, rect) {
+  if (!element || !rect) return;
+  element.style.height = `${rect.height}px`;
+  element.style.left = `${rect.left}px`;
+  element.style.top = `${rect.top}px`;
+  element.style.width = `${rect.width}px`;
+}
+
 export function usePanelActiveGlow({
   activePanel,
   displayWidths,
@@ -90,6 +114,13 @@ export function usePanelActiveGlow({
     return true;
   };
 
+  const syncActiveGlowRectRef = (panelId, rect) => {
+    if (!panelId || !rect) return;
+    activeGlowLayersRef.current = activeGlowLayersRef.current.map((layer) =>
+      layer.panelId === panelId && layer.visible ? { ...layer, rect } : layer
+    );
+  };
+
   useLayoutEffect(() => () => {
     clearActiveGlowSchedule();
   }, []);
@@ -151,6 +182,7 @@ export function usePanelActiveGlow({
     }
 
     const updateRect = () => {
+      if (dragType === 'resize') return;
       if (!syncActiveGlowRect(nextPanelId)) {
         activeGlowPanelRef.current = '';
         fadeExistingLayers();
@@ -174,6 +206,39 @@ export function usePanelActiveGlow({
   }, [displayWidths, mainWidth, visiblePanels]);
 
   useLayoutEffect(() => {
+    if (dragType !== 'resize' || typeof window === 'undefined') return undefined;
+    const panelId = activeGlowPanelRef.current;
+    if (!panelId) return undefined;
+
+    let frameId = 0;
+    let stopped = false;
+
+    const updateGlowDom = () => {
+      const rect = readPanelGlowRect(panelId);
+      const element = readActiveGlowElement(panelId);
+      if (rect && element) {
+        applyGlowRectToElement(element, rect);
+        syncActiveGlowRectRef(panelId, rect);
+      }
+    };
+
+    const follow = () => {
+      if (stopped) return;
+      updateGlowDom();
+      frameId = window.requestAnimationFrame(follow);
+    };
+
+    updateGlowDom();
+    frameId = window.requestAnimationFrame(follow);
+    return () => {
+      stopped = true;
+      if (frameId) window.cancelAnimationFrame(frameId);
+      syncActiveGlowRect(panelId);
+    };
+  }, [activePanel, dragType]);
+
+  useLayoutEffect(() => {
+    if (dragType === 'resize') return undefined;
     if (!activeGlowPanelRef.current) return undefined;
     let frameId = 0;
     let stopped = false;
@@ -208,6 +273,9 @@ export function usePanelActiveGlow({
       <div
         key={layer.id}
         aria-hidden="true"
+        data-glow-layer-id={layer.id}
+        data-panel-id={layer.panelId}
+        data-visible={layer.visible ? 'true' : 'false'}
         className={`panel-active-glow-fixed ${layer.visible ? 'panel-active-glow-fixed-on' : ''}`}
         style={{
           height: `${layer.rect.height}px`,

@@ -853,6 +853,14 @@
   box-shadow: none;
 }
 
+.rich-text-editor-content > :not(table):not(.tableWrapper):not(.note-image-node),
+.rich-text-editor-content > table,
+.rich-text-editor-content > .tableWrapper,
+.rich-text-editor-content > .note-image-node {
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .note-image-node {
   position: relative;
 }

@@ -56,7 +56,7 @@ export default function ModelProviderDiscoveryPanel({
         </div>
       )}
       {discoveredModels.length > 0 && (
-        <div className="settings-expand-enter mt-3 max-h-52 space-y-1 overflow-y-auto pr-1">
+        <div className="settings-expand-enter mt-3 max-h-52 space-y-1 overflow-y-auto pr-1 custom-scrollbar">
           {discoveredModels.map((model) => {
             const selected = model.id === draft.model_id;
             return (

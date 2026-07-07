@@ -1,0 +1,344 @@
+.chat-markdown,
+.chat-markdown-fallback {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-markdown {
+  color: inherit;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p {
+  margin: 0.55rem 0;
+  line-height: 1.72;
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  margin: 1rem 0 0.45rem;
+  color: inherit;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.chat-markdown h1 {
+  font-size: 1.25rem;
+}
+
+.chat-markdown h2 {
+  font-size: 1.12rem;
+}
+
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  font-size: 1rem;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0.55rem 0;
+  padding-left: 1.35rem;
+}
+
+.chat-markdown ul {
+  list-style: disc;
+}
+
+.chat-markdown ol {
+  list-style: decimal;
+}
+
+.chat-markdown li {
+  margin: 0.25rem 0;
+  padding-left: 0.2rem;
+}
+
+.chat-markdown li > p {
+  margin: 0.25rem 0;
+}
+
+.chat-markdown blockquote {
+  margin: 0.75rem 0;
+  border-left: 3px solid rgb(59 130 246 / 0.35);
+  padding: 0.15rem 0 0.15rem 0.85rem;
+  color: rgb(75 85 99);
+}
+
+.dark .chat-markdown blockquote {
+  border-left-color: rgb(147 197 253 / 0.38);
+  color: rgb(209 213 219);
+}
+
+.chat-markdown hr {
+  margin: 0.9rem 0;
+  border: 0;
+  border-top: 1px solid rgb(15 23 42 / 0.1);
+}
+
+.dark .chat-markdown hr {
+  border-top-color: rgb(255 255 255 / 0.12);
+}
+
+.chat-markdown a {
+  color: rgb(37 99 235);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.chat-markdown a:hover {
+  text-decoration: underline;
+}
+
+.dark .chat-markdown a {
+  color: rgb(147 197 253);
+}
+
+.chat-markdown code:not(.hljs) {
+  border-radius: var(--radius-micro);
+  background: rgb(15 23 42 / 0.07);
+  padding: 0.12rem 0.32rem;
+  color: rgb(55 65 81);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.88em;
+  font-weight: 700;
+}
+
+.dark .chat-markdown code:not(.hljs) {
+  background: rgb(255 255 255 / 0.1);
+  color: rgb(243 244 246);
+}
+
+.chat-code-block {
+  max-width: 100%;
+  margin: 0.85rem 0;
+  overflow: hidden;
+  border: 1px solid rgb(15 23 42 / 0.08);
+  border-radius: var(--radius-control);
+  background: rgb(248 250 252);
+}
+
+.dark .chat-code-block {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(19 20 23);
+}
+
+.chat-code-block-header {
+  display: flex;
+  min-height: 2.05rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgb(15 23 42 / 0.07);
+  padding: 0.32rem 0.55rem 0.32rem 0.75rem;
+  background: rgb(241 245 249);
+}
+
+.dark .chat-code-block-header {
+  border-bottom-color: rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.chat-code-block-language {
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(51 65 85);
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dark .chat-code-block-language {
+  color: rgb(226 232 240);
+}
+
+.chat-code-copy-button {
+  flex: 0 0 auto;
+  color: rgb(71 85 105);
+}
+
+.dark .chat-code-copy-button {
+  color: rgb(203 213 225);
+}
+
+.chat-code-block-body {
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  padding: 0.85rem 1rem;
+  color: rgb(31 41 55);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.72;
+}
+
+.dark .chat-code-block-body {
+  color: rgb(229 231 235);
+}
+
+.chat-code-block-body code {
+  display: block;
+  min-width: max-content;
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+
+.chat-markdown-table-wrapper {
+  max-width: 100%;
+  margin: 0.85rem 0;
+  overflow-x: auto;
+  border: 1px solid rgb(15 23 42 / 0.08);
+  border-radius: var(--radius-control);
+}
+
+.dark .chat-markdown-table-wrapper {
+  border-color: rgb(255 255 255 / 0.1);
+}
+
+.chat-markdown table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border-bottom: 1px solid rgb(15 23 42 / 0.08);
+  padding: 0.48rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.chat-markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+.chat-markdown th {
+  background: rgb(248 250 252);
+  color: rgb(51 65 85);
+  font-weight: 800;
+}
+
+.dark .chat-markdown th,
+.dark .chat-markdown td {
+  border-bottom-color: rgb(255 255 255 / 0.08);
+}
+
+.dark .chat-markdown th {
+  background: rgb(255 255 255 / 0.04);
+  color: rgb(226 232 240);
+}
+
+.chat-markdown img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.75rem 0;
+  border-radius: var(--radius-control);
+}
+
+.chat-markdown input[type="checkbox"] {
+  margin-right: 0.45rem;
+  vertical-align: -0.12em;
+}
+
+.chat-markdown-fallback {
+  white-space: pre-wrap;
+}
+
+.chat-markdown-unsafe-link,
+.chat-markdown-image-alt {
+  color: rgb(107 114 128);
+  font-weight: 700;
+}
+
+.dark .chat-markdown-unsafe-link,
+.dark .chat-markdown-image-alt {
+  color: rgb(156 163 175);
+}
+
+.chat-markdown .hljs-keyword,
+.chat-markdown .hljs-selector-tag,
+.chat-markdown .hljs-built_in,
+.chat-markdown .hljs-name,
+.chat-markdown .hljs-tag {
+  color: rgb(124 58 237);
+}
+
+.chat-markdown .hljs-string,
+.chat-markdown .hljs-title,
+.chat-markdown .hljs-section,
+.chat-markdown .hljs-attribute {
+  color: rgb(22 101 52);
+}
+
+.chat-markdown .hljs-comment,
+.chat-markdown .hljs-quote {
+  color: rgb(100 116 139);
+  font-style: italic;
+}
+
+.chat-markdown .hljs-number,
+.chat-markdown .hljs-literal,
+.chat-markdown .hljs-variable,
+.chat-markdown .hljs-template-variable {
+  color: rgb(194 65 12);
+}
+
+.chat-markdown .hljs-symbol,
+.chat-markdown .hljs-bullet,
+.chat-markdown .hljs-link {
+  color: rgb(2 132 199);
+}
+
+.dark .chat-markdown .hljs-keyword,
+.dark .chat-markdown .hljs-selector-tag,
+.dark .chat-markdown .hljs-built_in,
+.dark .chat-markdown .hljs-name,
+.dark .chat-markdown .hljs-tag {
+  color: rgb(196 181 253);
+}
+
+.dark .chat-markdown .hljs-string,
+.dark .chat-markdown .hljs-title,
+.dark .chat-markdown .hljs-section,
+.dark .chat-markdown .hljs-attribute {
+  color: rgb(134 239 172);
+}
+
+.dark .chat-markdown .hljs-comment,
+.dark .chat-markdown .hljs-quote {
+  color: rgb(148 163 184);
+}
+
+.dark .chat-markdown .hljs-number,
+.dark .chat-markdown .hljs-literal,
+.dark .chat-markdown .hljs-variable,
+.dark .chat-markdown .hljs-template-variable {
+  color: rgb(253 186 116);
+}
+
+.dark .chat-markdown .hljs-symbol,
+.dark .chat-markdown .hljs-bullet,
+.dark .chat-markdown .hljs-link {
+  color: rgb(125 211 252);
+}

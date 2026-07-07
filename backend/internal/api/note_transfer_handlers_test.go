@@ -3,11 +3,15 @@ package api
 import (
 	"context"
 	"database/sql"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"webide-backend/internal/store"
+	"webide-backend/internal/usersvc"
 	"webide-backend/internal/workspace"
 
 	_ "modernc.org/sqlite"
@@ -64,6 +68,53 @@ func TestSanitizeHTMLFragmentRemovesExecutableMarkup(t *testing.T) {
 	}
 	if !strings.Contains(got, `<p>safe<a>link</a><img alt="x"></p>`) {
 		t.Fatalf("sanitized fragment removed unexpected safe markup: %s", got)
+	}
+}
+
+func TestFilesExportCanExportHistoryVersionHTML(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+	factory := usersvc.NewFactory(db, t.TempDir(), store.NewSkillStore(db))
+	files, err := factory.Workspace("test-user")
+	if err != nil {
+		t.Fatalf("Workspace returned error: %v", err)
+	}
+	if _, err := files.CreateBytes(context.Background(), "Note.html", []byte("<p>old history body</p>")); err != nil {
+		t.Fatalf("CreateBytes returned error: %v", err)
+	}
+	if _, err := files.WriteFile(context.Background(), "Note.html", "<p>current body</p>", "write"); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	versions, err := files.ListFileVersions(context.Background(), "", 30)
+	if err != nil {
+		t.Fatalf("ListFileVersions returned error: %v", err)
+	}
+	if len(versions) == 0 {
+		t.Fatalf("expected history version")
+	}
+
+	server := &Server{factory: factory}
+	req := httptest.NewRequest(http.MethodGet, "/api/files/export?version_id="+versions[0].ID+"&format=html", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxSessionKey, &SessionInfo{UserID: "test-user", Role: "user"}))
+	rec := httptest.NewRecorder()
+	server.handleFilesExport(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected export 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "old history body") {
+		t.Fatalf("history export missing old content: %s", body)
+	}
+	if strings.Contains(body, "current body") {
+		t.Fatalf("history export used current content: %s", body)
+	}
+	if got := rec.Result().Header.Get("Content-Disposition"); !strings.Contains(got, "Note.html") {
+		t.Fatalf("unexpected content disposition: %s", got)
 	}
 }
 

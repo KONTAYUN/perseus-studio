@@ -4,12 +4,17 @@ import { completedActionItems, latestLiveProgressItem, loadingStatusDisplayText,
 import { Button, IconButton } from '../ui';
 import { RUN_STEER_STATUS, runSteerStatusLabel } from '../../hooks/chatSteerItems';
 import EmptyChatState from './EmptyChatState';
+import ChatMarkdownRenderer from './markdown/ChatMarkdownRenderer';
 
 const STEER_FAILURE_BUTTON_CLASS = 'border-white/20 bg-white/10 text-blue-50 hover:bg-white/15 hover:text-white dark:border-white/15 dark:bg-white/10';
 
 export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBottomInset }) {
   const isHomeEmpty = !ide.currentConversationId && ide.conversationMessages.length === 0 && !ide.chatError && !ide.agentRecoveryNotice?.text;
   const bottomInset = isHomeEmpty ? 0 : messagesBottomInset;
+  const lastAssistantId = React.useMemo(
+    () => lastAssistantMessageId(ide.conversationMessages),
+    [ide.conversationMessages]
+  );
   return (
     <div
       ref={messagesRef}
@@ -61,11 +66,11 @@ export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBott
         </div>
       ) : (
         ide.conversationMessages.map((message) => (
-          <MessageBubble
+          <MemoizedMessageBubble
             key={message.id}
             message={message}
             ide={ide}
-            canRegenerate={message.id === lastAssistantMessageId(ide.conversationMessages)}
+            canRegenerate={message.id === lastAssistantId}
           />
         ))
       )}
@@ -104,6 +109,8 @@ function MessageBubble({ message, ide, canRegenerate }) {
           {attachments.length > 0 && <MessageAttachmentBadges attachments={attachments} message={message} ide={ide} />}
           {showLoadingOnly ? (
             <LoadingStateBubble message={message} fallbackText={message.content} />
+          ) : message.role === 'assistant' && !message.error ? (
+            <ChatMarkdownRenderer content={message.content} />
           ) : (
             <div className={`min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${message.error ? 'break-all' : ''}`}>
               {message.content}
@@ -174,6 +181,32 @@ function MessageBubble({ message, ide, canRegenerate }) {
         )}
       </div>
     </div>
+  );
+}
+
+const MemoizedMessageBubble = React.memo(MessageBubble, areMessageBubblePropsEqual);
+
+function areMessageBubblePropsEqual(previous, next) {
+  return (
+    previous.canRegenerate === next.canRegenerate &&
+    previous.ide?.isChatSending === next.ide?.isChatSending &&
+    isSameRenderableMessage(previous.message, next.message)
+  );
+}
+
+function isSameRenderableMessage(previous = {}, next = {}) {
+  return (
+    previous.id === next.id &&
+    previous.role === next.role &&
+    previous.kind === next.kind &&
+    previous.status === next.status &&
+    previous.content === next.content &&
+    previous.pending === next.pending &&
+    previous.error === next.error &&
+    previous.resumableRunId === next.resumableRunId &&
+    previous.attachments === next.attachments &&
+    previous.progressItems === next.progressItems &&
+    previous.loadingState === next.loadingState
   );
 }
 
