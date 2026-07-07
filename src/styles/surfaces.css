@@ -1,15 +1,26 @@
 .ui-panel-surface {
   border-radius: var(--radius-panel);
+  background: var(--surface-panel-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(1.18);
+  backdrop-filter: blur(24px) saturate(1.18);
   transition:
     border-color var(--motion-base) var(--ease-motion),
-    box-shadow var(--motion-layout) var(--ease-layout),
-    background-color var(--motion-base) var(--ease-motion);
+    background-color var(--motion-base) var(--ease-motion),
+    box-shadow var(--motion-layout) var(--ease-layout);
   box-shadow:
     var(--surface-shadow-panel),
     0 0 18px 1px rgb(59 130 246 / 0),
     0 0 42px 6px rgb(37 99 235 / 0),
     inset 0 0 0 1px rgb(96 165 250 / 0),
     inset 0 1px 0 var(--surface-highlight);
+}
+
+.ui-panel-header-surface {
+  background: var(--surface-panel-header-bg);
+}
+
+.ui-panel-body-surface {
+  background: transparent;
 }
 
 .ui-panel-surface-active {

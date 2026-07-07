@@ -23,13 +23,13 @@ body {
 :root {
   --ease-apple: cubic-bezier(0.19, 1, 0.22, 1);
   --ease-apple-soft: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-motion: cubic-bezier(0.2, 0, 0, 1);
-  --ease-layout: cubic-bezier(0.16, 1, 0.3, 1);
-  --motion-fast: 160ms;
-  --motion-base: 220ms;
-  --motion-popover: 240ms;
-  --motion-modal: 300ms;
-  --motion-layout: 320ms;
+  --ease-motion: cubic-bezier(0.18, 0.86, 0.28, 1);
+  --ease-layout: cubic-bezier(0.16, 1, 0.28, 1);
+  --motion-fast: 180ms;
+  --motion-base: 260ms;
+  --motion-popover: 300ms;
+  --motion-modal: 360ms;
+  --motion-layout: 400ms;
   --radius-micro: 7px;
   --radius-control-sm: 10px;
   --radius-control: 12px;
@@ -46,6 +46,8 @@ body {
   --radius-switch: 999px;
   --surface-line: rgb(15 23 42 / 0.08);
   --surface-highlight: rgb(255 255 255 / 0.72);
+  --surface-panel-bg: rgb(255 255 255 / 0.78);
+  --surface-panel-header-bg: rgb(249 250 251 / 0.76);
   --surface-shadow-soft: 0 6px 16px rgb(15 23 42 / 0.032);
   --surface-shadow-panel: 0 8px 22px rgb(15 23 42 / 0.04);
 }
@@ -58,6 +60,8 @@ body {
 .app-shell.dark {
   --surface-line: rgb(255 255 255 / 0.1);
   --surface-highlight: rgb(255 255 255 / 0.08);
+  --surface-panel-bg: rgb(28 28 30 / 0.94);
+  --surface-panel-header-bg: rgb(37 37 40 / 0.7);
   --surface-shadow-soft: 0 7px 18px rgb(0 0 0 / 0.16);
   --surface-shadow-panel: 0 9px 24px rgb(0 0 0 / 0.18);
   background:

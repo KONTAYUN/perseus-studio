@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
-const PANEL_LAYOUT_DURATION_MS = 320;
-const PANEL_LAYOUT_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
+const PANEL_LAYOUT_DURATION_MS = 400;
+const PANEL_LAYOUT_EASING = 'cubic-bezier(0.16, 1, 0.28, 1)';
 
 export function usePanelMotion({
   displayWidths,

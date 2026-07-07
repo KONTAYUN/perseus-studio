@@ -37,7 +37,7 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
     <aside
       id="panel-content-sidebar"
       data-testid="file-tree-panel"
-      className={`ui-panel-surface h-full flex flex-col bg-white/70 dark:bg-[#1C1C1E]/90 backdrop-blur-2xl overflow-hidden border relative ${ide.getPanelGlowStyle(
+      className={`ui-panel-surface h-full flex flex-col overflow-hidden border relative ${ide.getPanelGlowStyle(
         panelId
       )}`}
       onClick={() => ide.setActivePanel(panelId)}
@@ -49,7 +49,7 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
       }}
       tabIndex={0}
     >
-      <div className="h-12 flex-none min-w-0 px-3 border-b border-gray-100 dark:border-white/5 flex items-center justify-between gap-2 group select-none relative z-40">
+      <div className="ui-panel-header-surface h-12 flex-none min-w-0 px-3 border-b border-gray-100 dark:border-white/5 flex items-center justify-between gap-2 group select-none relative z-40">
         <div className="flex min-w-0 items-center space-x-2 text-gray-500 dark:text-gray-400">
           <span
             draggable

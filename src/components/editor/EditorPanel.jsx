@@ -33,7 +33,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
     <section
       id="panel-content-editor"
       data-testid="editor-panel"
-      className={`editor-panel-root ui-panel-surface h-full flex flex-col bg-white dark:bg-[#1E1E1E] overflow-hidden border relative ${ide.getPanelGlowStyle(
+      className={`editor-panel-root ui-panel-surface h-full flex flex-col overflow-hidden border relative ${ide.getPanelGlowStyle(
         panelId
       )}`}
       onClick={() => {
@@ -42,7 +42,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
       }}
     >
       <div
-        className="h-12 flex-none min-w-0 bg-gray-50/80 dark:bg-[#252526] border-b border-gray-200/50 dark:border-white/5 flex items-center gap-4 px-6 group select-none relative z-20 max-[640px]:px-4"
+        className="ui-panel-header-surface h-12 flex-none min-w-0 border-b border-gray-200/50 dark:border-white/5 flex items-center gap-4 px-6 group select-none relative z-20 max-[640px]:px-4"
         onDragOver={(e) => {
           const hasPath = e.dataTransfer?.types?.includes('workspace_path') || e.dataTransfer?.types?.includes('editor_tab_path');
           if (!hasPath) return;
@@ -226,7 +226,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
       </div>
 
       <div
-        className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#FAFAFA] text-[14px] leading-7 tracking-[0.012em] text-gray-800 dark:bg-[#1E1E1E] dark:text-gray-300"
+        className="ui-panel-body-surface relative flex min-h-0 flex-1 flex-col overflow-hidden text-[14px] leading-7 tracking-[0.012em] text-gray-800 dark:text-gray-300"
         onDragOver={(e) => {
           const hasPath = e.dataTransfer?.types?.includes('workspace_path') || e.dataTransfer?.types?.includes('editor_tab_path');
           if (!hasPath) return;

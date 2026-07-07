@@ -5,7 +5,7 @@ import ConversationMenu from './ConversationMenu';
 
 export default function ChatPanelHeader({ ide, onRenameConversation, panelId }) {
   return (
-    <div className="chat-panel-header relative z-20 grid h-12 flex-none grid-cols-[104px_minmax(0,1fr)_104px] items-center gap-2 border-b border-gray-100 bg-transparent px-3 dark:border-white/5 group max-[420px]:grid-cols-[82px_minmax(0,1fr)_96px]">
+    <div className="chat-panel-header ui-panel-header-surface relative z-20 grid h-12 flex-none grid-cols-[104px_minmax(0,1fr)_104px] items-center gap-2 border-b border-gray-100 px-3 dark:border-white/5 group max-[420px]:grid-cols-[82px_minmax(0,1fr)_96px]">
       <div className="flex min-w-0 items-center gap-1 text-gray-400">
         <span
           draggable

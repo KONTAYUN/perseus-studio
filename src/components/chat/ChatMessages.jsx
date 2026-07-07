@@ -15,7 +15,7 @@ export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBott
   return (
     <div
       ref={messagesRef}
-      className="chat-messages-scroll relative z-10 flex-1 space-y-1 overflow-y-auto overflow-x-hidden bg-gradient-to-b from-transparent to-gray-50/30 p-4 dark:to-black/10 custom-scrollbar scrollbar-rounded-clip"
+      className="chat-messages-scroll relative z-10 flex-1 space-y-1 overflow-y-auto overflow-x-hidden bg-transparent p-4 custom-scrollbar scrollbar-rounded-clip"
       style={{
         paddingBottom: `${bottomInset}px`,
         '--scrollbar-track-margin-bottom': `${scrollbarBottomInset}px`,

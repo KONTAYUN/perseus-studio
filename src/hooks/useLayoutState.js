@@ -164,7 +164,7 @@ export default function useLayoutState({ userId = '' } = {}) {
     setRecentlyAddedPanelId(panelId);
     window.setTimeout(() => {
       setRecentlyAddedPanelId((current) => (current === panelId ? '' : current));
-    }, 320);
+    }, 400);
   };
 
   const removePanel = (panelId, canRemove) => {

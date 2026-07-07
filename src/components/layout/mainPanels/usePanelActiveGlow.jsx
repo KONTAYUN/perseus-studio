@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-const PANEL_GLOW_DURATION_MS = 320;
+const PANEL_GLOW_DURATION_MS = 400;
 
 function readPanelGlowRect(panelId) {
   const element = document.getElementById(`panel-wrapper-${panelId}`);
