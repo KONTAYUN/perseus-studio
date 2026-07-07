@@ -14,6 +14,7 @@ export default function ChatPanel({ ide, panelId = 'chat' }) {
     composerHeight,
     composerRef,
     messagesBottomInset,
+    messagesScrollbarBottomInset,
     messagesRef,
     scrollToBottom,
     showScrollToBottom,
@@ -60,6 +61,7 @@ export default function ChatPanel({ ide, panelId = 'chat' }) {
         messagesRef={messagesRef}
         bottomRef={bottomRef}
         messagesBottomInset={messagesBottomInset}
+        messagesScrollbarBottomInset={messagesScrollbarBottomInset}
       />
 
       {showScrollToBottom && ide.conversationMessages.length > 0 && (

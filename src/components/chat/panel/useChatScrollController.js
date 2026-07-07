@@ -19,6 +19,7 @@ export function useChatScrollController(ide) {
   const [composerHeight, setComposerHeight] = React.useState(176);
   const [showScrollToBottom, setShowScrollToBottom] = React.useState(false);
   const messagesBottomInset = composerHeight + 72;
+  const messagesScrollbarBottomInset = Math.max(28, composerHeight - 140);
 
   const updateScrollStickiness = React.useCallback(() => {
     const element = messagesRef.current;
@@ -127,6 +128,7 @@ export function useChatScrollController(ide) {
     composerHeight,
     composerRef,
     messagesBottomInset,
+    messagesScrollbarBottomInset,
     messagesRef,
     scrollToBottom,
     showScrollToBottom,

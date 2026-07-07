@@ -4,9 +4,10 @@ import { Button } from '../ui';
 import EmptyChatState from './EmptyChatState';
 import MemoizedMessageBubble, { lastAssistantMessageId } from './ChatMessageBubble';
 
-export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBottomInset }) {
+export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBottomInset, messagesScrollbarBottomInset }) {
   const isHomeEmpty = !ide.currentConversationId && ide.conversationMessages.length === 0 && !ide.chatError && !ide.agentRecoveryNotice?.text;
   const bottomInset = isHomeEmpty ? 0 : messagesBottomInset;
+  const scrollbarBottomInset = isHomeEmpty ? 10 : Math.max(10, messagesScrollbarBottomInset || 10);
   const lastAssistantId = React.useMemo(
     () => lastAssistantMessageId(ide.conversationMessages),
     [ide.conversationMessages]
@@ -15,7 +16,10 @@ export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBott
     <div
       ref={messagesRef}
       className="chat-messages-scroll relative z-10 flex-1 space-y-1 overflow-y-auto overflow-x-hidden bg-gradient-to-b from-transparent to-gray-50/30 p-4 dark:to-black/10 custom-scrollbar scrollbar-rounded-clip"
-      style={{ paddingBottom: `${bottomInset}px` }}
+      style={{
+        paddingBottom: `${bottomInset}px`,
+        '--scrollbar-track-margin-bottom': `${scrollbarBottomInset}px`,
+      }}
     >
       {ide.chatError && (
         <div className="chat-error-card min-w-0 max-w-full overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">

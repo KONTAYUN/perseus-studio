@@ -44,12 +44,19 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .custom-scrollbar::-webkit-scrollbar-track,
-.custom-scrollbar::-webkit-scrollbar-track-piece,
 .chat-code-block-body::-webkit-scrollbar-track,
-.chat-code-block-body::-webkit-scrollbar-track-piece,
 .chat-markdown-table-wrapper::-webkit-scrollbar-track,
+.rich-text-editor-content pre::-webkit-scrollbar-track {
+  margin-block-start: var(--scrollbar-track-margin-top, var(--scrollbar-track-margin-block, 8px));
+  margin-block-end: var(--scrollbar-track-margin-bottom, var(--scrollbar-track-margin-block, 8px));
+  margin-inline-start: var(--scrollbar-track-margin-left, var(--scrollbar-track-margin-inline, 8px));
+  margin-inline-end: var(--scrollbar-track-margin-right, var(--scrollbar-track-margin-inline, 8px));
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track-piece,
+.chat-code-block-body::-webkit-scrollbar-track-piece,
 .chat-markdown-table-wrapper::-webkit-scrollbar-track-piece,
-.rich-text-editor-content pre::-webkit-scrollbar-track,
 .rich-text-editor-content pre::-webkit-scrollbar-track-piece {
   background: transparent;
 }
@@ -116,7 +123,10 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .scrollbar-rounded-clip {
-  clip-path: inset(0 round 0 0 14px 14px);
+  --scrollbar-track-margin-block: 10px;
+  --scrollbar-track-margin-inline: 10px;
+  clip-path: inset(0 round 0 0 calc(var(--radius-panel) - 4px) calc(var(--radius-panel) - 4px));
+  overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
 

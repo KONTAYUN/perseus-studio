@@ -14,6 +14,12 @@
   border-radius: 17px;
 }
 
+.chat-messages-scroll {
+  --scrollbar-track-margin-block: 10px;
+  --scrollbar-track-margin-bottom: 10px;
+  --scrollbar-track-margin-inline: 0px;
+}
+
 .chat-conversation-title-anchor {
   display: inline-flex;
   max-width: min(280px, 100%);
