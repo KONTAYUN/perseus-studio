@@ -197,7 +197,7 @@ export default function FileTreeRow({ item, items, depth, ide }) {
         >
           {item.isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
-        <span className="file-tree-icon flex h-5 w-4 items-center justify-center text-gray-400 transition-colors group-hover:text-blue-500 dark:text-gray-500">
+        <span className="file-tree-icon motion-color flex h-5 w-4 items-center justify-center text-gray-400 group-hover:text-blue-500 dark:text-gray-500">
           {item.type === 'folder' ? (
             item.isOpen ? (
               <FolderOpen size={15} className="text-blue-400" />

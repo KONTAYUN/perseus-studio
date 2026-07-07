@@ -22,101 +22,45 @@
 }
 
 .settings-view-enter {
-  animation: perseus-settings-view-enter 520ms var(--ease-apple) both;
+  animation: perseus-card-enter var(--motion-modal) var(--ease-motion) both;
 }
 
 .settings-section-appear,
 .settings-card {
-  animation: perseus-settings-card-enter 540ms var(--ease-apple) both;
+  animation: perseus-card-enter var(--motion-modal) var(--ease-motion) both;
 }
 
 .settings-view-enter > .settings-section-appear:nth-child(1),
 .settings-view-enter > .settings-card:nth-child(1) {
-  animation-delay: 30ms;
+  animation-delay: calc(var(--motion-fast) * 0.2);
 }
 
 .settings-view-enter > .settings-section-appear:nth-child(2),
 .settings-view-enter > .settings-card:nth-child(2) {
-  animation-delay: 70ms;
+  animation-delay: calc(var(--motion-fast) * 0.4);
 }
 
 .settings-view-enter > .settings-section-appear:nth-child(3),
 .settings-view-enter > .settings-card:nth-child(3) {
-  animation-delay: 110ms;
+  animation-delay: calc(var(--motion-fast) * 0.6);
 }
 
 .settings-view-enter > .settings-section-appear:nth-child(4),
 .settings-view-enter > .settings-card:nth-child(4) {
-  animation-delay: 150ms;
+  animation-delay: calc(var(--motion-fast) * 0.8);
 }
 
 .settings-view-enter > .settings-section-appear:nth-child(5),
 .settings-view-enter > .settings-card:nth-child(5) {
-  animation-delay: 190ms;
+  animation-delay: var(--motion-fast);
 }
 
 .settings-popover-enter {
   transform-origin: top center;
-  animation: perseus-settings-popover-enter 260ms var(--ease-apple) both;
+  animation: perseus-popover-enter var(--motion-popover) var(--ease-motion) both;
 }
 
 .settings-expand-enter {
   transform-origin: top center;
-  animation: perseus-settings-expand-enter 340ms var(--ease-apple) both;
-}
-
-@keyframes perseus-settings-view-enter {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.992);
-    filter: blur(2px);
-  }
-  55% {
-    opacity: 1;
-    filter: blur(0);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
-  }
-}
-
-@keyframes perseus-settings-card-enter {
-  from {
-    opacity: 0;
-    transform: translateY(14px) scale(0.986);
-    filter: blur(1.5px);
-  }
-  70% {
-    opacity: 1;
-    filter: blur(0);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
-  }
-}
-
-@keyframes perseus-settings-popover-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes perseus-settings-expand-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-8px) scaleY(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scaleY(1);
-  }
+  animation: perseus-popover-enter var(--motion-popover) var(--ease-motion) both;
 }

@@ -32,8 +32,6 @@ export default function MainPanels({ ide }) {
   const centerSinglePanel = isCenteredSingleChatPanel(visiblePanels);
   const contentWidth = Math.max(0, mainWidth - MAIN_HORIZONTAL_PADDING);
   const isResizing = ide.dragType === 'resize';
-  const isReordering = ide.dragType === 'reorder';
-  const isReorderMotion = isReordering || ide.layoutAnimationAction?.kind === 'reorder';
   const displayWidths = useMemo(
     () => calculateDisplayWidths({
       mainWidth,
@@ -109,7 +107,6 @@ export default function MainPanels({ ide }) {
               ide={ide}
               index={index}
               isOpeningPanel={isOpeningPanel}
-              isReorderMotion={isReorderMotion}
               isResizing={isResizing}
               nextPanel={nextPanel}
               panel={panel}

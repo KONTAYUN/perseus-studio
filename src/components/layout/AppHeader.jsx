@@ -88,7 +88,7 @@ export default function AppHeader({
   };
 
   return (
-    <header className="app-header h-14 flex-none bg-white/60 dark:bg-[#1C1C1E]/60 backdrop-blur-2xl border-b border-gray-200/50 dark:border-white/5 flex items-center justify-between px-5 z-30 transition-colors duration-200">
+    <header className="app-header motion-color h-14 flex-none bg-white/60 dark:bg-[#1C1C1E]/60 backdrop-blur-2xl border-b border-gray-200/50 dark:border-white/5 flex items-center justify-between px-5 z-30">
       <div className="flex h-full w-1/3 items-center gap-3">
         <img src="/perseus-mark.svg?v=6" alt="" className="h-7 w-7 rounded-xl" draggable="false" />
         <span className="font-bold text-[15px] leading-none tracking-tight text-gray-800 dark:text-gray-100">
@@ -97,7 +97,7 @@ export default function AppHeader({
       </div>
 
       <div
-        className={`header-segmented relative flex h-9 w-1/3 items-center justify-center gap-1.5 p-1.5 shadow-inner transition-[background-color,color,box-shadow,ring-color,transform] duration-150 ease-out ${
+        className={`header-segmented motion-color relative flex h-9 w-1/3 items-center justify-center gap-1.5 p-1.5 shadow-inner ${
           isPanelDragging
             ? isPanelTrashOver
               ? 'bg-red-500/95 text-white ring-2 ring-red-300/60'
@@ -111,7 +111,7 @@ export default function AppHeader({
         title={isPanelDragging ? '拖到这里关闭面板' : undefined}
       >
         {isPanelDragging ? (
-          <div className={`pointer-events-none flex items-center gap-2 text-sm font-bold transition-transform duration-150 ${isPanelTrashOver ? 'scale-[1.03]' : 'scale-100'}`}>
+          <div className={`pointer-events-none motion-rotate flex items-center gap-2 text-sm font-bold ${isPanelTrashOver ? 'scale-[1.03]' : 'scale-100'}`}>
             <Trash2 size={17} className="shrink-0" />
             <span>拖动到此处释放关闭面板</span>
           </div>

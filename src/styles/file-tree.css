@@ -18,7 +18,9 @@
   display: block;
   min-width: 0;
   padding-right: 12px;
-  transition: padding-right 180ms var(--ease-apple), color 180ms var(--ease-apple);
+  transition:
+    padding-right var(--motion-fast) var(--ease-motion),
+    color var(--motion-fast) var(--ease-motion);
 }
 
 .file-tree-label-text {
@@ -36,7 +38,7 @@
   opacity: 0;
   pointer-events: none;
   transform: translate(0, -50%);
-  transition: opacity 180ms var(--ease-apple);
+  transition: opacity var(--motion-fast) var(--ease-motion);
 }
 
 .file-tree-row:hover .file-tree-label,

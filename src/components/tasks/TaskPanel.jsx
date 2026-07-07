@@ -7,11 +7,11 @@ export default function TaskPanel({ tasks }) {
 
   return (
     <div
-      className="fixed inset-0 z-[140] bg-black/30 backdrop-blur-sm animate-in fade-in duration-300 ease-apple"
+      className="fixed inset-0 z-[140] bg-black/30 backdrop-blur-sm animate-in fade-in"
       onClick={() => tasks.setIsTaskPanelOpen(false)}
     >
       <aside
-        className="ui-overlay-surface absolute right-4 top-16 bottom-4 flex w-[min(920px,calc(100vw-2rem))] flex-col overflow-hidden border border-gray-200 bg-white dark:border-white/10 dark:bg-[#1C1C1E] animate-in slide-in-from-right-4 zoom-in-98 duration-500 ease-apple"
+        className="ui-overlay-surface motion-modal absolute right-4 top-16 bottom-4 flex w-[min(920px,calc(100vw-2rem))] flex-col overflow-hidden border border-gray-200 bg-white dark:border-white/10 dark:bg-[#1C1C1E]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 items-center justify-between border-b border-gray-100 px-4 dark:border-white/10">

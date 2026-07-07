@@ -1,9 +1,9 @@
 .ui-panel-surface {
   border-radius: var(--radius-panel);
   transition:
-    border-color 460ms var(--ease-apple),
-    box-shadow 680ms var(--ease-apple),
-    background-color 460ms var(--ease-apple);
+    border-color var(--motion-base) var(--ease-motion),
+    box-shadow var(--motion-layout) var(--ease-layout),
+    background-color var(--motion-base) var(--ease-motion);
   box-shadow:
     var(--surface-shadow-panel),
     0 0 18px 1px rgb(59 130 246 / 0),
@@ -65,9 +65,9 @@
     inset 0 0 0 1px rgb(96 165 250 / 0);
   will-change: opacity, border-color, box-shadow;
   transition:
-    opacity 460ms var(--ease-apple),
-    border-color 460ms var(--ease-apple),
-    box-shadow 460ms var(--ease-apple);
+    opacity var(--motion-layout) var(--ease-layout),
+    border-color var(--motion-layout) var(--ease-layout),
+    box-shadow var(--motion-layout) var(--ease-layout);
 }
 
 .panel-active-glow-fixed-on {
@@ -189,4 +189,3 @@
 .ui-overlay-surface.motion-modal {
   border-radius: var(--radius-shell);
 }
-

@@ -62,7 +62,7 @@ function MessageBubble({ message, ide, canRegenerate }) {
         </div>
         {shouldShowFooterGap && (
           <div
-            className={`message-actions pointer-events-none mt-1 flex h-5 max-w-full items-center gap-1 overflow-hidden opacity-0 transition-opacity duration-200 ease-apple group-hover/message:pointer-events-auto group-hover/message:opacity-100 ${
+            className={`message-actions motion-fade-reveal pointer-events-none mt-1 flex h-5 max-w-full items-center gap-1 overflow-hidden opacity-0 group-hover/message:pointer-events-auto group-hover/message:opacity-100 ${
               message.role === 'user' ? 'mr-2' : 'ml-2'
             }`}
           >
@@ -348,4 +348,3 @@ function MessageAttachmentBadges({ attachments, message, ide }) {
 }
 
 export default MemoizedMessageBubble;
-

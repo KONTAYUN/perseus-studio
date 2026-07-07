@@ -37,7 +37,7 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
     <aside
       id="panel-content-sidebar"
       data-testid="file-tree-panel"
-      className={`ui-panel-surface h-full flex flex-col bg-white/70 dark:bg-[#1C1C1E]/90 backdrop-blur-2xl overflow-hidden transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.19,1,0.22,1)] border relative ${ide.getPanelGlowStyle(
+      className={`ui-panel-surface h-full flex flex-col bg-white/70 dark:bg-[#1C1C1E]/90 backdrop-blur-2xl overflow-hidden border relative ${ide.getPanelGlowStyle(
         panelId
       )}`}
       onClick={() => ide.setActivePanel(panelId)}
@@ -204,7 +204,7 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
 
       <div
         data-testid="workspace-drop-root"
-        className={`flex-1 overflow-y-auto p-2 custom-scrollbar scrollbar-rounded-clip transition-colors relative ${
+        className={`flex-1 overflow-y-auto p-2 custom-scrollbar scrollbar-rounded-clip motion-color relative ${
           ide.fileDragOverId === 'root' ? 'bg-blue-50/70 dark:bg-blue-900/30' : ''
         }`}
         onDragEnter={(e) => {

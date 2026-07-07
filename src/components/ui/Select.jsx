@@ -36,7 +36,7 @@ export function Select({ value, onChange, children, disabled = false, className 
         )}
       >
         <span className="min-w-0 truncate">{selected?.label || ''}</span>
-        <ChevronDown size={15} className={cn('shrink-0 text-gray-500 transition-transform dark:text-gray-300', open && 'rotate-180')} />
+        <ChevronDown size={15} className={cn('motion-rotate shrink-0 text-gray-500 dark:text-gray-300', open && 'rotate-180')} />
       </button>
       <AnchoredPopover
         anchorRef={buttonRef}

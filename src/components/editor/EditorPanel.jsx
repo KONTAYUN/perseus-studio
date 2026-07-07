@@ -33,7 +33,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
     <section
       id="panel-content-editor"
       data-testid="editor-panel"
-      className={`editor-panel-root ui-panel-surface h-full flex flex-col bg-white dark:bg-[#1E1E1E] overflow-hidden transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.19,1,0.22,1)] border relative ${ide.getPanelGlowStyle(
+      className={`editor-panel-root ui-panel-surface h-full flex flex-col bg-white dark:bg-[#1E1E1E] overflow-hidden border relative ${ide.getPanelGlowStyle(
         panelId
       )}`}
       onClick={() => {
@@ -161,7 +161,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
                         editor.activateTab(tab.path);
                       }
                     }}
-                    className={`motion-chip editor-tab-item group/tab flex h-8 min-w-0 items-center gap-2 rounded-lg border px-2.5 text-sm transition-[background-color,border-color,color,opacity] duration-180 ease-apple ${
+                    className={`motion-chip editor-tab-item group/tab flex h-8 min-w-0 items-center gap-2 rounded-lg border px-2.5 text-sm ${
                       active
                         ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-100'
                         : 'border-gray-200 bg-white text-gray-600 hover:border-blue-200 dark:border-gray-700/60 dark:bg-[#1C1C1E] dark:text-gray-300'
@@ -252,7 +252,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
         }}
       >
         <div
-          className="editor-drop-overlay pointer-events-none absolute inset-x-10 bottom-4 top-16 z-10 rounded-2xl border-2 border-dashed border-transparent transition-colors max-[900px]:inset-x-6 max-[640px]:inset-x-3"
+          className="editor-drop-overlay motion-color pointer-events-none absolute inset-x-10 bottom-4 top-16 z-10 rounded-2xl border-2 border-dashed border-transparent max-[900px]:inset-x-6 max-[640px]:inset-x-3"
         />
         <div className="relative z-20 flex min-h-0 flex-1 flex-col">
           {(ide.errorMessage || editor.externalFileConflict || (editor.editorStatusMessage && editor.currentFilePath)) && (

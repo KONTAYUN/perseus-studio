@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+const PANEL_GLOW_DURATION_MS = 320;
+
 function readPanelGlowRect(panelId) {
   const element = document.getElementById(`panel-wrapper-${panelId}`);
   if (!element) return null;
@@ -76,7 +78,7 @@ export function usePanelActiveGlow({
     const timeoutId = window.setTimeout(() => {
       setActiveGlowLayersValue((layers) => layers.filter((layer) => layer.visible));
       activeGlowScheduleRef.current.cleanupTimeouts = activeGlowScheduleRef.current.cleanupTimeouts.filter((id) => id !== timeoutId);
-    }, 560);
+    }, PANEL_GLOW_DURATION_MS + 40);
     activeGlowScheduleRef.current.cleanupTimeouts.push(timeoutId);
   };
 
@@ -246,7 +248,8 @@ export function usePanelActiveGlow({
     const follow = (timestamp) => {
       if (!startedAt) startedAt = timestamp;
       syncActiveGlowRect();
-      const shouldKeepFollowing = isDraggingMode || layoutAnimationAction || timestamp - startedAt < 900;
+      const shouldKeepFollowing =
+        isDraggingMode || layoutAnimationAction || timestamp - startedAt < PANEL_GLOW_DURATION_MS + 80;
       if (!stopped && shouldKeepFollowing) {
         frameId = window.requestAnimationFrame(follow);
       }

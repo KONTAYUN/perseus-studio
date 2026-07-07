@@ -35,7 +35,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
 
   return (
     <div
-      className={`modal-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-md transition-opacity duration-300 ease-apple dark:bg-black/60 ${
+      className={`modal-backdrop motion-fade-reveal fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-md dark:bg-black/60 ${
         isClosing || !hasEntered ? 'opacity-0' : 'opacity-100'
       }`}
       onMouseDown={(e) => {
@@ -43,7 +43,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
       }}
     >
       <div
-        className={`settings-modal-card ui-overlay-surface flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden border border-white/40 bg-white/90 backdrop-blur-3xl transition-[opacity,transform,box-shadow,border-color,background-color] duration-500 ease-apple dark:border-white/10 dark:bg-[#1C1C1E]/95 ${
+        className={`settings-modal-card ui-overlay-surface motion-modal motion-modal-controlled flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden border border-white/40 bg-white/90 backdrop-blur-3xl dark:border-white/10 dark:bg-[#1C1C1E]/95 ${
           isClosing || !hasEntered ? 'translate-y-3 scale-[0.975] opacity-0' : 'translate-y-0 scale-100 opacity-100'
         }`}
       >

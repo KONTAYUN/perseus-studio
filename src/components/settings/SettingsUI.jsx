@@ -34,7 +34,7 @@ export function SectionTitle({ icon, title, description }) {
 
 export function ProviderCard({ children, className = '' }) {
   return (
-    <div className={cn('settings-card flex min-h-[82px] items-center gap-4 border border-gray-100 bg-white/80 p-4 transition-[background-color,border-color,box-shadow] duration-300 ease-apple hover:border-blue-100 hover:bg-white dark:border-white/10 dark:bg-[#2C2C2E]/75 dark:hover:border-blue-500/25', className)}>
+    <div className={cn('settings-card motion-color flex min-h-[82px] items-center gap-4 border border-gray-100 bg-white/80 p-4 hover:border-blue-100 hover:bg-white dark:border-white/10 dark:bg-[#2C2C2E]/75 dark:hover:border-blue-500/25', className)}>
       {children}
     </div>
   );

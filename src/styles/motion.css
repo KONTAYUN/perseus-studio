@@ -1,92 +1,101 @@
 .ease-apple {
-  transition-timing-function: var(--ease-apple);
-  animation-timing-function: var(--ease-apple);
+  transition-timing-function: var(--ease-motion);
+  animation-timing-function: var(--ease-motion);
 }
 
 .animate-in {
-  animation-duration: 260ms;
+  animation-duration: var(--motion-popover);
   animation-fill-mode: both;
-  animation-timing-function: var(--ease-apple);
+  animation-timing-function: var(--ease-motion);
 }
 
 .duration-150.animate-in {
-  animation-duration: 150ms;
+  animation-duration: var(--motion-fast);
 }
 
-.duration-300.animate-in {
-  animation-duration: 300ms;
-}
-
+.duration-300.animate-in,
 .duration-500.animate-in {
-  animation-duration: 500ms;
+  animation-duration: var(--motion-modal);
 }
 
 .fade-in {
   animation-name: perseus-fade-in;
 }
 
-.zoom-in-95 {
-  animation-name: perseus-fade-in, perseus-zoom-in-95;
-}
-
+.zoom-in-95,
 .zoom-in-98 {
-  animation-name: perseus-fade-in, perseus-zoom-in-98;
+  animation-name: perseus-fade-in, perseus-scale-in;
 }
 
 .slide-in-from-top-1 {
-  animation-name: perseus-fade-in, perseus-slide-in-from-top-1;
+  animation-name: perseus-fade-in, perseus-slide-in-from-top;
 }
 
 .slide-in-from-right-4 {
-  animation-name: perseus-fade-in, perseus-slide-in-from-right-4;
+  animation-name: perseus-fade-in, perseus-slide-in-from-right;
 }
 
 .zoom-in-95.slide-in-from-top-1 {
-  animation-name: perseus-fade-in, perseus-zoom-in-95-slide-top-1;
+  animation-name: perseus-fade-in, perseus-popover-enter;
 }
 
 .zoom-in-98.slide-in-from-right-4 {
-  animation-name: perseus-fade-in, perseus-zoom-in-98-slide-right-4;
+  animation-name: perseus-fade-in, perseus-panel-drawer-enter;
 }
 
-.animate-panel-appear {
-  animation: perseus-panel-appear 900ms var(--ease-apple-soft) both;
+.animate-panel-appear,
+.motion-panel-enter {
+  animation: perseus-panel-enter var(--motion-layout) var(--ease-layout) both;
+}
+
+.motion-popover,
+.motion-popover-right {
+  animation: perseus-popover-enter var(--motion-popover) var(--ease-motion) both;
 }
 
 .motion-popover {
   transform-origin: top center;
-  animation: perseus-popover-enter 320ms var(--ease-apple) both;
 }
 
 .motion-popover-right {
   transform-origin: left top;
-  animation: perseus-popover-right-enter 300ms var(--ease-apple) both;
 }
 
 .motion-modal {
   transform-origin: center 46%;
-  animation: perseus-modal-enter 420ms var(--ease-apple) both;
+  animation: perseus-modal-enter var(--motion-modal) var(--ease-layout) both;
+  transition:
+    opacity var(--motion-modal) var(--ease-layout),
+    transform var(--motion-modal) var(--ease-layout),
+    border-color var(--motion-base) var(--ease-motion),
+    box-shadow var(--motion-base) var(--ease-motion),
+    background-color var(--motion-base) var(--ease-motion);
+}
+
+.motion-modal-controlled {
+  animation: none;
 }
 
 .motion-card {
-  animation: perseus-card-enter 460ms var(--ease-apple) both;
+  animation: perseus-card-enter var(--motion-modal) var(--ease-motion) both;
 }
 
 .motion-message {
-  animation: perseus-message-enter 420ms var(--ease-apple) both;
+  animation: perseus-message-enter var(--motion-base) var(--ease-motion) both;
 }
 
 .motion-chip {
-  animation: perseus-chip-enter 260ms var(--ease-apple) both;
+  animation: perseus-chip-enter var(--motion-fast) var(--ease-motion) both;
 }
 
 .motion-row {
   transition:
-    background-color 180ms var(--ease-apple),
-    border-color 180ms var(--ease-apple),
-    box-shadow 220ms var(--ease-apple),
-    opacity 180ms var(--ease-apple),
-    transform 180ms var(--ease-apple);
+    background-color var(--motion-fast) var(--ease-motion),
+    border-color var(--motion-fast) var(--ease-motion),
+    color var(--motion-fast) var(--ease-motion),
+    box-shadow var(--motion-base) var(--ease-motion),
+    opacity var(--motion-fast) var(--ease-motion),
+    transform var(--motion-fast) var(--ease-motion);
 }
 
 .motion-row:hover {
@@ -96,26 +105,48 @@
 .motion-button {
   transform-origin: center;
   transition:
-    background-color 180ms var(--ease-apple),
-    color 180ms var(--ease-apple),
-    opacity 180ms var(--ease-apple),
-    border-color 180ms var(--ease-apple),
-    box-shadow 220ms var(--ease-apple),
-    transform 180ms var(--ease-apple);
+    background-color var(--motion-fast) var(--ease-motion),
+    color var(--motion-fast) var(--ease-motion),
+    opacity var(--motion-fast) var(--ease-motion),
+    border-color var(--motion-fast) var(--ease-motion),
+    box-shadow var(--motion-base) var(--ease-motion),
+    transform var(--motion-fast) var(--ease-motion);
 }
 
-.motion-button:hover {
-  transform: none;
-}
-
-.motion-button:active {
-  transform: none;
-}
-
+.motion-button:hover,
+.motion-button:active,
 .motion-button:disabled,
 .motion-button:disabled:hover,
 .motion-button:disabled:active {
   transform: none;
+}
+
+.motion-soft-focus {
+  transition:
+    border-color var(--motion-base) var(--ease-motion),
+    box-shadow var(--motion-base) var(--ease-motion),
+    background-color var(--motion-base) var(--ease-motion),
+    transform var(--motion-base) var(--ease-motion);
+}
+
+.motion-layout {
+  transition: opacity var(--motion-layout) var(--ease-layout);
+}
+
+.motion-color {
+  transition:
+    background-color var(--motion-base) var(--ease-motion),
+    border-color var(--motion-base) var(--ease-motion),
+    color var(--motion-base) var(--ease-motion),
+    box-shadow var(--motion-base) var(--ease-motion);
+}
+
+.motion-fade-reveal {
+  transition: opacity var(--motion-fast) var(--ease-motion);
+}
+
+.motion-rotate {
+  transition: transform var(--motion-fast) var(--ease-motion);
 }
 
 @keyframes perseus-fade-in {
@@ -127,16 +158,7 @@
   }
 }
 
-@keyframes perseus-zoom-in-95 {
-  from {
-    transform: scale(0.95);
-  }
-  to {
-    transform: scale(1);
-  }
-}
-
-@keyframes perseus-zoom-in-98 {
+@keyframes perseus-scale-in {
   from {
     transform: scale(0.98);
   }
@@ -145,7 +167,7 @@
   }
 }
 
-@keyframes perseus-slide-in-from-top-1 {
+@keyframes perseus-slide-in-from-top {
   from {
     transform: translateY(-4px);
   }
@@ -154,101 +176,61 @@
   }
 }
 
-@keyframes perseus-slide-in-from-right-4 {
+@keyframes perseus-slide-in-from-right {
   from {
-    transform: translateX(16px);
+    transform: translateX(12px);
   }
   to {
     transform: translateX(0);
   }
 }
 
-@keyframes perseus-zoom-in-95-slide-top-1 {
-  from {
-    transform: translateY(-4px) scale(0.95);
-  }
-  to {
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes perseus-zoom-in-98-slide-right-4 {
-  from {
-    transform: translateX(16px) scale(0.98);
-  }
-  to {
-    transform: translateX(0) scale(1);
-  }
-}
-
-@keyframes perseus-panel-appear {
-  0% {
-    opacity: 0;
-    transform: translateX(38px) scale(0.978);
-    filter: blur(2px);
-  }
-  58% {
-    opacity: 1;
-    filter: blur(0);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-    filter: blur(0);
-  }
-}
-
 @keyframes perseus-popover-enter {
   from {
     opacity: 0;
-    transform: translateY(-8px) scale(0.965);
-    filter: blur(1px);
-  }
-  65% {
-    opacity: 1;
-    filter: blur(0);
+    transform: translateY(-6px) scale(0.98);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
-@keyframes perseus-popover-right-enter {
+@keyframes perseus-panel-drawer-enter {
+  from {
+    transform: translateX(12px) scale(0.99);
+  }
+  to {
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes perseus-panel-enter {
   from {
     opacity: 0;
-    transform: translateX(10px) scale(0.97);
-    filter: blur(1px);
+    transform: translateY(6px) scale(0.992);
   }
   to {
     opacity: 1;
-    transform: translateX(0) scale(1);
-    filter: blur(0);
+    transform: translateY(0) scale(1);
   }
 }
 
 @keyframes perseus-modal-enter {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.97);
-    filter: blur(2px);
-  }
-  65% {
-    opacity: 1;
-    filter: blur(0);
+    transform: translateY(10px) scale(0.98);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
 @keyframes perseus-card-enter {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.99);
+    transform: translateY(6px) scale(0.994);
   }
   to {
     opacity: 1;
@@ -259,21 +241,55 @@
 @keyframes perseus-message-enter {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.992);
+    transform: translateY(5px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
 @keyframes perseus-chip-enter {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.96);
+    transform: scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+
+  .animate-in,
+  .animate-panel-appear,
+  .motion-panel-enter,
+  .motion-popover,
+  .motion-popover-right,
+  .motion-modal,
+  .motion-card,
+  .motion-message,
+  .motion-chip {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+  }
+
+  .motion-button,
+  .motion-row,
+  .motion-soft-focus,
+  .motion-layout,
+  .motion-color,
+  .motion-fade-reveal,
+  .motion-rotate,
+  .ui-panel-surface,
+  .panel-active-glow-fixed,
+  .composer-shell {
+    transition-duration: 1ms !important;
   }
 }

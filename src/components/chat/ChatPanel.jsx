@@ -45,7 +45,7 @@ export default function ChatPanel({ ide, panelId = 'chat' }) {
     <section
       id="panel-content-chat"
       data-testid="chat-panel"
-      className={`ui-panel-surface relative h-full flex flex-col bg-white/85 dark:bg-[#1C1C1E]/85 backdrop-blur-2xl overflow-visible transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.19,1,0.22,1)] border ${ide.getPanelGlowStyle(
+      className={`ui-panel-surface relative h-full flex flex-col bg-white/85 dark:bg-[#1C1C1E]/85 backdrop-blur-2xl overflow-visible border ${ide.getPanelGlowStyle(
         panelId
       )}`}
       onClick={() => ide.setActivePanel(panelId)}

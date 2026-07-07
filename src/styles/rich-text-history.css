@@ -6,8 +6,8 @@
 
 .rich-text-history-card {
   transition:
-    border-color 180ms ease,
-    background-color 180ms ease;
+    border-color var(--motion-fast) var(--ease-motion),
+    background-color var(--motion-fast) var(--ease-motion);
 }
 
 .rich-text-history-overlay {

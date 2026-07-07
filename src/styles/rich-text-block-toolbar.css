@@ -12,9 +12,9 @@
   box-shadow: none;
   outline: none;
   transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+    background-color var(--motion-fast) var(--ease-motion),
+    border-color var(--motion-fast) var(--ease-motion),
+    box-shadow var(--motion-fast) var(--ease-motion);
 }
 
 .rich-text-block-trigger:hover {

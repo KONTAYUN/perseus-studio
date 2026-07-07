@@ -1,4 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+
+const PANEL_LAYOUT_DURATION_MS = 320;
+const PANEL_LAYOUT_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
 export function usePanelMotion({
   displayWidths,
@@ -17,7 +20,6 @@ export function usePanelMotion({
   const appearedPanelIdsRef = useRef(new Set());
   const appearingPanelIdsRef = useRef(new Set());
   const appearTimeoutsRef = useRef({});
-  const [expandedIntroKey, setExpandedIntroKey] = useState('');
 
   useLayoutEffect(() => () => {
     Object.values(appearTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -41,19 +43,9 @@ export function usePanelMotion({
     if (!layoutAnimationAction) return undefined;
     const timeoutId = window.setTimeout(() => {
       setLayoutAnimationAction?.(null);
-    }, 560);
+    }, PANEL_LAYOUT_DURATION_MS + 40);
     return () => window.clearTimeout(timeoutId);
   }, [layoutAnimationAction, setLayoutAnimationAction]);
-
-  useLayoutEffect(() => {
-    if (layoutAnimationAction?.kind !== 'add') return undefined;
-    const actionKey = String(layoutAnimationAction.key || '');
-    setExpandedIntroKey('');
-    const frameId = window.requestAnimationFrame(() => {
-      setExpandedIntroKey(actionKey);
-    });
-    return () => window.cancelAnimationFrame(frameId);
-  }, [layoutAnimationAction]);
 
   useLayoutEffect(() => {
     if (mainWidth <= 0 || typeof document === 'undefined') return;
@@ -68,12 +60,17 @@ export function usePanelMotion({
     const orderChanged = samePanelSet && previousPanelIds.some((id, index) => id !== currentPanelIds[index]);
     const shouldFlipPanels =
       !isResizing &&
-      ((layoutAnimationAction?.kind === 'reorder' && orderChanged) ||
-        ((layoutAnimationAction?.kind === 'remove' || layoutAnimationAction?.kind === 'add') && !samePanelSet));
+      Boolean(layoutAnimationAction) &&
+      (layoutAnimationAction.kind !== 'reorder' || orderChanged);
 
     visiblePanels.forEach((panel) => {
       const element = document.getElementById(`panel-wrapper-${panel.id}`);
       if (!element) return;
+
+      if (panelAnimationsRef.current[panel.id]) {
+        panelAnimationsRef.current[panel.id].cancel();
+        delete panelAnimationsRef.current[panel.id];
+      }
 
       const rect = element.getBoundingClientRect();
       nextRects[panel.id] = {
@@ -89,26 +86,26 @@ export function usePanelMotion({
 
       const deltaX = previous.left - rect.left;
       const deltaY = previous.top - rect.top;
-      if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) return;
+      const scaleX = rect.width > 0 ? previous.width / rect.width : 1;
+      const scaleY = rect.height > 0 ? previous.height / rect.height : 1;
+      const hasPositionChange = Math.abs(deltaX) >= 1 || Math.abs(deltaY) >= 1;
+      const hasSizeChange = Math.abs(1 - scaleX) >= 0.002 || Math.abs(1 - scaleY) >= 0.002;
+      if (!hasPositionChange && !hasSizeChange) return;
 
-      panelAnimationsRef.current[panel.id]?.cancel();
       panelAnimationsRef.current[panel.id] = element.animate(
         [
           {
-            transform: `translate(${deltaX}px, ${deltaY}px)`,
-            opacity: 0.98,
+            transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`,
+            transformOrigin: 'top left',
           },
           {
-            transform: 'translate(0, 0)',
-            opacity: 1,
+            transform: 'translate(0, 0) scale(1, 1)',
+            transformOrigin: 'top left',
           },
         ],
         {
-          duration: layoutAnimationAction?.kind === 'reorder' ? 380 : 560,
-          easing:
-            layoutAnimationAction?.kind === 'reorder'
-              ? 'cubic-bezier(0.18, 0.86, 0.28, 1)'
-              : 'cubic-bezier(0.16, 1, 0.3, 1)',
+          duration: PANEL_LAYOUT_DURATION_MS,
+          easing: PANEL_LAYOUT_EASING,
           fill: 'none',
         }
       );
@@ -125,16 +122,15 @@ export function usePanelMotion({
   }, [displayWidths, draggingPanelId, isDraggingMode, isResizing, layoutAnimationAction, mainWidth, visiblePanels]);
 
   const getPanelIntroState = (id) => {
-    const forceIntro = layoutAnimationAction?.kind === 'add' && layoutAnimationAction.panelId === id;
-    const introActionKey = String(layoutAnimationAction?.key || '');
-    const isOpeningPanel = forceIntro && expandedIntroKey !== introActionKey;
+    const forceIntro =
+      layoutAnimationAction?.kind === 'add' && layoutAnimationAction.panelId === id;
     if (forceIntro && !appearingPanelIdsRef.current.has(id)) {
       appearingPanelIdsRef.current.add(id);
       window.clearTimeout(appearTimeoutsRef.current[id]);
       appearTimeoutsRef.current[id] = window.setTimeout(() => {
         appearingPanelIdsRef.current.delete(id);
         delete appearTimeoutsRef.current[id];
-      }, 820);
+      }, PANEL_LAYOUT_DURATION_MS + 40);
     }
     if (!appearedPanelIdsRef.current.has(id)) {
       appearedPanelIdsRef.current.add(id);
@@ -144,12 +140,12 @@ export function usePanelMotion({
         appearTimeoutsRef.current[id] = window.setTimeout(() => {
           appearingPanelIdsRef.current.delete(id);
           delete appearTimeoutsRef.current[id];
-        }, 820);
+        }, PANEL_LAYOUT_DURATION_MS + 40);
       }
     }
 
     return {
-      isOpeningPanel,
+      isOpeningPanel: false,
       shouldIntro: appearingPanelIdsRef.current.has(id),
     };
   };

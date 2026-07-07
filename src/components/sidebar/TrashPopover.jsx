@@ -75,7 +75,7 @@ export default function TrashPopover({ ide, anchorRef }) {
                       原路径：{item.original_path || item.name || item.path}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-200 ease-apple group-hover/trash:opacity-100">
+                  <div className="motion-fade-reveal flex shrink-0 items-center gap-1 opacity-0 group-hover/trash:opacity-100">
                     <IconButton
                       type="button"
                       data-testid={`restore-trash-${item.path}`}

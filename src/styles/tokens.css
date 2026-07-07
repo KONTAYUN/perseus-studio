@@ -23,6 +23,13 @@ body {
 :root {
   --ease-apple: cubic-bezier(0.19, 1, 0.22, 1);
   --ease-apple-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-motion: cubic-bezier(0.2, 0, 0, 1);
+  --ease-layout: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-fast: 160ms;
+  --motion-base: 220ms;
+  --motion-popover: 240ms;
+  --motion-modal: 300ms;
+  --motion-layout: 320ms;
   --radius-micro: 7px;
   --radius-control-sm: 10px;
   --radius-control: 12px;

@@ -64,6 +64,13 @@ Defined in `src/styles/tokens.css` and imported by `src/index.css`:
 |---|---|
 | `--ease-apple` | Default interaction easing |
 | `--ease-apple-soft` | Larger panel/modal entrance easing |
+| `--ease-motion` | Standard UI interaction easing |
+| `--ease-layout` | Panel/layout movement easing |
+| `--motion-fast` | 160ms control and row feedback |
+| `--motion-base` | 220ms state transitions |
+| `--motion-popover` | 240ms menus and small popovers |
+| `--motion-modal` | 300ms modals and large overlays |
+| `--motion-layout` | 320ms panel and layout changes |
 | `--radius-micro` | Tiny controls, compact icon buttons |
 | `--radius-control-sm` | Small buttons and compact controls |
 | `--radius-control` | Standard inputs/buttons |
@@ -147,10 +154,12 @@ Rules:
 
 Motion must be predictable and centered.
 
-- Default duration for small controls: about `180ms`.
-- Popovers: about `260-320ms`.
-- Modals/panels: about `420-900ms`, depending on size.
-- Easing: use `--ease-apple` or `--ease-apple-soft`.
+- Small controls and rows use `--motion-fast`.
+- Normal state changes use `--motion-base`.
+- Menus and small popovers use `--motion-popover`.
+- Modals and large overlays use `--motion-modal`.
+- Panel/layout changes use `--motion-layout`.
+- Easing uses `--ease-motion` for ordinary interaction and `--ease-layout` for panel/layout movement.
 
 Hard rules:
 
@@ -161,16 +170,31 @@ Hard rules:
 - Do not combine parent transform + child transform + action-group reveal for the same target.
 - Do not use hover motion that changes perceived alignment, gaps, or rounded-corner fit.
 - Avoid `hover:-translate-y-*` for buttons and cards unless there is a clear design-system exception.
+- Do not add new `duration-*`, arbitrary `ease-[...]`, or component-local `@keyframes`.
+- Keep keyframes in `src/styles/motion.css`.
+- Resize dragging must disable layout animation so panel width follows the pointer live.
+- Main panel layout changes must use one layout mechanism; do not stack width transition, FLIP movement, and a separate long entrance animation.
 
 Current shared classes:
 
 - `motion-button`: standard interaction transition.
+- `motion-color`: color/border/shadow state transition.
+- `motion-fade-reveal`: opacity-only reveal for hover actions and backdrops.
+- `motion-rotate`: small icon rotation such as chevrons.
+- `motion-layout`: panel width/position/opacity layout transition.
+- `motion-panel-enter`: subtle new-panel entrance.
 - `ui-icon-button`: stable icon-button shell.
 - `ui-icon-button-danger`: destructive icon-button hover tone.
 - `ui-icon-button-active`: active/selected icon-button state.
 - `ui-panel-drag-handle`: panel drag handle style.
 - `motion-row`: row color/shadow transition; no hover movement.
 - `motion-popover`, `motion-popover-right`, `motion-modal`: overlay entrance animation.
+
+Allowed motion exceptions:
+
+- Loading spinner, typing dots, and pulse indicators may keep status-specific animations.
+- Editor/Tiptap geometry may use inline `transform` for measured toolbar positions, but timing still belongs in shared motion classes when animated.
+- Reduced-motion users should get near-instant transitions through the shared motion layer.
 
 ## Button Standards
 
@@ -410,6 +434,9 @@ The audit fails on:
 - `hover:-translate`, `active:translate`, `translateY(-1px)`.
 - `hover:scale*` and `active:scale*` Tailwind utilities.
 - `transition-all`.
+- Tailwind `duration-*`, arbitrary `ease-[...]`, legacy `ease-apple`, and one-off `ease-out` utilities in components.
+- CSS `@keyframes` outside `src/styles/motion.css`.
+- Hardcoded CSS motion timings outside `src/styles/tokens.css` and `src/styles/motion.css`.
 - Tailwind shadow utilities in `src` JS/JSX, including `shadow-sm`, `shadow-xl`, `hover:shadow-*`, and arbitrary `shadow-[...]`.
 - Arbitrary component radius such as `rounded-[18px]`.
 - Hand-built segmented controls such as `inline-flex rounded-2xl ... p-0.5`.

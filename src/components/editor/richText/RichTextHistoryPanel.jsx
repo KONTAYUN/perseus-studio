@@ -149,7 +149,7 @@ export default function RichTextHistoryPanel({
 
   return (
     <div
-      className={`modal-backdrop rich-text-history-overlay rich-text-history-overlay-surface fixed inset-0 z-[110] flex items-center justify-center p-4 transition-opacity duration-300 ease-apple ${
+      className={`modal-backdrop rich-text-history-overlay rich-text-history-overlay-surface motion-fade-reveal fixed inset-0 z-[110] flex items-center justify-center p-4 ${
         isClosing || !hasEntered ? 'opacity-0' : 'opacity-100'
       }`}
       onMouseDown={(event) => {
@@ -157,7 +157,7 @@ export default function RichTextHistoryPanel({
       }}
     >
       <div
-        className={`rich-text-history-shell rich-text-history-shell-surface ui-overlay-surface flex h-[88vh] min-h-0 w-full max-w-6xl overflow-hidden border bg-white/90 backdrop-blur-3xl transition-[opacity,transform,box-shadow,border-color,background-color] duration-500 ease-apple dark:bg-[#1C1C1E]/95 ${
+        className={`rich-text-history-shell rich-text-history-shell-surface ui-overlay-surface motion-modal motion-modal-controlled flex h-[88vh] min-h-0 w-full max-w-6xl overflow-hidden border bg-white/90 backdrop-blur-3xl dark:bg-[#1C1C1E]/95 ${
           isClosing || !hasEntered ? 'translate-y-3 scale-[0.975] opacity-0' : 'translate-y-0 scale-100 opacity-100'
         }`}
       >

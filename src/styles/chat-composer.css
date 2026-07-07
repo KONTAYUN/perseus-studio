@@ -3,9 +3,9 @@
   border-radius: var(--radius-composer);
   padding: 8px 7px 7px 14px;
   transition:
-    border-color 460ms var(--ease-apple),
-    box-shadow 460ms var(--ease-apple),
-    background-color 460ms var(--ease-apple);
+    border-color var(--motion-base) var(--ease-motion),
+    box-shadow var(--motion-base) var(--ease-motion),
+    background-color var(--motion-base) var(--ease-motion);
   box-shadow:
     var(--surface-shadow-soft),
     0 0 18px 1px rgb(59 130 246 / 0),
@@ -106,7 +106,7 @@
   outline: none;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  transition: height 200ms var(--ease-apple);
+  transition: height var(--motion-base) var(--ease-motion);
 }
 
 .composer-textarea::-webkit-scrollbar {
@@ -240,7 +240,7 @@
   display: block;
   flex-shrink: 0;
   transform-origin: center;
-  transition: transform 180ms var(--ease-apple);
+  transition: transform var(--motion-fast) var(--ease-motion);
 }
 
 .composer-icon-button:hover svg {
@@ -373,18 +373,18 @@
 
 .motion-soft-focus {
   transition:
-    border-color 260ms var(--ease-apple),
-    box-shadow 320ms var(--ease-apple),
-    background-color 260ms var(--ease-apple),
-    transform 260ms var(--ease-apple);
+    border-color var(--motion-base) var(--ease-motion),
+    box-shadow var(--motion-base) var(--ease-motion),
+    background-color var(--motion-base) var(--ease-motion),
+    transform var(--motion-base) var(--ease-motion);
 }
 
 .composer-shell.motion-soft-focus {
   transition:
-    border-color 460ms var(--ease-apple),
-    box-shadow 460ms var(--ease-apple),
-    background-color 460ms var(--ease-apple),
-    transform 460ms var(--ease-apple);
+    border-color var(--motion-base) var(--ease-motion),
+    box-shadow var(--motion-base) var(--ease-motion),
+    background-color var(--motion-base) var(--ease-motion),
+    transform var(--motion-base) var(--ease-motion);
 }
 
 .scroll-to-bottom-button {

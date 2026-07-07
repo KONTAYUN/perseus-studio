@@ -12,6 +12,7 @@ const scorecard = fs.existsSync(scorecardPath) ? fs.readFileSync(scorecardPath, 
 const failures = [];
 const componentFiles = [];
 const sourceFiles = [];
+const styleFiles = [];
 const lineBudgetAllowlist = new Map();
 const longClassAllowedTokens = [
   'ui-panel-surface',
@@ -29,6 +30,11 @@ const longClassAllowedTokens = [
   'motion-button',
   'motion-row',
   'motion-soft-focus',
+  'motion-color',
+  'motion-fade-reveal',
+  'motion-layout',
+  'motion-panel-enter',
+  'motion-rotate',
   'animate-in',
   'composer-shell',
   'composer-tool-cluster',
@@ -94,6 +100,18 @@ function walk(dir, output) {
       continue;
     }
     if (/\.(jsx|js)$/.test(entry.name)) output.push(fullPath);
+  }
+}
+
+function walkStyles(dir, output) {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkStyles(fullPath, output);
+      continue;
+    }
+    if (/\.css$/.test(entry.name)) output.push(fullPath);
   }
 }
 
@@ -179,6 +197,10 @@ function checkForbiddenPatterns(file, source) {
     [/\bhover:scale(?:-\[|-\d|\b)/g, 'hover scale utility is not allowed; use centered icon feedback'],
     [/\bactive:scale(?:-\[|-\d|\b)/g, 'active scale utility is not allowed; use shared motion classes'],
     [/\btransition-all\b/g, 'transition-all is too broad; use explicit transition properties'],
+    [/\bduration-\d+\b/g, 'Tailwind duration-* utilities are not allowed; use motion tokens/classes'],
+    [/\bease-\[[^\]]+\]/g, 'arbitrary easing utilities are not allowed; use motion tokens/classes'],
+    [/\bease-out\b/g, 'one-off easing utilities are not allowed; use motion tokens/classes'],
+    [/\bease-apple\b/g, 'legacy ease utility is not allowed in components; use motion tokens/classes'],
     [/\b(?:hover:)?shadow-(?:sm|md|lg|xl|2xl)\b/g, 'Tailwind shadow utilities are not allowed in src JS/JSX; use named CSS surface classes'],
     [/\b(?:dark:)?(?:hover:)?shadow-\[[^\]]+\]/g, 'arbitrary shadow utilities are not allowed in src JS/JSX; use named CSS surface classes'],
     [/rounded-\[[^\]]+\]/g, 'arbitrary rounded-[...] is not allowed in components; use radius tokens/classes'],
@@ -191,6 +213,24 @@ function checkForbiddenPatterns(file, source) {
   for (const [pattern, message] of checks) {
     for (const match of source.matchAll(pattern)) {
       addFailure(file, match.index, message);
+    }
+  }
+}
+
+function checkMotionGovernance(file, source) {
+  const relativePath = rel(file);
+  const isMotionCss = relativePath === 'src/styles/motion.css';
+  const isTokensCss = relativePath === 'src/styles/tokens.css';
+
+  if (!isMotionCss) {
+    for (const match of source.matchAll(/@keyframes\b/g)) {
+      addFailure(file, match.index, 'keyframes must live in src/styles/motion.css');
+    }
+  }
+
+  if (!isMotionCss && !isTokensCss) {
+    for (const match of source.matchAll(/\b\d+ms\b/g)) {
+      addFailure(file, match.index, 'hardcoded motion timing is not allowed; use motion tokens');
     }
   }
 }
@@ -249,6 +289,7 @@ function checkComposerRegressions(file, source) {
 
 walk(componentRoot, componentFiles);
 walk(srcRoot, sourceFiles);
+walkStyles(path.join(srcRoot, 'styles'), styleFiles);
 
 for (const file of sourceFiles) {
   const source = fs.readFileSync(file, 'utf8');
@@ -256,6 +297,11 @@ for (const file of sourceFiles) {
   checkRawAbsolutePopovers(file, source);
   checkComposerRegressions(file, source);
   checkLineBudget(file, source);
+}
+
+for (const file of styleFiles) {
+  const source = fs.readFileSync(file, 'utf8');
+  checkMotionGovernance(file, source);
 }
 
 for (const file of componentFiles) {

@@ -80,7 +80,7 @@ export default function AppDialog({ dialog, onClose }) {
 
   return (
     <div
-      className="modal-backdrop fixed inset-0 z-[500] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md animate-in fade-in duration-300"
+      className="modal-backdrop fixed inset-0 z-[500] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md animate-in fade-in"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose(dialog.type === 'prompt' ? null : false);
       }}

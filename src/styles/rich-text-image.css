@@ -82,9 +82,9 @@
   font-size: 0.75rem;
   font-weight: 700;
   transition:
-    background-color 180ms ease,
-    color 180ms ease,
-    border-color 180ms ease;
+    background-color var(--motion-fast) var(--ease-motion),
+    color var(--motion-fast) var(--ease-motion),
+    border-color var(--motion-fast) var(--ease-motion);
 }
 
 .note-image-toolbar-button:hover {

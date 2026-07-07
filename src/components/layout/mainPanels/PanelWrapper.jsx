@@ -7,7 +7,6 @@ export default function PanelWrapper({
   ide,
   index,
   isOpeningPanel,
-  isReorderMotion,
   isResizing,
   nextPanel,
   panel,
@@ -24,7 +23,7 @@ export default function PanelWrapper({
       className={`panel-wrapper relative flex h-full min-w-0 will-change-[transform,opacity] ${
         isOpeningPanel || shouldIntro ? 'overflow-hidden' : 'overflow-visible'
       } ${
-        isResizing ? '' : 'transition-[width,opacity,margin-right]'
+        isResizing ? '' : 'motion-layout'
       }`}
       style={{
         width: `${isOpeningPanel ? 0 : panelWidth}px`,
@@ -40,15 +39,11 @@ export default function PanelWrapper({
             : ide.activePanel === id || (ide.activePanel === 'chat-input' && id === 'chat')
             ? 40
             : 10 - index,
-        transitionDuration: isResizing ? '0ms' : isReorderMotion ? '280ms' : '760ms',
-        transitionTimingFunction: isReorderMotion
-          ? 'cubic-bezier(0.18, 0.86, 0.28, 1)'
-          : 'cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
       {ide.dragType === 'reorder' && ide.draggingPanelId !== id && (
         <div
-          className={`ui-panel-surface absolute inset-0 z-[90] transition-colors ${
+          className={`ui-panel-surface motion-color absolute inset-0 z-[90] ${
             ide.dragOverId === id ? 'ui-panel-surface-drop bg-blue-500/10' : ''
           }`}
           onDragOver={(e) => ide.handlePanelDragOver(e, id)}
@@ -59,9 +54,9 @@ export default function PanelWrapper({
 
       <div
         className={`h-full w-full min-w-0 ${
-          shouldIntro ? 'animate-panel-appear' : ''
+          shouldIntro ? 'motion-panel-enter' : ''
         }`}
-        style={shouldIntro ? { animationDelay: `${Math.min(120, index * 36)}ms` } : undefined}
+        style={shouldIntro ? { animationDelay: `${Math.min(80, index * 24)}ms` } : undefined}
       >
         {children}
       </div>
@@ -71,7 +66,7 @@ export default function PanelWrapper({
           className="absolute -right-4 top-0 bottom-0 w-5 cursor-col-resize group flex items-center justify-center z-50"
           onMouseDown={(e) => ide.startResize(e, id, nextPanel.id, collectPanelSizes())}
         >
-          <div className="h-10 w-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gray-400/60 dark:bg-gray-500/60 group-active:bg-blue-500" />
+          <div className="h-10 w-1.5 rounded-full opacity-0 group-hover:opacity-100 motion-row bg-gray-400/60 dark:bg-gray-500/60 group-active:bg-blue-500" />
         </div>
       )}
     </div>

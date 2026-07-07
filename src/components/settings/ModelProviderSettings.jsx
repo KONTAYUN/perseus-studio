@@ -340,7 +340,7 @@ export default function ModelProviderSettings({ ide }) {
               >
                 <SlidersHorizontal size={13} />
                 高级
-                <ChevronDown size={13} className={`transition-transform ${showContextAdvanced ? 'rotate-180' : ''}`} />
+                <ChevronDown size={13} className={`motion-rotate ${showContextAdvanced ? 'rotate-180' : ''}`} />
               </Button>
             </div>
             {showContextAdvanced && (
