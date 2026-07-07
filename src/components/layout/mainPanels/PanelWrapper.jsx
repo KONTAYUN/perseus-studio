@@ -43,8 +43,10 @@ export default function PanelWrapper({
     >
       {ide.dragType === 'reorder' && ide.draggingPanelId !== id && (
         <div
-          className={`ui-panel-surface motion-color absolute inset-0 z-[90] ${
-            ide.dragOverId === id ? 'ui-panel-surface-drop bg-blue-500/10' : ''
+          className={`motion-color absolute inset-0 z-[90] rounded-3xl border ${
+            ide.dragOverId === id
+              ? 'border-blue-400/60 bg-blue-500/10'
+              : 'border-transparent bg-transparent'
           }`}
           onDragOver={(e) => ide.handlePanelDragOver(e, id)}
           onDrop={(e) => ide.handlePanelDrop(e, id)}
