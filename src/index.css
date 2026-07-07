@@ -9,6 +9,11 @@
 @import './styles/chat-composer-queue.css';
 @import './styles/editor.css';
 @import './styles/rich-text-toolbar.css';
+@import './styles/rich-text-block-toolbar.css';
+@import './styles/rich-text-selection-toolbar.css';
+@import './styles/rich-text-table-toolbar.css';
+@import './styles/rich-text-format-controls.css';
+@import './styles/rich-text-toolbar-menus.css';
 @import './styles/rich-text-history.css';
 @import './styles/rich-text-content.css';
 @import './styles/rich-text-image.css';

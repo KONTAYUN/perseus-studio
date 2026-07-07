@@ -1,170 +1,20 @@
 import React from 'react';
-import { Download, History, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
-import { API_BASE_URL, apiGet, workspaceFileContentUrl } from '../../../api/client';
-import { getNoteTitle, isNotePath, resolveNoteAssetPath } from '../../../hooks/noteTreeUtils.js';
-import { AnchoredPopover, Button, IconButton } from '../../ui';
-
-function toDate(value) {
-  const date = value ? new Date(value) : null;
-  return date && !Number.isNaN(date.getTime()) ? date : null;
-}
-
-function formatDate(value) {
-  const date = toDate(value);
-  if (!date) return '未知日期';
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
-}
-
-function formatTime(value) {
-  const date = toDate(value);
-  if (!date) return '未知时间';
-  return new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
-function formatTimestamp(value) {
-  const date = toDate(value);
-  if (!date) return '未知时间';
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
-function isAiSource(source = '') {
-  return String(source || '').toLowerCase().startsWith('ai_');
-}
-
-function sourceLabel(source = '') {
-  const normalized = String(source || '').toLowerCase();
-  if (normalized === 'restore_version') return '恢复版本';
-  if (normalized === 'manual_write') return '手动保存';
-  if (normalized === 'create') return '新建';
-  if (normalized.startsWith('ai_')) return 'AI 修改';
-  if (normalized) return normalized.replaceAll('_', ' ');
-  return '修改';
-}
-
-function baseName(path = '') {
-  return String(path || '').split('/').filter(Boolean).pop() || '未命名文件';
-}
-
-function parentPath(path = '') {
-  const parts = String(path || '').split('/').filter(Boolean);
-  parts.pop();
-  return parts.join('/');
-}
-
-function displayName(path = '') {
-  return isNotePath(path) ? getNoteTitle(path) : baseName(path);
-}
-
-function decoratePreviewHtml(notePath, html) {
-  if (typeof window === 'undefined') return html;
-  const template = window.document.createElement('template');
-  template.innerHTML = html || '';
-  template.content.querySelectorAll('img').forEach((image) => {
-    const original = image.getAttribute('src') || '';
-    const resolvedPath = resolveNoteAssetPath(notePath, original);
-    if (resolvedPath) {
-      image.setAttribute('src', workspaceFileContentUrl(resolvedPath));
-    }
-  });
-  return template.innerHTML;
-}
-
-function groupHistoryItems(items) {
-  return items.reduce((groups, item) => {
-    const label = formatDate(item.created_at);
-    const group = groups.find((entry) => entry.label === label);
-    if (group) {
-      group.items.push(item);
-    } else {
-      groups.push({ label, items: [item] });
-    }
-    return groups;
-  }, []);
-}
-
-function triggerBrowserDownload(path) {
-  const anchor = document.createElement('a');
-  anchor.href = `${API_BASE_URL}${path}`;
-  anchor.download = '';
-  anchor.rel = 'noopener';
-  anchor.style.display = 'none';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-}
-
-function HistoryExportButton({ selectedItem, selectedPath, disabled }) {
-  const anchorRef = React.useRef(null);
-  const [isOpen, setIsOpen] = React.useState(false);
-  const canExport = Boolean(selectedItem?.id && selectedPath && isNotePath(selectedPath));
-
-  const exportVersion = (format) => {
-    if (!canExport) return;
-    const params = new URLSearchParams();
-    params.set('version_id', selectedItem.id);
-    params.set('path', selectedPath);
-    params.set('format', format);
-    triggerBrowserDownload(`/api/files/export?${params.toString()}`);
-  };
-
-  return (
-    <>
-      <Button
-        ref={anchorRef}
-        variant="subtle"
-        size="sm"
-        disabled={disabled || !canExport}
-        onClick={() => setIsOpen((current) => !current)}
-        title={canExport ? '导出历史记录' : '只有 HTML 笔记历史支持导出'}
-      >
-        <Download size={14} />
-        导出
-      </Button>
-      <AnchoredPopover
-        anchorRef={anchorRef}
-        width={176}
-        minWidth={176}
-        maxHeight={220}
-        open={isOpen && canExport}
-        onClose={() => setIsOpen(false)}
-        testId="history-export-menu"
-        className="py-1"
-      >
-        {[
-          ['html', 'HTML (.html)'],
-          ['md', 'Markdown (.md)'],
-          ['docx', 'Word (.docx)'],
-        ].map(([format, label]) => (
-          <button
-            key={format}
-            type="button"
-            className="motion-row flex w-full items-center px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-300 dark:hover:bg-blue-500/20"
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsOpen(false);
-              exportVersion(format);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </AnchoredPopover>
-    </>
-  );
-}
+import { History, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
+import { apiGet } from '../../../api/client';
+import { isNotePath } from '../../../hooks/noteTreeUtils.js';
+import { Button, IconButton } from '../../ui';
+import RichTextHistoryExportButton from './RichTextHistoryExportButton';
+import {
+  decoratePreviewHtml,
+  displayName,
+  formatDate,
+  formatTime,
+  formatTimestamp,
+  groupHistoryItems,
+  isAiSource,
+  parentPath,
+  sourceLabel,
+} from './richTextHistoryUtils';
 
 export default function RichTextHistoryPanel({
   onClearHistory,
@@ -389,7 +239,7 @@ export default function RichTextHistoryPanel({
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <HistoryExportButton
+              <RichTextHistoryExportButton
                 selectedItem={selectedItem}
                 selectedPath={selectedPath}
                 disabled={!selectedItem}

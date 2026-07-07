@@ -49,7 +49,12 @@ The threshold is not a hard split rule. A file may stay over the threshold when 
 - `src/styles/chat-composer.css`: composer shell, input, bottom action bar, model status, and scroll-to-bottom control.
 - `src/styles/chat-composer-queue.css`: pending input queue, running steer previews, and follow-up question panels above the composer.
 - `src/styles/editor.css`: editor tabs, editor textarea, editor drop states.
-- `src/styles/rich-text-toolbar.css`: rich text floating toolbar, selection toolbar, color/font/table controls, and block trigger surfaces.
+- `src/styles/rich-text-toolbar.css`: rich text floating toolbar shell and shared floating surface.
+- `src/styles/rich-text-block-toolbar.css`: six-dot block trigger and block-menu trigger visuals.
+- `src/styles/rich-text-selection-toolbar.css`: selection toolbar shell.
+- `src/styles/rich-text-table-toolbar.css`: table toolbar, table trigger, and table command menu visuals.
+- `src/styles/rich-text-format-controls.css`: font, color, highlight, and formatting controls.
+- `src/styles/rich-text-toolbar-menus.css`: rich text submenu panels and table size picker visuals.
 - `src/styles/rich-text-history.css`: global recent changes panel and history preview controls.
 - `src/styles/rich-text-content.css`: rich text body typography, prose density, headings, lists, quotes, inline code, and document-width behavior.
 - `src/styles/rich-text-image.css`: note image frames, resize handles, image toolbar, and alignment/width visuals.

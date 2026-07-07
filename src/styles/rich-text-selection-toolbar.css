@@ -1,0 +1,16 @@
+.rich-text-selection-toolbar {
+  max-width: min(92vw, 920px);
+  isolation: isolate;
+}
+
+.rich-text-selection-toolbar-surface {
+  border: 1px solid rgb(229 231 235 / 0.92);
+  border-radius: 1rem;
+  background: rgb(248 249 251);
+  box-shadow: 0 18px 52px rgb(15 23 42 / 0.22);
+}
+
+.dark .rich-text-selection-toolbar-surface {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(30 32 37);
+}
