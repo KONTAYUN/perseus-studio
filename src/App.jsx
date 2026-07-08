@@ -1,12 +1,14 @@
 import React from 'react';
 import AppHeader from './components/layout/AppHeader';
 import AppDialog, { useAppDialog } from './components/common/AppDialog';
+import ToastViewport from './components/common/ToastViewport';
 import MainPanels from './components/layout/MainPanels';
 import RichTextHistoryPanel from './components/editor/richText/RichTextHistoryPanel';
 import SettingsModal from './components/settings/SettingsModal';
 import TaskPanel from './components/tasks/TaskPanel';
 import { apiGet, apiPost } from './api/client';
 import useIdeState from './hooks/useIdeState';
+import useToastQueue from './hooks/useToastQueue';
 import useTasks from './hooks/useTasks';
 import { Button, Input } from './components/ui';
 
@@ -21,10 +23,12 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = React.useState(false);
   const [isRegisterMode, setIsRegisterMode] = React.useState(false);
   const appDialog = useAppDialog();
+  const toastQueue = useToastQueue();
   const ide = useIdeState({
     currentUser: auth.user,
     enabled: auth.authenticated,
     dialog: appDialog.api,
+    notify: toastQueue.showToast,
     onTasksChanged: (task) => {
       tasksRef.current?.upsertTask(task);
       tasksRef.current?.loadTasks();
@@ -176,6 +180,7 @@ export default function App() {
       {ide.isHistoryOpen && (
         <RichTextHistoryPanel
           open={ide.isHistoryOpen}
+          dialog={appDialog.api}
           onClearHistory={ide.clearFileHistory}
           onDeleteVersion={ide.deleteFileVersion}
           onRestoreVersion={ide.restoreFileVersion}
@@ -189,6 +194,11 @@ export default function App() {
 
       <TaskPanel tasks={tasks} />
       <AppDialog dialog={appDialog.dialog} onClose={appDialog.close} />
+      <ToastViewport
+        toasts={toastQueue.toasts}
+        onDismiss={toastQueue.dismissToast}
+        onRemove={toastQueue.removeToast}
+      />
     </div>
   );
 }

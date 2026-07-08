@@ -10,7 +10,7 @@ Overall: **9.6 / 10**
 |---|---:|---|---|
 | Structure standard | 9.6 | `docs/STRUCTURE_STANDARDS.md` treats 450 lines as a review threshold, not a hard split rule. `npm run test:structure` requires a responsibility review entry for threshold crossings. | Future agents must not reintroduce mechanical line-count splits. |
 | Frontend boundaries | 9.6 | Rich text editor behavior is split by responsibility. File tree, chat messages, and rich text history now have smaller render entries with row/message/history helpers separated. | Keep new UI behavior in the extracted components instead of growing entry files again. |
-| CSS boundaries | 9.6 | `src/index.css` is an ordered entrypoint. Rich text styling is split into editor base, toolbar shell, block trigger, selection toolbar, table toolbar, format controls, menus, history, content, image, and table sections. | Future toolbar work should stay in the matching control-family section. |
+| CSS boundaries | 9.6 | `src/index.css` is an ordered entrypoint. Rich text styling is split into editor base, toolbar shell, block trigger, selection toolbar, table toolbar, format controls, menus, history, content, image, and table sections. Toast visuals are isolated in `src/styles/toast.css`; shared motion semantics stay in `src/styles/motion.css`. | Future toolbar work should stay in the matching control-family section. |
 | Backend import/export | 9.6 | DOCX import/export facades delegate to style types, extraction, Word XML, and zip helpers. File and note transfer handlers now split by route responsibility without changing API behavior. | Keep HTTP decoding in handlers and conversion/filesystem behavior in helpers/services. |
 | UI system | 9.5 | `docs/UI_DESIGN_SYSTEM.md` documents rich text editor control exceptions. `npm run test:ui` continues to block raw one-off buttons, shadows, radius drift, and broad motion. | Editor-specific controls must stay in named CSS classes, not long JSX class strings. |
 | Old-code audit | 9.5 | `docs/LEGACY_STRUCTURE_AUDIT.md` records the old-code review and decisions. No production file now exceeds the 450-line review threshold. | Full package-wide Go tests depend on local Go or Docker availability; keep Docker fallback documented. |
@@ -21,7 +21,7 @@ These production files cross the 450-line review threshold or sit near it. A thr
 
 | File | Classification | Decision |
 |---|---|---|
-| None | No production file currently exceeds the review threshold. | Keep future threshold crossings documented here instead of splitting mechanically. |
+| `src/styles/motion.css` | Shared motion token mapping, keyframes, reduced-motion behavior, and compatibility motion classes. | Keep this as the single motion semantics registry. Move component-specific visual surfaces, such as toast styling, to their own CSS section instead of splitting keyframes by line count. |
 
 ## Completed Structural Cleanup
 

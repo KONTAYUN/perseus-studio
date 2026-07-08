@@ -188,7 +188,8 @@ Current shared classes:
 - `motion-presence-exit`: modal/popover body exit before unmount.
 - `motion-list-enter` and `motion-list-exit`: list item add/remove feedback.
 - `motion-content-switch`: short content fade when a selected detail view changes.
-- `motion-status-toast`: centered status notice entrance.
+- `motion-toast`: bottom-left toast entrance for short status notifications.
+- `motion-toast-exit`: bottom-left toast exit for short status notifications.
 - `motion-copy-confirm`: compact confirmation bounce for copy-style feedback.
 - `ui-icon-button`: stable icon-button shell.
 - `ui-icon-button-danger`: destructive icon-button hover tone.

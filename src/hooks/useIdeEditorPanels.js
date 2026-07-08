@@ -6,6 +6,7 @@ export default function useIdeEditorPanels({
   editorRef,
   layout,
   loadTree,
+  notify,
   setErrorMessage,
   setSelectedItemPath,
   setSelectedItemType,
@@ -20,6 +21,7 @@ export default function useIdeEditorPanels({
       setErrorMessage,
       setSelectedItemPath,
       setSelectedItemType,
+      notify,
       confirm,
     });
 

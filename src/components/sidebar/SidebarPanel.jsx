@@ -256,16 +256,6 @@ export default function SidebarPanel({ ide, panelId = 'fileTree' }) {
         )}
 
         <div className="relative z-10">
-          {ide.uploadStatus && (
-            <div className="mx-2 mb-2 rounded-xl border border-blue-200/80 bg-blue-50/80 px-3 py-2 text-[12px] text-blue-600 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
-              {ide.uploadStatus}
-            </div>
-          )}
-          {ide.errorMessage && (
-            <div className="mx-2 mb-2 rounded-xl border border-red-200/80 bg-red-50/80 px-3 py-2 text-[12px] text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-              {ide.errorMessage}
-            </div>
-          )}
           {ide.isTreeLoading ? (
             <div className="px-3 py-2 text-[12px] text-gray-400 dark:text-gray-500">加载文件树中...</div>
           ) : (

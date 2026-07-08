@@ -1,3 +1,7 @@
+.rich-text-table-toolbar {
+  z-index: 96;
+}
+
 .rich-text-table-toolbar-surface {
   border: 1px solid rgb(229 231 235 / 0.92);
   border-radius: 1rem;

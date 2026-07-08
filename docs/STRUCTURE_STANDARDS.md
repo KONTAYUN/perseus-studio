@@ -43,6 +43,7 @@ The threshold is not a hard split rule. A file may stay over the threshold when 
 - `src/styles/tokens.css`: reset, global variables, radius token overrides, app shell background.
 - `src/styles/surfaces.css`: reusable surfaces, cards, overlays, panel glow, non-motion visual primitives.
 - `src/styles/motion.css`: animation keyframes/classes, motion primitives, shared interactive control motion.
+- `src/styles/toast.css`: global bottom-left toast viewport, toast item surfaces, tone colors, and toast close control.
 - `src/styles/controls.css`: shared interactive control geometry and states.
 - `src/styles/chat.css`: chat messages, assistant progress, recovery notices, and chat-only message surfaces.
 - `src/styles/chat-markdown.css`: rendered assistant Markdown, code blocks, tables, and chat content scroll affordances.

@@ -108,7 +108,7 @@ export default function RichTextSelectionToolbar({
 
   const content = (
     <div
-      className="rich-text-selection-toolbar fixed z-[980]"
+      className="rich-text-selection-toolbar fixed"
       style={{
         left: position.left,
         top: position.top,
@@ -145,7 +145,7 @@ export default function RichTextSelectionToolbar({
             <span className="text-[15px] font-bold leading-none">A</span>
           </button>
           {isFontMenuOpen && (
-            <div className="rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full z-[630] mt-2 min-w-[98px] p-1">
+            <div className="rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full mt-2 min-w-[98px] p-1">
               {FONT_SIZE_OPTIONS.map((value) => (
                 <button
                   key={value}
@@ -189,7 +189,7 @@ export default function RichTextSelectionToolbar({
             </span>
           </button>
           {isTextColorMenuOpen && (
-            <div className="rich-text-color-menu rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full z-[630] mt-2 w-[188px] p-2">
+            <div className="rich-text-color-menu rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full mt-2 w-[188px] p-2">
               <button
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
@@ -257,7 +257,7 @@ export default function RichTextSelectionToolbar({
             </span>
           </button>
           {isHighlightColorMenuOpen && (
-            <div className="rich-text-color-menu rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full z-[630] mt-2 w-[188px] p-2">
+            <div className="rich-text-color-menu rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full mt-2 w-[188px] p-2">
               <button
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}

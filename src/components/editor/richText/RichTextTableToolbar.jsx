@@ -98,7 +98,7 @@ export default function RichTextTableToolbar({
 
   const content = (
     <div
-      className="rich-text-table-toolbar fixed z-[1120]"
+      className="rich-text-table-toolbar fixed"
       style={{
         left: position.left,
         top: position.top,

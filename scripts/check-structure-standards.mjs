@@ -12,6 +12,7 @@ const cssImportOrder = [
   './styles/tokens.css',
   './styles/surfaces.css',
   './styles/motion.css',
+  './styles/toast.css',
   './styles/controls.css',
   './styles/chat.css',
   './styles/chat-markdown.css',

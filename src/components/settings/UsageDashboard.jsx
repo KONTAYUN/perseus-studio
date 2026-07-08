@@ -28,7 +28,7 @@ const usageViewOptions = [
   { value: 'events', label: '最近调用' },
 ];
 
-export default function UsageDashboard({ dialog, onBack, currentUser }) {
+export default function UsageDashboard({ dialog, onBack, currentUser, notify }) {
   const isAdmin = currentUser?.role === 'admin';
   const [range, setRange] = React.useState(defaultRange);
   const [userId, setUserId] = React.useState('');
@@ -42,12 +42,14 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
   const [editingPriceId, setEditingPriceId] = React.useState('');
   const [activeView, setActiveView] = React.useState('users');
   const [showPriceSettings, setShowPriceSettings] = React.useState(false);
-  const [message, setMessage] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
+  const showMessage = React.useCallback((nextMessage, options) => {
+    if (nextMessage) notify?.(nextMessage, options);
+  }, [notify]);
 
   const loadUsage = React.useCallback(async () => {
     setIsLoading(true);
-    setMessage('');
+    showMessage('');
     try {
       const query = usageQuery({ range, userId, providerId });
       const [summaryData, eventsData, pricesData] = await Promise.all([
@@ -61,11 +63,11 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
       setEvents(eventsData.events || []);
       setPrices(pricesData.items || []);
     } catch (error) {
-      setMessage(error.message);
+      showMessage(error.message, { tone: 'error' });
     } finally {
       setIsLoading(false);
     }
-  }, [range, userId, providerId]);
+  }, [range, userId, providerId, showMessage]);
 
   React.useEffect(() => {
     if (isAdmin) loadUsage();
@@ -81,7 +83,7 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
 
   async function savePrice(event) {
     event.preventDefault();
-    setMessage('');
+    showMessage('');
     try {
       const payload = normalizePriceDraft(priceDraft);
       if (editingPriceId) {
@@ -91,8 +93,9 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
       }
       resetPriceForm();
       await loadUsage();
+      showMessage('价格配置已保存。', { tone: 'success' });
     } catch (error) {
-      setMessage(error.message);
+      showMessage(error.message, { tone: 'error' });
     }
   }
 
@@ -121,8 +124,9 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
       await apiDelete(`/api/admin/usage/prices/${encodeURIComponent(item.id)}`);
       await loadUsage();
       if (editingPriceId === item.id) resetPriceForm();
+      showMessage('价格配置已删除。', { tone: 'success' });
     } catch (error) {
-      setMessage(error.message);
+      showMessage(error.message, { tone: 'error' });
     }
   }
 
@@ -165,12 +169,6 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
           </Button>
         </div>
       </div>
-
-      {message && (
-        <div className="settings-expand-enter mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-          {message}
-        </div>
-      )}
 
       <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <UsageMetric title="请求数" value={formatNumber(totals.request_count)} caption={`失败 ${formatNumber(totals.failed_count)} 次`} />

@@ -2,6 +2,7 @@
 @import './styles/tokens.css';
 @import './styles/surfaces.css';
 @import './styles/motion.css';
+@import './styles/toast.css';
 @import './styles/controls.css';
 @import './styles/chat.css';
 @import './styles/chat-markdown.css';

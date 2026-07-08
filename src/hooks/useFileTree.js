@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { apiGet } from '../api/client';
 import {
   decorateTree,
@@ -21,6 +21,7 @@ export default function useFileTree({
   clearEditorPathState,
   confirm,
   getCurrentFile,
+  notify,
   openFile,
   setEditorStatusMessage,
   setIsAddMenuOpen,
@@ -29,14 +30,26 @@ export default function useFileTree({
   const [treeData, setTreeData] = useState([]);
   const [openFolders, setOpenFolders] = useState(() => readStoredOpenFolders(userId) || new Set());
   const [isTreeLoading, setIsTreeLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorMessage, setErrorMessageState] = useState('');
   const [inlineRenamePath, setInlineRenamePath] = useState('');
   const [inlineRenameDraft, setInlineRenameDraft] = useState('');
-  const [uploadStatus, setUploadStatus] = useState('');
+  const [uploadStatus, setUploadStatusState] = useState('');
   const [exitingFilePaths, setExitingFilePaths] = useState(new Set());
   const [recentFileTreePaths, setRecentFileTreePaths] = useState(new Set());
 
   const selectedItemPathRef = useRef('');
+  const setErrorMessage = useCallback((message) => {
+    setErrorMessageState(message);
+    if (typeof message === 'string' && message.trim()) {
+      notify?.(message, { tone: 'error' });
+    }
+  }, [notify]);
+  const setUploadStatus = useCallback((message) => {
+    setUploadStatusState(message);
+    if (typeof message === 'string' && message.trim()) {
+      notify?.(message);
+    }
+  }, [notify]);
   const {
     cancelFileDialog,
     fileDialog,

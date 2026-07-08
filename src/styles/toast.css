@@ -1,0 +1,125 @@
+.toast-viewport {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 240;
+  display: flex;
+  max-width: min(380px, calc(100vw - 40px));
+  flex-direction: column-reverse;
+  gap: 9px;
+  pointer-events: none;
+}
+
+.toast-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  width: min(360px, calc(100vw - 40px));
+  border: 1px solid rgb(255 255 255 / 0.5);
+  border-radius: var(--radius-control);
+  background: rgb(255 255 255 / 0.88);
+  box-shadow:
+    0 14px 34px rgb(15 23 42 / 0.12),
+    inset 0 1px 0 rgb(255 255 255 / 0.56);
+  color: rgb(31 41 55);
+  padding: 10px 10px 10px 12px;
+  pointer-events: auto;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.dark .toast-item {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(31 31 34 / 0.88);
+  box-shadow:
+    0 16px 38px rgb(0 0 0 / 0.34),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+  color: rgb(229 231 235);
+}
+
+.toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-icon);
+  background: rgb(59 130 246 / 0.12);
+  color: rgb(37 99 235);
+}
+
+.toast-item-success .toast-icon {
+  background: rgb(16 185 129 / 0.13);
+  color: rgb(5 150 105);
+}
+
+.toast-item-warning .toast-icon {
+  background: rgb(245 158 11 / 0.14);
+  color: rgb(217 119 6);
+}
+
+.toast-item-error .toast-icon {
+  background: rgb(239 68 68 / 0.14);
+  color: rgb(220 38 38);
+}
+
+.dark .toast-item-success .toast-icon {
+  color: rgb(110 231 183);
+}
+
+.dark .toast-item-warning .toast-icon {
+  color: rgb(252 211 77);
+}
+
+.dark .toast-item-error .toast-icon {
+  color: rgb(252 165 165);
+}
+
+.toast-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.toast-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-icon);
+  background: transparent;
+  color: rgb(107 114 128);
+}
+
+.toast-close:hover {
+  background: rgb(15 23 42 / 0.06);
+  color: rgb(31 41 55);
+}
+
+.dark .toast-close {
+  color: rgb(156 163 175);
+}
+
+.dark .toast-close:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(243 244 246);
+}
+
+@media (max-width: 640px) {
+  .toast-viewport {
+    right: 14px;
+    bottom: 14px;
+    left: 14px;
+    max-width: none;
+  }
+
+  .toast-item {
+    width: 100%;
+  }
+}

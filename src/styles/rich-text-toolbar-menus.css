@@ -9,7 +9,7 @@
 
 .rich-text-submenu-panel {
   isolation: isolate;
-  z-index: 1200;
+  z-index: 2;
 }
 
 .rich-text-submenu-panel-surface {

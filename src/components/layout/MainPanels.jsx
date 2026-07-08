@@ -2,7 +2,6 @@ import React, { useMemo, useRef } from 'react';
 import ChatPanel from '../chat/ChatPanel';
 import EditorPanel from '../editor/EditorPanel';
 import SidebarPanel from '../sidebar/SidebarPanel';
-import useMotionPresence from '../../hooks/useMotionPresence';
 import PanelWrapper from './mainPanels/PanelWrapper';
 import PanelExitGhost from './mainPanels/PanelExitGhost';
 import {
@@ -29,7 +28,6 @@ function getPanelContent(panel, ide) {
 
 export default function MainPanels({ ide }) {
   const mainRef = useRef(null);
-  const latestLayoutNoticeRef = useRef('');
   const visiblePanels = ide.panels;
   const mainWidth = useMeasuredMainWidth(mainRef);
   const centerSinglePanel = isCenteredSingleChatPanel(visiblePanels);
@@ -64,11 +62,6 @@ export default function MainPanels({ ide }) {
     setLayoutAnimationAction: ide.setLayoutAnimationAction,
     visiblePanels,
   });
-  const layoutNoticePresence = useMotionPresence(Boolean(ide.layoutNotice));
-  React.useEffect(() => {
-    if (ide.layoutNotice) latestLayoutNoticeRef.current = ide.layoutNotice;
-  }, [ide.layoutNotice]);
-  const visibleLayoutNotice = ide.layoutNotice || latestLayoutNoticeRef.current;
   const collectVisiblePanelSizes = () => collectPanelSizes(visiblePanels, displayWidths);
 
   return (
@@ -88,14 +81,6 @@ export default function MainPanels({ ide }) {
               ide.dragType === 'resize' ? 'cursor-col-resize' : 'cursor-grabbing'
             }`}
           />
-        )}
-
-        {layoutNoticePresence.present && visibleLayoutNotice && (
-          <div className={`layout-notice absolute left-1/2 top-5 z-[120] rounded-xl border border-blue-100 bg-white/95 px-4 py-2 text-sm font-semibold text-blue-600 dark:border-blue-500/20 dark:bg-[#252526]/95 dark:text-blue-200 ${
-            layoutNoticePresence.exiting ? 'motion-status-toast-exit' : 'motion-status-toast'
-          }`}>
-            {visibleLayoutNotice}
-          </div>
         )}
 
         {centerSinglePanel && <div className="flex-1" />}

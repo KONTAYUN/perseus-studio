@@ -12,7 +12,7 @@ export default function RichTextBlockTrigger({
   return createPortal(
     <button
       type="button"
-      className={`rich-text-block-trigger fixed z-[1130] ${active ? 'is-active' : ''}`}
+      className={`rich-text-block-trigger fixed ${active ? 'is-active' : ''}`}
       style={{
         left: position.left,
         top: position.top,

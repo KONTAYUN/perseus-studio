@@ -6,6 +6,7 @@ export default function useIdeLifecycleEffects({
   layoutNotice,
   loadConversations,
   loadTree,
+  notify,
   setLayoutNotice,
 }) {
   useEffect(() => {
@@ -21,7 +22,8 @@ export default function useIdeLifecycleEffects({
 
   useEffect(() => {
     if (!layoutNotice) return undefined;
-    const timer = window.setTimeout(() => setLayoutNotice(''), 1800);
-    return () => window.clearTimeout(timer);
-  }, [layoutNotice]);
+    notify?.(layoutNotice);
+    setLayoutNotice('');
+    return undefined;
+  }, [layoutNotice, notify, setLayoutNotice]);
 }

@@ -255,14 +255,8 @@ export default function EditorPanel({ ide, editor, panelId }) {
           className="editor-drop-overlay motion-color pointer-events-none absolute inset-x-10 bottom-4 top-16 z-10 rounded-2xl border-2 border-dashed border-transparent max-[900px]:inset-x-6 max-[640px]:inset-x-3"
         />
         <div className="relative z-20 flex min-h-0 flex-1 flex-col">
-          {(ide.errorMessage || editor.externalFileConflict || (editor.editorStatusMessage && editor.currentFilePath)) && (
+          {editor.externalFileConflict && (
             <div className="flex-none px-12 pt-7 max-[900px]:px-8 max-[640px]:px-5">
-              {ide.errorMessage && (
-                <div className="settings-expand-enter mb-4 rounded-xl border border-red-200/80 bg-red-50/80 px-3 py-2 text-[12px] text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-                  {ide.errorMessage}
-                </div>
-              )}
-
               {editor.externalFileConflict && (
                 <div className="editor-conflict-notice settings-expand-enter mb-4 rounded-xl border border-amber-200/80 bg-amber-50/90 px-3 py-3 text-[12px] text-amber-700 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
                   <div>{editor.externalFileConflict.message}</div>
@@ -294,18 +288,13 @@ export default function EditorPanel({ ide, editor, panelId }) {
                 </div>
               )}
 
-              {editor.editorStatusMessage && !editor.externalFileConflict && editor.currentFilePath && (
-                <div className="settings-expand-enter mb-4 rounded-xl border border-blue-200/80 bg-blue-50/80 px-3 py-2 text-[12px] text-blue-600 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
-                  {editor.editorStatusMessage}
-                </div>
-              )}
             </div>
           )}
 
           <div className="min-h-0 flex-1">
             {!editor.currentFilePath ? (
               <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
-                {editor.editorStatusMessage || '从左侧文件树选择一个文件开始编辑'}
+                从左侧文件树选择一个文件开始编辑
               </div>
             ) : editor.isEditorLoading ? (
               <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">

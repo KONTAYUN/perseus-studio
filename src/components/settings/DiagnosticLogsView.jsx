@@ -4,15 +4,17 @@ import { API_BASE_URL, apiDelete, apiGet } from '../../api/client';
 import { Button, EmptyCard, SegmentedControl, SettingsSection, formatDate } from './SettingsUI';
 import { diagnosticShortJudgement, formatRequestSummary } from './diagnosticLogUtils';
 
-export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
+export default function DiagnosticLogsView({ dialog, onBack, currentUser, notify }) {
   const isAdmin = currentUser?.role === 'admin';
   const [scope, setScope] = React.useState('all');
   const [logs, setLogs] = React.useState([]);
   const [usersById, setUsersById] = React.useState({});
-  const [message, setMessage] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
   const [expandedIds, setExpandedIds] = React.useState(new Set());
   const isAllUsersScope = true;
+  const showMessage = React.useCallback((nextMessage, options) => {
+    if (nextMessage) notify?.(nextMessage, options);
+  }, [notify]);
 
   if (!isAdmin) return null;
 
@@ -22,17 +24,17 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
 
   const loadLogs = React.useCallback(async () => {
     setIsLoading(true);
-    setMessage('');
+    showMessage('');
     try {
       const data = await apiGet('/api/admin/diagnostics/logs?limit=200');
       setLogs(data.logs || []);
       setUsersById(data.users || {});
     } catch (error) {
-      setMessage(error.message);
+      showMessage(error.message, { tone: 'error' });
     } finally {
       setIsLoading(false);
     }
-  }, [isAllUsersScope]);
+  }, [isAllUsersScope, showMessage]);
 
   React.useEffect(() => {
     loadLogs();
@@ -54,9 +56,9 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
     try {
       const text = await fetchExportText();
       await navigator.clipboard.writeText(text);
-      setMessage('已复制全部用户最近诊断日志。');
+      showMessage('已复制全部用户最近诊断日志。', { tone: 'success' });
     } catch (error) {
-      setMessage(error.message);
+      showMessage(error.message, { tone: 'error' });
     }
   };
 
@@ -70,9 +72,9 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
       link.download = 'perseus-diagnostic-logs-all-users.txt';
       link.click();
       URL.revokeObjectURL(url);
-      setMessage('已导出诊断日志。');
+      showMessage('已导出诊断日志。', { tone: 'success' });
     } catch (error) {
-      setMessage(error.message);
+      showMessage(error.message, { tone: 'error' });
     }
   };
 
@@ -88,9 +90,9 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
       await apiDelete('/api/admin/diagnostics/logs');
       setLogs([]);
       setExpandedIds(new Set());
-      setMessage('全部用户诊断日志已清空。');
+      showMessage('全部用户诊断日志已清空。', { tone: 'success' });
     } catch (error) {
-      setMessage(error.message);
+      showMessage(error.message, { tone: 'error' });
     }
   };
 
@@ -110,9 +112,9 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
         next.delete(item.id);
         return next;
       });
-      setMessage('已删除该条诊断日志。');
+      showMessage('已删除该条诊断日志。', { tone: 'success' });
     } catch (error) {
-      setMessage(error.message);
+      showMessage(error.message, { tone: 'error' });
     }
   };
 
@@ -155,12 +157,6 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
           </Button>
         </div>
       </div>
-
-      {message && (
-        <div className="settings-expand-enter mb-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
-          {message}
-        </div>
-      )}
 
       {isLoading ? (
         <div className="settings-card rounded-2xl border border-gray-100 bg-white/70 p-6 text-center text-sm text-gray-400 dark:border-white/10 dark:bg-[#252526]/80">

@@ -20,6 +20,7 @@ const HISTORY_EXIT_DURATION_MS = 360;
 const HISTORY_LIST_EXIT_DELAY_MS = 180;
 
 export default function RichTextHistoryPanel({
+  dialog,
   onClearHistory,
   onClose,
   onDeleteVersion,
@@ -128,7 +129,13 @@ export default function RichTextHistoryPanel({
 
   const handleDeleteVersion = async () => {
     if (!selectedItem?.id) return;
-    if (!window.confirm('删除这条历史记录后将无法恢复，确认继续吗？')) return;
+    const confirmed = await dialog?.confirm?.({
+      title: '删除历史记录',
+      message: '删除这条历史记录后将无法恢复，确认继续吗？',
+      confirmLabel: '删除记录',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setDeletingId(selectedItem.id);
     await new Promise((resolve) => window.setTimeout(resolve, HISTORY_LIST_EXIT_DELAY_MS));
     const ok = await onDeleteVersion?.(selectedItem.id);
@@ -141,7 +148,13 @@ export default function RichTextHistoryPanel({
 
   const handleClearHistory = async () => {
     if (!hasHistoryEntries) return;
-    if (!window.confirm('确认清空全部最近修改历史吗？')) return;
+    const confirmed = await dialog?.confirm?.({
+      title: '清空最近修改',
+      message: '确认清空全部最近修改历史吗？',
+      confirmLabel: '清空历史',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setClearingHistory(true);
     await new Promise((resolve) => window.setTimeout(resolve, HISTORY_LIST_EXIT_DELAY_MS));
     const ok = await onClearHistory?.();

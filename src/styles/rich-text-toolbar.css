@@ -1,12 +1,13 @@
 .rich-text-toolbar {
   position: relative;
   isolation: isolate;
-  z-index: 140;
+  z-index: 92;
   backdrop-filter: blur(10px);
 }
 
 .rich-text-toolbar-floating {
   isolation: isolate;
+  z-index: 96;
   width: 0;
   height: 0;
   max-width: none;

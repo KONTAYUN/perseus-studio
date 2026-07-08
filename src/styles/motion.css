@@ -121,12 +121,12 @@
   animation: perseus-content-switch var(--motion-base) var(--ease-motion) both;
 }
 
-.motion-status-toast {
-  animation: perseus-status-toast-enter var(--motion-popover) var(--ease-motion) both;
+.motion-toast {
+  animation: perseus-toast-enter var(--motion-modal) var(--ease-layout) both;
 }
 
-.motion-status-toast-exit {
-  animation: perseus-status-toast-exit var(--motion-base) var(--ease-motion) both;
+.motion-toast-exit {
+  animation: perseus-toast-exit var(--motion-base) var(--ease-motion) both;
 }
 
 .motion-copy-confirm {
@@ -364,25 +364,25 @@
   }
 }
 
-@keyframes perseus-status-toast-enter {
+@keyframes perseus-toast-enter {
   from {
     opacity: 0;
-    transform: translate(-50%, -6px) scale(0.98);
+    transform: translateX(-22px) scale(0.985);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0) scale(1);
+    transform: translateX(0) scale(1);
   }
 }
 
-@keyframes perseus-status-toast-exit {
+@keyframes perseus-toast-exit {
   from {
     opacity: 1;
-    transform: translate(-50%, 0) scale(1);
+    transform: translateX(0) scale(1);
   }
   to {
     opacity: 0;
-    transform: translate(-50%, -5px) scale(0.985);
+    transform: translateX(-16px) scale(0.985);
   }
 }
 
@@ -418,8 +418,8 @@
   .motion-list-enter,
   .motion-list-exit,
   .motion-content-switch,
-  .motion-status-toast,
-  .motion-status-toast-exit,
+  .motion-toast,
+  .motion-toast-exit,
   .motion-copy-confirm,
   .motion-panel-exit {
     animation-duration: 1ms !important;

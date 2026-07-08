@@ -114,8 +114,8 @@ export default function RichTextToolbar({
       onMouseDownCapture={() => onInteractWithin?.()}
       className={
         floating
-          ? 'rich-text-toolbar-floating fixed z-[1140]'
-          : 'rich-text-toolbar relative z-[120] flex flex-wrap items-center gap-2 border-b border-gray-200/70 bg-white/92 px-4 py-2 dark:border-white/10 dark:bg-[#1f2023]'
+          ? 'rich-text-toolbar-floating fixed'
+          : 'rich-text-toolbar relative flex flex-wrap items-center gap-2 border-b border-gray-200/70 bg-white/92 px-4 py-2 dark:border-white/10 dark:bg-[#1f2023]'
       }
       style={
         floating && position
@@ -175,7 +175,7 @@ export default function RichTextToolbar({
             <SlidersHorizontal size={15} />
           </button>
           {isSpacingMenuOpen && (
-            <div className="absolute left-0 top-full z-[1200] mt-2 flex items-start">
+            <div className="absolute left-0 top-full mt-2 flex items-start">
               <div className="rich-text-submenu-panel rich-text-submenu-panel-surface flex w-[108px] flex-col gap-1 p-1">
                 {spacingGroups.map((group) => (
                   <button
@@ -234,7 +234,7 @@ export default function RichTextToolbar({
             <Table2 size={15} />
           </ToolbarButton>
           {isTableMenuOpen && (
-            <div className="rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full z-[1200] mt-2 w-[244px] p-3">
+            <div className="rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full mt-2 w-[244px] p-3">
               <div className="space-y-3">
                 <div
                   className="table-size-picker"

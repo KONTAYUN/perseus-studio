@@ -2,6 +2,7 @@
   display: grid;
   grid-template-columns: repeat(2, 4px);
   place-content: center;
+  z-index: 96;
   gap: 3px;
   width: 24px;
   height: 24px;

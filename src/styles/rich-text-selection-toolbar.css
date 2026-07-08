@@ -1,6 +1,7 @@
 .rich-text-selection-toolbar {
   max-width: min(92vw, 920px);
   isolation: isolate;
+  z-index: 96;
 }
 
 .rich-text-selection-toolbar-surface {

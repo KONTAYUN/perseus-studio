@@ -11,6 +11,7 @@ import useIdeLifecycleEffects from './useIdeLifecycleEffects';
 export default function useIdeState(options = {}) {
   const isEnabled = options.enabled !== false;
   const dialog = options.dialog || {};
+  const notify = options.notify || (() => {});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const layout = useLayoutState({ userId: options.currentUser?.id || options.currentUser?.user_id || '' });
@@ -30,6 +31,7 @@ export default function useIdeState(options = {}) {
     }),
     openFile: (...args) => editorRef.current?.openFile?.(...args),
     confirm: dialog.confirm,
+    notify,
     setEditorStatusMessage: (...args) => editorRef.current?.setEditorStatusMessage?.(...args),
     setIsAddMenuOpen,
     userId: options.currentUser?.id || options.currentUser?.user_id || '',
@@ -118,6 +120,7 @@ export default function useIdeState(options = {}) {
     editorRef,
     layout,
     loadTree,
+    notify,
     setErrorMessage,
     setSelectedItemPath,
     setSelectedItemType,
@@ -139,6 +142,7 @@ export default function useIdeState(options = {}) {
     layoutNotice: layout.layoutNotice,
     loadConversations: chat.loadConversations,
     loadTree,
+    notify,
     setLayoutNotice: layout.setLayoutNotice,
   });
 
@@ -181,6 +185,7 @@ export default function useIdeState(options = {}) {
     ...skillsState,
     ...chat,
     currentUser: options.currentUser || null,
+    showToast: notify,
     activeTabPath: activeEditor.activeTabPath,
     activateTab: activeEditor.activateTab,
     addPanel: editorState.addPanel,

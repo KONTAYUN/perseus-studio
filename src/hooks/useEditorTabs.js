@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { apiPost } from '../api/client';
 import { createEditorFileLoader } from './createEditorFileLoader';
 import { createEditorHistoryActions } from './createEditorHistoryActions';
@@ -21,6 +21,7 @@ export default function useEditorTabs({
   setErrorMessage,
   setSelectedItemPath,
   setSelectedItemType,
+  notify,
 } = {}) {
   const [isEditorLoading, setIsEditorLoading] = useState(false);
   const [isSavingFile, setIsSavingFile] = useState(false);
@@ -32,7 +33,7 @@ export default function useEditorTabs({
   const [currentFileType, setCurrentFileType] = useState('text');
   const [currentFileNotice, setCurrentFileNotice] = useState('');
   const [externalFileConflict, setExternalFileConflict] = useState(null);
-  const [editorStatusMessage, setEditorStatusMessage] = useState('');
+  const [editorStatusMessage, setEditorStatusMessageState] = useState('');
   const [openTabs, setOpenTabs] = useState([]);
   const [activeTabPath, setActiveTabPath] = useState('');
 
@@ -46,6 +47,12 @@ export default function useEditorTabs({
   const activeTabPathRef = useRef('');
   const autoSaveTimerRef = useRef(null);
   const editorLoadRequestRef = useRef(0);
+  const setEditorStatusMessage = useCallback((message, options) => {
+    setEditorStatusMessageState(message);
+    if (typeof message === 'string' && message.trim()) {
+      notify?.(message, options);
+    }
+  }, [notify]);
 
   const isTextFile = currentFileType === 'text';
   const isDirty =
@@ -157,7 +164,7 @@ export default function useEditorTabs({
     setCurrentFileType(tab.fileType || detectFileType(tab.path));
     setCurrentFileNotice(tab.notice || '');
     setExternalFileConflict(tab.conflict || null);
-    setEditorStatusMessage(tab.statusMessage || '');
+    setEditorStatusMessageState(tab.statusMessage || '');
     setSelectedItemPath?.(tab.path);
     setSelectedItemType?.('file');
     setActivePanel?.('editor');
@@ -271,7 +278,7 @@ export default function useEditorTabs({
     setCurrentFileType(snapshot.fileType || detectFileType(snapshot.path));
     setCurrentFileNotice(snapshot.notice || '');
     setExternalFileConflict(snapshot.conflict || null);
-    setEditorStatusMessage(snapshot.statusMessage || '');
+    setEditorStatusMessageState(snapshot.statusMessage || '');
     setSelectedItemPath?.(snapshot.path);
     setSelectedItemType?.('file');
     setActivePanel?.('editor');
@@ -307,7 +314,7 @@ export default function useEditorTabs({
     }
     setIsSavingFile(true);
     setErrorMessage?.('');
-    setEditorStatusMessage('');
+    setEditorStatusMessageState('');
     try {
       const result = await apiPost('/api/files/write', {
         path,
@@ -361,7 +368,7 @@ export default function useEditorTabs({
   function keepLocalFileChanges() {
     if (!externalFileConflict) return;
     setExternalFileConflict(null);
-    setEditorStatusMessage('已保留本地修改；如需写回磁盘，请手动保存。');
+    setEditorStatusMessage('已保留本地修改；如需写回磁盘，请手动保存。', { tone: 'warning' });
     setErrorMessage?.('');
   }
 

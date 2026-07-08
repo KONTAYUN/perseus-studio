@@ -17,7 +17,7 @@
   position: absolute;
   left: 50%;
   top: -0.85rem;
-  z-index: 1100;
+  z-index: 96;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -38,7 +38,7 @@
   position: absolute;
   left: 50%;
   top: -1.25rem;
-  z-index: 1110;
+  z-index: 97;
   width: min(92vw, 340px);
   transform: translate(-50%, -100%);
   border: 1px solid rgb(229 231 235 / 0.92);
@@ -114,7 +114,7 @@
 .note-image-resize-handle {
   position: absolute;
   top: 50%;
-  z-index: 1090;
+  z-index: 95;
   width: 0.95rem;
   height: 0.95rem;
   border: 2px solid rgb(255 255 255);

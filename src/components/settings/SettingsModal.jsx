@@ -82,11 +82,11 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
           )}
 
           {settingsView === 'diagnostics' && (
-            <DiagnosticLogsView dialog={dialog} onBack={() => setSettingsView('main')} currentUser={currentUser} />
+            <DiagnosticLogsView dialog={dialog} onBack={() => setSettingsView('main')} currentUser={currentUser} notify={ide.showToast} />
           )}
 
           {settingsView === 'usage' && (
-            <UsageDashboard dialog={dialog} onBack={() => setSettingsView('main')} currentUser={currentUser} />
+            <UsageDashboard dialog={dialog} onBack={() => setSettingsView('main')} currentUser={currentUser} notify={ide.showToast} />
           )}
 
           {settingsView === 'main' && (

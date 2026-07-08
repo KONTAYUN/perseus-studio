@@ -13,7 +13,6 @@ import {
 } from './SettingsUI';
 
 export default function SkillSettings({ ide, dialog, onBack }) {
-  const [uploadMessage, setUploadMessage] = React.useState('');
   const [candidates, setCandidates] = React.useState(null);
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState(new Set());
   const [selectedSkillId, setSelectedSkillId] = React.useState('');
@@ -21,6 +20,9 @@ export default function SkillSettings({ ide, dialog, onBack }) {
   const [skillPreview, setSkillPreview] = React.useState(null);
   const [view, setView] = React.useState('list');
   const selectedSkill = ide.skills.find((item) => item.id === selectedSkillId) || null;
+  const showUploadMessage = React.useCallback((message) => {
+    if (message) ide.showToast?.(message);
+  }, [ide.showToast]);
 
   const openDetail = async (item) => {
     setSelectedSkillId(item.id);
@@ -33,15 +35,15 @@ export default function SkillSettings({ ide, dialog, onBack }) {
 
   const uploadSkill = async (file) => {
     if (!file) return;
-    setUploadMessage('');
+    showUploadMessage('');
     setCandidates(null);
     const result = await ide.uploadSkillZip(file);
     if (result.candidates?.length > 0) {
       setCandidates(result);
       setSelectedCandidateIds(new Set(result.candidates.map((item) => item.id)));
-      setUploadMessage(result.message || '发现多个 Skill，请选择安装。');
+      showUploadMessage(result.message || '发现多个 Skill，请选择安装。');
     } else {
-      setUploadMessage(result.message || 'Skill 已安装。');
+      showUploadMessage(result.message || 'Skill 已安装。');
     }
   };
 
@@ -51,7 +53,7 @@ export default function SkillSettings({ ide, dialog, onBack }) {
     await ide.installSelectedSkills(candidates.upload_id, ids);
     setCandidates(null);
     setSelectedCandidateIds(new Set());
-    setUploadMessage('已安装选中的 Skill。');
+    showUploadMessage('已安装选中的 Skill。');
   };
 
   const renameSkill = async (item) => {
@@ -127,7 +129,6 @@ export default function SkillSettings({ ide, dialog, onBack }) {
       ide={ide}
       onBack={onBack}
       onUpload={uploadSkill}
-      uploadMessage={uploadMessage}
       candidates={candidates}
       selectedCandidateIds={selectedCandidateIds}
       setSelectedCandidateIds={setSelectedCandidateIds}
@@ -145,7 +146,6 @@ function SkillsListView({
   ide,
   onBack,
   onUpload,
-  uploadMessage,
   candidates,
   selectedCandidateIds,
   setSelectedCandidateIds,
@@ -172,12 +172,6 @@ function SkillsListView({
           <Upload size={15} /> 上传 skill.zip
         </Button>
       </div>
-
-      {uploadMessage && (
-        <div className="settings-expand-enter mb-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
-          {uploadMessage}
-        </div>
-      )}
 
       {candidates?.candidates?.length > 0 && (
         <div className="settings-expand-enter mb-4 rounded-2xl border border-gray-100 bg-white/80 p-4 dark:border-white/10 dark:bg-[#252526]/80">
