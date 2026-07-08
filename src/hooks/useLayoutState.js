@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const EDITOR_PANEL_IDS = ['editor_1', 'editor_2', 'editor_3'];
 const MAX_TOTAL_PANELS = 5;
 const MAX_EDITOR_PANELS = 3;
 const DEFAULT_LAYOUT_WIDTHS = { fileTree: 300, chat: 500 };
+const PANEL_EXIT_GHOST_DURATION_MS = 360;
 
 function minWidthForPanelType(type) {
   if (type === 'chat') return 340;
@@ -68,6 +69,24 @@ function getPanelWrapperElement(panelId) {
   return document.getElementById(`panel-wrapper-${panelId}`);
 }
 
+function capturePanelExitGhost(panel) {
+  const element = getPanelWrapperElement(panel.id);
+  if (!element || typeof window === 'undefined') return null;
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  return {
+    id: panel.id,
+    key: `${panel.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    rect: {
+      height: rect.height,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+    },
+    type: panel.type,
+  };
+}
+
 export default function useLayoutState({ userId = '' } = {}) {
   const [layoutColumns, setLayoutColumnsValue] = useState(3);
   const [panels, setPanels] = useState(PRESETS[3]);
@@ -84,6 +103,8 @@ export default function useLayoutState({ userId = '' } = {}) {
   const [layoutNotice, setLayoutNotice] = useState('');
   const [recentlyAddedPanelId, setRecentlyAddedPanelId] = useState('');
   const [layoutAnimationAction, setLayoutAnimationAction] = useState(null);
+  const [exitingPanelGhosts, setExitingPanelGhosts] = useState([]);
+  const exitGhostTimeoutsRef = useRef({});
 
   const panelOrder = useMemo(() => panels.map((panel) => panel.id), [panels]);
 
@@ -101,10 +122,29 @@ export default function useLayoutState({ userId = '' } = {}) {
     window.localStorage.setItem(themeStorageKey(userId), isDarkMode ? 'dark' : 'light');
   }, [isDarkMode, userId]);
 
+  useEffect(() => () => {
+    Object.values(exitGhostTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
+  }, []);
+
+  const queuePanelExitGhosts = (panelsToExit) => {
+    const ghosts = panelsToExit.map(capturePanelExitGhost).filter(Boolean);
+    if (ghosts.length === 0) return;
+    setExitingPanelGhosts((current) => [...current, ...ghosts].slice(-MAX_TOTAL_PANELS));
+    ghosts.forEach((ghost) => {
+      exitGhostTimeoutsRef.current[ghost.key] = window.setTimeout(() => {
+        setExitingPanelGhosts((current) => current.filter((item) => item.key !== ghost.key));
+        delete exitGhostTimeoutsRef.current[ghost.key];
+      }, PANEL_EXIT_GHOST_DURATION_MS);
+    });
+  };
+
   const setLayoutColumns = (columns) => {
+    const nextPanels = PRESETS[columns] || PRESETS[3];
+    const nextPanelIds = new Set(nextPanels.map((panel) => panel.id));
+    queuePanelExitGhosts(panels.filter((panel) => !nextPanelIds.has(panel.id)));
     setLayoutAnimationAction({ kind: 'preset', key: Date.now() });
     setLayoutColumnsValue(columns);
-    setPanels(PRESETS[columns] || PRESETS[3]);
+    setPanels(nextPanels);
     setWidths(DEFAULT_LAYOUT_WIDTHS);
     setActivePanel('none');
     setPanelAddMenuOpen(false);
@@ -171,6 +211,7 @@ export default function useLayoutState({ userId = '' } = {}) {
     const panel = panels.find((item) => item.id === panelId);
     if (!panel) return false;
     if (canRemove && !canRemove(panel)) return false;
+    queuePanelExitGhosts([panel]);
     setLayoutAnimationAction({ kind: 'remove', key: Date.now() });
     setPanels((current) => {
       const next = current.filter((item) => item.id !== panelId);
@@ -330,6 +371,7 @@ export default function useLayoutState({ userId = '' } = {}) {
     handlePanelDragOver,
     handlePanelDragStart,
     handlePanelDrop,
+    exitingPanelGhosts,
     isDarkMode,
     isDraggingMode,
     isPanelTrashOver,

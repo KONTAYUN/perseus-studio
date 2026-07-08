@@ -15,6 +15,8 @@ export default function FileTreeRow({ item, items, depth, ide }) {
     const isInlineRenaming = ide.inlineRenamePath === item.path;
     const isTextFile = item.type === 'file' && ide.isTextPath(item.path);
     const isActiveRow = ide.selectedPaths.has(item.path) || item.path === ide.currentFilePath;
+    const isExitingRow = ide.exitingFilePaths?.has(item.path);
+    const isRecentRow = ide.recentFileTreePaths?.has(item.path);
     const actionCount = item.type === 'folder' ? 5 : isTextFile ? 3 : 2;
     const actionWidth = actionCount * 20 + Math.max(0, actionCount - 1) * 4 + 2;
 
@@ -168,7 +170,7 @@ export default function FileTreeRow({ item, items, depth, ide }) {
           paddingLeft: `${depth * 12 + 8}px`,
           '--file-tree-action-width': `${actionWidth}px`,
         }}
-        className={`file-tree-row motion-row relative min-w-0 overflow-hidden py-1.5 pr-2 rounded-lg cursor-pointer group text-[13px]
+        className={`file-tree-row motion-row motion-list-enter relative min-w-0 overflow-hidden py-1.5 pr-2 rounded-lg cursor-pointer group text-[13px]
             ${
               ide.fileDragOverId === item.id
                 ? 'bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-400'
@@ -178,6 +180,8 @@ export default function FileTreeRow({ item, items, depth, ide }) {
                   ? 'bg-blue-50 dark:bg-blue-500/15 ring-1 ring-blue-300/70 dark:ring-blue-500/40'
                   : 'hover:bg-gray-100 dark:hover:bg-white/5'
             }
+            ${isExitingRow ? 'motion-list-exit pointer-events-none' : ''}
+            ${isRecentRow ? 'file-tree-row-recent' : ''}
             ${ide.draggingFileId === item.id ? 'opacity-40' : 'opacity-100'}
             text-gray-700 dark:text-gray-300`}
       >

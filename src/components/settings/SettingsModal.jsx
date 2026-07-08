@@ -8,6 +8,8 @@ import ModelProviderSettings from './ModelProviderSettings';
 import SearchProviderSettings from './SearchProviderSettings';
 import SkillSettings from './SkillSettings';
 
+const MODAL_EXIT_DURATION_MS = 360;
+
 export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
   const [hasEntered, setHasEntered] = React.useState(false);
@@ -28,7 +30,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
 
   const closeWithAnimation = () => {
     setIsClosing(true);
-    window.setTimeout(onClose, 160);
+    window.setTimeout(onClose, MODAL_EXIT_DURATION_MS);
   };
 
   if (!isAdmin) return null;

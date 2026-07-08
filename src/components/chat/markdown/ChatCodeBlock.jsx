@@ -30,7 +30,7 @@ function ChatCodeBlock({ className = '', children }) {
   }
 
   return (
-    <div className="chat-code-block">
+    <div className="chat-code-block motion-list-enter">
       <div className="chat-code-block-header">
         <span className="chat-code-block-language">{label}</span>
         <IconButton
@@ -39,7 +39,7 @@ function ChatCodeBlock({ className = '', children }) {
           title={copied ? '已复制代码' : '复制代码'}
           label={copied ? '已复制代码' : '复制代码'}
           onClick={handleCopy}
-          className="chat-code-copy-button"
+          className={`chat-code-copy-button ${copied ? 'motion-copy-confirm' : ''}`}
         >
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </IconButton>

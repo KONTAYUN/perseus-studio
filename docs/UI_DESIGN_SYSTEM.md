@@ -183,6 +183,13 @@ Current shared classes:
 - `motion-rotate`: small icon rotation such as chevrons.
 - `motion-layout`: panel width/position/opacity layout transition.
 - `motion-panel-enter`: subtle new-panel entrance.
+- `motion-panel-exit`: lightweight fixed ghost exit for removed panels.
+- `motion-panel-lift`: temporary lifted state while a panel is being reordered.
+- `motion-presence-exit`: modal/popover body exit before unmount.
+- `motion-list-enter` and `motion-list-exit`: list item add/remove feedback.
+- `motion-content-switch`: short content fade when a selected detail view changes.
+- `motion-status-toast`: centered status notice entrance.
+- `motion-copy-confirm`: compact confirmation bounce for copy-style feedback.
 - `ui-icon-button`: stable icon-button shell.
 - `ui-icon-button-danger`: destructive icon-button hover tone.
 - `ui-icon-button-active`: active/selected icon-button state.

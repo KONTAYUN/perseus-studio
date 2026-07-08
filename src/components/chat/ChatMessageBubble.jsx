@@ -278,12 +278,22 @@ function LoadingStatusDots({ size = 'md' }) {
 }
 
 function MessageActionButton({ children, title, onClick }) {
+  const [confirmed, setConfirmed] = React.useState(false);
+  const timeoutRef = React.useRef(null);
+
+  React.useEffect(() => () => window.clearTimeout(timeoutRef.current), []);
+
   return (
     <IconButton
       type="button"
-      onClick={onClick}
+      onClick={(event) => {
+        onClick?.(event);
+        setConfirmed(true);
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = window.setTimeout(() => setConfirmed(false), 700);
+      }}
       size="compact"
-      className="border border-transparent"
+      className={`border border-transparent ${confirmed ? 'motion-copy-confirm' : ''}`}
       title={title}
     >
       {children}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Edit3, X } from 'lucide-react';
+import useMotionPresence from '../../hooks/useMotionPresence';
 import { Button, IconButton, Input } from '../ui';
 
 export function useAppDialog() {
@@ -46,48 +47,63 @@ export function useAppDialog() {
 export default function AppDialog({ dialog, onClose }) {
   const [value, setValue] = React.useState('');
   const inputRef = React.useRef(null);
+  const latestDialogRef = React.useRef(null);
+  const { closeWithPresence, exiting, present } = useMotionPresence(Boolean(dialog));
 
   React.useEffect(() => {
-    if (!dialog) return undefined;
-    setValue(dialog.initialValue || '');
+    if (dialog) latestDialogRef.current = dialog;
+  }, [dialog]);
+
+  const renderedDialog = dialog || latestDialogRef.current;
+  const requestClose = React.useCallback((result) => {
+    closeWithPresence(() => onClose(result));
+  }, [closeWithPresence, onClose]);
+
+  React.useEffect(() => {
+    if (!renderedDialog) return undefined;
+    setValue(renderedDialog.initialValue || '');
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose(dialog.type === 'prompt' ? null : false);
+      if (event.key === 'Escape') requestClose(renderedDialog.type === 'prompt' ? null : false);
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [dialog, onClose]);
+  }, [renderedDialog, requestClose]);
 
   React.useEffect(() => {
-    if (dialog?.type !== 'prompt') return;
+    if (renderedDialog?.type !== 'prompt') return;
     const timer = window.setTimeout(() => {
       inputRef.current?.focus();
       inputRef.current?.select();
     }, 60);
     return () => window.clearTimeout(timer);
-  }, [dialog]);
+  }, [renderedDialog]);
 
-  if (!dialog) return null;
+  if (!present || !renderedDialog) return null;
 
-  const isDanger = dialog.tone === 'red' || dialog.tone === 'danger';
+  const isDanger = renderedDialog.tone === 'red' || renderedDialog.tone === 'danger';
   const submit = (event) => {
     event.preventDefault();
-    if (dialog.type === 'prompt') {
-      onClose(value);
+    if (renderedDialog.type === 'prompt') {
+      requestClose(value);
       return;
     }
-    onClose(true);
+    requestClose(true);
   };
 
   return (
     <div
-      className="modal-backdrop fixed inset-0 z-[500] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md animate-in fade-in"
+      className={`modal-backdrop motion-fade-reveal fixed inset-0 z-[500] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md ${
+        exiting ? 'opacity-0' : 'animate-in fade-in opacity-100'
+      }`}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose(dialog.type === 'prompt' ? null : false);
+        if (event.target === event.currentTarget) requestClose(renderedDialog.type === 'prompt' ? null : false);
       }}
     >
       <form
         onSubmit={submit}
-        className="ui-overlay-surface motion-modal w-full max-w-md border border-white/50 bg-white/95 p-5 backdrop-blur-3xl dark:border-white/10 dark:bg-[#252527]/95"
+        className={`ui-overlay-surface motion-modal w-full max-w-md border border-white/50 bg-white/95 p-5 backdrop-blur-3xl dark:border-white/10 dark:bg-[#252527]/95 ${
+          exiting ? 'motion-presence-exit' : ''
+        }`}
       >
         <div className="flex items-start gap-4">
           <div
@@ -97,31 +113,31 @@ export default function AppDialog({ dialog, onClose }) {
                 : 'bg-blue-500/10 text-blue-500 dark:bg-blue-500/15 dark:text-blue-300'
             }`}
           >
-            {dialog.type === 'prompt' ? <Edit3 size={20} /> : <AlertTriangle size={20} />}
+            {renderedDialog.type === 'prompt' ? <Edit3 size={20} /> : <AlertTriangle size={20} />}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-base font-bold text-gray-900 dark:text-gray-100">{dialog.title}</div>
-            {dialog.message && (
+            <div className="text-base font-bold text-gray-900 dark:text-gray-100">{renderedDialog.title}</div>
+            {renderedDialog.message && (
               <div className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-gray-500 dark:text-gray-400">
-                {dialog.message}
+                {renderedDialog.message}
               </div>
             )}
           </div>
           <IconButton
             type="button"
-            onClick={() => onClose(dialog.type === 'prompt' ? null : false)}
+            onClick={() => requestClose(renderedDialog.type === 'prompt' ? null : false)}
             title="关闭"
           >
             <X size={16} />
           </IconButton>
         </div>
 
-        {dialog.type === 'prompt' && (
+        {renderedDialog.type === 'prompt' && (
           <Input
             ref={inputRef}
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder={dialog.placeholder}
+            placeholder={renderedDialog.placeholder}
             className="mt-5 h-11 px-4 font-semibold"
           />
         )}
@@ -129,16 +145,16 @@ export default function AppDialog({ dialog, onClose }) {
         <div className="mt-6 flex justify-end gap-2">
           <Button
             type="button"
-            onClick={() => onClose(dialog.type === 'prompt' ? null : false)}
+            onClick={() => requestClose(renderedDialog.type === 'prompt' ? null : false)}
             variant="secondary"
           >
-            {dialog.cancelLabel}
+            {renderedDialog.cancelLabel}
           </Button>
           <Button
             type="submit"
             variant={isDanger ? 'danger' : 'primary'}
           >
-            {dialog.confirmLabel}
+            {renderedDialog.confirmLabel}
           </Button>
         </div>
       </form>

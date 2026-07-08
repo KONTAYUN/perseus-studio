@@ -24,13 +24,13 @@ export default function PanelWrapper({
         isOpeningPanel || shouldIntro ? 'overflow-hidden' : 'overflow-visible'
       } ${
         isResizing ? '' : 'motion-layout'
-      }`}
+      } ${ide.draggingPanelId === id ? 'motion-panel-lift' : ''}`}
       style={{
         width: `${isOpeningPanel ? 0 : panelWidth}px`,
         flex: 'none',
-        opacity: isOpeningPanel ? 0 : ide.draggingPanelId === id ? 0.55 : 1,
+        opacity: isOpeningPanel ? 0 : ide.draggingPanelId === id ? 0.86 : 1,
         transform: ide.draggingPanelId === id
-          ? 'scale(0.985) translateY(2px)'
+          ? 'scale(1.006) translateY(-3px)'
           : 'scale(1) translateY(0)',
         marginRight: showResizer && !isOpeningPanel ? '12px' : '0px',
         zIndex:

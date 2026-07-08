@@ -200,3 +200,52 @@
 .ui-overlay-surface.motion-modal {
   border-radius: var(--radius-shell);
 }
+
+.panel-exit-ghost {
+  position: fixed;
+  z-index: 88;
+  pointer-events: none;
+  overflow: hidden;
+  transform-origin: top left;
+}
+
+.panel-exit-ghost-header {
+  display: flex;
+  height: 48px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--surface-line);
+  padding: 0 18px;
+  background: var(--surface-panel-header-bg);
+}
+
+.panel-exit-ghost-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: var(--radius-micro);
+  background: rgb(148 163 184 / 0.38);
+}
+
+.panel-exit-ghost-tab {
+  width: min(140px, 46%);
+  height: 24px;
+  border-radius: var(--radius-control-sm);
+  background: rgb(59 130 246 / 0.12);
+}
+
+.panel-exit-ghost-body {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 28px 34px;
+}
+
+.panel-exit-ghost-line {
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: rgb(148 163 184 / 0.14);
+}
+
+.dark .panel-exit-ghost-line {
+  background: rgb(255 255 255 / 0.08);
+}

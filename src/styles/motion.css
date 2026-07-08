@@ -48,6 +48,22 @@
   animation: perseus-panel-enter var(--motion-layout) var(--ease-layout) both;
 }
 
+.motion-panel-exit {
+  animation: perseus-panel-exit var(--motion-modal) var(--ease-layout) both;
+}
+
+.motion-panel-lift {
+  box-shadow:
+    0 14px 34px rgb(15 23 42 / 0.12),
+    0 0 28px rgb(59 130 246 / 0.12);
+}
+
+.dark .motion-panel-lift {
+  box-shadow:
+    0 18px 42px rgb(0 0 0 / 0.34),
+    0 0 32px rgb(59 130 246 / 0.18);
+}
+
 .motion-popover,
 .motion-popover-right {
   animation: perseus-popover-enter var(--motion-popover) var(--ease-motion) both;
@@ -76,6 +92,10 @@
   animation: none;
 }
 
+.motion-presence-exit {
+  animation: perseus-presence-exit var(--motion-base) var(--ease-motion) both;
+}
+
 .motion-card {
   animation: perseus-card-enter var(--motion-modal) var(--ease-motion) both;
 }
@@ -86,6 +106,31 @@
 
 .motion-chip {
   animation: perseus-chip-enter var(--motion-fast) var(--ease-motion) both;
+}
+
+.motion-list-enter {
+  animation: perseus-list-enter var(--motion-base) var(--ease-motion) both;
+}
+
+.motion-list-exit {
+  overflow: hidden;
+  animation: perseus-list-exit var(--motion-base) var(--ease-motion) both;
+}
+
+.motion-content-switch {
+  animation: perseus-content-switch var(--motion-base) var(--ease-motion) both;
+}
+
+.motion-status-toast {
+  animation: perseus-status-toast-enter var(--motion-popover) var(--ease-motion) both;
+}
+
+.motion-status-toast-exit {
+  animation: perseus-status-toast-exit var(--motion-base) var(--ease-motion) both;
+}
+
+.motion-copy-confirm {
+  animation: perseus-copy-confirm var(--motion-base) var(--ease-motion) both;
 }
 
 .motion-row {
@@ -208,11 +253,24 @@
 @keyframes perseus-panel-enter {
   from {
     opacity: 0;
-    transform: translateY(6px) scale(0.992);
+    transform: translateY(4px) scale(0.994);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes perseus-panel-exit {
+  from {
+    opacity: 0.94;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.985);
+    filter: blur(1.5px);
   }
 }
 
@@ -224,6 +282,17 @@
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes perseus-presence-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
   }
 }
 
@@ -260,6 +329,75 @@
   }
 }
 
+@keyframes perseus-list-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes perseus-list-exit {
+  from {
+    max-height: 72px;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-4px) scale(0.992);
+  }
+}
+
+@keyframes perseus-content-switch {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes perseus-status-toast-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@keyframes perseus-status-toast-exit {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -5px) scale(0.985);
+  }
+}
+
+@keyframes perseus-copy-confirm {
+  0% {
+    transform: scale(0.86);
+  }
+  58% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -273,9 +411,17 @@
   .motion-popover,
   .motion-popover-right,
   .motion-modal,
+  .motion-presence-exit,
   .motion-card,
   .motion-message,
-  .motion-chip {
+  .motion-chip,
+  .motion-list-enter,
+  .motion-list-exit,
+  .motion-content-switch,
+  .motion-status-toast,
+  .motion-status-toast-exit,
+  .motion-copy-confirm,
+  .motion-panel-exit {
     animation-duration: 1ms !important;
     animation-delay: 0ms !important;
   }

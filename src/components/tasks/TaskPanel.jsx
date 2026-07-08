@@ -1,17 +1,27 @@
 import React from 'react';
 import { Activity, Trash2, X } from 'lucide-react';
+import useMotionPresence from '../../hooks/useMotionPresence';
 import { Badge, Button, IconButton } from '../ui';
 
 export default function TaskPanel({ tasks }) {
-  if (!tasks.isTaskPanelOpen) return null;
+  const { closeWithPresence, exiting, present } = useMotionPresence(tasks.isTaskPanelOpen);
+  const closePanel = React.useCallback(() => {
+    closeWithPresence(() => tasks.setIsTaskPanelOpen(false));
+  }, [closeWithPresence, tasks]);
+
+  if (!present) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[140] bg-black/30 backdrop-blur-sm animate-in fade-in"
-      onClick={() => tasks.setIsTaskPanelOpen(false)}
+      className={`motion-fade-reveal fixed inset-0 z-[140] bg-black/30 backdrop-blur-sm ${
+        exiting ? 'opacity-0' : 'animate-in fade-in opacity-100'
+      }`}
+      onClick={closePanel}
     >
       <aside
-        className="ui-overlay-surface motion-modal absolute right-4 top-16 bottom-4 flex w-[min(920px,calc(100vw-2rem))] flex-col overflow-hidden border border-gray-200 bg-white dark:border-white/10 dark:bg-[#1C1C1E]"
+        className={`ui-overlay-surface motion-modal absolute right-4 top-16 bottom-4 flex w-[min(920px,calc(100vw-2rem))] flex-col overflow-hidden border border-gray-200 bg-white dark:border-white/10 dark:bg-[#1C1C1E] ${
+          exiting ? 'motion-presence-exit' : ''
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 items-center justify-between border-b border-gray-100 px-4 dark:border-white/10">
@@ -24,7 +34,7 @@ export default function TaskPanel({ tasks }) {
           </div>
           <div className="flex items-center gap-2">
             <IconButton
-              onClick={() => tasks.setIsTaskPanelOpen(false)}
+              onClick={closePanel}
               title="关闭任务面板"
             >
               <X size={16} />

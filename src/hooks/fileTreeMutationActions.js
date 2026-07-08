@@ -28,6 +28,9 @@ export function createFileTreeMutationActions({
   selectedItemType,
   selectedItems,
   selectedPaths,
+  animateFileTreeExit,
+  clearFileTreeExit,
+  flashFileTreePaths,
   setEditorStatusMessage,
   setErrorMessage,
   setInlineRenameDraft,
@@ -53,6 +56,7 @@ export function createFileTreeMutationActions({
         return next;
       });
       await loadTree();
+      flashFileTreePaths?.([path]);
       if (options.renameAfterCreate) {
         startInlineRename(path, 'folder');
       }
@@ -77,6 +81,7 @@ export function createFileTreeMutationActions({
         });
       }
       await loadTree();
+      flashFileTreePaths?.([path]);
       if (options.renameAfterCreate) {
         startInlineRename(path, 'file');
       } else if (options.openAfterCreate !== false) {
@@ -97,6 +102,7 @@ export function createFileTreeMutationActions({
       applyPathUpdate(oldPath, newPath);
       applyEditorPathUpdate?.(oldPath, newPath);
       await loadTree();
+      flashFileTreePaths?.([newPath]);
     } catch (error) {
       console.error('renamePath failed', error);
       setErrorMessage(error.message);
@@ -143,11 +149,14 @@ export function createFileTreeMutationActions({
     setErrorMessage('');
     setEditorStatusMessage?.('');
     try {
+      await animateFileTreeExit?.([path]);
       await apiPost('/api/files/delete', { path });
       clearPathState(path);
       clearEditorPathState?.(path);
       await loadTree();
+      clearFileTreeExit?.([path]);
     } catch (error) {
+      clearFileTreeExit?.([path]);
       console.error('deletePath failed', error);
       setErrorMessage(error.message);
       throw error;
@@ -161,6 +170,7 @@ export function createFileTreeMutationActions({
     setErrorMessage('');
     setUploadStatus(`正在上传 ${filesToUpload.length} 个文件...`);
 
+    const uploadedPaths = [];
     try {
       for (const file of filesToUpload) {
         const relativePath = buildUploadPath(file.name, targetPath);
@@ -183,6 +193,7 @@ export function createFileTreeMutationActions({
             throw error;
           }
         }
+        uploadedPaths.push(relativePath);
       }
 
       if (targetPath) {
@@ -194,6 +205,7 @@ export function createFileTreeMutationActions({
       }
       setUploadStatus(`上传完成：${filesToUpload.length} 个文件`);
       await loadTree();
+      flashFileTreePaths?.(uploadedPaths);
     } finally {
       resetFileDragState();
       window.setTimeout(() => setUploadStatus(''), 1800);
@@ -293,6 +305,7 @@ export function createFileTreeMutationActions({
       setSelectedPaths(new Set([movedPath]));
       setLastSelectedPath(movedPath);
       await loadTree();
+      flashFileTreePaths?.([movedPath]);
       showTransientUploadStatus('已调整顺序');
     } catch (error) {
       console.error('reorderPath failed', error);
@@ -317,7 +330,9 @@ export function createFileTreeMutationActions({
     });
     if (!ok) return;
     setErrorMessage('');
+    const pathsToDelete = itemsToDelete.map((item) => item.path);
     try {
+      await animateFileTreeExit?.(pathsToDelete);
       for (const item of itemsToDelete) {
         await apiPost('/api/files/delete', { path: item.path });
         clearPathState(item.path);
@@ -327,9 +342,11 @@ export function createFileTreeMutationActions({
       setSelectedItemPath('');
       setSelectedItemType('root');
       await loadTree();
+      clearFileTreeExit?.(pathsToDelete);
       setUploadStatus(`已移入回收站：${count} 项`);
       window.setTimeout(() => setUploadStatus(''), 2200);
     } catch (error) {
+      clearFileTreeExit?.(pathsToDelete);
       console.error('deleteSelectedItems failed', error);
       setErrorMessage(error.message);
       throw error;

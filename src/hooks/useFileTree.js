@@ -33,6 +33,8 @@ export default function useFileTree({
   const [inlineRenamePath, setInlineRenamePath] = useState('');
   const [inlineRenameDraft, setInlineRenameDraft] = useState('');
   const [uploadStatus, setUploadStatus] = useState('');
+  const [exitingFilePaths, setExitingFilePaths] = useState(new Set());
+  const [recentFileTreePaths, setRecentFileTreePaths] = useState(new Set());
 
   const selectedItemPathRef = useRef('');
   const {
@@ -160,6 +162,9 @@ export default function useFileTree({
     selectedPaths,
     setEditorStatusMessage,
     setErrorMessage,
+    animateFileTreeExit,
+    clearFileTreeExit,
+    flashFileTreePaths,
     setInlineRenameDraft,
     setInlineRenamePath,
     setIsAddMenuOpen,
@@ -211,6 +216,44 @@ export default function useFileTree({
     }
   }
 
+  function animateFileTreeExit(paths = []) {
+    const uniquePaths = [...new Set(paths.filter(Boolean))];
+    if (uniquePaths.length === 0) return Promise.resolve();
+    setExitingFilePaths((current) => {
+      const next = new Set(current);
+      uniquePaths.forEach((path) => next.add(path));
+      return next;
+    });
+    return new Promise((resolve) => window.setTimeout(resolve, 180));
+  }
+
+  function clearFileTreeExit(paths = []) {
+    const uniquePaths = new Set(paths.filter(Boolean));
+    if (uniquePaths.size === 0) return;
+    setExitingFilePaths((current) => {
+      const next = new Set(current);
+      uniquePaths.forEach((path) => next.delete(path));
+      return next;
+    });
+  }
+
+  function flashFileTreePaths(paths = []) {
+    const uniquePaths = [...new Set(paths.filter(Boolean))];
+    if (uniquePaths.length === 0) return;
+    setRecentFileTreePaths((current) => {
+      const next = new Set(current);
+      uniquePaths.forEach((path) => next.add(path));
+      return next;
+    });
+    window.setTimeout(() => {
+      setRecentFileTreePaths((current) => {
+        const next = new Set(current);
+        uniquePaths.forEach((path) => next.delete(path));
+        return next;
+      });
+    }, 1400);
+  }
+
   const toggleFolder = (folderPath) => {
     setOpenFolders((current) => {
       const next = new Set(current);
@@ -243,6 +286,7 @@ export default function useFileTree({
     draggingFilePath,
     emptyTrash,
     errorMessage,
+    exitingFilePaths,
     exportNotes,
     fileDialog,
     fileDropIndicator,
@@ -275,6 +319,7 @@ export default function useFileTree({
     openSearchResult,
     openTrashPanel,
     renamePath,
+    recentFileTreePaths,
     reorderPath,
     resetFileDragState,
     restoreTrashItem,
