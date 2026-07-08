@@ -117,7 +117,7 @@
 
 .rich-text-editor-content p {
   color: inherit;
-  margin: 0.55em 0;
+  margin: 0 0 0.85em;
 }
 
 .rich-text-editor-content blockquote {
