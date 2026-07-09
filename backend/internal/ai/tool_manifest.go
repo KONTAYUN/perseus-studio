@@ -67,6 +67,13 @@ type CurrentReadWorkingSet struct {
 
 type CurrentReadSpanView struct {
 	Path                            string `json:"path"`
+	ToolName                        string `json:"tool_name,omitempty"`
+	Mode                            string `json:"mode,omitempty"`
+	View                            string `json:"view,omitempty"`
+	BlockID                         string `json:"block_id,omitempty"`
+	SectionID                       string `json:"section_id,omitempty"`
+	DocHash                         string `json:"doc_hash,omitempty"`
+	LedgerID                        string `json:"ledger_id,omitempty"`
 	StartLine                       int    `json:"start_line,omitempty"`
 	EndLine                         int    `json:"end_line,omitempty"`
 	TotalLines                      int    `json:"total_lines,omitempty"`

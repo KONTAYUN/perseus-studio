@@ -146,6 +146,10 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		return
 	}
 	opts.Event("model_request_summary", "info", map[string]any{
+		"kernel_version":                    summary.KernelVersion,
+		"kernel_mode":                       summary.KernelMode,
+		"kernel_progress_events":            summary.KernelProgressEvents,
+		"kernel_read_targets":               summary.KernelReadTargets,
 		"round":                             summary.Round,
 		"protocol":                          summary.Protocol,
 		"provider_message_phase":            summary.ProviderMessagePhase,

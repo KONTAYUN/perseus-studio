@@ -9,6 +9,13 @@ import (
 
 type readResultSpan struct {
 	Path       string
+	ToolName   string
+	Mode       string
+	View       string
+	BlockID    string
+	SectionID  string
+	DocHash    string
+	LedgerID   string
 	StartLine  int
 	EndLine    int
 	TotalLines int
@@ -55,13 +62,20 @@ func readResultSpans(result *TranscriptToolResult) []readResultSpan {
 	}
 	seen := map[string]bool{}
 	var spans []readResultSpan
-	add := func(path string, startLine, endLine, totalLines int, truncated bool, content string) {
+	add := func(path string, startLine, endLine, totalLines int, truncated bool, content string, meta AgentReadTarget) {
 		normalized := normalizeWorkspaceEventPath(path)
 		if normalized == "" {
 			return
 		}
 		span := readResultSpan{
 			Path:       normalized,
+			ToolName:   firstNonEmpty(meta.ToolName, result.ToolName),
+			Mode:       meta.Mode,
+			View:       meta.View,
+			BlockID:    meta.BlockID,
+			SectionID:  meta.SectionID,
+			DocHash:    meta.DocHash,
+			LedgerID:   meta.LedgerID,
 			StartLine:  startLine,
 			EndLine:    endLine,
 			TotalLines: totalLines,
@@ -82,6 +96,12 @@ func readResultSpans(result *TranscriptToolResult) []readResultSpan {
 		Paths           []string `json:"paths"`
 		Content         string   `json:"content"`
 		NumberedContent string   `json:"numbered_content"`
+		View            string   `json:"view"`
+		Mode            string   `json:"mode"`
+		BlockID         string   `json:"block_id"`
+		SectionID       string   `json:"section_id"`
+		DocHash         string   `json:"doc_hash"`
+		LedgerID        string   `json:"ledger_id"`
 		Truncated       bool     `json:"truncated"`
 		StartLine       int      `json:"start_line"`
 		EndLine         int      `json:"end_line"`
@@ -91,6 +111,12 @@ func readResultSpans(result *TranscriptToolResult) []readResultSpan {
 			Path            string `json:"path"`
 			Content         string `json:"content"`
 			NumberedContent string `json:"numbered_content"`
+			View            string `json:"view"`
+			Mode            string `json:"mode"`
+			BlockID         string `json:"block_id"`
+			SectionID       string `json:"section_id"`
+			DocHash         string `json:"doc_hash"`
+			LedgerID        string `json:"ledger_id"`
 			Truncated       bool   `json:"truncated"`
 			StartLine       int    `json:"start_line"`
 			EndLine         int    `json:"end_line"`
@@ -101,27 +127,57 @@ func readResultSpans(result *TranscriptToolResult) []readResultSpan {
 		if isContextReferenceStatus(payload.Status) {
 			return nil
 		}
-		add(payload.Path, payload.StartLine, payload.EndLine, payload.TotalLines, payload.Truncated, readSpanContent(payload.Content, payload.NumberedContent))
+		payloadMeta := AgentReadTarget{
+			ToolName:  result.ToolName,
+			View:      payload.View,
+			Mode:      payload.Mode,
+			BlockID:   payload.BlockID,
+			SectionID: payload.SectionID,
+			DocHash:   payload.DocHash,
+			LedgerID:  payload.LedgerID,
+		}
+		add(payload.Path, payload.StartLine, payload.EndLine, payload.TotalLines, payload.Truncated, readSpanContent(payload.Content, payload.NumberedContent), payloadMeta)
 		for _, item := range payload.Items {
 			if isContextReferenceStatus(item.Status) {
 				continue
 			}
-			add(item.Path, item.StartLine, item.EndLine, item.TotalLines, item.Truncated, readSpanContent(item.Content, item.NumberedContent))
+			itemMeta := AgentReadTarget{
+				ToolName:  result.ToolName,
+				View:      firstNonEmpty(item.View, payload.View),
+				Mode:      firstNonEmpty(item.Mode, payload.Mode),
+				BlockID:   firstNonEmpty(item.BlockID, payload.BlockID),
+				SectionID: firstNonEmpty(item.SectionID, payload.SectionID),
+				DocHash:   firstNonEmpty(item.DocHash, payload.DocHash),
+				LedgerID:  firstNonEmpty(item.LedgerID, payload.LedgerID),
+			}
+			add(item.Path, item.StartLine, item.EndLine, item.TotalLines, item.Truncated, readSpanContent(item.Content, item.NumberedContent), itemMeta)
 		}
 		if len(spans) == 0 {
 			for _, path := range payload.Paths {
-				add(path, 0, 0, 0, false, "")
+				add(path, 0, 0, 0, false, "", payloadMeta)
 			}
 		}
 	}
 	if len(spans) == 0 && result.ToolName != "read_workspace_files" {
 		for _, path := range workspaceEventPaths(result.Event) {
-			add(path, 0, 0, 0, false, "")
+			add(path, 0, 0, 0, false, "", AgentReadTarget{ToolName: result.ToolName})
 		}
 	}
 	sort.Slice(spans, func(i, j int) bool {
 		if spans[i].Path != spans[j].Path {
 			return spans[i].Path < spans[j].Path
+		}
+		if spans[i].Mode != spans[j].Mode {
+			return spans[i].Mode < spans[j].Mode
+		}
+		if spans[i].View != spans[j].View {
+			return spans[i].View < spans[j].View
+		}
+		if spans[i].BlockID != spans[j].BlockID {
+			return spans[i].BlockID < spans[j].BlockID
+		}
+		if spans[i].SectionID != spans[j].SectionID {
+			return spans[i].SectionID < spans[j].SectionID
 		}
 		if spans[i].StartLine != spans[j].StartLine {
 			return spans[i].StartLine < spans[j].StartLine
@@ -200,7 +256,7 @@ func compactReadResultForPayload(result *TranscriptToolResult) bool {
 		return false
 	}
 	changed := false
-	if compactReadPayloadObjectForPayload(payload) {
+	if compactReadPayloadObjectForPayload(payload, result.ToolName) {
 		changed = true
 	}
 	if rawItems, ok := payload["items"].([]any); ok {
@@ -209,7 +265,7 @@ func compactReadResultForPayload(result *TranscriptToolResult) bool {
 			if !ok {
 				continue
 			}
-			if compactReadPayloadObjectForPayload(item) {
+			if compactReadPayloadObjectForPayload(item, result.ToolName) {
 				changed = true
 			}
 		}
@@ -228,7 +284,7 @@ func compactReadResultForPayload(result *TranscriptToolResult) bool {
 	return true
 }
 
-func compactReadPayloadObjectForPayload(payload map[string]any) bool {
+func compactReadPayloadObjectForPayload(payload map[string]any, toolName string) bool {
 	if payload == nil {
 		return false
 	}
@@ -250,7 +306,11 @@ func compactReadPayloadObjectForPayload(payload map[string]any) bool {
 		payload["numbered_content_state"] = "reference_only"
 	}
 	payload["status"] = "context_reference"
-	payload["next_action"] = "Use a preserved recent read when available; call read_workspace_text/read_workspace_files with start_line/end_line only when exact text is missing."
+	if toolName == "read_workspace_note_view" {
+		payload["next_action"] = "Use a preserved recent note block/section when available; call read_workspace_note_view mode=index, then mode=block or mode=section only when exact HTML is missing."
+	} else {
+		payload["next_action"] = "Use a preserved recent read when available; call read_workspace_text/read_workspace_files with start_line/end_line only when exact text is missing."
+	}
 	return true
 }
 
@@ -260,6 +320,9 @@ func isContextReferenceStatus(status string) bool {
 }
 
 func readSpanKey(span readResultSpan) string {
+	if span.ToolName == "read_workspace_note_view" || span.Mode != "" || span.BlockID != "" || span.SectionID != "" || span.DocHash != "" {
+		return fmt.Sprintf("%s:%s:%s:%s:%s:%s:%d:%d:%d:%t", span.Path, span.Mode, span.View, span.DocHash, span.BlockID, span.SectionID, span.StartLine, span.EndLine, span.TotalLines, span.Truncated)
+	}
 	return fmt.Sprintf("%s:%d:%d:%d:%t", span.Path, span.StartLine, span.EndLine, span.TotalLines, span.Truncated)
 }
 
@@ -268,6 +331,10 @@ func readSpanLabels(spans []readResultSpan) []string {
 	for _, span := range spans {
 		if span.HasRange {
 			labels = append(labels, fmt.Sprintf("%s:%d-%d", span.Path, span.StartLine, span.EndLine))
+			continue
+		}
+		if span.ToolName == "read_workspace_note_view" || span.Mode != "" || span.BlockID != "" || span.SectionID != "" {
+			labels = append(labels, noteReadSpanLabel(span))
 			continue
 		}
 		labels = append(labels, span.Path)
@@ -306,6 +373,13 @@ func currentReadWorkingSetFromTranscript(transcript *AgentTranscript, limit int)
 				state := readContentStateAvailableForSpan(span, contentAvailable)
 				set.Spans = append(set.Spans, CurrentReadSpanView{
 					Path:                            span.Path,
+					ToolName:                        span.ToolName,
+					Mode:                            span.Mode,
+					View:                            span.View,
+					BlockID:                         span.BlockID,
+					SectionID:                       span.SectionID,
+					DocHash:                         span.DocHash,
+					LedgerID:                        span.LedgerID,
 					StartLine:                       span.StartLine,
 					EndLine:                         span.EndLine,
 					TotalLines:                      span.TotalLines,
@@ -346,10 +420,34 @@ func currentReadWorkingSetLabels(set CurrentReadWorkingSet) []string {
 			labels = append(labels, fmt.Sprintf("%s:%d-%d", span.Path, span.StartLine, span.EndLine))
 			continue
 		}
+		if span.ToolName == "read_workspace_note_view" || span.Mode != "" || span.BlockID != "" || span.SectionID != "" {
+			labels = append(labels, noteWorkingSetSpanLabel(span))
+			continue
+		}
 		labels = append(labels, span.Path)
 	}
 	sort.Strings(labels)
 	return labels
+}
+
+func noteWorkingSetSpanLabel(span CurrentReadSpanView) string {
+	parts := []string{span.Path}
+	if span.Mode != "" {
+		parts = append(parts, "mode="+span.Mode)
+	}
+	if span.View != "" {
+		parts = append(parts, "view="+span.View)
+	}
+	if span.BlockID != "" {
+		parts = append(parts, "block="+span.BlockID)
+	}
+	if span.SectionID != "" {
+		parts = append(parts, "section="+span.SectionID)
+	}
+	if span.DocHash != "" {
+		parts = append(parts, "doc="+truncatePlainRunes(span.DocHash, 12))
+	}
+	return strings.Join(nonEmptyStrings(parts...), " ")
 }
 
 func currentReadWorkingSetPaths(set CurrentReadWorkingSet) []string {
@@ -382,6 +480,9 @@ func readSpanSupersedes(newer, older readResultSpan) bool {
 	if newer.Path == "" || newer.Path != older.Path {
 		return false
 	}
+	if newer.ToolName == "read_workspace_note_view" || older.ToolName == "read_workspace_note_view" || newer.Mode != "" || older.Mode != "" {
+		return noteReadSpanSupersedes(newer, older)
+	}
 	if !newer.HasRange || !older.HasRange {
 		return !newer.HasRange && !older.HasRange
 	}
@@ -395,4 +496,41 @@ func readSpanSupersedes(newer, older readResultSpan) bool {
 		return false
 	}
 	return newer.StartLine <= older.StartLine && newer.EndLine >= older.EndLine
+}
+
+func noteReadSpanLabel(span readResultSpan) string {
+	parts := []string{span.Path}
+	if span.Mode != "" {
+		parts = append(parts, "mode="+span.Mode)
+	}
+	if span.View != "" {
+		parts = append(parts, "view="+span.View)
+	}
+	if span.BlockID != "" {
+		parts = append(parts, "block="+span.BlockID)
+	}
+	if span.SectionID != "" {
+		parts = append(parts, "section="+span.SectionID)
+	}
+	if span.DocHash != "" {
+		parts = append(parts, "doc="+truncatePlainRunes(span.DocHash, 12))
+	}
+	return strings.Join(nonEmptyStrings(parts...), " ")
+}
+
+func noteReadSpanSupersedes(newer, older readResultSpan) bool {
+	if newer.Path != older.Path {
+		return false
+	}
+	if firstNonEmpty(newer.Mode, "full") != firstNonEmpty(older.Mode, "full") ||
+		firstNonEmpty(newer.View, "structure") != firstNonEmpty(older.View, "structure") ||
+		newer.DocHash != older.DocHash ||
+		newer.BlockID != older.BlockID ||
+		newer.SectionID != older.SectionID {
+		return false
+	}
+	if !newer.Truncated {
+		return true
+	}
+	return newer.Content != "" && newer.Content == older.Content
 }

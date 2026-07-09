@@ -151,7 +151,26 @@ func toolTargetSummary(name, argumentsJSON string) string {
 		return quotedSummary(stringField(decoded, "query", "pattern"))
 	case "search_workspace_text", "perseus_search_web", "web_search":
 		return quotedSummary(stringField(decoded, "query"))
-	case "inspect_workspace", "read_workspace_note_view", "read_workspace_text", "apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
+	case "read_workspace_note_view":
+		target := kernelReadTargetFromArguments(name, argumentsJSON)
+		parts := []string{pathSummary(target.Path)}
+		if target.Mode != "" {
+			parts = append(parts, "mode="+target.Mode)
+		}
+		if target.View != "" {
+			parts = append(parts, "view="+target.View)
+		}
+		if target.BlockID != "" {
+			parts = append(parts, "block="+target.BlockID)
+		}
+		if target.SectionID != "" {
+			parts = append(parts, "section="+target.SectionID)
+		}
+		if target.DocHash != "" {
+			parts = append(parts, "doc="+truncatePlainRunes(target.DocHash, 12))
+		}
+		return strings.Join(nonEmptyStrings(parts...), " ")
+	case "inspect_workspace", "read_workspace_text", "apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
 		if name == "apply_workspace_patch" {
 			if path := firstPatchPathFromText(stringField(decoded, "patch")); path != "" {
 				return pathSummary(path)

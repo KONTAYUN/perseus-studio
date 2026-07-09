@@ -73,6 +73,7 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 		"truncated": truncated,
 		"hash":      result.Hash,
 		"doc_hash":  noteDocHash(result.Content),
+		"ledger_id": noteViewLedgerID(result.Path, args.View, args.Mode, "", "", noteDocHash(result.Content)),
 		"next_hint": "Use text/structure for content work and format for lightweight style awareness. For exact HTML, call mode=index first, then mode=block or mode=section with raw.",
 	})
 	summary := fmt.Sprintf("read %s note view for %s (%d chars, truncated=%t)", args.View, result.Path, len([]rune(viewContent)), truncated)
@@ -90,6 +91,7 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 		"mode":      mode,
 		"hash":      fileHash,
 		"doc_hash":  doc.DocHash,
+		"ledger_id": noteViewLedgerID(path, view, mode, blockID, sectionID, doc.DocHash),
 		"next_hint": "Use mode=index to locate HTML blocks, then mode=block or mode=section for targeted raw HTML before precise formatting edits.",
 	}
 	switch mode {
@@ -119,6 +121,7 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 		content := renderNoteBlocks([]noteBlock{block}, view)
 		content, truncated := limitNoteContent(content, maxChars)
 		base["block_id"] = block.ID
+		base["ledger_id"] = noteViewLedgerID(path, view, mode, block.ID, "", doc.DocHash)
 		base["block"] = map[string]any{
 			"block_id":     block.ID,
 			"tag":          block.Tag,
@@ -151,6 +154,7 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 		content := renderNoteBlocks(blocks, view)
 		content, truncated := limitNoteContent(content, maxChars)
 		base["section_id"] = section.ID
+		base["ledger_id"] = noteViewLedgerID(path, view, mode, "", section.ID, doc.DocHash)
 		base["section"] = section
 		base["content"] = content
 		base["truncated"] = truncated
@@ -163,6 +167,10 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 	default:
 		return "", "", "正在读取笔记视图...", path, fmt.Errorf("unsupported note view mode: %s", mode)
 	}
+}
+
+func noteViewLedgerID(path, view, mode, blockID, sectionID, docHash string) string {
+	return agentKernelLedgerID("note", normalizeWorkspaceEventPath(path), firstNonEmpty(mode, "full"), firstNonEmpty(view, "structure"), docHash, blockID, sectionID)
 }
 
 func renderNoteView(fragment, view string) string {

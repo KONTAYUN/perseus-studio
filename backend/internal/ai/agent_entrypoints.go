@@ -30,6 +30,7 @@ func (s *Service) runOpenAIAgent(ctx context.Context, conversationID, messageID 
 		toolLoopActive:     opts.ForceTool != "" || opts.TaskID != "" || attachmentsRequireToolLoop(attachments),
 		transcript:         newAgentTranscript(),
 		contextManager:     newAgentContextManager(),
+		kernel:             newAgentKernelState(),
 	}
 	if checkpoint, ok := s.loadRunCheckpoint(ctx, opts); ok {
 		runtime.restoreCheckpoint(checkpoint)
@@ -61,6 +62,7 @@ func (s *Service) runAnthropicAgent(ctx context.Context, conversationID, message
 		toolLoopActive:     opts.ForceTool != "" || opts.TaskID != "" || attachmentsRequireToolLoop(attachments),
 		transcript:         newAgentTranscript(),
 		contextManager:     newAgentContextManager(),
+		kernel:             newAgentKernelState(),
 	}
 	if checkpoint, ok := s.loadRunCheckpoint(ctx, opts); ok {
 		runtime.restoreCheckpoint(checkpoint)

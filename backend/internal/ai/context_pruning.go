@@ -166,6 +166,13 @@ func compactedToolResultNotice(toolName string, event ToolEvent, message string)
 }
 
 func compactedToolResultNoticeWithReason(toolName string, event ToolEvent, reasonCode, contentState, message string) string {
+	exactTextNeeded := "call the relevant workspace tool for the specific path and line range"
+	if toolName == "read_workspace_note_view" {
+		exactTextNeeded = "call read_workspace_note_view with mode=index, then mode=block or mode=section for the specific HTML block/section"
+		if strings.Contains(message, "line range") || strings.TrimSpace(message) == "" {
+			message = "Use this historical note read as metadata only; call read_workspace_note_view with mode=index, then mode=block or mode=section when exact HTML is missing."
+		}
+	}
 	payload := map[string]any{
 		"status":            "context_reference",
 		"tool_name":         toolName,
@@ -174,7 +181,7 @@ func compactedToolResultNoticeWithReason(toolName string, event ToolEvent, reaso
 		"content_state":     contentState,
 		"reason_code":       reasonCode,
 		"next_action":       message,
-		"exact_text_needed": "call the relevant workspace tool for the specific path and line range",
+		"exact_text_needed": exactTextNeeded,
 	}
 	if isReadWorkspaceTool(toolName) {
 		payload["read_content_state"] = readContentStateForReference(contentState)

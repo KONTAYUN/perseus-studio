@@ -121,6 +121,7 @@ func providerReadObservationPayload(result TranscriptToolResult, payload map[str
 	copyStringField(next, payload, "block_id")
 	copyStringField(next, payload, "section_id")
 	copyStringField(next, payload, "doc_hash")
+	copyStringField(next, payload, "ledger_id")
 	if path := firstNonEmpty(stringFromAny(payload["path"]), result.Event.Path); path != "" {
 		next["path"] = normalizeWorkspaceEventPath(path)
 	}

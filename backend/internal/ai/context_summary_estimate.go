@@ -16,6 +16,8 @@ func summarizeAnthropicContext(messages []map[string]any, transcript *AgentTrans
 
 func summarizeProviderContext(protocol string, messages []map[string]any, transcript *AgentTranscript, actions []string, round int, profile providerRuntimeProfile) ProviderRequestSummary {
 	summary := ProviderRequestSummary{
+		KernelVersion:           agentKernelV2Version,
+		KernelMode:              agentKernelV2Version,
 		Round:                   round,
 		Protocol:                protocol,
 		ToolManifestDigest:      toolManifestDigest(),
@@ -57,6 +59,9 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 					summary.NoteViewSectionReads += sectionReads
 				}
 			}
+			if readToolResultLedgerTruncated(result.Content) {
+				summary.LedgerResultTruncated = true
+			}
 			summary.LargestToolResults = appendLargestToolResultSize(summary.LargestToolResults, ToolResultSizeLog{
 				ToolName:     result.ToolName,
 				Path:         normalizeWorkspaceEventPath(result.Event.Path),
@@ -96,6 +101,16 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 	}
 	summary.ContextWatermarkPercent = contextWatermarkPercent(summary.EstimatedTokens, summary.ContextWindowTokens)
 	return summary
+}
+
+func readToolResultLedgerTruncated(raw string) bool {
+	var payload struct {
+		LedgerResultTruncated bool `json:"ledger_result_truncated"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return false
+	}
+	return payload.LedgerResultTruncated
 }
 
 func noteViewReadModeCounts(raw string) (int, int, int) {

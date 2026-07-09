@@ -260,6 +260,9 @@ type AgentRuntimeCheckpoint struct {
 	LastProviderEmptyResponse bool                                `json:"last_provider_empty_response"`
 	CompletedContent          string                              `json:"completed_content"`
 	CurrentRound              int                                 `json:"current_round"`
+	ActionProgress            ActionProgressLedger                `json:"action_progress,omitempty"`
+	LoopGuard                 AgentLoopGuard                      `json:"loop_guard,omitempty"`
+	Kernel                    AgentKernelState                    `json:"kernel,omitempty"`
 	Seq                       int64                               `json:"seq,omitempty"`
 }
 
@@ -284,6 +287,9 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 		LastProviderEmptyResponse: r.lastProviderEmptyResponse,
 		CompletedContent:          r.completedContent,
 		CurrentRound:              r.currentRound,
+		ActionProgress:            r.actionProgress,
+		LoopGuard:                 r.loopGuard,
+		Kernel:                    normalizeAgentKernelState(r.kernel),
 	}
 	for key, value := range r.appliedMutations {
 		checkpoint.AppliedMutations[key] = value
@@ -326,6 +332,9 @@ func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
 	r.lastProviderEmptyResponse = checkpoint.LastProviderEmptyResponse
 	r.completedContent = checkpoint.CompletedContent
 	r.currentRound = checkpoint.CurrentRound
+	r.actionProgress = checkpoint.ActionProgress
+	r.loopGuard = checkpoint.LoopGuard
+	r.kernel = normalizeAgentKernelState(checkpoint.Kernel)
 }
 
 func initialRuntimeCheckpoint(messages []store.Message, attachments []AttachmentPayload, allowTask bool, requiresCompletion bool) AgentRuntimeCheckpoint {
@@ -336,5 +345,6 @@ func initialRuntimeCheckpoint(messages []store.Message, attachments []Attachment
 		LoadedToolsets:     allAgentToolsets(allowTask),
 		RequiresCompletion: requiresCompletion,
 		ToolLoopActive:     requiresCompletion,
+		Kernel:             newAgentKernelState(),
 	}
 }

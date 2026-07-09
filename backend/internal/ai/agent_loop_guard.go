@@ -14,7 +14,8 @@ func (r *agentRuntime) recordLoopGuardAction(call agentToolCall, isError bool, e
 	if r == nil {
 		return
 	}
-	key := loopGuardActionKey(call, isError, event)
+	r.recordKernelToolProgress(call, isError, event, result)
+	key := loopGuardActionKey(call, isError, event, r.kernelV2Active())
 	if key != "" && key == r.loopGuard.LastActionKey {
 		r.loopGuard.RepeatedActionCount++
 	} else {
@@ -31,15 +32,21 @@ func (r *agentRuntime) recordLoopGuardAction(call agentToolCall, isError bool, e
 		r.loopGuard.LastProgressFingerprint = fingerprint
 		r.loopGuard.NoProgressRoundCount = 0
 		r.actionProgress.LastProgressRound = r.currentRound
+		if isReadWorkspaceTool(call.Name) && !isError {
+			r.actionProgress.LastReadProgressRound = r.currentRound
+		}
 	}
 }
 
-func loopGuardActionKey(call agentToolCall, isError bool, event ToolEvent) string {
+func loopGuardActionKey(call agentToolCall, isError bool, event ToolEvent, useKernelTarget bool) string {
 	name := strings.TrimSpace(call.Name)
 	if name == "" {
 		return ""
 	}
 	target := firstNonEmpty(event.TargetSummary, event.Path, toolTargetSummary(name, executionToolArgumentsJSON(call)))
+	if useKernelTarget {
+		target = firstNonEmpty(kernelToolTargetKey(name, executionToolArgumentsJSON(call), event, AgentReadTarget{}), target)
+	}
 	status := event.Status
 	if status == "" {
 		if isError {
@@ -55,7 +62,11 @@ func (r *agentRuntime) progressFingerprint() string {
 	if r == nil {
 		return ""
 	}
-	return strings.Join(r.verifiedWorkspaceChangedPaths(), "|") + "::" + strings.Join(r.actionProgress.ConditionSatisfiedPaths, "|")
+	kernelProgress := ""
+	if r.kernelV2Active() {
+		kernelProgress = r.kernelProgressFingerprint()
+	}
+	return strings.Join(r.verifiedWorkspaceChangedPaths(), "|") + "::" + strings.Join(r.actionProgress.ConditionSatisfiedPaths, "|") + "::" + kernelProgress
 }
 
 func (r *agentRuntime) loopGuardTriggered() (LoopGuardObservation, bool, bool) {

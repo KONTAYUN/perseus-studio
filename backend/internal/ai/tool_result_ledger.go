@@ -17,6 +17,7 @@ type LedgerToolResultSnapshot struct {
 	BlockID               string           `json:"block_id,omitempty"`
 	SectionID             string           `json:"section_id,omitempty"`
 	DocHash               string           `json:"doc_hash,omitempty"`
+	LedgerID              string           `json:"ledger_id,omitempty"`
 	StartLine             int              `json:"start_line,omitempty"`
 	EndLine               int              `json:"end_line,omitempty"`
 	TotalLines            int              `json:"total_lines,omitempty"`
@@ -91,6 +92,7 @@ func buildLedgerToolResultSnapshot(toolName, result string) LedgerToolResultSnap
 	snapshot.BlockID = stringFromAny(payload["block_id"])
 	snapshot.SectionID = stringFromAny(payload["section_id"])
 	snapshot.DocHash = stringFromAny(payload["doc_hash"])
+	snapshot.LedgerID = stringFromAny(payload["ledger_id"])
 	snapshot.StartLine = intFromAny(payload["start_line"])
 	snapshot.EndLine = intFromAny(payload["end_line"])
 	snapshot.TotalLines = intFromAny(payload["total_lines"])

@@ -70,6 +70,11 @@ func (r *agentRuntime) callModel(ctx context.Context, round int) (agentModelTurn
 
 func (r *agentRuntime) annotateRequestSummary() {
 	actionManifest := manifestWithWorkspaceState(r.currentModelActionManifest(), r.lastContextSnapshot)
+	r.ensureKernelState()
+	r.lastContextSnapshot.Summary.KernelVersion = r.kernel.Version
+	r.lastContextSnapshot.Summary.KernelMode = r.kernel.Mode
+	r.lastContextSnapshot.Summary.KernelProgressEvents = len(r.kernel.ProgressEvents)
+	r.lastContextSnapshot.Summary.KernelReadTargets = len(r.kernel.ReadTargets)
 	r.lastContextSnapshot.Summary.ProviderAttempts = r.providerAttempts
 	r.lastContextSnapshot.Summary.CheckpointResumeAttempt = r.checkpointResumeAttempts
 	r.lastContextSnapshot.Summary.LoadedToolsets = loadedToolsetNames(r.loadedToolsets)

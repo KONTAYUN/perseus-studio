@@ -77,6 +77,7 @@ type ActionSelectionState struct {
 type ActionProgressLedger struct {
 	ConditionSatisfiedPaths []string `json:"condition_satisfied_paths,omitempty"`
 	LastProgressRound       int      `json:"last_progress_round,omitempty"`
+	LastReadProgressRound   int      `json:"last_read_progress_round,omitempty"`
 }
 
 type AgentLoopGuard struct {
@@ -138,6 +139,7 @@ type agentRuntime struct {
 	providerAttempts          int
 	actionProgress            ActionProgressLedger
 	loopGuard                 AgentLoopGuard
+	kernel                    AgentKernelState
 }
 
 type runtimeToolFailure struct {

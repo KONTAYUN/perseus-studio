@@ -15,6 +15,10 @@ type ContextSnapshot struct {
 }
 
 type ProviderRequestSummary struct {
+	KernelVersion                 string               `json:"kernel_version,omitempty"`
+	KernelMode                    string               `json:"kernel_mode,omitempty"`
+	KernelProgressEvents          int                  `json:"kernel_progress_events,omitempty"`
+	KernelReadTargets             int                  `json:"kernel_read_targets,omitempty"`
 	Round                         int                  `json:"round"`
 	Protocol                      string               `json:"protocol"`
 	ProviderMessagePhase          string               `json:"provider_message_phase,omitempty"`

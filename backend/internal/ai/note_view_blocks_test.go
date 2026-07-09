@@ -162,3 +162,131 @@ func TestWorkspacePromptDirectsHTMLTruncationToBlockReads(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentKernelNoteViewBlocksCountAsDistinctProgress(t *testing.T) {
+	runtime := &agentRuntime{
+		kernel:           newAgentKernelState(),
+		appliedMutations: map[string]ToolEvent{},
+		chunkWrites:      map[string]workspaceChunkWriteState{},
+	}
+	event := ToolEvent{ToolName: "read_workspace_note_view", Status: "success", Path: "Note.html"}
+	callOne := agentToolCall{Name: "read_workspace_note_view", ArgumentsJSON: `{"path":"Note.html","mode":"block","view":"raw","block_id":"b0001","doc_hash":"abc"}`}
+	callTwo := agentToolCall{Name: "read_workspace_note_view", ArgumentsJSON: `{"path":"Note.html","mode":"block","view":"raw","block_id":"b0002","doc_hash":"abc"}`}
+	if loopGuardActionKey(callOne, false, event, true) == loopGuardActionKey(callTwo, false, event, true) {
+		t.Fatal("different note blocks must not share loop-guard action keys")
+	}
+
+	runtime.recordLoopGuardAction(callOne, false, event, mustJSON(map[string]any{
+		"tool_name": "read_workspace_note_view",
+		"path":      "Note.html",
+		"mode":      "block",
+		"view":      "raw",
+		"block_id":  "b0001",
+		"doc_hash":  "abc",
+		"ledger_id": "note:Note.html:block:raw:abc:b0001",
+		"content":   "<p>one</p>",
+	}))
+	firstFingerprint := runtime.progressFingerprint()
+	runtime.recordLoopGuardAction(callTwo, false, event, mustJSON(map[string]any{
+		"tool_name": "read_workspace_note_view",
+		"path":      "Note.html",
+		"mode":      "block",
+		"view":      "raw",
+		"block_id":  "b0002",
+		"doc_hash":  "abc",
+		"ledger_id": "note:Note.html:block:raw:abc:b0002",
+		"content":   "<p>two</p>",
+	}))
+	if runtime.loopGuard.RepeatedActionCount != 1 {
+		t.Fatalf("different block reads should reset repeated action count, got %d", runtime.loopGuard.RepeatedActionCount)
+	}
+	if runtime.progressFingerprint() == firstFingerprint {
+		t.Fatal("second block read should advance the progress fingerprint")
+	}
+	if len(runtime.kernel.ReadTargets) != 2 {
+		t.Fatalf("expected two note read targets, got %#v", runtime.kernel.ReadTargets)
+	}
+}
+
+func TestAgentKernelTextRangesCountAsDistinctTargets(t *testing.T) {
+	event := ToolEvent{ToolName: "read_workspace_text", Status: "success", Path: "draft.txt"}
+	first := agentToolCall{Name: "read_workspace_text", ArgumentsJSON: `{"path":"draft.txt","start_line":1,"end_line":80}`}
+	second := agentToolCall{Name: "read_workspace_text", ArgumentsJSON: `{"path":"draft.txt","start_line":81,"end_line":160}`}
+	if loopGuardActionKey(first, false, event, true) == loopGuardActionKey(second, false, event, true) {
+		t.Fatal("different text ranges must not share loop-guard action keys")
+	}
+
+	resultTarget := kernelReadTargetFromToolResult("read_workspace_text", mustJSON(map[string]any{
+		"tool_name": "read_workspace_text",
+		"path":      "draft.txt",
+	}))
+	argsTarget := kernelReadTargetFromArguments("read_workspace_text", first.ArgumentsJSON)
+	merged := mergeKernelReadTarget(resultTarget, argsTarget)
+	if merged.LedgerID != "draft.txt:1-80" {
+		t.Fatalf("expected argument line range to fill missing result ledger id, got %#v", merged)
+	}
+}
+
+func TestAgentRuntimeCheckpointPreservesKernelProgress(t *testing.T) {
+	runtime := &agentRuntime{
+		transcript:       newAgentTranscript(),
+		appliedMutations: map[string]ToolEvent{},
+		chunkWrites:      map[string]workspaceChunkWriteState{},
+		loadedToolsets:   map[string]bool{"workspace": true},
+		kernel:           newAgentKernelState(),
+		actionProgress:   ActionProgressLedger{LastProgressRound: 3, LastReadProgressRound: 3},
+		loopGuard:        AgentLoopGuard{LastActionKey: "read", RepeatedActionCount: 2, LastProgressFingerprint: "fp"},
+	}
+	runtime.kernel.ReadTargets["read_workspace_note_view\x00Note.html\x00block\x00raw\x00abc\x00b0001\x00"] = AgentReadTarget{
+		ToolName: "read_workspace_note_view",
+		Path:     "Note.html",
+		Mode:     "block",
+		View:     "raw",
+		BlockID:  "b0001",
+		DocHash:  "abc",
+	}
+	checkpoint := runtime.checkpoint()
+	restored := &agentRuntime{}
+	restored.restoreCheckpoint(checkpoint)
+	if restored.kernel.Version != agentKernelV2Version || len(restored.kernel.ReadTargets) != 1 {
+		t.Fatalf("expected kernel state restored, got %#v", restored.kernel)
+	}
+	if restored.actionProgress.LastReadProgressRound != 3 || restored.loopGuard.RepeatedActionCount != 2 {
+		t.Fatalf("expected progress and loop guard restored, got %#v %#v", restored.actionProgress, restored.loopGuard)
+	}
+}
+
+func TestCurrentReadWorkingSetKeepsDistinctNoteBlocks(t *testing.T) {
+	transcript := newAgentTranscript()
+	for _, blockID := range []string{"b0001", "b0002"} {
+		callID := "read_" + blockID
+		transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
+			ID:            callID,
+			Name:          "read_workspace_note_view",
+			ArgumentsJSON: fmt.Sprintf(`{"path":"Note.html","mode":"block","view":"raw","block_id":%q,"doc_hash":"abc"}`, blockID),
+		}}})
+		transcript.AppendToolResults([]TranscriptToolResult{{
+			ToolCallID: callID,
+			ToolName:   "read_workspace_note_view",
+			Content: mustJSON(map[string]any{
+				"path":      "Note.html",
+				"mode":      "block",
+				"view":      "raw",
+				"block_id":  blockID,
+				"doc_hash":  "abc",
+				"ledger_id": "note:Note.html:block:raw:abc:" + blockID,
+				"content":   "<p>" + blockID + "</p>",
+			}),
+			Event: ToolEvent{ToolName: "read_workspace_note_view", Status: "success", Path: "Note.html"},
+		}})
+	}
+	workingSet := currentReadWorkingSetFromTranscript(transcript, 4)
+	if len(workingSet.Spans) != 2 {
+		t.Fatalf("expected two note block spans, got %#v", workingSet.Spans)
+	}
+	labels := currentReadWorkingSetLabels(workingSet)
+	if !containsContextAction(labels, "Note.html mode=block view=raw block=b0001 doc=abc") ||
+		!containsContextAction(labels, "Note.html mode=block view=raw block=b0002 doc=abc") {
+		t.Fatalf("expected block labels, got %#v", labels)
+	}
+}
