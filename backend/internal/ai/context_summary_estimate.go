@@ -50,6 +50,12 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 				if readToolResultModelViewTruncated(result.Content) {
 					summary.ModelViewTruncated = true
 				}
+				if result.ToolName == "read_workspace_note_view" {
+					indexReads, blockReads, sectionReads := noteViewReadModeCounts(result.Content)
+					summary.NoteViewIndexReads += indexReads
+					summary.NoteViewBlockReads += blockReads
+					summary.NoteViewSectionReads += sectionReads
+				}
 			}
 			summary.LargestToolResults = appendLargestToolResultSize(summary.LargestToolResults, ToolResultSizeLog{
 				ToolName:     result.ToolName,
@@ -90,6 +96,25 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 	}
 	summary.ContextWatermarkPercent = contextWatermarkPercent(summary.EstimatedTokens, summary.ContextWindowTokens)
 	return summary
+}
+
+func noteViewReadModeCounts(raw string) (int, int, int) {
+	var payload struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return 0, 0, 0
+	}
+	switch strings.TrimSpace(payload.Mode) {
+	case "index":
+		return 1, 0, 0
+	case "block":
+		return 0, 1, 0
+	case "section":
+		return 0, 0, 1
+	default:
+		return 0, 0, 0
+	}
 }
 
 func readToolResultSourceTruncated(raw string) bool {

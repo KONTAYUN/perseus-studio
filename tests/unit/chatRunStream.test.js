@@ -1,82 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { waitForAgentRunStream } from '../../src/hooks/chatRunStream.js';
-
-class MockEventSource {
-  static instances = [];
-
-  constructor(url) {
-    this.url = url;
-    this.listeners = new Map();
-    this.closed = false;
-    MockEventSource.instances.push(this);
-  }
-
-  addEventListener(type, handler) {
-    this.listeners.set(type, handler);
-  }
-
-  emit(type, data) {
-    this.listeners.get(type)?.({ data: JSON.stringify(data) });
-  }
-
-  fail() {
-    this.onerror?.();
-  }
-
-  close() {
-    this.closed = true;
-  }
-}
+import {
+  MockEventSource,
+  flushRunStreamMicrotasks,
+  installRunStreamTestGlobals,
+  pendingRunShellMessage,
+  startRunStreamForTest,
+} from './chatRunStreamTestUtils.js';
 
 test('waitForAgentRunStream resumes event stream from the last applied seq', async () => {
-  const originalEventSource = globalThis.EventSource;
-  const originalWindow = globalThis.window;
+  const restoreGlobals = installRunStreamTestGlobals();
   try {
-    globalThis.EventSource = MockEventSource;
-    globalThis.window = {
-      setInterval: () => 0,
-      clearInterval: () => {},
-      setTimeout: (fn) => {
-        queueMicrotask(fn);
-        return 0;
-      },
-    };
-    MockEventSource.instances = [];
-
-    let messages = [
-      {
-        id: 'temp_assistant',
-        role: 'assistant',
-        pending: true,
-        runId: 'run-1',
-        activeMessageId: '',
-        kind: 'run_shell',
-        content: '',
-        progressItems: [],
-      },
-    ];
-
-    const runPromise = waitForAgentRunStream({
-      control: {},
+    let messages = [pendingRunShellMessage('run-1')];
+    const runPromise = startRunStreamForTest({
       conversationID: 'conv-1',
-      currentConversationIdRef: { current: 'conv-1' },
-      loadConversations: async () => {},
-      onAssistantToolEvents: async () => {},
-      onTasksChanged: () => {},
       runId: 'run-1',
-      selectedModel: null,
-      setAgentRecoveryNotice: () => {},
-      setChatError: () => {},
-      setContextCompactionNotice: () => {},
-      setContextUsage: () => {},
-      setConversationMessages: (updater) => {
-        messages = typeof updater === 'function' ? updater(messages) : updater;
+      getMessages: () => messages,
+      setMessages: (next) => {
+        messages = next;
       },
-      setRunSteerItems: () => {},
-      setRunSteerNotice: () => {},
-      thinkingId: 'temp_assistant',
     });
 
     const first = MockEventSource.instances[0];
@@ -98,9 +41,9 @@ test('waitForAgentRunStream resumes event stream from the last applied seq', asy
       type: 'assistant_message_delta',
       payload: { message_id: 'a1', delta: 'hello ' },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
     first.fail();
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
 
     assert.equal(MockEventSource.instances.length, 2);
     assert.match(MockEventSource.instances[1].url, /after_seq=2/);
@@ -133,58 +76,21 @@ test('waitForAgentRunStream resumes event stream from the last applied seq', asy
 
     assert.equal(messages.find((item) => item.id === 'a1')?.content, 'hello world');
   } finally {
-    globalThis.EventSource = originalEventSource;
-    globalThis.window = originalWindow;
+    restoreGlobals();
   }
 });
 
 test('waitForAgentRunStream removes rejected completion preview messages', async () => {
-  const originalEventSource = globalThis.EventSource;
-  const originalWindow = globalThis.window;
+  const restoreGlobals = installRunStreamTestGlobals();
   try {
-    globalThis.EventSource = MockEventSource;
-    globalThis.window = {
-      setInterval: () => 0,
-      clearInterval: () => {},
-      setTimeout: (fn) => {
-        queueMicrotask(fn);
-        return 0;
-      },
-    };
-    MockEventSource.instances = [];
-
-    let messages = [
-      {
-        id: 'temp_assistant',
-        role: 'assistant',
-        pending: true,
-        runId: 'run-2',
-        activeMessageId: '',
-        kind: 'run_shell',
-        content: '',
-        progressItems: [],
-      },
-    ];
-
-    const runPromise = waitForAgentRunStream({
-      control: {},
+    let messages = [pendingRunShellMessage('run-2')];
+    const runPromise = startRunStreamForTest({
       conversationID: 'conv-2',
-      currentConversationIdRef: { current: 'conv-2' },
-      loadConversations: async () => {},
-      onAssistantToolEvents: async () => {},
-      onTasksChanged: () => {},
       runId: 'run-2',
-      selectedModel: null,
-      setAgentRecoveryNotice: () => {},
-      setChatError: () => {},
-      setContextCompactionNotice: () => {},
-      setContextUsage: () => {},
-      setConversationMessages: (updater) => {
-        messages = typeof updater === 'function' ? updater(messages) : updater;
+      getMessages: () => messages,
+      setMessages: (next) => {
+        messages = next;
       },
-      setRunSteerItems: () => {},
-      setRunSteerNotice: () => {},
-      thinkingId: 'temp_assistant',
     });
 
     const source = MockEventSource.instances[0];
@@ -247,58 +153,21 @@ test('waitForAgentRunStream removes rejected completion preview messages', async
     assert.equal(messages.some((item) => item.id === 'preview-1'), false);
     assert.equal(messages.find((item) => item.id === 'final-1')?.content, '修正后的内容');
   } finally {
-    globalThis.EventSource = originalEventSource;
-    globalThis.window = originalWindow;
+    restoreGlobals();
   }
 });
 
 test('waitForAgentRunStream shows a pending shell between assistant segments', async () => {
-  const originalEventSource = globalThis.EventSource;
-  const originalWindow = globalThis.window;
+  const restoreGlobals = installRunStreamTestGlobals();
   try {
-    globalThis.EventSource = MockEventSource;
-    globalThis.window = {
-      setInterval: () => 0,
-      clearInterval: () => {},
-      setTimeout: (fn) => {
-        queueMicrotask(fn);
-        return 0;
-      },
-    };
-    MockEventSource.instances = [];
-
-    let messages = [
-      {
-        id: 'temp_assistant',
-        role: 'assistant',
-        pending: true,
-        runId: 'run-3',
-        activeMessageId: '',
-        kind: 'run_shell',
-        content: '',
-        progressItems: [],
-      },
-    ];
-
-    const runPromise = waitForAgentRunStream({
-      control: {},
+    let messages = [pendingRunShellMessage('run-3')];
+    const runPromise = startRunStreamForTest({
       conversationID: 'conv-3',
-      currentConversationIdRef: { current: 'conv-3' },
-      loadConversations: async () => {},
-      onAssistantToolEvents: async () => {},
-      onTasksChanged: () => {},
       runId: 'run-3',
-      selectedModel: null,
-      setAgentRecoveryNotice: () => {},
-      setChatError: () => {},
-      setContextCompactionNotice: () => {},
-      setContextUsage: () => {},
-      setConversationMessages: (updater) => {
-        messages = typeof updater === 'function' ? updater(messages) : updater;
+      getMessages: () => messages,
+      setMessages: (next) => {
+        messages = next;
       },
-      setRunSteerItems: () => {},
-      setRunSteerNotice: () => {},
-      thinkingId: 'temp_assistant',
     });
 
     const source = MockEventSource.instances[0];
@@ -332,7 +201,7 @@ test('waitForAgentRunStream shows a pending shell between assistant segments', a
         },
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
 
     assert.deepEqual(messages.map((item) => item.id), ['a1', 'temp_assistant']);
     assert.equal(messages[0].pending, false);
@@ -354,7 +223,7 @@ test('waitForAgentRunStream shows a pending shell between assistant segments', a
         },
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
 
     assert.deepEqual(messages.map((item) => item.id), ['a1', 'a2']);
     assert.equal(messages[1].pending, true);
@@ -378,58 +247,21 @@ test('waitForAgentRunStream shows a pending shell between assistant segments', a
     assert.deepEqual(messages.map((item) => item.id), ['a1', 'a2']);
     assert.equal(messages.some((item) => item.kind === 'run_shell'), false);
   } finally {
-    globalThis.EventSource = originalEventSource;
-    globalThis.window = originalWindow;
+    restoreGlobals();
   }
 });
 
 test('waitForAgentRunStream does not keep empty completed assistant segments', async () => {
-  const originalEventSource = globalThis.EventSource;
-  const originalWindow = globalThis.window;
+  const restoreGlobals = installRunStreamTestGlobals();
   try {
-    globalThis.EventSource = MockEventSource;
-    globalThis.window = {
-      setInterval: () => 0,
-      clearInterval: () => {},
-      setTimeout: (fn) => {
-        queueMicrotask(fn);
-        return 0;
-      },
-    };
-    MockEventSource.instances = [];
-
-    let messages = [
-      {
-        id: 'temp_assistant',
-        role: 'assistant',
-        pending: true,
-        runId: 'run-4',
-        activeMessageId: '',
-        kind: 'run_shell',
-        content: '',
-        progressItems: [],
-      },
-    ];
-
-    const runPromise = waitForAgentRunStream({
-      control: {},
+    let messages = [pendingRunShellMessage('run-4')];
+    const runPromise = startRunStreamForTest({
       conversationID: 'conv-4',
-      currentConversationIdRef: { current: 'conv-4' },
-      loadConversations: async () => {},
-      onAssistantToolEvents: async () => {},
-      onTasksChanged: () => {},
       runId: 'run-4',
-      selectedModel: null,
-      setAgentRecoveryNotice: () => {},
-      setChatError: () => {},
-      setContextCompactionNotice: () => {},
-      setContextUsage: () => {},
-      setConversationMessages: (updater) => {
-        messages = typeof updater === 'function' ? updater(messages) : updater;
+      getMessages: () => messages,
+      setMessages: (next) => {
+        messages = next;
       },
-      setRunSteerItems: () => {},
-      setRunSteerNotice: () => {},
-      thinkingId: 'temp_assistant',
     });
 
     const source = MockEventSource.instances[0];
@@ -466,7 +298,7 @@ test('waitForAgentRunStream does not keep empty completed assistant segments', a
         },
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
 
     assert.equal(messages.some((item) => item.id === 'a-empty'), false);
     assert.equal(messages.some((item) => item.kind === 'run_shell' && item.pending), true);
@@ -507,26 +339,13 @@ test('waitForAgentRunStream does not keep empty completed assistant segments', a
     assert.deepEqual(messages.map((item) => item.id), ['a-final']);
     assert.equal(messages[0].content, '真正回复');
   } finally {
-    globalThis.EventSource = originalEventSource;
-    globalThis.window = originalWindow;
+    restoreGlobals();
   }
 });
 
 test('waitForAgentRunStream places received steer in the message timeline before later assistant output', async () => {
-  const originalEventSource = globalThis.EventSource;
-  const originalWindow = globalThis.window;
+  const restoreGlobals = installRunStreamTestGlobals();
   try {
-    globalThis.EventSource = MockEventSource;
-    globalThis.window = {
-      setInterval: () => 0,
-      clearInterval: () => {},
-      setTimeout: (fn) => {
-        queueMicrotask(fn);
-        return 0;
-      },
-    };
-    MockEventSource.instances = [];
-
     let messages = [
       {
         id: 'u1',
@@ -534,41 +353,22 @@ test('waitForAgentRunStream places received steer in the message timeline before
         content: '先创建版本3',
         conversation_id: 'conv-5',
       },
-      {
-        id: 'temp_assistant',
-        role: 'assistant',
-        pending: true,
-        runId: 'run-5',
-        activeMessageId: '',
-        kind: 'run_shell',
-        content: '',
-        progressItems: [],
-      },
+      pendingRunShellMessage('run-5'),
     ];
     let steerItems = [];
 
-    const runPromise = waitForAgentRunStream({
-      control: {},
+    const runPromise = startRunStreamForTest({
       conversationID: 'conv-5',
-      currentConversationIdRef: { current: 'conv-5' },
       userMessageId: 'u1',
-      loadConversations: async () => {},
-      onAssistantToolEvents: async () => {},
-      onTasksChanged: () => {},
       runId: 'run-5',
-      selectedModel: null,
-      setAgentRecoveryNotice: () => {},
-      setChatError: () => {},
-      setContextCompactionNotice: () => {},
-      setContextUsage: () => {},
-      setConversationMessages: (updater) => {
-        messages = typeof updater === 'function' ? updater(messages) : updater;
+      getMessages: () => messages,
+      setMessages: (next) => {
+        messages = next;
       },
-      setRunSteerItems: (updater) => {
-        steerItems = typeof updater === 'function' ? updater(steerItems) : updater;
+      getSteerItems: () => steerItems,
+      setSteerItems: (next) => {
+        steerItems = next;
       },
-      setRunSteerNotice: () => {},
-      thinkingId: 'temp_assistant',
     });
 
     const source = MockEventSource.instances[0];
@@ -599,7 +399,7 @@ test('waitForAgentRunStream places received steer in the message timeline before
         },
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
     assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'temp_assistant']);
 
     source.emit('event', {
@@ -628,7 +428,7 @@ test('waitForAgentRunStream places received steer in the message timeline before
         },
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
 
     assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'steer-msg-1', 'temp_assistant']);
     assert.equal(messages[2].kind, 'steer');
@@ -649,7 +449,7 @@ test('waitForAgentRunStream places received steer in the message timeline before
         },
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
 
     assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'steer-msg-1', 'a2']);
 
@@ -677,7 +477,7 @@ test('waitForAgentRunStream places received steer in the message timeline before
         },
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
 
     assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'steer-msg-1', 'a2']);
     assert.equal(messages[2].status, 'applied');
@@ -701,60 +501,26 @@ test('waitForAgentRunStream places received steer in the message timeline before
     assert.deepEqual(messages.map((item) => item.id), ['u1', 'a1', 'steer-msg-1', 'a2']);
     assert.equal(messages[3].content, '按警局开场继续');
   } finally {
-    globalThis.EventSource = originalEventSource;
-    globalThis.window = originalWindow;
+    restoreGlobals();
   }
 });
 
 test('waitForAgentRunStream removes committed steer message after cancel event', async () => {
-  const originalEventSource = globalThis.EventSource;
-  const originalWindow = globalThis.window;
+  const restoreGlobals = installRunStreamTestGlobals();
   try {
-    globalThis.EventSource = MockEventSource;
-    globalThis.window = {
-      setInterval: () => 0,
-      clearInterval: () => {},
-      setTimeout: (fn) => {
-        queueMicrotask(fn);
-        return 0;
-      },
-    };
-    MockEventSource.instances = [];
-
     let messages = [
       { id: 'u1', role: 'user', content: '继续', conversation_id: 'conv-6' },
-      {
-        id: 'temp_assistant',
-        role: 'assistant',
-        pending: true,
-        runId: 'run-6',
-        activeMessageId: '',
-        kind: 'run_shell',
-        content: '',
-        progressItems: [],
-      },
+      pendingRunShellMessage('run-6'),
     ];
 
-    const runPromise = waitForAgentRunStream({
-      control: {},
+    const runPromise = startRunStreamForTest({
       conversationID: 'conv-6',
-      currentConversationIdRef: { current: 'conv-6' },
       userMessageId: 'u1',
-      loadConversations: async () => {},
-      onAssistantToolEvents: async () => {},
-      onTasksChanged: () => {},
       runId: 'run-6',
-      selectedModel: null,
-      setAgentRecoveryNotice: () => {},
-      setChatError: () => {},
-      setContextCompactionNotice: () => {},
-      setContextUsage: () => {},
-      setConversationMessages: (updater) => {
-        messages = typeof updater === 'function' ? updater(messages) : updater;
+      getMessages: () => messages,
+      setMessages: (next) => {
+        messages = next;
       },
-      setRunSteerItems: () => {},
-      setRunSteerNotice: () => {},
-      thinkingId: 'temp_assistant',
     });
 
     const source = MockEventSource.instances[0];
@@ -777,7 +543,7 @@ test('waitForAgentRunStream removes committed steer message after cancel event',
         },
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
     assert.equal(messages.some((item) => item.id === 'steer-msg-1'), true);
 
     source.emit('event', {
@@ -790,7 +556,7 @@ test('waitForAgentRunStream removes committed steer message after cancel event',
         message_deleted: true,
       },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushRunStreamMicrotasks();
 
     assert.equal(messages.some((item) => item.id === 'steer-msg-1'), false);
     source.emit('event', {
@@ -823,7 +589,6 @@ test('waitForAgentRunStream removes committed steer message after cancel event',
     source.emit('run', { id: 'run-6', status: 'succeeded' });
     await runPromise;
   } finally {
-    globalThis.EventSource = originalEventSource;
-    globalThis.window = originalWindow;
+    restoreGlobals();
   }
 });

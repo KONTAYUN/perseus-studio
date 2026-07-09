@@ -17,8 +17,14 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 		return "", "", "正在读取笔记视图...", "", err
 	}
 	var args struct {
-		Path string `json:"path"`
-		View string `json:"view"`
+		Path      string `json:"path"`
+		View      string `json:"view"`
+		Mode      string `json:"mode"`
+		BlockID   string `json:"block_id"`
+		SectionID string `json:"section_id"`
+		DocHash   string `json:"doc_hash"`
+		MaxBlocks int    `json:"max_blocks"`
+		MaxChars  int    `json:"max_chars"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在读取笔记视图...", "", fmt.Errorf("invalid tool arguments")
@@ -27,10 +33,19 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 	if args.View == "" {
 		args.View = "structure"
 	}
+	args.Mode = strings.ToLower(strings.TrimSpace(args.Mode))
+	if args.Mode == "" {
+		args.Mode = "full"
+	}
 	switch args.View {
 	case "text", "structure", "format", "raw":
 	default:
 		return "", "", "正在读取笔记视图...", args.Path, fmt.Errorf("unsupported note view: %s", args.View)
+	}
+	switch args.Mode {
+	case "full", "index", "block", "section":
+	default:
+		return "", "", "正在读取笔记视图...", args.Path, fmt.Errorf("unsupported note view mode: %s", args.Mode)
 	}
 	result, err := files.ReadFile(args.Path)
 	if err != nil {
@@ -38,6 +53,10 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 	}
 	if !strings.HasSuffix(strings.ToLower(result.Path), ".html") {
 		return "", "", "正在读取笔记视图...", result.Path, fmt.Errorf("read_workspace_note_view only supports .html notes")
+	}
+
+	if args.Mode != "full" {
+		return s.execReadWorkspaceNoteBlockView(result.Path, result.Content, result.Hash, args.View, args.Mode, args.BlockID, args.SectionID, args.DocHash, args.MaxBlocks, args.MaxChars)
 	}
 
 	viewContent := renderNoteView(result.Content, args.View)
@@ -49,13 +68,101 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 	payload := workspaceToolPayload("read_workspace_note_view", result.Path, map[string]any{
 		"path":      result.Path,
 		"view":      args.View,
+		"mode":      args.Mode,
 		"content":   viewContent,
 		"truncated": truncated,
 		"hash":      result.Hash,
-		"next_hint": "Use text or structure for content work; use format or raw only when preserving or changing exact formatting matters.",
+		"doc_hash":  noteDocHash(result.Content),
+		"next_hint": "Use text/structure for content work and format for lightweight style awareness. For exact HTML, call mode=index first, then mode=block or mode=section with raw.",
 	})
 	summary := fmt.Sprintf("read %s note view for %s (%d chars, truncated=%t)", args.View, result.Path, len([]rune(viewContent)), truncated)
 	return mustJSON(payload), summary, "正在读取笔记视图...", result.Path, nil
+}
+
+func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view, mode, blockID, sectionID, expectedDocHash string, maxBlocks, maxChars int) (string, string, string, string, error) {
+	doc := buildNoteBlockDocument(fragment)
+	if expectedDocHash = strings.TrimSpace(expectedDocHash); expectedDocHash != "" && expectedDocHash != doc.DocHash {
+		return "", "", "正在读取笔记视图...", path, fmt.Errorf("note view doc_hash is stale; call read_workspace_note_view with mode=index again")
+	}
+	base := map[string]any{
+		"path":      path,
+		"view":      view,
+		"mode":      mode,
+		"hash":      fileHash,
+		"doc_hash":  doc.DocHash,
+		"next_hint": "Use mode=index to locate HTML blocks, then mode=block or mode=section for targeted raw HTML before precise formatting edits.",
+	}
+	switch mode {
+	case "index":
+		blocks, indexTruncated := noteIndexPayloadBlocks(doc.Blocks, maxBlocks)
+		base["blocks"] = blocks
+		base["sections"] = noteIndexPayloadSections(doc.Sections)
+		base["total_blocks"] = len(doc.Blocks)
+		base["returned_blocks"] = len(blocks)
+		base["index_truncated"] = indexTruncated
+		base["total_text_chars"] = doc.TotalTextRune
+		base["total_raw_chars"] = doc.TotalRawRune
+		base["truncated"] = indexTruncated
+		base["next_action"] = "Choose a block_id or section_id from this index and call read_workspace_note_view with mode=block or mode=section. Use view=raw only for exact HTML edits."
+		payload := workspaceToolPayload("read_workspace_note_view", path, base)
+		summary := fmt.Sprintf("indexed %s note blocks for %s (%d blocks)", view, path, len(doc.Blocks))
+		return mustJSON(payload), summary, "正在读取笔记视图...", path, nil
+	case "block":
+		blockID = strings.TrimSpace(blockID)
+		if blockID == "" {
+			return "", "", "正在读取笔记视图...", path, fmt.Errorf("block_id is required for note view mode=block")
+		}
+		block, ok := findNoteBlock(doc.Blocks, blockID)
+		if !ok {
+			return "", "", "正在读取笔记视图...", path, fmt.Errorf("note block_id not found; call read_workspace_note_view with mode=index again")
+		}
+		content := renderNoteBlocks([]noteBlock{block}, view)
+		content, truncated := limitNoteContent(content, maxChars)
+		base["block_id"] = block.ID
+		base["block"] = map[string]any{
+			"block_id":     block.ID,
+			"tag":          block.Tag,
+			"section_id":   block.SectionID,
+			"heading_path": block.HeadingPath,
+			"text_preview": block.TextPreview,
+			"text_chars":   block.TextRunes,
+			"raw_chars":    block.RawRunes,
+			"has_images":   block.HasImages,
+			"has_tables":   block.HasTables,
+			"has_styles":   block.HasStyles,
+		}
+		base["content"] = content
+		base["truncated"] = truncated
+		if truncated {
+			base["next_action"] = "This block is still large. Re-read the note with mode=index and choose a smaller neighboring block or a more specific section."
+		}
+		payload := workspaceToolPayload("read_workspace_note_view", path, base)
+		summary := fmt.Sprintf("read %s note block %s for %s (%d chars, truncated=%t)", view, block.ID, path, len([]rune(content)), truncated)
+		return mustJSON(payload), summary, "正在读取笔记视图...", path, nil
+	case "section":
+		sectionID = strings.TrimSpace(sectionID)
+		if sectionID == "" {
+			return "", "", "正在读取笔记视图...", path, fmt.Errorf("section_id is required for note view mode=section")
+		}
+		section, blocks, ok := findNoteSection(doc, sectionID)
+		if !ok {
+			return "", "", "正在读取笔记视图...", path, fmt.Errorf("note section_id not found; call read_workspace_note_view with mode=index again")
+		}
+		content := renderNoteBlocks(blocks, view)
+		content, truncated := limitNoteContent(content, maxChars)
+		base["section_id"] = section.ID
+		base["section"] = section
+		base["content"] = content
+		base["truncated"] = truncated
+		if truncated {
+			base["next_action"] = "This section is still large. Use mode=index and read the specific block_id values inside this section."
+		}
+		payload := workspaceToolPayload("read_workspace_note_view", path, base)
+		summary := fmt.Sprintf("read %s note section %s for %s (%d chars, truncated=%t)", view, section.ID, path, len([]rune(content)), truncated)
+		return mustJSON(payload), summary, "正在读取笔记视图...", path, nil
+	default:
+		return "", "", "正在读取笔记视图...", path, fmt.Errorf("unsupported note view mode: %s", mode)
+	}
 }
 
 func renderNoteView(fragment, view string) string {

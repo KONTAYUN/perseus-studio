@@ -7,25 +7,30 @@ import (
 const ledgerToolResultMaxRunes = 20000
 
 type LedgerToolResultSnapshot struct {
-	ToolName              string         `json:"tool_name,omitempty"`
-	Status                string         `json:"status,omitempty"`
-	Path                  string         `json:"path,omitempty"`
-	Paths                 []string       `json:"paths,omitempty"`
-	ChangedPaths          []string       `json:"changed_paths,omitempty"`
-	StartLine             int            `json:"start_line,omitempty"`
-	EndLine               int            `json:"end_line,omitempty"`
-	TotalLines            int            `json:"total_lines,omitempty"`
-	Truncated             bool           `json:"truncated,omitempty"`
-	SourceReadTruncated   bool           `json:"source_read_truncated,omitempty"`
-	ModelViewTruncated    bool           `json:"model_view_truncated,omitempty"`
-	LedgerResultTruncated bool           `json:"ledger_result_truncated"`
-	OriginalChars         int            `json:"original_chars"`
-	OriginalBytes         int            `json:"original_bytes"`
-	ContentChars          int            `json:"content_chars,omitempty"`
-	NumberedContentChars  int            `json:"numbered_content_chars,omitempty"`
+	ToolName              string           `json:"tool_name,omitempty"`
+	Status                string           `json:"status,omitempty"`
+	Path                  string           `json:"path,omitempty"`
+	Paths                 []string         `json:"paths,omitempty"`
+	ChangedPaths          []string         `json:"changed_paths,omitempty"`
+	Mode                  string           `json:"mode,omitempty"`
+	View                  string           `json:"view,omitempty"`
+	BlockID               string           `json:"block_id,omitempty"`
+	SectionID             string           `json:"section_id,omitempty"`
+	DocHash               string           `json:"doc_hash,omitempty"`
+	StartLine             int              `json:"start_line,omitempty"`
+	EndLine               int              `json:"end_line,omitempty"`
+	TotalLines            int              `json:"total_lines,omitempty"`
+	Truncated             bool             `json:"truncated,omitempty"`
+	SourceReadTruncated   bool             `json:"source_read_truncated,omitempty"`
+	ModelViewTruncated    bool             `json:"model_view_truncated,omitempty"`
+	LedgerResultTruncated bool             `json:"ledger_result_truncated"`
+	OriginalChars         int              `json:"original_chars"`
+	OriginalBytes         int              `json:"original_bytes"`
+	ContentChars          int              `json:"content_chars,omitempty"`
+	NumberedContentChars  int              `json:"numbered_content_chars,omitempty"`
 	Items                 []map[string]any `json:"items,omitempty"`
-	PreviewHead           string         `json:"preview_head,omitempty"`
-	PreviewTail           string         `json:"preview_tail,omitempty"`
+	PreviewHead           string           `json:"preview_head,omitempty"`
+	PreviewTail           string           `json:"preview_tail,omitempty"`
 }
 
 func ledgerToolResultJSON(toolName, result string) string {
@@ -39,10 +44,10 @@ func ledgerToolResultJSON(toolName, result string) string {
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return mustJSON(map[string]any{
-			"tool_name":                toolName,
-			"ledger_result_truncated":  true,
-			"original_chars":           len([]rune(result)),
-			"original_bytes":           len([]byte(result)),
+			"tool_name":               toolName,
+			"ledger_result_truncated": true,
+			"original_chars":          len([]rune(result)),
+			"original_bytes":          len([]byte(result)),
 		})
 	}
 	if len([]rune(string(raw))) <= ledgerToolResultMaxRunes {
@@ -81,6 +86,11 @@ func buildLedgerToolResultSnapshot(toolName, result string) LedgerToolResultSnap
 	snapshot.Path = normalizeWorkspaceEventPath(stringFromAny(payload["path"]))
 	snapshot.Paths = normalizedProviderPaths(stringSliceFromAnyLoose(payload["paths"]))
 	snapshot.ChangedPaths = normalizedProviderPaths(stringSliceFromAnyLoose(payload["changed_paths"]))
+	snapshot.Mode = stringFromAny(payload["mode"])
+	snapshot.View = stringFromAny(payload["view"])
+	snapshot.BlockID = stringFromAny(payload["block_id"])
+	snapshot.SectionID = stringFromAny(payload["section_id"])
+	snapshot.DocHash = stringFromAny(payload["doc_hash"])
 	snapshot.StartLine = intFromAny(payload["start_line"])
 	snapshot.EndLine = intFromAny(payload["end_line"])
 	snapshot.TotalLines = intFromAny(payload["total_lines"])

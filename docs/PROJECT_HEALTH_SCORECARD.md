@@ -6,6 +6,16 @@ This scorecard records the current engineering-health standard and the evidence 
 
 Overall: **9.6 / 10**
 
+## Optimization Baseline
+
+This project is optimized by runtime and maintenance impact, not by deleting lines.
+
+| Area | Baseline | Optimization Direction |
+|---|---|---|
+| Frontend build | Before this pass, Vite emitted one main JS chunk: `assets/index-CqgydvHg.js` at **1,283.84 kB** minified / **387.27 kB** gzip, with the Rollup large chunk warning. After this pass, the main entry is **304.27 kB** / **89.29 kB** gzip, and the largest vendor chunks are **363.35 kB** editor, **361.82 kB** general vendor, and **141.99 kB** React. | Keep editor/main layout on the first screen, lazy-load low-frequency overlays, and use stable vendor chunks for React, Tiptap, icons, and general vendor code. |
+| Test maintainability | Chat run stream tests repeated EventSource/window setup and `waitForAgentRunStream` boilerplate in each case. AI integration tests repeated request payload decode setup. | Move repeated test harness work into package-local/unit-test helpers while preserving every scenario assertion. |
+| Runtime rendering | Resize and active panel behavior already avoid React state updates on every drag frame. Chat Markdown, message bubbles, and code blocks already use memo boundaries. | Keep memo limited to proven repeated render boundaries; avoid broad memo wrappers that add complexity without reliable wins. |
+
 | Area | Score | Evidence | Remaining Risk |
 |---|---:|---|---|
 | Structure standard | 9.6 | `docs/STRUCTURE_STANDARDS.md` treats 450 lines as a review threshold, not a hard split rule. `npm run test:structure` requires a responsibility review entry for threshold crossings. | Future agents must not reintroduce mechanical line-count splits. |
@@ -22,6 +32,7 @@ These production files cross the 450-line review threshold or sit near it. A thr
 | File | Classification | Decision |
 |---|---|---|
 | `src/styles/motion.css` | Shared motion token mapping, keyframes, reduced-motion behavior, and compatibility motion classes. | Keep this as the single motion semantics registry. Move component-specific visual surfaces, such as toast styling, to their own CSS section instead of splitting keyframes by line count. |
+| `backend/internal/ai/note_view_blocks.go` | HTML note fragment block indexing, section grouping, raw block capture, and compact metadata projection for `read_workspace_note_view`. | Keep together for now because parser/tokenizer/index metadata must evolve as one behavior. If it grows again, split by real boundary: raw-token capture, block/section indexing, and payload projection. |
 
 ## Completed Structural Cleanup
 

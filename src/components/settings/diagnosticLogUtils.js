@@ -23,6 +23,8 @@ export function diagnosticShortJudgement(item) {
   if (failureClass === 'provider_bad_request_with_tools') return '上游拒绝工具调用请求';
   if (failureClass === 'provider_bad_request_without_tools') return '上游拒绝普通请求';
   if (failureClass === 'user_or_client_canceled') return '用户或浏览器取消请求';
+  if (failureClass === 'provider_tpm_rate_limited') return '模型供应商 TPM 限流';
+  if (failureClass === 'provider_rate_limited') return '模型供应商限流';
   if (failureClass === 'provider_transient_http') return '上游临时 HTTP 故障';
   if (failureClass === 'provider_transient_transport') return '上游连接临时中断';
   if (failureClass === 'provider_transport_eof') return '上游连接提前断开';

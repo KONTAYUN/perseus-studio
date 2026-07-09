@@ -23,6 +23,8 @@ func formatProviderError(statusCode int, raw any) error {
 	case strings.Contains(lower, "inappropriate content") || strings.Contains(lower, "data_inspection_failed") ||
 		strings.Contains(lower, "content policy") || strings.Contains(lower, "safety"):
 		return fmt.Errorf("模型供应商内容安全检查拦截了本轮输入：%s。通常是搜索结果或上下文里包含敏感内容，可换一个模型、减少搜索结果、或改成更中性的摘要请求后重试", message)
+	case statusCode == 429 || strings.Contains(lower, "too many requests") || strings.Contains(lower, "rate limit"):
+		return fmt.Errorf("模型供应商限流：%s。请稍后继续，或切换到可用模型", message)
 	case strings.Contains(message, "容量已满") || strings.Contains(message, "繁忙") ||
 		strings.Contains(lower, "capacity") || strings.Contains(lower, "overloaded") || strings.Contains(lower, "rate limit"):
 		return fmt.Errorf("模型供应商暂时繁忙：%s。请稍后重试，或切换到其它可用模型", message)

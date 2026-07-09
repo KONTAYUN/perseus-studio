@@ -88,6 +88,10 @@ func buildProviderObservationView(result TranscriptToolResult, payload map[strin
 	}
 	if isReadWorkspaceTool(view.ToolName) {
 		view.ReadRanges = providerReadReferenceViews(result, payload)
+		if view.ToolName == "read_workspace_note_view" {
+			view.NextAction = "Use read_workspace_note_view with mode=index, then mode=block or mode=section when exact HTML is needed. Do not use start_line/end_line for HTML note fragments."
+			return view
+		}
 		view.NextAction = "Use preserved numbered_content when available; call read_workspace_text or read_workspace_files with the path and line range only when exact text is missing, truncated, stale, or outside the available range."
 		return view
 	}
@@ -112,6 +116,11 @@ func providerReadObservationPayload(result TranscriptToolResult, payload map[str
 	copyNumberField(next, payload, "end_line")
 	copyNumberField(next, payload, "total_lines")
 	copyBoolField(next, payload, "truncated")
+	copyStringField(next, payload, "view")
+	copyStringField(next, payload, "mode")
+	copyStringField(next, payload, "block_id")
+	copyStringField(next, payload, "section_id")
+	copyStringField(next, payload, "doc_hash")
 	if path := firstNonEmpty(stringFromAny(payload["path"]), result.Event.Path); path != "" {
 		next["path"] = normalizeWorkspaceEventPath(path)
 	}
@@ -134,7 +143,11 @@ func providerReadObservationPayload(result TranscriptToolResult, payload map[str
 		copyStringField(next, payload, "content")
 		copyStringField(next, payload, "numbered_content")
 	}
-	next["next_action"] = "Use preserved numbered_content when available; read by path and line range only when exact text is missing, truncated, stale, or outside the available range."
+	if firstNonEmpty(result.ToolName, result.Event.ToolName) == "read_workspace_note_view" {
+		next["next_action"] = "For this .html note, use read_workspace_note_view with mode=index, then mode=block or mode=section for the needed block_id/section_id. Use view=raw only for exact HTML edits."
+	} else {
+		next["next_action"] = "Use preserved numbered_content when available; read by path and line range only when exact text is missing, truncated, stale, or outside the available range."
+	}
 	return next
 }
 

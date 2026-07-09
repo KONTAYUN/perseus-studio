@@ -3,14 +3,15 @@ import AppHeader from './components/layout/AppHeader';
 import AppDialog, { useAppDialog } from './components/common/AppDialog';
 import ToastViewport from './components/common/ToastViewport';
 import MainPanels from './components/layout/MainPanels';
-import RichTextHistoryPanel from './components/editor/richText/RichTextHistoryPanel';
-import SettingsModal from './components/settings/SettingsModal';
-import TaskPanel from './components/tasks/TaskPanel';
 import { apiGet, apiPost } from './api/client';
 import useIdeState from './hooks/useIdeState';
 import useToastQueue from './hooks/useToastQueue';
 import useTasks from './hooks/useTasks';
 import { Button, Input } from './components/ui';
+
+const RichTextHistoryPanel = React.lazy(() => import('./components/editor/richText/RichTextHistoryPanel'));
+const SettingsModal = React.lazy(() => import('./components/settings/SettingsModal'));
+const TaskPanel = React.lazy(() => import('./components/tasks/TaskPanel'));
 
 export default function App() {
   const tasksRef = React.useRef(null);
@@ -22,6 +23,7 @@ export default function App() {
   const [loginNotice, setLoginNotice] = React.useState('');
   const [isLoggingIn, setIsLoggingIn] = React.useState(false);
   const [isRegisterMode, setIsRegisterMode] = React.useState(false);
+  const [taskPanelRequested, setTaskPanelRequested] = React.useState(false);
   const appDialog = useAppDialog();
   const toastQueue = useToastQueue();
   const ide = useIdeState({
@@ -54,6 +56,10 @@ export default function App() {
   React.useEffect(() => {
     ideRef.current = ide;
   }, [ide]);
+
+  React.useEffect(() => {
+    if (tasks.isTaskPanelOpen) setTaskPanelRequested(true);
+  }, [tasks.isTaskPanelOpen]);
 
   React.useEffect(() => {
     checkAuth();
@@ -178,27 +184,46 @@ export default function App() {
       <MainPanels ide={{ ...ide, tasks }} />
 
       {ide.isHistoryOpen && (
-        <RichTextHistoryPanel
-          open={ide.isHistoryOpen}
-          dialog={appDialog.api}
-          onClearHistory={ide.clearFileHistory}
-          onDeleteVersion={ide.deleteFileVersion}
-          onRestoreVersion={ide.restoreFileVersion}
-          onClose={() => ide.setIsHistoryOpen(false)}
-        />
+        <React.Suspense fallback={<LazyOverlayFallback />}>
+          <RichTextHistoryPanel
+            open={ide.isHistoryOpen}
+            dialog={appDialog.api}
+            onClearHistory={ide.clearFileHistory}
+            onDeleteVersion={ide.deleteFileVersion}
+            onRestoreVersion={ide.restoreFileVersion}
+            onClose={() => ide.setIsHistoryOpen(false)}
+          />
+        </React.Suspense>
       )}
 
       {isAdmin && ide.isSettingsOpen && (
-        <SettingsModal ide={ide} dialog={appDialog.api} onClose={() => ide.setIsSettingsOpen(false)} currentUser={auth.user} />
+        <React.Suspense fallback={<LazyOverlayFallback />}>
+          <SettingsModal ide={ide} dialog={appDialog.api} onClose={() => ide.setIsSettingsOpen(false)} currentUser={auth.user} />
+        </React.Suspense>
       )}
 
-      <TaskPanel tasks={tasks} />
+      {taskPanelRequested && (
+        <React.Suspense fallback={tasks.isTaskPanelOpen ? <LazyOverlayFallback align="right" /> : null}>
+          <TaskPanel tasks={tasks} />
+        </React.Suspense>
+      )}
       <AppDialog dialog={appDialog.dialog} onClose={appDialog.close} />
       <ToastViewport
         toasts={toastQueue.toasts}
         onDismiss={toastQueue.dismissToast}
         onRemove={toastQueue.removeToast}
       />
+    </div>
+  );
+}
+
+function LazyOverlayFallback({ align = 'center' }) {
+  const alignment = align === 'right' ? 'items-start justify-end pt-16 pr-4' : 'items-center justify-center p-4';
+  return (
+    <div className={`fixed inset-0 z-[150] flex ${alignment} bg-black/20 backdrop-blur-sm`}>
+      <div className="ui-overlay-surface motion-modal rounded-xl border border-white/10 bg-white/90 px-4 py-3 text-xs font-semibold text-gray-600 dark:bg-[#1C1C1E]/95 dark:text-gray-300">
+        Loading...
+      </div>
     </div>
   );
 }

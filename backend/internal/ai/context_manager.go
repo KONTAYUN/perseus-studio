@@ -47,6 +47,9 @@ type ProviderRequestSummary struct {
 	PreservedReadRanges           []string             `json:"preserved_read_ranges,omitempty"`
 	CurrentReadWorkingSetPaths    []string             `json:"current_read_working_set_paths,omitempty"`
 	CurrentReadWorkingSetRanges   []string             `json:"current_read_working_set_ranges,omitempty"`
+	NoteViewIndexReads            int                  `json:"note_view_index_reads,omitempty"`
+	NoteViewBlockReads            int                  `json:"note_view_block_reads,omitempty"`
+	NoteViewSectionReads          int                  `json:"note_view_section_reads,omitempty"`
 	RecentReadMemoryPaths         []string             `json:"recent_read_memory_paths,omitempty"`
 	RecentReadInlinedChars        int                  `json:"recent_read_inlined_chars,omitempty"`
 	ContentOnlyPolicy             string               `json:"content_only_policy,omitempty"`

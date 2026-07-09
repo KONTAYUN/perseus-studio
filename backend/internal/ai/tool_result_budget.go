@@ -27,7 +27,9 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 			return string(raw)
 		}
 	case "read_workspace_note_view":
-		trimMapString(payload, "content", profile.MaxReadFileContentRunes)
+		if trimMapString(payload, "content", profile.MaxReadFileContentRunes) {
+			attachNoteViewContinuationHint(payload)
+		}
 		if fitPayloadStringFieldsToBudget(payload, []string{"content"}, profile.MaxToolResultRunes) {
 			raw, _ := json.Marshal(payload)
 			return string(raw)
@@ -243,6 +245,10 @@ func attachReadContinuationHint(payload map[string]any) {
 	if payload == nil {
 		return
 	}
+	if strings.TrimSpace(stringFromAny(payload["tool_name"])) == "read_workspace_note_view" || strings.TrimSpace(stringFromAny(payload["tool"])) == "read_workspace_note_view" {
+		attachNoteViewContinuationHint(payload)
+		return
+	}
 	nextStart := intFromAny(payload["end_line"])
 	total := intFromAny(payload["total_lines"])
 	if nextStart > 0 && (total == 0 || nextStart < total) {
@@ -263,18 +269,43 @@ func attachReadContinuationHint(payload map[string]any) {
 	}
 }
 
-func trimMapString(payload map[string]any, key string, maxRunes int) {
+func attachNoteViewContinuationHint(payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	path := strings.TrimSpace(stringFromAny(payload["path"]))
+	mode := strings.TrimSpace(stringFromAny(payload["mode"]))
+	view := strings.TrimSpace(stringFromAny(payload["view"]))
+	if mode == "" {
+		mode = "full"
+	}
+	var parts []string
+	if path != "" {
+		parts = append(parts, "path="+path)
+	}
+	if view != "" {
+		parts = append(parts, "view="+view)
+	}
+	if len(parts) > 0 {
+		payload["next_action"] = "For this .html note, do not continue with start_line/end_line. Call read_workspace_note_view with mode=index (" + strings.Join(parts, ", ") + "), then read the needed block_id or section_id with mode=block or mode=section; use view=raw only when exact HTML is required."
+		return
+	}
+	payload["next_action"] = "For this .html note, call read_workspace_note_view with mode=index, then read the needed block_id or section_id with mode=block or mode=section."
+}
+
+func trimMapString(payload map[string]any, key string, maxRunes int) bool {
 	value, ok := payload[key].(string)
 	if !ok {
-		return
+		return false
 	}
 	trimmed, truncated := truncatePlainForModel(value, maxRunes)
 	if !truncated {
-		return
+		return false
 	}
 	payload[key] = trimmed
 	payload[key+"_truncated_for_model"] = true
 	payload[key+"_truncation_note"] = fmt.Sprintf("kept first %d chars for model stability", maxRunes)
+	return true
 }
 
 func budgetWebSearchPayload(payload map[string]any, profile providerRuntimeProfile) {

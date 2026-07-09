@@ -22,17 +22,7 @@ func TestGenerateReplyOpenAICreateFileAfterReminder(t *testing.T) {
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll returned error: %v", err)
-		}
-
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("invalid request payload: %v", err)
-		}
-
+		payload := readJSONRequestPayload(t, r)
 		count := requestCount.Add(1)
 		assertOpenAISystemPromptSupportsWrite(t, payload)
 
@@ -80,15 +70,7 @@ func TestGenerateReplyOpenAIAskFollowupQuestionCompletesRun(t *testing.T) {
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll returned error: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("invalid request payload: %v", err)
-		}
+		payload := readJSONRequestPayload(t, r)
 		names := openAIToolNamesFromPayload(t, payload)
 		if !names["ask_followup_question"] {
 			t.Fatalf("ask_followup_question missing from payload: %#v", names)
@@ -120,16 +102,7 @@ func TestGenerateReplyOpenAIToolLoopStopsRepeatedInspectLoop(t *testing.T) {
 
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll returned error: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("invalid request payload: %v", err)
-		}
-
+		payload := readJSONRequestPayload(t, r)
 		count := requestCount.Add(1)
 		if count == 1 {
 			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
@@ -433,15 +406,7 @@ func TestAgentAppliesPendingSteerBeforeNextModelTurn(t *testing.T) {
 
 	var capturedMessages []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll returned error: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("invalid request payload: %v", err)
-		}
+		payload := readJSONRequestPayload(t, r)
 		if items, ok := payload["messages"].([]any); ok {
 			for _, item := range items {
 				if message, ok := item.(map[string]any); ok {

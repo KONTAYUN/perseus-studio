@@ -178,6 +178,9 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"preserved_read_ranges":             summary.PreservedReadRanges,
 		"current_read_working_set_paths":    summary.CurrentReadWorkingSetPaths,
 		"current_read_working_set_ranges":   summary.CurrentReadWorkingSetRanges,
+		"note_view_index_reads":             summary.NoteViewIndexReads,
+		"note_view_block_reads":             summary.NoteViewBlockReads,
+		"note_view_section_reads":           summary.NoteViewSectionReads,
 		"recent_read_memory_paths":          summary.RecentReadMemoryPaths,
 		"recent_read_inlined_chars":         summary.RecentReadInlinedChars,
 		"content_only_policy":               summary.ContentOnlyPolicy,
@@ -185,7 +188,9 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"anthropic_prompt_cache_enabled":    summary.AnthropicPromptCacheEnabled,
 		"provider_round_count":              summary.ProviderRoundCount,
 		"source_read_truncated":             summary.SourceReadTruncated,
+		"model_view_truncated":              summary.ModelViewTruncated,
 		"provider_context_compacted":        summary.ProviderContextCompacted,
+		"ledger_result_truncated":           summary.LedgerResultTruncated,
 		"tool_result_bytes":                 summary.ToolResultBytes,
 		"read_content_bytes":                summary.ReadContentBytes,
 		"largest_tool_results":              summary.LargestToolResults,
@@ -336,6 +341,10 @@ func providerResponseFailureClass(providerErr *ProviderResponseError, err error)
 	}
 	text := strings.ToLower(strings.Join([]string{providerErr.Message, providerErr.ResponseSnippet, errString(err)}, "\n"))
 	switch {
+	case providerErr.StatusCode == http.StatusTooManyRequests && (strings.Contains(text, "tpm") || strings.Contains(text, "token per minute") || strings.Contains(text, "tokens per minute")):
+		return "provider_tpm_rate_limited"
+	case providerErr.StatusCode == http.StatusTooManyRequests || strings.Contains(text, "too many requests") || strings.Contains(text, "rate limit"):
+		return "provider_rate_limited"
 	case strings.Contains(text, "incomplete tool call arguments"):
 		return "provider_incomplete_tool_arguments"
 	case strings.Contains(text, "model_not_found") ||

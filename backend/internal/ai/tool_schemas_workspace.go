@@ -31,7 +31,7 @@ func openAIWorkspaceToolByName(name string) map[string]any {
 	case "read_workspace_text":
 		return openAIFunctionTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams())
 	case "read_workspace_note_view":
-		return openAIFunctionTool(name, "Read an HTML note as a model-friendly view. Prefer structure for content edits, text for plain extraction, format for lightweight style awareness, and raw only for precise formatting changes.", workspaceNoteViewParams())
+		return openAIFunctionTool(name, "Read an HTML note as a model-friendly view. Use mode=index to locate blocks/sections before exact HTML work; then mode=block or mode=section with view=raw. Prefer structure/text/format for ordinary content understanding.", workspaceNoteViewParams())
 	case "read_workspace_files":
 		return openAIFunctionTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
 	case "manage_workspace_path":
@@ -56,7 +56,7 @@ func anthropicWorkspaceToolByName(name string) map[string]any {
 	case "read_workspace_text":
 		return anthropicTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams())
 	case "read_workspace_note_view":
-		return anthropicTool(name, "Read an HTML note as a model-friendly view. Prefer structure for content edits, text for plain extraction, format for lightweight style awareness, and raw only for precise formatting changes.", workspaceNoteViewParams())
+		return anthropicTool(name, "Read an HTML note as a model-friendly view. Use mode=index to locate blocks/sections before exact HTML work; then mode=block or mode=section with view=raw. Prefer structure/text/format for ordinary content understanding.", workspaceNoteViewParams())
 	case "read_workspace_files":
 		return anthropicTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
 	case "manage_workspace_path":
@@ -180,7 +180,7 @@ func workspaceReadParams() map[string]any {
 func workspaceNoteViewParams() map[string]any {
 	return map[string]any{
 		"type":     "object",
-		"required": []string{"path", "view"},
+		"required": []string{"path"},
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
@@ -189,7 +189,32 @@ func workspaceNoteViewParams() map[string]any {
 			"view": map[string]any{
 				"type":        "string",
 				"enum":        []string{"text", "structure", "format", "raw"},
-				"description": "text returns plain body text; structure returns headings/paragraphs/lists/tables/images; format returns lightweight formatting hints; raw returns the original HTML fragment.",
+				"description": "text returns plain body text; structure returns headings/paragraphs/lists/tables/images; format returns lightweight formatting hints; raw returns HTML for precise edits. Default structure.",
+			},
+			"mode": map[string]any{
+				"type":        "string",
+				"enum":        []string{"full", "index", "section", "block"},
+				"description": "full preserves the legacy whole-view behavior. index returns block/section metadata without large content. section reads one section_id. block reads one block_id. Default full.",
+			},
+			"block_id": map[string]any{
+				"type":        "string",
+				"description": "Required when mode=block. Use a block_id returned by mode=index.",
+			},
+			"section_id": map[string]any{
+				"type":        "string",
+				"description": "Required when mode=section. Use a section_id returned by mode=index.",
+			},
+			"doc_hash": map[string]any{
+				"type":        "string",
+				"description": "Optional doc_hash from mode=index. If the note changed, stale ids are rejected and the note must be indexed again.",
+			},
+			"max_blocks": map[string]any{
+				"type":        "integer",
+				"description": "Maximum blocks to return for mode=index. Default 200, maximum 500.",
+			},
+			"max_chars": map[string]any{
+				"type":        "integer",
+				"description": "Maximum characters to return for mode=block or mode=section. Default 20000, maximum 50000.",
 			},
 		},
 	}
