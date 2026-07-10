@@ -101,6 +101,18 @@ export function agentEventText(type, payload = {}) {
       return '连接中断，正在重试';
     case 'model_stream_recovering':
       return '连接中断，正在恢复';
+    case 'stream_reconnecting': {
+      const attempt = Number(payload.attempt) || 1;
+      const maxAttempts = Number(payload.max_attempts) || 1;
+      return `Stream reconnecting ${attempt}/${maxAttempts}`;
+    }
+    case 'transport_fallback':
+      return 'Switching to non-stream response';
+    case 'provider_rate_limited':
+    case 'provider_cooldown_updated': {
+      const seconds = Math.ceil((Number(payload.retry_after_ms) || 0) / 1000);
+      return seconds > 0 ? `Provider rate limit; wait ${seconds}s` : 'Provider rate limit';
+    }
     case 'tool_call_started':
       return pendingToolStatus(payload);
     case 'tool_call_completed':

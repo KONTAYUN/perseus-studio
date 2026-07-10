@@ -54,6 +54,54 @@ func TestReadWorkspaceNoteViewIndexHandlesLongHTMLLines(t *testing.T) {
 	}
 }
 
+func TestReadWorkspaceNoteViewIndexPaginatesBlocks(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	var fragment strings.Builder
+	for i := 1; i <= 95; i++ {
+		fragment.WriteString(fmt.Sprintf("<p>Block %03d</p>", i))
+	}
+	if _, err := env.files.CreateFile(ctx, "Paged.html", fragment.String()); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	firstJSON, _, _, _, err := env.service.executeTool(ctx, "read_workspace_note_view", `{"path":"Paged.html","mode":"index"}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("index page 1 returned error: %v", err)
+	}
+	var firstPayload map[string]any
+	if err := json.Unmarshal([]byte(firstJSON), &firstPayload); err != nil {
+		t.Fatalf("invalid index json: %v", err)
+	}
+	firstBlocks, ok := firstPayload["blocks"].([]any)
+	if !ok || len(firstBlocks) != defaultNoteIndexBlocks {
+		t.Fatalf("expected default page of %d blocks, got %#v", defaultNoteIndexBlocks, firstPayload["blocks"])
+	}
+	if firstPayload["has_more_blocks"] != true || intFromAny(firstPayload["next_start_block"]) != defaultNoteIndexBlocks+1 {
+		t.Fatalf("expected continuation metadata, got %#v", firstPayload)
+	}
+
+	secondJSON, _, _, _, err := env.service.executeTool(ctx, "read_workspace_note_view", fmt.Sprintf(`{"path":"Paged.html","mode":"index","start_block":%d}`, defaultNoteIndexBlocks+1), RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("index page 2 returned error: %v", err)
+	}
+	var secondPayload map[string]any
+	if err := json.Unmarshal([]byte(secondJSON), &secondPayload); err != nil {
+		t.Fatalf("invalid second index json: %v", err)
+	}
+	secondBlocks, ok := secondPayload["blocks"].([]any)
+	if !ok || len(secondBlocks) != 15 {
+		t.Fatalf("expected final page of 15 blocks, got %#v", secondPayload["blocks"])
+	}
+	if secondPayload["has_more_blocks"] == true || intFromAny(secondPayload["next_start_block"]) != 0 {
+		t.Fatalf("did not expect continuation metadata on final page, got %#v", secondPayload)
+	}
+	firstSecondBlock := secondBlocks[0].(map[string]any)
+	if firstSecondBlock["block_id"] != "b0081" {
+		t.Fatalf("expected page 2 to start at b0081, got %#v", firstSecondBlock)
+	}
+}
+
 func TestReadWorkspaceNoteViewBlockAndSectionRaw(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -141,6 +189,47 @@ func TestBudgetToolResultForModelGivesHTMLBlockContinuationHint(t *testing.T) {
 	nextAction := stringFromAny(payload["next_action"])
 	if !strings.Contains(nextAction, "mode=index") || strings.Contains(nextAction, "line range") {
 		t.Fatalf("expected HTML block continuation hint, got %q", nextAction)
+	}
+}
+
+func TestBudgetToolResultForModelPreservesNoteIndexStructure(t *testing.T) {
+	blocks := make([]map[string]any, 0, 40)
+	for i := 1; i <= 40; i++ {
+		blocks = append(blocks, map[string]any{
+			"block_id":     fmt.Sprintf("b%04d", i),
+			"tag":          "p",
+			"text_preview": strings.Repeat("preview ", 12),
+			"char_count":   240,
+		})
+	}
+	raw := mustJSON(map[string]any{
+		"tool_name":       "read_workspace_note_view",
+		"path":            "Long.html",
+		"mode":            "index",
+		"doc_hash":        "abc",
+		"start_block":     1,
+		"total_blocks":    40,
+		"returned_blocks": 40,
+		"has_more_blocks": false,
+		"blocks":          blocks,
+	})
+	budgeted := budgetToolResultForModel("read_workspace_note_view", raw, providerRuntimeProfile{
+		MaxToolResultRunes:      1500,
+		MaxReadFileContentRunes: 6000,
+	})
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
+		t.Fatalf("budgeted payload is not json: %v\n%s", err, budgeted)
+	}
+	kept, ok := payload["blocks"].([]any)
+	if !ok || len(kept) == 0 || len(kept) >= len(blocks) {
+		t.Fatalf("expected trimmed but structured blocks, got %#v", payload["blocks"])
+	}
+	if payload["index_truncated_for_model"] != true || payload["model_view_truncated"] != true {
+		t.Fatalf("expected model-view index truncation flags, got %#v", payload)
+	}
+	if intFromAny(payload["next_start_block"]) != 1+len(kept) || payload["has_more_blocks"] != true {
+		t.Fatalf("expected continuation metadata based on kept blocks, got %#v", payload)
 	}
 }
 

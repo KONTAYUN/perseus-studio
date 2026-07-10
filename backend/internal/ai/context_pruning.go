@@ -6,11 +6,12 @@ import (
 )
 
 func (m *agentContextManager) compactTranscript(transcript *AgentTranscript, profile providerRuntimeProfile) (*AgentTranscript, []string) {
-	compacted := transcript.Clone()
+	compacted, normalizeActions := normalizeTranscriptToolPairs(transcript)
 	if compacted == nil {
 		return newAgentTranscript(), nil
 	}
 	var actions []string
+	actions = append(actions, normalizeActions...)
 	actions = append(actions, compactSupersededReadResults(compacted)...)
 	actions = append(actions, compactReadsStaleAfterMutation(compacted)...)
 	actions = append(actions, compactToolResultsForBudget(compacted, profile)...)

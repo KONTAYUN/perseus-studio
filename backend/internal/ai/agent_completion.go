@@ -50,6 +50,13 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 	r.clearToolErrors()
 	content := renderCompletionUserVisibleContent(attempt)
 	r.completedContent = content
+	r.appendKernelItem(AgentTurnItem{
+		Kind:         "final_message",
+		Phase:        "final",
+		Status:       "completed",
+		Content:      truncatePlainRunes(content, 2000),
+		ChangedPaths: r.verifiedWorkspaceChangedPaths(),
+	})
 	r.finalizeActiveAssistantMessage(content)
 	emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
 	payload := map[string]any{"result": attempt.Result, "summary": attempt.Summary, "failed_items": attempt.FailedItems, "notes": attempt.Notes}

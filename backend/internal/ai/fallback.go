@@ -28,7 +28,9 @@ func isCheckpointRecoverableProviderError(err error) bool {
 	}
 	var providerErr *ProviderResponseError
 	if errors.As(err, &providerErr) {
-		return isRetriableProviderStatus(providerErr.StatusCode) || providerErr.StatusCode == 529
+		// HTTP failures belong to request classification. Checkpoint recovery is
+		// reserved for a broken transport after verified tool progress.
+		return false
 	}
 	if isRecoverableFinalProviderError(err) {
 		return true
@@ -39,26 +41,6 @@ func isCheckpointRecoverableProviderError(err error) bool {
 		"empty stream",
 		"empty provider",
 		"unexpected eof",
-		"http 408",
-		"http 409",
-		"http 429",
-		"http 500",
-		"http 502",
-		"http 503",
-		"http 504",
-		"http 529",
-		"status 408",
-		"status 409",
-		"status 429",
-		"status 500",
-		"status 502",
-		"status 503",
-		"status 504",
-		"status 529",
-		"too many requests",
-		"rate limit",
-		"overloaded",
-		"capacity",
 	}
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {

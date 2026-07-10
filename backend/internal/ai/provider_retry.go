@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	defaultProviderRequestMaxAttempts = 3
-	defaultProviderRetryBaseDelayMS   = 750
+	defaultProviderRequestMaxAttempts = 5
+	defaultProviderRetryBaseDelayMS   = 200
 	defaultProviderRetryMaxDelayMS    = 5000
 )
 
@@ -25,9 +25,12 @@ type ProviderRetryPolicy struct {
 func (p ProviderRetryPolicy) diagnosticMap() map[string]any {
 	return map[string]any{
 		"request_max_attempts": p.MaxAttempts,
+		"request_max_retries":  max(0, p.MaxAttempts-1),
 		"base_delay_ms":        p.BaseDelay.Milliseconds(),
 		"max_delay_ms":         p.MaxDelay.Milliseconds(),
-		"retry_statuses":       []int{408, 425, 429, 500, 502, 503, 504, 529},
+		"retry_429":            false,
+		"retry_5xx":            true,
+		"retry_statuses":       []string{"5xx"},
 		"retry_transport":      true,
 		"stream_fallback":      providerStreamFallbackEnabled(),
 	}
@@ -80,7 +83,7 @@ func isRetryableProviderAttemptError(err error, statusCode int) bool {
 		return false
 	}
 	if statusCode > 0 {
-		return isRetriableProviderStatusIncluding529(statusCode)
+		return isRetriableProviderStatus(statusCode)
 	}
 	if err != nil {
 		return isTransientTransportError(err)

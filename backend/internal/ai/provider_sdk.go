@@ -37,6 +37,7 @@ func (s *Service) openAISDKPostRaw(ctx context.Context, provider store.ModelProv
 	err = client.Post(ctx, strings.TrimLeft(path, "/"), payload, &resp)
 	if err != nil {
 		err = normalizeProviderSDKError(err)
+		err = s.classifyProviderError(opts, provider, err)
 	}
 	return resp, err
 }
@@ -55,6 +56,7 @@ func (s *Service) anthropicSDKPostRaw(ctx context.Context, provider store.ModelP
 	err = client.Post(ctx, strings.TrimLeft(path, "/"), payload, &resp)
 	if err != nil {
 		err = normalizeProviderSDKError(err)
+		err = s.classifyProviderError(opts, provider, err)
 	}
 	return resp, err
 }
@@ -171,7 +173,31 @@ func providerResponseErrorFromSDK(statusCode int, resp *http.Response, req *http
 		Endpoint:        endpoint,
 		ResponseSnippet: snippet,
 		Message:         message,
+		RetryAfter:      responseHeaderValue(resp, "Retry-After"),
+		RateLimitReset:  responseRateLimitReset(resp),
+		RequestID:       responseRequestID(resp),
 	}
+}
+
+func responseHeaderValue(resp *http.Response, name string) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.Header.Get(name)
+}
+
+func responseRateLimitReset(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	return providerRateLimitResetHeader(resp.Header)
+}
+
+func responseRequestID(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	return providerRequestIDHeader(resp.Header)
 }
 
 func openAIChatPath() string {

@@ -27,6 +27,12 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 			return string(raw)
 		}
 	case "read_workspace_note_view":
+		if strings.TrimSpace(stringFromAny(payload["mode"])) == "index" {
+			if fitNoteIndexPayloadToBudget(payload, profile.MaxToolResultRunes) {
+				raw, _ := json.Marshal(payload)
+				return string(raw)
+			}
+		}
 		if trimMapString(payload, "content", profile.MaxReadFileContentRunes) {
 			attachNoteViewContinuationHint(payload)
 		}
@@ -187,6 +193,112 @@ func fitBatchReadPayloadToBudget(payload map[string]any, maxRunes int) bool {
 	return false
 }
 
+func fitNoteIndexPayloadToBudget(payload map[string]any, maxRunes int) bool {
+	if maxRunes <= 0 {
+		return false
+	}
+	rawBlocks, ok := payload["blocks"].([]any)
+	if !ok {
+		return false
+	}
+	compacted := false
+	for attempts := 0; attempts < 80; attempts++ {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return false
+		}
+		if len([]rune(string(raw))) <= maxRunes {
+			return true
+		}
+		if !compacted {
+			rawBlocks = compactNoteIndexBlocksForModel(rawBlocks)
+			payload["blocks"] = rawBlocks
+			compactNoteIndexSectionsForModel(payload)
+			payload["note_index_compacted_for_model"] = true
+			payload["model_view"] = "Note index metadata was compacted for model stability; doc_hash, block_id, section_id, previews, and continuation hints are preserved."
+			compacted = true
+			continue
+		}
+		if len(rawBlocks) <= 1 {
+			payload["model_view_truncated"] = true
+			payload["read_content_state"] = string(ReadContentStateModelViewTruncated)
+			payload["next_action"] = "This note index page is still too large. Retry read_workspace_note_view with mode=index and a smaller max_blocks value."
+			return false
+		}
+		rawBlocks = rawBlocks[:len(rawBlocks)-1]
+		payload["blocks"] = rawBlocks
+		payload["returned_blocks"] = len(rawBlocks)
+		payload["index_truncated_for_model"] = true
+		payload["model_view_truncated"] = true
+		payload["read_content_state"] = string(ReadContentStateModelViewTruncated)
+		if start := intFromAny(payload["start_block"]); start > 0 {
+			payload["next_start_block"] = start + len(rawBlocks)
+			payload["has_more_blocks"] = true
+			payload["next_action"] = fmt.Sprintf("Continue this note index with start_block=%d, or read one of the visible block_id/section_id values with mode=block or mode=section.", start+len(rawBlocks))
+		}
+	}
+	return false
+}
+
+func compactNoteIndexBlocksForModel(blocks []any) []any {
+	compacted := make([]any, 0, len(blocks))
+	for _, raw := range blocks {
+		block, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		next := map[string]any{}
+		copyStringField(next, block, "block_id")
+		copyStringField(next, block, "tag")
+		copyStringField(next, block, "section_id")
+		copyStringField(next, block, "heading_path")
+		copyStringField(next, block, "text_preview")
+		copyNumberField(next, block, "text_chars")
+		copyNumberField(next, block, "raw_chars")
+		copyNumberField(next, block, "level")
+		copyTrueBoolField(next, block, "has_images")
+		copyTrueBoolField(next, block, "has_tables")
+		copyTrueBoolField(next, block, "has_styles")
+		compacted = append(compacted, next)
+	}
+	return compacted
+}
+
+func compactNoteIndexSectionsForModel(payload map[string]any) {
+	rawSections, ok := payload["sections"].([]any)
+	if !ok {
+		return
+	}
+	compacted := make([]any, 0, len(rawSections))
+	for _, raw := range rawSections {
+		section, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		next := map[string]any{}
+		copyStringField(next, section, "section_id")
+		copyStringField(next, section, "title")
+		copyStringField(next, section, "heading_path")
+		copyStringField(next, section, "start_block_id")
+		copyStringField(next, section, "end_block_id")
+		copyNumberField(next, section, "block_count")
+		copyNumberField(next, section, "text_chars")
+		copyNumberField(next, section, "raw_chars")
+		copyNumberField(next, section, "level")
+		copyTrueBoolField(next, section, "has_images")
+		copyTrueBoolField(next, section, "has_tables")
+		copyTrueBoolField(next, section, "has_styles")
+		compacted = append(compacted, next)
+	}
+	payload["sections"] = compacted
+}
+
+func copyTrueBoolField(target map[string]any, source map[string]any, key string) {
+	if value, ok := source[key].(bool); ok && value {
+		target[key] = true
+	}
+}
+
 func largestBatchReadContent(items []any) (map[string]any, string, string) {
 	var selected map[string]any
 	selectedKey := ""
@@ -224,11 +336,37 @@ func compactToolResultJSON(toolName, raw string, maxRunes int) string {
 		"model_view":     "The tool result is too large for this model view. Retry with a narrower request if more detail is needed.",
 		"original_chars": len([]rune(raw)),
 	}
+	copyCompactToolResultMetadata(payload, raw)
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return `{"truncated":true,"model_view":"tool result was too large"}`
 	}
 	return string(encoded)
+}
+
+func copyCompactToolResultMetadata(payload map[string]any, raw string) {
+	var source map[string]any
+	if payload == nil || json.Unmarshal([]byte(raw), &source) != nil {
+		return
+	}
+	for _, key := range []string{
+		"tool", "tool_name", "status", "status_kind", "path", "paths",
+		"view", "mode", "doc_hash", "ledger_id", "block_id", "section_id",
+		"start_block", "next_start_block", "has_more_blocks", "returned_blocks", "total_blocks",
+		"index_truncated", "index_truncated_for_model", "read_content_state", "next_action",
+	} {
+		if value, ok := source[key]; ok {
+			payload[key] = value
+		}
+	}
+	if blocks, ok := source["blocks"].([]any); ok {
+		payload["blocks"] = compactNoteIndexBlocksForModel(blocks)
+	}
+	if _, ok := source["sections"].([]any); ok {
+		compactSource := map[string]any{"sections": source["sections"]}
+		compactNoteIndexSectionsForModel(compactSource)
+		payload["sections"] = compactSource["sections"]
+	}
 }
 
 type ReadContentState string

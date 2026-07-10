@@ -120,6 +120,20 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			EmitCompletionResultDelta: emitCompletionResult,
 			RevealTextAfterTool:       revealTextAfterAction,
 		})
+		if err != nil {
+			if _, partial := partialTurnFromStreamError(err); !partial && !providerStreamTurnHasStarted(turn) && shouldRetryProviderStreamError(ctx, err) {
+				closeStream()
+				var terminal bool
+				turn, terminal, err = p.retryStream(ctx, &req, payload, endpoint, providerStreamParseOptions{
+					EmitText:                  emitText,
+					EmitCompletionResultDelta: emitCompletionResult,
+					RevealTextAfterTool:       revealTextAfterAction,
+				}, err)
+				if terminal {
+					return turn, err
+				}
+			}
+		}
 		if emitText != nil && strings.TrimSpace(turn.PublicStreamedContent) != "" && (!revealTextAfterAction || len(turn.ToolCalls) > 0) {
 			turn.PublicTextStreamed = true
 		}
@@ -143,6 +157,13 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 					"error":         err.Error(),
 					"diagnostic_id": diagID,
 					"recovery":      "use_completed_stream_tool_call",
+				})
+				emitToolLifecycleEvent(req.Opts, "transport_fallback", "warn", map[string]any{
+					"from":        "stream",
+					"to":          "non_stream",
+					"provider_id": req.Provider.ID,
+					"model_id":    req.Provider.ModelID,
+					"error":       err.Error(),
 				})
 				closeStream()
 				return partial, nil
@@ -252,6 +273,45 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 	}
 
 	return p.parseNonStream(ctx, req, resp, endpoint, duration)
+}
+
+func (p anthropicProviderV2) retryStream(ctx context.Context, req *providerTurnRequest, payload map[string]any, endpoint string, parseOptions providerStreamParseOptions, firstErr error) (agentModelTurn, bool, error) {
+	maxRetries := providerStreamMaxRetries()
+	req.Snapshot.Summary.StreamMaxRetries = maxRetries
+	lastErr := firstErr
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		delay := providerStreamRetryDelay(attempt)
+		emitProviderStreamReconnect(req.Opts, req.Provider, attempt, maxRetries, delay, lastErr)
+		if !sleepProviderRetry(ctx, delay) {
+			return agentModelTurn{}, false, ctx.Err()
+		}
+		req.Snapshot.Summary.StreamReconnectAttempts = attempt
+		resp, err := p.service.anthropicSDKPostRaw(ctx, req.Provider, anthropicMessagesPath(req.Provider), payload, req.Opts, "provider_stream_reconnect", &req.Snapshot.Summary)
+		if err != nil {
+			return agentModelTurn{}, false, err
+		}
+		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+		if !strings.Contains(contentType, "text/event-stream") {
+			turn, parseErr := p.parseNonStream(ctx, *req, resp, endpoint, 0)
+			return turn, true, parseErr
+		}
+		turn, parseErr := parseAnthropicStreamWithOptions(resp.Body, parseOptions)
+		_ = resp.Body.Close()
+		if parseErr == nil && !isEmptyModelTurn(turn) {
+			return turn, false, nil
+		}
+		if partial, ok := partialTurnFromStreamError(parseErr); ok {
+			return partial, false, nil
+		}
+		if parseErr == nil {
+			parseErr = fmt.Errorf("empty Anthropic stream response")
+		}
+		lastErr = parseErr
+		if providerStreamTurnHasStarted(turn) || !shouldRetryProviderStreamError(ctx, parseErr) {
+			return agentModelTurn{}, false, parseErr
+		}
+	}
+	return agentModelTurn{}, false, lastErr
 }
 
 func (s *Service) callAnthropicAgentTurn(ctx context.Context, runtime *agentRuntime, round int) (agentModelTurn, error) {

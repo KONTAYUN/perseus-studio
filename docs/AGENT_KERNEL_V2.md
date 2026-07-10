@@ -1,32 +1,56 @@
-# Perseus Agent Kernel v2
+# Perseus Agent Kernel
 
-Agent Kernel v2 is the stability layer for long workspace tasks. It is not a new
+Agent Kernel is the stability layer for long workspace tasks. It is not a new
 storage format and it is not a Codex CLI wrapper. The goal is to make Perseus
-behave like mature agent runners: bounded context, explicit tool progress,
-recoverable checkpoints, and targeted file reads.
+behave like mature agent runners: bounded context, typed turn items, explicit
+tool progress, recoverable checkpoints, and targeted file reads.
 
 ## Runtime Switch
 
 `PERSEUS_AGENT_KERNEL_MODE` controls the execution guard behavior:
 
-- `kernel_v2` is the default.
+- `codex_parity` is the default.
+- `kernel_v2_current` keeps the previous v2 streaming behavior for compatibility.
+- `kernel_v2` is accepted as an alias for `kernel_v2_current`.
+- `codex_sidecar_benchmark` uses the same internal guard behavior as
+  `codex_parity` and is reserved for comparison harnesses.
 - `legacy` keeps the previous loop-guard target behavior and disables v2 read
   progress tracking.
 
 The switch is intentionally coarse so a local deployment can roll back the new
 target/progress accounting without changing user data or workspace files.
 
-## Core Ledgers
+## Core Items And Ledgers
 
-Kernel v2 records these internal ledgers on each run checkpoint:
+The kernel records a `Turn` as typed items instead of treating every intermediate
+model sentence as a normal assistant chat bubble:
+
+- `turn_started`
+- `tool_call`
+- `tool_result`
+- `file_change`
+- `context_compaction`
+- `final_message`
+
+Intermediate planning/commentary stays in the item stream and diagnostics. The
+main chat should show user messages, final assistant replies, and actionable
+error cards.
+
+The kernel also records these internal ledgers on each run checkpoint:
 
 - `AgentKernelState`: kernel version/mode, read targets, and recent progress
-  events.
+  events/items.
 - `ActionProgressLedger`: semantic progress counters and the last successful
   read-progress round.
 - `AgentLoopGuard`: repeated action and no-progress guard state.
 - `ToolResultLedger`: bounded tool-result metadata for diagnostics and context
   compaction.
+
+Before building provider context, the transcript is normalized:
+
+- assistant tool calls without results get an `aborted` tool result.
+- orphan tool results without a matching call are dropped.
+- normalization actions are written into compaction diagnostics.
 
 Tool progress is keyed by the real target, not only by tool name. For example:
 
@@ -47,8 +71,15 @@ For `.html` notes, the stable read path is:
 3. Read the target with `mode=block` or `mode=section`.
 4. Use `view=raw` only when exact HTML is needed.
 
-Every index/block/section read returns `doc_hash` and `ledger_id`. If the file
-changes, stale `doc_hash` values are rejected and the model must re-index.
+`mode=index` is paged. It returns `start_block`, `returned_blocks`,
+`total_blocks`, `has_more_blocks`, and `next_start_block`. This keeps the block
+list structured even when the note is large. Provider-budget trimming must trim
+whole index blocks from the end and preserve the continuation pointer; it must
+not head/tail truncate the index into plain text.
+
+Every index/block/section read returns `doc_hash` and `ledger_id`. Block and
+section reads bind IDs to `doc_hash`; if the file changes, stale `doc_hash`
+values are rejected and the model must re-index.
 
 Line ranges are still valid for ordinary text files, but they are not the right
 continuation strategy for rich-text HTML fragments because a short note can have
@@ -92,4 +123,3 @@ A Codex sidecar may be used as a non-production comparison harness for real
 failure cases, but Perseus production runs must not depend on `codex exec` as a
 black-box backend. Any sidecar experiment should expose Perseus-style tools and
 compare behavior against Kernel v2 before changing production code.
-

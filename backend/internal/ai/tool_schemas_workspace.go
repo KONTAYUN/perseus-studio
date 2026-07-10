@@ -29,13 +29,13 @@ func openAIWorkspaceToolByName(name string) map[string]any {
 	case "inspect_workspace":
 		return openAIFunctionTool(name, "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams())
 	case "read_workspace_text":
-		return openAIFunctionTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams())
+		return openAIFunctionTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. .html notes are automatically redirected to read_workspace_note_view mode=index; do not read HTML notes by line range.", workspaceReadParams())
 	case "read_workspace_note_view":
 		return openAIFunctionTool(name, "Read an HTML note as a model-friendly view. Use mode=index to locate blocks/sections before exact HTML work; then mode=block or mode=section with view=raw. Prefer structure/text/format for ordinary content understanding.", workspaceNoteViewParams())
 	case "read_workspace_files":
-		return openAIFunctionTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
+		return openAIFunctionTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. .html notes are returned as note indexes, not line-range text.", workspaceReadFilesParams())
 	case "manage_workspace_path":
-		return openAIFunctionTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams())
+		return openAIFunctionTool(name, "Perform a validated workspace path operation: mkdir, rename, move, copy, or trash. Use copy for deterministic file duplication without asking the model to rewrite whole files.", workspaceManageParams())
 	case "organize_workspace_matches":
 		return openAIFunctionTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
 	case "apply_workspace_patch":
@@ -54,13 +54,13 @@ func anthropicWorkspaceToolByName(name string) map[string]any {
 	case "inspect_workspace":
 		return anthropicTool(name, "Inspect workspace structure by listing files and folders. Prefer find_workspace_files or search_workspace_text for targeted discovery; use this for folder overview.", workspaceListParams())
 	case "read_workspace_text":
-		return anthropicTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. Do not use for binary/document formats such as .docx; if only an unsupported document is available, say it is not readable by the current text tools.", workspaceReadParams())
+		return anthropicTool(name, "Read a supported plain-text file from the current user's workspace, optionally by line range. .html notes are automatically redirected to read_workspace_note_view mode=index; do not read HTML notes by line range.", workspaceReadParams())
 	case "read_workspace_note_view":
 		return anthropicTool(name, "Read an HTML note as a model-friendly view. Use mode=index to locate blocks/sections before exact HTML work; then mode=block or mode=section with view=raw. Prefer structure/text/format for ordinary content understanding.", workspaceNoteViewParams())
 	case "read_workspace_files":
-		return anthropicTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
+		return anthropicTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. .html notes are returned as note indexes, not line-range text.", workspaceReadFilesParams())
 	case "manage_workspace_path":
-		return anthropicTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams())
+		return anthropicTool(name, "Perform a validated workspace path operation: mkdir, rename, move, copy, or trash. Use copy for deterministic file duplication without asking the model to rewrite whole files.", workspaceManageParams())
 	case "organize_workspace_matches":
 		return anthropicTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
 	default:
@@ -169,7 +169,7 @@ func workspaceReadParams() map[string]any {
 		"type":     "object",
 		"required": []string{"path"},
 		"properties": map[string]any{
-			"path":       map[string]any{"type": "string", "description": "Workspace-relative supported plain-text file path. Binary/document files such as .docx are not supported by this tool."},
+			"path":       map[string]any{"type": "string", "description": "Workspace-relative supported plain-text file path. .html notes are redirected to read_workspace_note_view mode=index; binary/document files such as .docx are not supported."},
 			"start_line": map[string]any{"type": "integer", "description": "Optional 1-based first line to read."},
 			"end_line":   map[string]any{"type": "integer", "description": "Optional 1-based last line to read."},
 			"max_chars":  map[string]any{"type": "integer", "description": "Maximum characters to return. Default 20000, maximum 50000."},
@@ -208,9 +208,13 @@ func workspaceNoteViewParams() map[string]any {
 				"type":        "string",
 				"description": "Optional doc_hash from mode=index. If the note changed, stale ids are rejected and the note must be indexed again.",
 			},
+			"start_block": map[string]any{
+				"type":        "integer",
+				"description": "Optional 1-based first block to return for mode=index pagination. Use next_start_block from a prior index result.",
+			},
 			"max_blocks": map[string]any{
 				"type":        "integer",
-				"description": "Maximum blocks to return for mode=index. Default 200, maximum 500.",
+				"description": "Maximum blocks to return for mode=index. Default 80, maximum 500.",
 			},
 			"max_chars": map[string]any{
 				"type":        "integer",
@@ -227,7 +231,7 @@ func workspaceReadFilesParams() map[string]any {
 		"properties": map[string]any{
 			"paths": map[string]any{
 				"type":        "array",
-				"description": "Workspace-relative supported plain-text file paths to read. Binary/document files such as .docx are not supported by this tool.",
+				"description": "Workspace-relative supported plain-text file paths to read. .html notes are returned as read_workspace_note_view mode=index summaries; binary/document files such as .docx are not supported.",
 				"items":       map[string]any{"type": "string"},
 			},
 			"start_line":         map[string]any{"type": "integer", "description": "Optional 1-based first line to read from each file."},
@@ -387,12 +391,16 @@ func workspaceManageParams() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"mkdir", "rename", "move", "trash"},
+				"enum":        []string{"mkdir", "rename", "move", "copy", "trash"},
 				"description": "Workspace path operation to perform.",
 			},
-			"path":            map[string]any{"type": "string", "description": "Existing path for rename/move/trash, or folder path to create for mkdir."},
+			"path":            map[string]any{"type": "string", "description": "Existing path for rename/move/copy/trash, or folder path to create for mkdir."},
 			"new_name":        map[string]any{"type": "string", "description": "Required for rename. New leaf name only, not a parent path."},
 			"new_parent_path": map[string]any{"type": "string", "description": "Required for move. Destination folder path, empty string means workspace root."},
+			"destination_path": map[string]any{
+				"type":        "string",
+				"description": "Required for copy. Exact destination file path. The backend refuses to overwrite an existing path.",
+			},
 		},
 	}
 }

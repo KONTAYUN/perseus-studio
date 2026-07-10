@@ -94,6 +94,8 @@ type PathChangeResult struct {
 	OldPath      string   `json:"old_path,omitempty"`
 	NewPath      string   `json:"new_path,omitempty"`
 	ChangedPaths []string `json:"changed_paths,omitempty"`
+	Hash         string   `json:"hash,omitempty"`
+	Size         int64    `json:"size,omitempty"`
 }
 
 type TrashItem struct {

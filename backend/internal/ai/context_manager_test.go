@@ -528,6 +528,48 @@ func TestProviderMessageBuilderSkipsShortTranscript(t *testing.T) {
 	}
 }
 
+func TestProviderMessageBuilderCompactsLongConversationWithoutTranscript(t *testing.T) {
+	var messages []store.Message
+	messages = append(messages, store.Message{Role: "system", Content: "stable system prompt"})
+	messages = append(messages, store.Message{Role: "user", Content: "first task anchor"})
+	for index := 0; index < 30; index++ {
+		messages = append(messages,
+			store.Message{Role: "assistant", Content: fmt.Sprintf("older answer %02d", index)},
+			store.Message{Role: "user", Content: strings.Repeat(fmt.Sprintf("large older user %02d ", index), 500)},
+		)
+	}
+	messages = append(messages,
+		store.Message{Role: "assistant", Content: "latest assistant result"},
+		store.Message{Role: "user", Content: "latest user request"},
+	)
+
+	snapshot := newAgentContextManager().BuildWithOptions(agentProtocolOpenAI, messages, nil, newAgentTranscript(), providerRuntimeProfile{}, 1, ProviderMessageBuildOptions{
+		Phase:        "tool_loop",
+		Reason:       "tool_loop",
+		TriggerBytes: 16 * 1024,
+		TargetBytes:  12 * 1024,
+	})
+	if !snapshot.Summary.MessageBuilderApplied {
+		t.Fatal("expected message-only provider compaction")
+	}
+	if !containsActionPrefix(snapshot.Summary.CompactionActions, "provider_message_builder_compacted:tool_loop:messages=") {
+		t.Fatalf("expected message compaction action, got %#v", snapshot.Summary.CompactionActions)
+	}
+	raw, err := json.Marshal(snapshot.OpenAIMessages)
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "large older user 29") {
+		t.Fatalf("expected large older user message to be folded out: %s", text)
+	}
+	for _, want := range []string{"stable system prompt", "first task anchor", "latest assistant result", "latest user request", "older chat message"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q to remain in compacted messages: %s", want, text)
+		}
+	}
+}
+
 func TestProviderMessageBuilderPreservesRecentWorkingSetReadInToolLoop(t *testing.T) {
 	transcript := newAgentTranscript()
 	for index := 0; index < 18; index++ {

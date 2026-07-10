@@ -23,6 +23,9 @@ type ProviderResponseError struct {
 	ResponseSnippet string
 	ParseError      string
 	Message         string
+	RetryAfter      string
+	RateLimitReset  string
+	RequestID       string
 }
 
 type RequestAttemptEvent struct {
@@ -265,13 +268,7 @@ func sleepBeforeRetry(ctx context.Context, attempt int) bool {
 }
 
 func isRetriableProviderStatus(statusCode int) bool {
-	return statusCode == http.StatusRequestTimeout ||
-		statusCode == http.StatusTooEarly ||
-		statusCode == http.StatusTooManyRequests ||
-		statusCode == http.StatusInternalServerError ||
-		statusCode == http.StatusBadGateway ||
-		statusCode == http.StatusServiceUnavailable ||
-		statusCode == http.StatusGatewayTimeout
+	return statusCode >= http.StatusInternalServerError && statusCode <= 599
 }
 
 func isRetriableProviderStatusIncluding529(statusCode int) bool {
@@ -332,6 +329,9 @@ func decodeProviderResponse(resp *http.Response, endpoint string, target any) er
 					Endpoint:        endpoint,
 					ResponseSnippet: responseSnippet(body, 500),
 					Message:         formatProviderError(resp.StatusCode, data.Error).Error(),
+					RetryAfter:      resp.Header.Get("Retry-After"),
+					RateLimitReset:  providerRateLimitResetHeader(resp.Header),
+					RequestID:       providerRequestIDHeader(resp.Header),
 				}
 			}
 		}
@@ -341,6 +341,9 @@ func decodeProviderResponse(resp *http.Response, endpoint string, target any) er
 			Endpoint:        endpoint,
 			ResponseSnippet: responseSnippet(body, 500),
 			Message:         providerHTTPErrorMessage(resp.StatusCode, contentType, endpoint, responseSnippet(body, 300)),
+			RetryAfter:      resp.Header.Get("Retry-After"),
+			RateLimitReset:  providerRateLimitResetHeader(resp.Header),
+			RequestID:       providerRequestIDHeader(resp.Header),
 		}
 	}
 	if err := json.Unmarshal(body, target); err != nil {

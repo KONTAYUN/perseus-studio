@@ -32,7 +32,22 @@ func (r *agentRuntime) shouldCheckpointResume(ctx context.Context, err error) bo
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
+	if !r.hasVerifiedCheckpointProgress() {
+		return false
+	}
 	return r.checkpointResumeAttempts < agentMaxCheckpointResumes()
+}
+
+func (r *agentRuntime) hasVerifiedCheckpointProgress() bool {
+	if r == nil {
+		return false
+	}
+	for _, event := range r.events {
+		if strings.EqualFold(strings.TrimSpace(event.Status), "success") && strings.TrimSpace(event.ToolName) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *agentRuntime) restoreLatestCheckpointForRecovery(ctx context.Context, err error) bool {

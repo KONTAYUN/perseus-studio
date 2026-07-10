@@ -54,18 +54,19 @@ func isLocalWorkspaceReference(reference string) bool {
 }
 
 func resolveWorkspaceReferenceFromNote(notePath, reference string) string {
-	reference = normalizeWorkspaceReference(reference)
-	if reference == "" {
+	rawReference := strings.ReplaceAll(strings.TrimSpace(reference), "\\", "/")
+	normalizedReference := normalizeWorkspaceReference(rawReference)
+	if normalizedReference == "" {
 		return ""
 	}
-	if !strings.HasPrefix(reference, ".") {
-		return reference
+	if !strings.HasPrefix(rawReference, ".") {
+		return normalizedReference
 	}
 	base := path.Dir(normalizeWorkspaceReference(notePath))
 	if base == "." {
 		base = ""
 	}
-	resolved := normalizeWorkspaceReference(path.Join(base, reference))
+	resolved := normalizeWorkspaceReference(path.Join(base, normalizedReference))
 	if resolved == "" || resolved == "." || strings.HasPrefix(resolved, "../") || resolved == ".." {
 		return ""
 	}

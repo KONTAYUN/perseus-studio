@@ -133,6 +133,104 @@ func (t *AgentTranscript) Clone() *AgentTranscript {
 	return next
 }
 
+func normalizeTranscriptToolPairs(transcript *AgentTranscript) (*AgentTranscript, []string) {
+	next := transcript.Clone()
+	if next == nil {
+		return newAgentTranscript(), nil
+	}
+	if len(next.Entries) == 0 {
+		return next, nil
+	}
+	knownCalls := map[string]agentToolCall{}
+	callOrder := make([]string, 0)
+	resultSeen := map[string]bool{}
+	actions := make([]string, 0)
+	entries := make([]TranscriptEntry, 0, len(next.Entries)+1)
+
+	for _, entry := range next.Entries {
+		switch entry.Kind {
+		case transcriptEntryAssistant:
+			for _, call := range entry.ToolCalls {
+				id := strings.TrimSpace(call.ID)
+				if id == "" {
+					continue
+				}
+				if _, exists := knownCalls[id]; !exists {
+					callOrder = append(callOrder, id)
+				}
+				knownCalls[id] = call
+			}
+			entries = append(entries, entry)
+		case transcriptEntryTool:
+			filtered := make([]TranscriptToolResult, 0, len(entry.ToolResults))
+			for _, result := range entry.ToolResults {
+				id := strings.TrimSpace(result.ToolCallID)
+				call, ok := knownCalls[id]
+				if id == "" || !ok {
+					actions = append(actions, "orphan_tool_result_dropped:"+firstNonEmpty(result.ToolName, result.Event.ToolName, "unknown_tool"))
+					continue
+				}
+				if strings.TrimSpace(result.ToolName) == "" {
+					result.ToolName = call.Name
+				}
+				if strings.TrimSpace(result.Event.ToolName) == "" {
+					result.Event.ToolName = result.ToolName
+				}
+				if strings.TrimSpace(result.Event.ToolCallID) == "" {
+					result.Event.ToolCallID = id
+				}
+				resultSeen[id] = true
+				filtered = append(filtered, result)
+			}
+			if len(filtered) > 0 {
+				entry.ToolResults = filtered
+				entries = append(entries, entry)
+			}
+		default:
+			entries = append(entries, entry)
+		}
+	}
+
+	var aborted []TranscriptToolResult
+	for _, id := range callOrder {
+		if resultSeen[id] {
+			continue
+		}
+		call := knownCalls[id]
+		toolName := firstNonEmpty(call.Name, "unknown_tool")
+		content := mustJSON(map[string]any{
+			"status":       "aborted",
+			"tool_name":    toolName,
+			"tool_call_id": id,
+			"message":      "Tool call was interrupted before producing output. Treat this as unavailable and continue from verified context only.",
+		})
+		aborted = append(aborted, TranscriptToolResult{
+			ToolCallID: id,
+			ToolName:   toolName,
+			Content:    content,
+			IsError:    true,
+			Event: ToolEvent{
+				Type:       "tool_call_aborted",
+				ToolCallID: id,
+				ToolName:   toolName,
+				StatusKind: "warn",
+				Label:      toolName,
+				Status:     "aborted",
+				Error:      "tool call was interrupted before producing output",
+			},
+		})
+		actions = append(actions, "missing_tool_result_aborted:"+toolName)
+	}
+	if len(aborted) > 0 {
+		entries = append(entries, TranscriptEntry{
+			Kind:        transcriptEntryTool,
+			ToolResults: aborted,
+		})
+	}
+	next.Entries = entries
+	return next, dedupeStrings(actions)
+}
+
 func cloneAgentToolCalls(items []agentToolCall) []agentToolCall {
 	if len(items) == 0 {
 		return nil

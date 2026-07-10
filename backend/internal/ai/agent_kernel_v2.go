@@ -9,16 +9,24 @@ import (
 )
 
 const (
-	agentKernelV2Version = "kernel_v2"
-	agentKernelLegacy    = "legacy"
-	maxKernelProgressLog = 40
+	agentKernelV2Version         = "codex_parity"
+	agentKernelLegacy            = "legacy"
+	agentKernelV2Current         = "kernel_v2_current"
+	agentKernelCodexParity       = "codex_parity"
+	agentKernelSidecarBenchmark  = "codex_sidecar_benchmark"
+	agentKernelLegacyV2EnvAlias  = "kernel_v2"
+	agentKernelCurrentV2EnvAlias = "current_v2"
+	maxKernelProgressLog         = 40
+	maxKernelTurnItems           = 160
 )
 
 type AgentKernelState struct {
 	Version        string                     `json:"version"`
 	Mode           string                     `json:"mode"`
+	TurnID         string                     `json:"turn_id,omitempty"`
 	ReadTargets    map[string]AgentReadTarget `json:"read_targets,omitempty"`
 	ProgressEvents []AgentProgressEvent       `json:"progress_events,omitempty"`
+	Items          []AgentTurnItem            `json:"items,omitempty"`
 }
 
 type AgentReadTarget struct {
@@ -42,13 +50,30 @@ type AgentProgressEvent struct {
 	LedgerID  string `json:"ledger_id,omitempty"`
 }
 
+type AgentTurnItem struct {
+	ID           string   `json:"id"`
+	TurnID       string   `json:"turn_id,omitempty"`
+	Kind         string   `json:"kind"`
+	Phase        string   `json:"phase,omitempty"`
+	Status       string   `json:"status"`
+	Round        int      `json:"round,omitempty"`
+	ToolCallID   string   `json:"tool_call_id,omitempty"`
+	ToolName     string   `json:"tool_name,omitempty"`
+	Target       string   `json:"target,omitempty"`
+	LedgerID     string   `json:"ledger_id,omitempty"`
+	Content      string   `json:"content,omitempty"`
+	Error        string   `json:"error,omitempty"`
+	ChangedPaths []string `json:"changed_paths,omitempty"`
+}
+
 func newAgentKernelState() AgentKernelState {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("PERSEUS_AGENT_KERNEL_MODE")))
 	if mode == "" {
-		mode = agentKernelV2Version
+		mode = agentKernelCodexParity
 	}
-	if mode != agentKernelLegacy && mode != agentKernelV2Version {
-		mode = agentKernelV2Version
+	mode = normalizeAgentKernelMode(mode)
+	if mode == "" {
+		mode = agentKernelCodexParity
 	}
 	return AgentKernelState{
 		Version:     agentKernelV2Version,
@@ -61,8 +86,9 @@ func normalizeAgentKernelState(state AgentKernelState) AgentKernelState {
 	if strings.TrimSpace(state.Version) == "" {
 		state.Version = agentKernelV2Version
 	}
+	state.Mode = normalizeAgentKernelMode(state.Mode)
 	if strings.TrimSpace(state.Mode) == "" {
-		state.Mode = agentKernelV2Version
+		state.Mode = agentKernelCodexParity
 	}
 	if state.ReadTargets == nil {
 		state.ReadTargets = map[string]AgentReadTarget{}
@@ -82,7 +108,31 @@ func (r *agentRuntime) kernelV2Active() bool {
 		return true
 	}
 	r.ensureKernelState()
-	return r.kernel.Mode == agentKernelV2Version
+	return r.kernel.Mode != agentKernelLegacy
+}
+
+func (r *agentRuntime) codexParityKernelActive() bool {
+	if r == nil {
+		return true
+	}
+	r.ensureKernelState()
+	return r.kernel.Mode == agentKernelCodexParity || r.kernel.Mode == agentKernelSidecarBenchmark
+}
+
+func normalizeAgentKernelMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "", agentKernelCodexParity:
+		return agentKernelCodexParity
+	case agentKernelLegacy:
+		return agentKernelLegacy
+	case agentKernelV2Current, agentKernelLegacyV2EnvAlias, agentKernelCurrentV2EnvAlias:
+		return agentKernelV2Current
+	case agentKernelSidecarBenchmark:
+		return agentKernelSidecarBenchmark
+	default:
+		return ""
+	}
 }
 
 func (r *agentRuntime) recordKernelToolProgress(call agentToolCall, isError bool, event ToolEvent, result string) {
@@ -90,7 +140,7 @@ func (r *agentRuntime) recordKernelToolProgress(call agentToolCall, isError bool
 		return
 	}
 	r.ensureKernelState()
-	if r.kernel.Mode != agentKernelV2Version {
+	if r.kernel.Mode == agentKernelLegacy {
 		return
 	}
 	status := firstNonEmpty(event.Status, "success")
@@ -125,6 +175,110 @@ func (r *agentRuntime) recordKernelToolProgress(call agentToolCall, isError bool
 	})
 	if len(r.kernel.ProgressEvents) > maxKernelProgressLog {
 		r.kernel.ProgressEvents = r.kernel.ProgressEvents[len(r.kernel.ProgressEvents)-maxKernelProgressLog:]
+	}
+}
+
+func (r *agentRuntime) emitKernelTurnStarted() {
+	if r == nil || !r.kernelV2Active() {
+		return
+	}
+	r.ensureKernelState()
+	if r.kernel.TurnID == "" {
+		r.kernel.TurnID = firstNonEmpty(r.opts.RunID, r.messageID)
+	}
+	emitToolLifecycleEvent(r.opts, "turn_started", "info", map[string]any{
+		"turn_id":        r.kernel.TurnID,
+		"kernel_version": r.kernel.Version,
+		"kernel_mode":    r.kernel.Mode,
+	})
+}
+
+func (r *agentRuntime) appendKernelItem(item AgentTurnItem) {
+	if r == nil || !r.kernelV2Active() {
+		return
+	}
+	r.ensureKernelState()
+	if r.kernel.TurnID == "" {
+		r.kernel.TurnID = firstNonEmpty(r.opts.RunID, r.messageID)
+	}
+	if item.ID == "" {
+		item.ID = agentKernelLedgerID(item.Kind, item.ToolCallID, item.ToolName, intString(r.currentRound), intString(len(r.kernel.Items)+1))
+	}
+	item.TurnID = r.kernel.TurnID
+	if item.Round == 0 {
+		item.Round = r.currentRound
+	}
+	if item.Status == "" {
+		item.Status = "completed"
+	}
+	r.kernel.Items = append(r.kernel.Items, item)
+	if len(r.kernel.Items) > maxKernelTurnItems {
+		r.kernel.Items = r.kernel.Items[len(r.kernel.Items)-maxKernelTurnItems:]
+	}
+	payload := map[string]any{
+		"item":           item,
+		"turn_id":        item.TurnID,
+		"item_id":        item.ID,
+		"item_kind":      item.Kind,
+		"item_status":    item.Status,
+		"kernel_version": r.kernel.Version,
+		"kernel_mode":    r.kernel.Mode,
+	}
+	emitToolLifecycleEvent(r.opts, "item_completed", "info", payload)
+	switch item.Kind {
+	case "tool_call", "tool_result", "file_change", "context_compaction", "final_message":
+		emitToolLifecycleEvent(r.opts, item.Kind, "info", payload)
+	}
+}
+
+func (r *agentRuntime) appendKernelAssistantItem(phase, content string) {
+	content = truncatePlainRunes(strings.TrimSpace(content), 1200)
+	if content == "" {
+		return
+	}
+	r.appendKernelItem(AgentTurnItem{
+		Kind:    "assistant_message",
+		Phase:   phase,
+		Status:  "completed",
+		Content: content,
+	})
+}
+
+func (r *agentRuntime) appendKernelToolCallItem(call agentToolCall) {
+	r.appendKernelItem(AgentTurnItem{
+		Kind:       "tool_call",
+		Status:     "started",
+		ToolCallID: call.ID,
+		ToolName:   call.Name,
+		Target:     toolTargetSummary(call.Name, executionToolArgumentsJSON(call)),
+	})
+}
+
+func (r *agentRuntime) appendKernelToolResultItem(call agentToolCall, event ToolEvent, isError bool, result string) {
+	target := kernelReadTargetFromToolResult(call.Name, result)
+	status := firstNonEmpty(event.Status, "success")
+	if isError {
+		status = "failed"
+	}
+	r.appendKernelItem(AgentTurnItem{
+		Kind:         "tool_result",
+		Status:       status,
+		ToolCallID:   call.ID,
+		ToolName:     call.Name,
+		Target:       firstNonEmpty(event.TargetSummary, event.Path, target.Path, toolTargetSummary(call.Name, executionToolArgumentsJSON(call))),
+		LedgerID:     target.LedgerID,
+		Error:        event.Error,
+		ChangedPaths: append([]string(nil), event.ChangedPaths...),
+	})
+	if len(event.ChangedPaths) > 0 {
+		r.appendKernelItem(AgentTurnItem{
+			Kind:         "file_change",
+			Status:       status,
+			ToolCallID:   call.ID,
+			ToolName:     call.Name,
+			Target:       firstNonEmpty(event.Path, event.TargetSummary),
+			ChangedPaths: append([]string(nil), event.ChangedPaths...),
+		})
 	}
 }
 

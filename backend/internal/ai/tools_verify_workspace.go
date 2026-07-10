@@ -89,6 +89,8 @@ func (s *Service) verifyToolResult(ctx context.Context, toolName, resultJSON str
 			return s.verifyManagedMkdir(files, resultJSON)
 		case "rename", "move":
 			return s.verifyManagedMove(files, resultJSON)
+		case "copy":
+			return s.verifyManagedCopy(files, resultJSON)
 		case "trash":
 			return s.verifyManagedTrash(files, resultJSON)
 		default:
@@ -197,6 +199,28 @@ func (s *Service) verifyManagedMove(files *workspace.Service, resultJSON string)
 		return ToolVerification{Status: "failed", Message: "new path does not exist after move/rename", Path: meta.NewPath}
 	}
 	return ToolVerification{Status: "verified", Message: "old path removed and new path exists", Path: meta.NewPath}
+}
+
+func (s *Service) verifyManagedCopy(files *workspace.Service, resultJSON string) ToolVerification {
+	var meta struct {
+		OldPath string `json:"old_path"`
+		NewPath string `json:"new_path"`
+		Hash    string `json:"hash"`
+	}
+	if err := json.Unmarshal([]byte(resultJSON), &meta); err != nil || meta.OldPath == "" || meta.NewPath == "" {
+		return ToolVerification{Status: "failed", Message: "copy result did not include old_path and new_path"}
+	}
+	if !existsWorkspacePath(files, meta.OldPath) {
+		return ToolVerification{Status: "failed", Message: "source path does not exist after copy", Path: meta.OldPath}
+	}
+	read, err := files.ReadFile(meta.NewPath)
+	if err != nil {
+		return ToolVerification{Status: "failed", Message: fmt.Sprintf("copied file is not readable: %v", err), Path: meta.NewPath}
+	}
+	if meta.Hash != "" && read.Hash != meta.Hash {
+		return ToolVerification{Status: "failed", Message: "copied file hash mismatch", Path: meta.NewPath}
+	}
+	return ToolVerification{Status: "verified", Message: "source and copied file exist", Path: meta.NewPath}
 }
 
 func (s *Service) verifyManagedTrash(files *workspace.Service, resultJSON string) ToolVerification {

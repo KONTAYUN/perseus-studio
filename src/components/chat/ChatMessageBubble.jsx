@@ -3,6 +3,7 @@ import { Copy, GitBranch, RefreshCw, Trash2 } from 'lucide-react';
 import { completedActionItems, latestLiveProgressItem, loadingStatusDisplayText, loadingStatusReserveText, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
 import { Button, IconButton } from '../ui';
 import { RUN_STEER_STATUS, runSteerStatusLabel } from '../../hooks/chatSteerItems';
+import { formatRetryAfterLabel, isResumeBlockedByFailure } from '../../hooks/chatErrorUtils';
 import ChatMarkdownRenderer from './markdown/ChatMarkdownRenderer';
 
 const STEER_FAILURE_BUTTON_CLASS = 'border-white/20 bg-white/10 text-blue-50 hover:bg-white/15 hover:text-white dark:border-white/15 dark:bg-white/10';
@@ -13,6 +14,8 @@ function MessageBubble({ message, ide, canRegenerate }) {
   const showLoadingOnly = message.pending && !(message.content || '').trim();
   const shouldShowFooterGap = shouldReserveMessageFooter(message);
   const isSteerMessage = message.kind === 'steer';
+  const resumeBlocked = message.error && isResumeBlockedByFailure(message);
+  const resumeButtonLabel = resumeBlocked ? formatRetryAfterLabel(message.retryAfterMs, message.resetAt) : '继续';
   return (
     <div className={`group/message flex min-w-0 max-w-full overflow-hidden ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div className={`flex min-w-0 max-w-[88%] flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -44,7 +47,13 @@ function MessageBubble({ message, ide, canRegenerate }) {
             <SteerFailureActions message={message} ide={ide} />
           )}
           {!message.pending && message.error && message.resumableRunId && (
-            <Button
+            <div className="mt-3 flex flex-col items-start gap-2">
+              {resumeBlocked && (
+                <div className="text-[11px] font-semibold text-red-200/80">
+                  {resumeButtonLabel}
+                </div>
+              )}
+              <Button
               type="button"
               variant="danger"
               size="xs"
@@ -52,12 +61,13 @@ function MessageBubble({ message, ide, canRegenerate }) {
                 e.stopPropagation();
                 ide.continueAgentRun?.(message.resumableRunId, message.conversation_id);
               }}
-              disabled={ide.isChatSending}
+              disabled={ide.isChatSending || resumeBlocked}
               className="mt-3"
             >
               <RefreshCw size={13} />
               继续
-            </Button>
+              </Button>
+            </div>
           )}
         </div>
         {shouldShowFooterGap && (
@@ -126,6 +136,11 @@ function isSameRenderableMessage(previous = {}, next = {}) {
     previous.pending === next.pending &&
     previous.error === next.error &&
     previous.resumableRunId === next.resumableRunId &&
+    previous.failureClass === next.failureClass &&
+    previous.retryAfterMs === next.retryAfterMs &&
+    previous.resetAt === next.resetAt &&
+    previous.canResumeNow === next.canResumeNow &&
+    previous.recommendedAction === next.recommendedAction &&
     previous.attachments === next.attachments &&
     previous.progressItems === next.progressItems &&
     previous.loadingState === next.loadingState

@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '../ui';
 import EmptyChatState from './EmptyChatState';
 import MemoizedMessageBubble, { lastAssistantMessageId } from './ChatMessageBubble';
+import { formatRetryAfterLabel, isResumeBlockedByFailure } from '../../hooks/chatErrorUtils';
 
 export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBottomInset, messagesScrollbarBottomInset }) {
   const isHomeEmpty = !ide.currentConversationId && ide.conversationMessages.length === 0 && !ide.chatError && !ide.agentRecoveryNotice?.text;
@@ -12,6 +13,10 @@ export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBott
     () => lastAssistantMessageId(ide.conversationMessages),
     [ide.conversationMessages]
   );
+  const resumeBlocked = isResumeBlockedByFailure(ide.resumableRun);
+  const resumeBlockedLabel = resumeBlocked
+    ? formatRetryAfterLabel(ide.resumableRun?.retryAfterMs, ide.resumableRun?.resetAt)
+    : '';
   return (
     <div
       ref={messagesRef}
@@ -26,6 +31,11 @@ export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBott
           {ide.chatError}
           {ide.resumableRun?.runId && (
             <div className="mt-3">
+              {resumeBlockedLabel && (
+                <div className="mb-2 text-[11px] font-semibold text-red-300">
+                  {resumeBlockedLabel}
+                </div>
+              )}
               <Button
                 type="button"
                 variant="danger"
@@ -34,7 +44,7 @@ export default function ChatMessages({ ide, messagesRef, bottomRef, messagesBott
                   e.stopPropagation();
                   ide.continueAgentRun?.();
                 }}
-                disabled={ide.isChatSending}
+                disabled={ide.isChatSending || resumeBlocked}
               >
                 <RefreshCw size={13} />
                 继续

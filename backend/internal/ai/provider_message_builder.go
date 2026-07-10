@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	providerMessageBuilderTriggerBytes   = 64 * 1024
+	providerMessageBuilderTriggerBytes   = 48 * 1024
 	providerMessageBuilderTargetBytes    = 48 * 1024
 	providerMessageBuilderTriggerEntries = 16
 	providerMessageBuilderRecentEntries  = 8
@@ -46,11 +46,11 @@ type ProviderMessageBuildResult struct {
 }
 
 type ProviderContinuationSummary struct {
-	SuccessfulTools  []string
-	FailedTools      []string
-	ReadPaths        []string
-	ChangedPaths     []string
-	Failures         []string
+	SuccessfulTools []string
+	FailedTools     []string
+	ReadPaths       []string
+	ChangedPaths    []string
+	Failures        []string
 }
 
 func (b ProviderMessageBuilder) Build(input ProviderMessageBuildInput) ProviderMessageBuildResult {
@@ -80,7 +80,20 @@ func (b ProviderMessageBuilder) Build(input ProviderMessageBuildInput) ProviderM
 		preserveRecent++
 	}
 	if compactedCount <= 0 {
-		return ProviderMessageBuildResult{Transcript: transcript, Messages: input.Messages, Actions: input.Actions, PayloadBeforeBytes: beforePayload, Phase: options.Phase}
+		messages := compactConversationMessagesForProvider(input.Messages)
+		if len(messages) == len(input.Messages) {
+			return ProviderMessageBuildResult{Transcript: transcript, Messages: input.Messages, Actions: input.Actions, PayloadBeforeBytes: beforePayload, Phase: options.Phase}
+		}
+		result := ProviderMessageBuildResult{
+			Applied:            true,
+			Strategy:           strategyName(options),
+			Phase:              options.Phase,
+			Messages:           messages,
+			Transcript:         transcript,
+			Actions:            appendProviderMessageBuilderMessageAction(input.Actions, len(input.Messages)-len(messages), options),
+			PayloadBeforeBytes: beforePayload,
+		}
+		return result.fitTarget(input, options)
 	}
 	older := transcript.Entries[:compactedCount]
 	recent := cloneTranscriptEntries(transcript.Entries[compactedCount:])
@@ -182,6 +195,12 @@ func strategyName(options ProviderMessageBuildOptions) string {
 func appendProviderMessageBuilderAction(actions []string, compacted, preserved int, options ProviderMessageBuildOptions) []string {
 	next := append([]string(nil), actions...)
 	next = append(next, fmt.Sprintf("provider_message_builder_compacted:%s:entries=%d:preserved=%d", strings.TrimPrefix(strategyName(options), "deterministic_continuation_summary:"), compacted, preserved))
+	return dedupeStrings(next)
+}
+
+func appendProviderMessageBuilderMessageAction(actions []string, compactedMessages int, options ProviderMessageBuildOptions) []string {
+	next := append([]string(nil), actions...)
+	next = append(next, fmt.Sprintf("provider_message_builder_compacted:%s:messages=%d", strings.TrimPrefix(strategyName(options), "deterministic_continuation_summary:"), compactedMessages))
 	return dedupeStrings(next)
 }
 
@@ -365,9 +384,10 @@ func compactConversationMessagesForProvider(messages []store.Message) []store.Me
 	if lastUser >= 0 {
 		keep[lastUser] = true
 	}
-	for index := len(messages) - 4; index < len(messages); index++ {
-		if index >= 0 {
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role == "assistant" {
 			keep[index] = true
+			break
 		}
 	}
 	next := make([]store.Message, 0, len(keep)+1)

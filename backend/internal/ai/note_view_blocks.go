@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultNoteIndexBlocks = 200
+	defaultNoteIndexBlocks = 80
 	maxNoteIndexBlocks     = 500
 	defaultNoteBlockRunes  = 20000
 	maxNoteBlockRunes      = 50000
@@ -40,6 +40,13 @@ type noteBlock struct {
 	HasStyles   bool   `json:"has_styles,omitempty"`
 	RawHTML     string `json:"-"`
 	Text        string `json:"-"`
+}
+
+type noteIndexBlockPage struct {
+	Blocks         []map[string]any
+	StartBlock     int
+	NextStartBlock int
+	HasMore        bool
 }
 
 type noteSection struct {
@@ -447,6 +454,38 @@ func blockIndexByID(blocks []noteBlock, id string) int {
 		}
 	}
 	return -1
+}
+
+func noteIndexPage(blocks []noteBlock, startBlock, maxBlocks int) noteIndexBlockPage {
+	if maxBlocks <= 0 {
+		maxBlocks = defaultNoteIndexBlocks
+	}
+	if maxBlocks > maxNoteIndexBlocks {
+		maxBlocks = maxNoteIndexBlocks
+	}
+	if startBlock <= 0 {
+		startBlock = 1
+	}
+	startIndex := startBlock - 1
+	if startIndex > len(blocks) {
+		startIndex = len(blocks)
+	}
+	endIndex := startIndex + maxBlocks
+	if endIndex > len(blocks) {
+		endIndex = len(blocks)
+	}
+	items, _ := noteIndexPayloadBlocks(blocks[startIndex:endIndex], maxBlocks)
+	nextStart := 0
+	hasMore := endIndex < len(blocks)
+	if hasMore {
+		nextStart = endIndex + 1
+	}
+	return noteIndexBlockPage{
+		Blocks:         items,
+		StartBlock:     startIndex + 1,
+		NextStartBlock: nextStart,
+		HasMore:        hasMore,
+	}
 }
 
 func noteIndexPayloadBlocks(blocks []noteBlock, maxBlocks int) ([]map[string]any, bool) {

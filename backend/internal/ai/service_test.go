@@ -249,6 +249,22 @@ func TestProviderTurnCanStreamAssistantTextOnlyWhenPatchChannelInactive(t *testi
 	if !providerTurnCanStreamAssistantText(providerTurnRequest{Tools: openAIToolsForLoadedToolsets(loaded, true)}) {
 		t.Fatal("workspace tool turns should stream ordinary text; patch blocks are filtered separately")
 	}
+	if providerTurnCanStreamAssistantText(providerTurnRequest{
+		ActionBoundaryActive: true,
+		Snapshot: ContextSnapshot{Summary: ProviderRequestSummary{
+			KernelMode: agentKernelCodexParity,
+		}},
+	}) {
+		t.Fatal("codex-parity action-boundary turns must keep intermediate text out of the main chat stream")
+	}
+	if !providerTurnCanStreamAssistantText(providerTurnRequest{
+		ActionBoundaryActive: true,
+		Snapshot: ContextSnapshot{Summary: ProviderRequestSummary{
+			KernelMode: agentKernelV2Current,
+		}},
+	}) {
+		t.Fatal("current v2 mode keeps the previous streaming behavior for compatibility")
+	}
 }
 
 func TestActionBoundaryActiveBuffersTextUntilActionAppears(t *testing.T) {
@@ -850,11 +866,11 @@ func TestProviderRetryPolicyDefaultsAndEnv(t *testing.T) {
 	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "")
 	t.Setenv("PERSEUS_PROVIDER_RETRY_MAX_DELAY_MS", "")
 	policy := currentProviderRetryPolicy()
-	if policy.MaxAttempts != 3 {
-		t.Fatalf("expected default provider max attempts to be 3, got %d", policy.MaxAttempts)
+	if policy.MaxAttempts != 5 {
+		t.Fatalf("expected default provider max attempts to be 5, got %d", policy.MaxAttempts)
 	}
-	if policy.BaseDelay != 750*time.Millisecond {
-		t.Fatalf("expected default provider base delay 750ms, got %s", policy.BaseDelay)
+	if policy.BaseDelay != 200*time.Millisecond {
+		t.Fatalf("expected default provider base delay 200ms, got %s", policy.BaseDelay)
 	}
 	if policy.MaxDelay != 5*time.Second {
 		t.Fatalf("expected default provider max delay 5s, got %s", policy.MaxDelay)
@@ -1576,6 +1592,121 @@ func TestAgentRuntimeFinalizeRejectsMissingChunkState(t *testing.T) {
 	}
 }
 
+func TestAgentRuntimeHTMLPatchRequiresCurrentRawRead(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	ctx := context.Background()
+	if _, err := files.CreateFile(ctx, "Note.html", "<h1>Title</h1>\n<p>old text</p>\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	runtime := newTestWorkspaceAgentRuntime(service, "conv_html_guard", "msg_html_guard")
+	patch := "*** Begin Patch\n" +
+		"*** Update File: Note.html\n" +
+		"@@\n" +
+		" <h1>Title</h1>\n" +
+		"-<p>old text</p>\n" +
+		"+<p>new text</p>\n" +
+		"*** End Patch"
+
+	content, isError := runTestAgentToolCall(t, runtime, agentToolCall{
+		ID:        "patch_without_raw",
+		Name:      "apply_workspace_patch",
+		PatchText: patch,
+	})
+	if !isError || !strings.Contains(content, "html note mutation rejected") || !strings.Contains(content, "view=raw") {
+		t.Fatalf("expected raw-read guard rejection, content=%s isError=%v", content, isError)
+	}
+	read, err := files.ReadFile("Note.html")
+	if err != nil || !strings.Contains(read.Content, "old text") {
+		t.Fatalf("guard should not mutate note, content=%q err=%v", read.Content, err)
+	}
+
+	indexContent, isError := runTestAgentToolCall(t, runtime, agentToolCall{
+		ID:            "read_index",
+		Name:          "read_workspace_note_view",
+		ArgumentsJSON: `{"path":"Note.html","mode":"index","view":"structure"}`,
+	})
+	if isError {
+		t.Fatalf("index read failed: %s", indexContent)
+	}
+	docHash, blockID := firstNoteBlockForText(t, indexContent, "old text")
+	rawContent, isError := runTestAgentToolCall(t, runtime, agentToolCall{
+		ID:   "read_raw",
+		Name: "read_workspace_note_view",
+		ArgumentsJSON: mustJSON(map[string]any{
+			"path":     "Note.html",
+			"mode":     "block",
+			"view":     "raw",
+			"block_id": blockID,
+			"doc_hash": docHash,
+		}),
+	})
+	if isError || !strings.Contains(rawContent, `"view":"raw"`) || !strings.Contains(rawContent, `"block_id":"`+blockID+`"`) {
+		t.Fatalf("raw read failed: %s isError=%v", rawContent, isError)
+	}
+
+	content, isError = runTestAgentToolCall(t, runtime, agentToolCall{
+		ID:        "patch_after_raw",
+		Name:      "apply_workspace_patch",
+		PatchText: patch,
+	})
+	if isError || !strings.Contains(content, `"tool_name":"apply_workspace_patch"`) {
+		t.Fatalf("expected patch after raw read to succeed, content=%s isError=%v", content, isError)
+	}
+	read, err = files.ReadFile("Note.html")
+	if err != nil || !strings.Contains(read.Content, "new text") {
+		t.Fatalf("expected updated note, content=%q err=%v", read.Content, err)
+	}
+}
+
+func TestAgentRuntimeHTMLPatchRejectsStaleRawRead(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	ctx := context.Background()
+	if _, err := files.CreateFile(ctx, "Note.html", "<p>old text</p>\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	runtime := newTestWorkspaceAgentRuntime(service, "conv_html_stale", "msg_html_stale")
+	indexContent, isError := runTestAgentToolCall(t, runtime, agentToolCall{
+		ID:            "read_index",
+		Name:          "read_workspace_note_view",
+		ArgumentsJSON: `{"path":"Note.html","mode":"index","view":"structure"}`,
+	})
+	if isError {
+		t.Fatalf("index read failed: %s", indexContent)
+	}
+	docHash, blockID := firstNoteBlockForText(t, indexContent, "old text")
+	_, isError = runTestAgentToolCall(t, runtime, agentToolCall{
+		ID:   "read_raw",
+		Name: "read_workspace_note_view",
+		ArgumentsJSON: mustJSON(map[string]any{
+			"path":     "Note.html",
+			"mode":     "block",
+			"view":     "raw",
+			"block_id": blockID,
+			"doc_hash": docHash,
+		}),
+	})
+	if isError {
+		t.Fatal("raw read should succeed")
+	}
+	if _, err := files.WriteExistingTextFile(ctx, "Note.html", "<p>changed elsewhere</p>\n", "test_external_change"); err != nil {
+		t.Fatalf("WriteExistingTextFile returned error: %v", err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: Note.html\n" +
+		"@@\n" +
+		"-<p>changed elsewhere</p>\n" +
+		"+<p>new text</p>\n" +
+		"*** End Patch"
+	content, isError := runTestAgentToolCall(t, runtime, agentToolCall{
+		ID:        "patch_stale_raw",
+		Name:      "apply_workspace_patch",
+		PatchText: patch,
+	})
+	if !isError || !strings.Contains(content, "current doc_hash") {
+		t.Fatalf("expected stale raw read rejection, content=%s isError=%v", content, isError)
+	}
+}
+
 func TestExecuteFinalizeWorkspaceWriteRejectsMismatchedCounts(t *testing.T) {
 	service, _, _, files := newTestAIService(t)
 	if _, err := files.CreateFile(context.Background(), "drafts/long.txt", "一\n二"); err != nil {
@@ -1716,6 +1847,65 @@ func TestExecuteToolWriteWorkspaceFileMarkdown(t *testing.T) {
 	}
 }
 
+func TestExecuteToolReadWorkspaceTextRedirectsHTMLToNoteIndex(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "notes/Long.html", `<h1>Title</h1><p>`+strings.Repeat("long text ", 2000)+`</p>`); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	result, summary, _, path, err := service.executeTool(context.Background(), "read_workspace_text", `{"path":"notes/Long.html","start_line":1,"end_line":1}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("executeTool returned error: %v", err)
+	}
+	if path != "notes/Long.html" || !strings.Contains(summary, "redirected read_workspace_text .html request") {
+		t.Fatalf("expected redirected html read, path=%q summary=%q", path, summary)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("invalid result json: %v", err)
+	}
+	if payload["tool_name"] != "read_workspace_note_view" || payload["mode"] != "index" {
+		t.Fatalf("expected note index payload, got %#v", payload)
+	}
+	if _, ok := payload["content"]; ok {
+		t.Fatalf("html redirect must not expose full content via read_workspace_text: %#v", payload["content"])
+	}
+	blocks, ok := payload["blocks"].([]any)
+	if !ok || len(blocks) == 0 {
+		t.Fatalf("expected indexed blocks, got %#v", payload["blocks"])
+	}
+}
+
+func TestExecuteToolReadWorkspaceFilesIndexesHTMLItems(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "notes/a.html", `<h1>A</h1><p>Alpha</p>`); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	if _, err := files.CreateFile(context.Background(), "notes/b.txt", "Beta"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	result, _, _, _, err := service.executeTool(context.Background(), "read_workspace_files", `{"paths":["notes/a.html","notes/b.txt"]}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("executeTool returned error: %v", err)
+	}
+	var payload struct {
+		Items          []struct{ Path, Content string } `json:"items"`
+		NoteIndexes    []struct{ Path, Mode string }    `json:"note_indexes"`
+		Count          int                              `json:"count"`
+		NoteIndexCount int                              `json:"note_index_count"`
+	}
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("invalid result json: %v", err)
+	}
+	if payload.Count != 1 || payload.NoteIndexCount != 1 || len(payload.Items) != 1 || len(payload.NoteIndexes) != 1 {
+		t.Fatalf("unexpected mixed batch payload: %#v", payload)
+	}
+	if payload.NoteIndexes[0].Path != "notes/a.html" || payload.NoteIndexes[0].Mode != "index" {
+		t.Fatalf("expected html note index item, got %#v", payload.NoteIndexes)
+	}
+}
+
 func TestExecuteToolMkdirWorkspace(t *testing.T) {
 	service, _, _, files := newTestAIService(t)
 
@@ -1744,6 +1934,43 @@ func TestExecuteToolMkdirWorkspace(t *testing.T) {
 	}
 	if !containsPathValue(payload["changed_paths"], "docs/guides") {
 		t.Fatalf("expected changed_paths to include docs/guides, got %#v", payload["changed_paths"])
+	}
+}
+
+func TestExecuteToolManageWorkspacePathCopiesHTMLWithoutOverwrite(t *testing.T) {
+	service, _, _, files := newTestAIService(t)
+	if _, err := files.CreateFile(context.Background(), "notes/source.html", `<p><img data-note-src="./source.assets/pic.png" src="./source.assets/pic.png"></p>`); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	result, _, _, path, err := service.executeTool(context.Background(), "manage_workspace_path", `{"action":"copy","path":"notes/source.html","destination_path":"archive/copy.html"}`, RunOptions{UserID: testUserID})
+	if err != nil {
+		t.Fatalf("executeTool returned error: %v", err)
+	}
+	if path != "archive/copy.html" {
+		t.Fatalf("unexpected copied path: %s", path)
+	}
+	read, err := files.ReadFile("archive/copy.html")
+	if err != nil {
+		t.Fatalf("ReadFile copied target returned error: %v", err)
+	}
+	if !strings.Contains(read.Content, "../notes/source.assets/pic.png") {
+		t.Fatalf("expected copied html asset references to be rewritten, got %q", read.Content)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("invalid result json: %v", err)
+	}
+	if payload["operation"] != "copy" || payload["hash"] == "" {
+		t.Fatalf("unexpected copy payload: %#v", payload)
+	}
+	if !containsPathValue(payload["changed_paths"], "archive/copy.html") {
+		t.Fatalf("expected changed_paths to include target, got %#v", payload["changed_paths"])
+	}
+
+	_, _, _, _, err = service.executeTool(context.Background(), "manage_workspace_path", `{"action":"copy","path":"notes/source.html","destination_path":"archive/copy.html"}`, RunOptions{UserID: testUserID})
+	if err == nil || !strings.Contains(err.Error(), "target path already exists") {
+		t.Fatalf("expected copy overwrite rejection, got %v", err)
 	}
 }
 
@@ -3609,6 +3836,57 @@ func toolNamesFromOpenAITools(tools []map[string]any) map[string]bool {
 		}
 	}
 	return names
+}
+
+func newTestWorkspaceAgentRuntime(service *Service, conversationID, messageID string) *agentRuntime {
+	return &agentRuntime{
+		service:          service,
+		protocol:         agentProtocolOpenAI,
+		conversationID:   conversationID,
+		messageID:        messageID,
+		opts:             RunOptions{UserID: testUserID},
+		loadedToolsets:   allAgentToolsets(true),
+		appliedMutations: map[string]ToolEvent{},
+		chunkWrites:      map[string]workspaceChunkWriteState{},
+	}
+}
+
+func runTestAgentToolCall(t *testing.T, runtime *agentRuntime, call agentToolCall) (string, bool) {
+	t.Helper()
+	content, isError, request, completed, err := runtime.processOneToolCall(context.Background(), call)
+	if err != nil || request != nil || completed {
+		t.Fatalf("call %s returned request=%v completed=%v err=%v content=%s", call.Name, request, completed, err, content)
+	}
+	event := ToolEvent{}
+	if len(runtime.events) > 0 {
+		event = runtime.events[len(runtime.events)-1]
+	}
+	runtime.recordLoopGuardAction(call, isError, event, content)
+	return content, isError
+}
+
+func firstNoteBlockForText(t *testing.T, raw, text string) (string, string) {
+	t.Helper()
+	var payload struct {
+		DocHash string `json:"doc_hash"`
+		Blocks  []struct {
+			BlockID     string `json:"block_id"`
+			TextPreview string `json:"text_preview"`
+		} `json:"blocks"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("invalid note index JSON: %v\n%s", err, raw)
+	}
+	if payload.DocHash == "" {
+		t.Fatalf("note index missing doc_hash: %s", raw)
+	}
+	for _, block := range payload.Blocks {
+		if strings.Contains(block.TextPreview, text) {
+			return payload.DocHash, block.BlockID
+		}
+	}
+	t.Fatalf("note index missing block containing %q: %s", text, raw)
+	return "", ""
 }
 
 func newTestAIService(t *testing.T) (*Service, *sql.DB, string, *workspace.Service) {

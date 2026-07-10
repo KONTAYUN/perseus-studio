@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"strings"
 	"time"
@@ -23,6 +24,10 @@ func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conve
 	stage := "failed"
 	eventType := "run_failed"
 	level := "error"
+	failure := ai.FailureMetadataFromError(err)
+	if strings.Contains(failure.FailureClass, "rate_limited") || failure.FailureClass == "provider_quota_exhausted" {
+		stage = "rate_limited"
+	}
 	if ctx.Err() != nil || strings.Contains(strings.ToLower(message), "context canceled") {
 		status = store.AgentRunCanceled
 		stage = "canceled"
@@ -56,6 +61,17 @@ func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conve
 			log.Printf("[agent_run] append diagnostic event failed run=%s diagnostic=%s error=%v", runID, diagnosticID, err)
 		}
 	}
+	failurePayload := map[string]any{
+		"failure_class":      failure.FailureClass,
+		"retry_after_ms":     failure.RetryAfterMS,
+		"provider_id":        failure.ProviderID,
+		"model_id":           failure.ModelID,
+		"can_resume_now":     failure.CanResumeNow,
+		"recommended_action": failure.RecommendedAction,
+	}
+	if !failure.ResetAt.IsZero() {
+		failurePayload["reset_at"] = failure.ResetAt
+	}
 	if _, err := s.appendRunEventStrict(eventCtx, store.AgentEventInput{
 		RunID:          runID,
 		UserID:         userID,
@@ -63,20 +79,34 @@ func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conve
 		MessageID:      messageID,
 		Type:           eventType,
 		Level:          level,
-		Payload: map[string]any{
-			"error":             message,
-			"diagnostic_log_id": diagnosticID,
-		},
+		Payload:        mergeFailureEventPayload(failurePayload, message, diagnosticID),
 	}); err != nil {
 		log.Printf("[agent_run] append failure event failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
 	}
+	failureJSON, _ := json.Marshal(failure)
+	failureJSONString := string(failureJSON)
 	if _, err := s.publishRunStrict(context.Background(), userID, runID, status, stage, store.UpdateAgentRunInput{
 		ErrorMessage:    &message,
 		DiagnosticLogID: diagnosticID,
+		FailureJSON:     &failureJSONString,
 		SetCompletedAt:  true,
 	}); err != nil {
 		log.Printf("[agent_run] publish failure state failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
 	}
+}
+
+func mergeFailureEventPayload(metadata map[string]any, message, diagnosticID string) map[string]any {
+	payload := map[string]any{
+		"error":             message,
+		"diagnostic_log_id": diagnosticID,
+	}
+	for key, value := range metadata {
+		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+			continue
+		}
+		payload[key] = value
+	}
+	return payload
 }
 
 func (s *Server) completeConversationRunWithBudgetExhaustion(ctx context.Context, userID, conversationID, userMessageID, runID string, assistantMessage store.Message, reply ai.Reply) error {

@@ -30,6 +30,12 @@ type LedgerToolResultSnapshot struct {
 	ContentChars          int              `json:"content_chars,omitempty"`
 	NumberedContentChars  int              `json:"numbered_content_chars,omitempty"`
 	Items                 []map[string]any `json:"items,omitempty"`
+	Blocks                []map[string]any `json:"blocks,omitempty"`
+	TotalBlocks           int              `json:"total_blocks,omitempty"`
+	ReturnedBlocks        int              `json:"returned_blocks,omitempty"`
+	StartBlock            int              `json:"start_block,omitempty"`
+	NextStartBlock        int              `json:"next_start_block,omitempty"`
+	HasMoreBlocks         bool             `json:"has_more_blocks,omitempty"`
 	PreviewHead           string           `json:"preview_head,omitempty"`
 	PreviewTail           string           `json:"preview_tail,omitempty"`
 }
@@ -101,6 +107,35 @@ func buildLedgerToolResultSnapshot(toolName, result string) LedgerToolResultSnap
 	snapshot.ModelViewTruncated = boolFromAny(payload["model_view_truncated"])
 	snapshot.ContentChars = len([]rune(stringFromAny(payload["content"])))
 	snapshot.NumberedContentChars = len([]rune(stringFromAny(payload["numbered_content"])))
+	snapshot.TotalBlocks = intFromAny(payload["total_blocks"])
+	snapshot.ReturnedBlocks = intFromAny(payload["returned_blocks"])
+	snapshot.StartBlock = intFromAny(payload["start_block"])
+	snapshot.NextStartBlock = intFromAny(payload["next_start_block"])
+	snapshot.HasMoreBlocks = boolFromAny(payload["has_more_blocks"])
+	if rawBlocks, ok := payload["blocks"].([]any); ok {
+		for _, rawBlock := range rawBlocks {
+			block, ok := rawBlock.(map[string]any)
+			if !ok {
+				continue
+			}
+			snapshot.Blocks = append(snapshot.Blocks, map[string]any{
+				"block_id":     stringFromAny(block["block_id"]),
+				"tag":          stringFromAny(block["tag"]),
+				"section_id":   stringFromAny(block["section_id"]),
+				"heading_path": stringFromAny(block["heading_path"]),
+				"text_preview": stringFromAny(block["text_preview"]),
+				"text_chars":   intFromAny(block["text_chars"]),
+				"raw_chars":    intFromAny(block["raw_chars"]),
+				"level":        intFromAny(block["level"]),
+				"has_images":   boolFromAny(block["has_images"]),
+				"has_tables":   boolFromAny(block["has_tables"]),
+				"has_styles":   boolFromAny(block["has_styles"]),
+			})
+			if len(snapshot.Blocks) >= defaultNoteIndexBlocks {
+				break
+			}
+		}
+	}
 	if rawItems, ok := payload["items"].([]any); ok {
 		for _, rawItem := range rawItems {
 			item, ok := rawItem.(map[string]any)

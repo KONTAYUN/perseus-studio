@@ -24,7 +24,7 @@ This project is optimized by runtime and maintenance impact, not by deleting lin
 | Backend import/export | 9.6 | DOCX import/export facades delegate to style types, extraction, Word XML, and zip helpers. File and note transfer handlers now split by route responsibility without changing API behavior. | Keep HTTP decoding in handlers and conversion/filesystem behavior in helpers/services. |
 | Agent kernel | 9.5 | `docs/AGENT_KERNEL_V2.md` records the v2 execution model: bounded context, targeted note reads, tool/result ledgers, checkpoint restore state, and the legacy rollback switch. | Future AI work should extend the kernel ledger/read-target model instead of adding ad hoc loop-guard exceptions. |
 | UI system | 9.5 | `docs/UI_DESIGN_SYSTEM.md` documents rich text editor control exceptions. `npm run test:ui` continues to block raw one-off buttons, shadows, radius drift, and broad motion. | Editor-specific controls must stay in named CSS classes, not long JSX class strings. |
-| Old-code audit | 9.5 | `docs/LEGACY_STRUCTURE_AUDIT.md` records the old-code review and decisions. No production file now exceeds the 450-line review threshold. | Full package-wide Go tests depend on local Go or Docker availability; keep Docker fallback documented. |
+| Old-code audit | 9.5 | `docs/LEGACY_STRUCTURE_AUDIT.md` records the old-code review and decisions. Files over the 450-line review threshold are registered below with responsibility-based decisions. | Full package-wide Go tests depend on local Go or Docker availability; keep Docker fallback documented. |
 
 ## Responsibility Review Register
 
@@ -35,6 +35,7 @@ These production files cross the 450-line review threshold or sit near it. A thr
 | `src/styles/motion.css` | Shared motion token mapping, keyframes, reduced-motion behavior, and compatibility motion classes. | Keep this as the single motion semantics registry. Move component-specific visual surfaces, such as toast styling, to their own CSS section instead of splitting keyframes by line count. |
 | `backend/internal/ai/note_view_blocks.go` | HTML note fragment block indexing, section grouping, raw block capture, and compact metadata projection for `read_workspace_note_view`. | Keep together for now because parser/tokenizer/index metadata must evolve as one behavior. If it grows again, split by real boundary: raw-token capture, block/section indexing, and payload projection. |
 | `backend/internal/ai/context_read_spans.go` | Current-read working set extraction, read-result span identity, stale/superseded read compaction, and model-facing read metadata for text and HTML note reads. | Keep together for now because the span identity rules must stay consistent across compaction, diagnostics, and kernel progress. If it grows again, split by real boundary: result decoding, supersession rules, and working-set projection. |
+| `backend/internal/ai/tool_result_budget.go` | Model-facing tool-result budgeting, compact note-index projection, continuation hints, and stable metadata preservation for large tool results. | Keep together for now because budget trimming and metadata preservation must be reasoned about as one behavior. If it grows again, split by real boundary: generic JSON budgeting, note-index compaction, and read-continuation hints. |
 
 ## Completed Structural Cleanup
 

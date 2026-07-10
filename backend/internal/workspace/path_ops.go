@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -114,6 +115,63 @@ func (s *Service) MovePath(oldPath, newParentPath string) (PathChangeResult, err
 		return PathChangeResult{}, fmt.Errorf("source and destination are the same")
 	}
 	return s.renameValidated(cleanOld, cleanNew)
+}
+
+func (s *Service) CopyFile(ctx context.Context, sourcePath, destinationPath string) (PathChangeResult, error) {
+	cleanSource, absSource, err := s.sanitizePath(sourcePath)
+	if err != nil {
+		return PathChangeResult{}, err
+	}
+	if isAnyTrashPath(cleanSource) {
+		return PathChangeResult{}, trashManagedOnlyError()
+	}
+	sourceInfo, err := os.Stat(absSource)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return PathChangeResult{}, fmt.Errorf("source file does not exist")
+		}
+		return PathChangeResult{}, err
+	}
+	if sourceInfo.IsDir() {
+		return PathChangeResult{}, fmt.Errorf("copy only supports files")
+	}
+
+	cleanDestination, absDestination, err := s.sanitizePath(destinationPath)
+	if err != nil {
+		return PathChangeResult{}, err
+	}
+	if isAnyTrashPath(cleanDestination) {
+		return PathChangeResult{}, trashManagedOnlyError()
+	}
+	if cleanSource == cleanDestination {
+		return PathChangeResult{}, fmt.Errorf("source and destination are the same")
+	}
+	if _, err := os.Stat(absDestination); err == nil {
+		return PathChangeResult{}, fmt.Errorf("target path already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return PathChangeResult{}, err
+	}
+
+	read, err := s.ReadFile(cleanSource)
+	if err != nil {
+		return PathChangeResult{}, err
+	}
+	content := read.Content
+	if isHTMLNotePath(cleanSource) && isHTMLNotePath(cleanDestination) {
+		content = rewriteMovedHTMLNoteAssetRefs(content, cleanSource, cleanDestination)
+	}
+	write, err := s.CreateBytes(ctx, cleanDestination, []byte(content))
+	if err != nil {
+		return PathChangeResult{}, err
+	}
+	return PathChangeResult{
+		Path:         write.Path,
+		OldPath:      cleanSource,
+		NewPath:      write.Path,
+		ChangedPaths: []string{cleanSource, write.Path},
+		Hash:         write.Hash,
+		Size:         write.Size,
+	}, nil
 }
 
 func (s *Service) Rename(oldPath, newPath string) (map[string]string, error) {

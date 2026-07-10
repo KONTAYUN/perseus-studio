@@ -236,6 +236,9 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 		if hasCompleteToolCalls(turn) {
 			return agentModelTurn{}, &partialStreamTurnError{turn: turn, err: err}
 		}
+		if providerStreamTurnHasStarted(turn) {
+			return turn, err
+		}
 		return agentModelTurn{}, err
 	}
 	turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)

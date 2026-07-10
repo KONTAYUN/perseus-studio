@@ -47,6 +47,49 @@ func TestProviderMessageProtocolWarningsAllowsPendingLastAssistantToolCall(t *te
 	}
 }
 
+func TestNormalizeTranscriptToolPairsAddsAbortedResultForMissingOutput(t *testing.T) {
+	transcript := newAgentTranscript()
+	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{{
+		ID:            "call_read_1",
+		Name:          "read_workspace_text",
+		ArgumentsJSON: `{"path":"a.txt"}`,
+	}}})
+
+	normalized, actions := normalizeTranscriptToolPairs(transcript)
+	if !containsContextAction(actions, "missing_tool_result_aborted:read_workspace_text") {
+		t.Fatalf("expected missing result action, got %#v", actions)
+	}
+	if len(normalized.Entries) != 2 || normalized.Entries[1].Kind != transcriptEntryTool {
+		t.Fatalf("expected appended tool result entry, got %#v", normalized.Entries)
+	}
+	result := normalized.Entries[1].ToolResults[0]
+	if result.ToolCallID != "call_read_1" || result.ToolName != "read_workspace_text" || !result.IsError || result.Event.Status != "aborted" {
+		t.Fatalf("unexpected aborted result: %#v", result)
+	}
+	messages := openAITranscriptMessages(normalized.Entries)
+	if warnings := providerMessageProtocolWarnings(messages, "openai"); len(warnings) != 0 {
+		t.Fatalf("normalized transcript should not produce protocol warnings: %#v", warnings)
+	}
+}
+
+func TestNormalizeTranscriptToolPairsDropsOrphanToolResults(t *testing.T) {
+	transcript := newAgentTranscript()
+	transcript.AppendToolResults([]TranscriptToolResult{{
+		ToolCallID: "orphan",
+		ToolName:   "read_workspace_text",
+		Content:    `{"path":"a.txt","content":"orphan"}`,
+		Event:      ToolEvent{ToolName: "read_workspace_text", Status: "success", Path: "a.txt"},
+	}})
+
+	normalized, actions := normalizeTranscriptToolPairs(transcript)
+	if !containsContextAction(actions, "orphan_tool_result_dropped:read_workspace_text") {
+		t.Fatalf("expected orphan drop action, got %#v", actions)
+	}
+	if len(normalized.Entries) != 0 {
+		t.Fatalf("orphan tool result must not enter provider context: %#v", normalized.Entries)
+	}
+}
+
 func TestAnthropicTranscriptMessagesCoalescesAdjacentToolResults(t *testing.T) {
 	transcript := newAgentTranscript()
 	transcript.AppendAssistantTurn(agentModelTurn{ToolCalls: []agentToolCall{

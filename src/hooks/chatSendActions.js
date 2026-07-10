@@ -1,5 +1,5 @@
 import { apiPostFormWithSignal } from '../api/client';
-import { formatChatError } from './chatErrorUtils';
+import { chatFailureMetadata, formatChatError } from './chatErrorUtils';
 import { buildAssistantRunShell, mapPendingAssistant, mergeCommittedRunStart } from './chatStateUtils.js';
 
 export function createChatSendActions({
@@ -292,6 +292,7 @@ export function createChatSendActions({
         runId: error.runId,
         conversationId: error.conversationId || conversationID,
         diagnosticLogId: error.diagnosticLogId || '',
+        ...chatFailureMetadata(error),
       });
     }
     const isBudgetExhausted = error?.stage === 'budget_exhausted' || error?.incompleteReason === 'budget_exhausted';
@@ -305,6 +306,7 @@ export function createChatSendActions({
         error: true,
         resumableRunId: error?.runId || '',
         diagnosticLogId: error?.diagnosticLogId || '',
+        ...chatFailureMetadata(error),
         content: isBudgetExhausted ? message : `${prefix}：${message}`,
       }))
     );

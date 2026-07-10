@@ -297,6 +297,8 @@ func workspaceFileChangedOperation(name string, event ToolEvent) string {
 		switch {
 		case event.OldPath != "" && event.NewPath != "" && (workspace.IsTrashPath(event.NewPath) || workspace.IsLegacyTrashPath(event.NewPath)):
 			return "trash"
+		case event.OldPath != "" && event.NewPath != "" && event.Operation == "copy":
+			return "copy"
 		case event.OldPath != "" && event.NewPath != "":
 			return "move"
 		case event.Path != "":

@@ -144,6 +144,9 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 		if hasCompleteToolCalls(turn) {
 			return agentModelTurn{}, &partialStreamTurnError{turn: turn, err: err}
 		}
+		if providerStreamTurnHasStarted(turn) {
+			return turn, err
+		}
 		return agentModelTurn{}, err
 	}
 	turn := buildAnthropicStreamTurn(content.String(), finishReason, blocks)

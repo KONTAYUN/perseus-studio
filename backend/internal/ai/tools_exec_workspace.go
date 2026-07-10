@@ -117,6 +117,18 @@ func (s *Service) execReadWorkspaceFile(ctx context.Context, userID, argumentsJS
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在读取工作区文件...", "", fmt.Errorf("invalid tool arguments")
 	}
+	if isWorkspaceHTMLPath(args.Path) {
+		redirectArgs := mustJSON(map[string]any{
+			"path": args.Path,
+			"view": "structure",
+			"mode": "index",
+		})
+		result, summary, label, path, err := s.execReadWorkspaceNoteView(ctx, userID, redirectArgs)
+		if err != nil {
+			return result, summary, label, path, err
+		}
+		return result, "redirected read_workspace_text .html request to note index: " + summary, label, path, nil
+	}
 	maxChars := args.MaxChars
 	if maxChars <= 0 || maxChars > 50000 {
 		maxChars = 20000
@@ -183,10 +195,56 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		Path  string `json:"path"`
 		Error string `json:"error"`
 	}
+	type noteIndexItem struct {
+		Path           string           `json:"path"`
+		RedirectedTool string           `json:"redirected_tool"`
+		View           string           `json:"view"`
+		Mode           string           `json:"mode"`
+		DocHash        string           `json:"doc_hash"`
+		Blocks         []map[string]any `json:"blocks"`
+		Sections       []map[string]any `json:"sections"`
+		TotalBlocks    int              `json:"total_blocks"`
+		ReturnedBlocks int              `json:"returned_blocks"`
+		NextStartBlock int              `json:"next_start_block,omitempty"`
+		HasMoreBlocks  bool             `json:"has_more_blocks"`
+		TotalTextChars int              `json:"total_text_chars"`
+		TotalRawChars  int              `json:"total_raw_chars"`
+		NextAction     string           `json:"next_action"`
+	}
 	items := make([]readItem, 0, len(paths))
+	noteIndexes := make([]noteIndexItem, 0)
 	failed := make([]failedItem, 0)
 	truncated := limitedByCount
 	for _, path := range paths {
+		if isWorkspaceHTMLPath(path) {
+			read, readErr := files.ReadFile(path)
+			if readErr != nil {
+				failed = append(failed, failedItem{Path: path, Error: readErr.Error()})
+				continue
+			}
+			doc := buildNoteBlockDocument(read.Content)
+			page := noteIndexPage(doc.Blocks, 0, 80)
+			if page.HasMore {
+				truncated = true
+			}
+			noteIndexes = append(noteIndexes, noteIndexItem{
+				Path:           read.Path,
+				RedirectedTool: "read_workspace_note_view",
+				View:           "structure",
+				Mode:           "index",
+				DocHash:        doc.DocHash,
+				Blocks:         page.Blocks,
+				Sections:       noteIndexPayloadSections(doc.Sections),
+				TotalBlocks:    len(doc.Blocks),
+				ReturnedBlocks: len(page.Blocks),
+				NextStartBlock: page.NextStartBlock,
+				HasMoreBlocks:  page.HasMore,
+				TotalTextChars: doc.TotalTextRune,
+				TotalRawChars:  doc.TotalRawRune,
+				NextAction:     "Use read_workspace_note_view with mode=block or mode=section for targeted content. Use view=raw only for exact HTML edits.",
+			})
+			continue
+		}
 		result, readErr := files.ReadTextFileRange(path, args.StartLine, args.EndLine, maxChars)
 		if readErr != nil {
 			failed = append(failed, failedItem{Path: path, Error: readErr.Error()})
@@ -205,27 +263,36 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 			TotalLines:      result.TotalLines,
 		})
 	}
-	if len(items) == 0 {
+	if len(items) == 0 && len(noteIndexes) == 0 {
 		return "", "", "正在批量读取文件...", "", fmt.Errorf("all requested files failed to read")
 	}
 	readPaths := make([]string, 0, len(items))
 	for _, item := range items {
 		readPaths = append(readPaths, item.Path)
 	}
+	for _, item := range noteIndexes {
+		readPaths = append(readPaths, item.Path)
+	}
 	payload := workspaceToolPayload("read_workspace_files", "", map[string]any{
 		"items":            items,
+		"note_indexes":     noteIndexes,
 		"failed":           failed,
 		"paths":            readPaths,
 		"count":            len(items),
+		"note_index_count": len(noteIndexes),
 		"failed_count":     len(failed),
 		"truncated":        truncated,
 		"limited_by_count": limitedByCount,
 		"start_line":       args.StartLine,
 		"end_line":         args.EndLine,
-		"next_hint":        "Use a *** Begin Patch text patch for any file content change.",
+		"next_hint":        "Use read_workspace_note_view mode=block/section for .html notes. Use a *** Begin Patch text patch for file content changes.",
 	})
-	summary := fmt.Sprintf("read %d workspace file(s), %d failed", len(items), len(failed))
+	summary := fmt.Sprintf("read %d workspace file(s), indexed %d html note(s), %d failed", len(items), len(noteIndexes), len(failed))
 	return mustJSON(payload), summary, "正在批量读取文件...", strings.Join(readPaths, ","), nil
+}
+
+func isWorkspaceHTMLPath(path string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".html")
 }
 
 func normalizeBatchReadPaths(paths []string) []string {

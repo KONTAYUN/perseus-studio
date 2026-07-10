@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
 	"webide-backend/internal/tasks"
 )
@@ -67,7 +69,12 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 		run, event, err := s.resumeAgentRun(r.Context(), user.UserID, runID)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			var limited *ai.ProviderRateLimitError
+			if errors.As(err, &limited) {
+				writeAIError(w, http.StatusTooManyRequests, err)
+			} else {
+				writeAIError(w, http.StatusBadRequest, err)
+			}
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"run": run, "resume_event": event})
@@ -160,6 +167,15 @@ func (s *Server) resumeAgentRun(ctx context.Context, userID, runID string) (stor
 	if !run.UserMessageID.Valid || strings.TrimSpace(run.UserMessageID.String) == "" {
 		return store.AgentRun{}, store.AgentEvent{}, fmt.Errorf("run has no user message to continue")
 	}
+	user := MustUserFromContext(ctx)
+	if user.UserID == "" {
+		user.UserID = userID
+	}
+	if state, limited, limitErr := s.ai.ActiveProviderRateLimit(ctx, userID, user.Role, run.ModelProviderID); limitErr != nil {
+		return store.AgentRun{}, store.AgentEvent{}, limitErr
+	} else if limited {
+		return store.AgentRun{}, store.AgentEvent{}, &ai.ProviderRateLimitError{State: state, Err: fmt.Errorf("provider cooldown is active")}
+	}
 	userMessage, err := s.conversations.GetMessage(ctx, userID, run.UserMessageID.String)
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
@@ -180,10 +196,6 @@ func (s *Server) resumeAgentRun(ctx context.Context, userID, runID string) (stor
 	})
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
-	}
-	user := MustUserFromContext(ctx)
-	if user.UserID == "" {
-		user.UserID = userID
 	}
 	go s.executeConversationRun(userID, user.Role, run.ConversationID, userMessage.ID, run.ModelProviderID, userMessage.Content, userMessage.AttachmentsJSON, attachmentPayloads, "", runID)
 	return resumed, event, nil

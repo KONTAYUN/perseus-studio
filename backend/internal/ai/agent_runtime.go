@@ -14,6 +14,7 @@ import (
 )
 
 func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
+	r.emitKernelTurnStarted()
 	for {
 		if _, triggered, stop := r.loopGuardTriggered(); triggered && stop {
 			message := r.loopGuardFailureMessage()
@@ -196,6 +197,9 @@ func (r *agentRuntime) shouldFinalizeActionPreamble(turn agentModelTurn, kind Mo
 
 func (r *agentRuntime) appendAssistantTurn(turn agentModelTurn) {
 	r.transcript.AppendAssistantTurn(turn)
+	if len(turn.ToolCalls) > 0 {
+		r.appendKernelAssistantItem("commentary", turn.Content)
+	}
 }
 
 func (r *agentRuntime) appendToolResults(results []TranscriptToolResult) {

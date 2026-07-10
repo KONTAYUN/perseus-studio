@@ -24,6 +24,7 @@ import { mergeConversationSnapshotPreservingActive } from './chatMessageMerge.js
 import { markRunSteerApplied, markRunSteerReceived, markRunSteerRejected } from './chatSteerItems.js';
 import { scheduleDelay, startInterval, stopInterval, wait } from './chatRunStreamTimers.js';
 import { shouldEnsureProgressShell, toolEventFromPayload } from './chatRunStreamToolEvents.js';
+import { chatFailureMetadata } from './chatErrorUtils.js';
 
 export async function waitForAgentRunStream({
   afterSeq = 0,
@@ -191,6 +192,7 @@ export async function waitForAgentRunStream({
     error.conversationId = conversationID;
     error.stage = metadata.stage || '';
     error.incompleteReason = metadata.incompleteReason || '';
+    Object.assign(error, chatFailureMetadata(metadata));
     settled = true;
     throw error;
   };
@@ -203,6 +205,7 @@ export async function waitForAgentRunStream({
       await refreshFromLatestAssistantMessage();
       await fail(run.error_message || '执行失败', run.diagnostic_log_id, {
         stage: run.stage || '',
+        ...chatFailureMetadata(run),
       });
     }
   };
@@ -323,6 +326,7 @@ export async function waitForAgentRunStream({
       await fail(payload.error || '执行失败', payload.diagnostic_log_id, {
         stage: payload.stage || '',
         incompleteReason: payload.incomplete_reason || '',
+        ...chatFailureMetadata(payload),
       });
     } else if (item?.type === 'conversation_title_updated') {
       if (payload.conversation) {

@@ -17,14 +17,15 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 		return "", "", "正在读取笔记视图...", "", err
 	}
 	var args struct {
-		Path      string `json:"path"`
-		View      string `json:"view"`
-		Mode      string `json:"mode"`
-		BlockID   string `json:"block_id"`
-		SectionID string `json:"section_id"`
-		DocHash   string `json:"doc_hash"`
-		MaxBlocks int    `json:"max_blocks"`
-		MaxChars  int    `json:"max_chars"`
+		Path       string `json:"path"`
+		View       string `json:"view"`
+		Mode       string `json:"mode"`
+		BlockID    string `json:"block_id"`
+		SectionID  string `json:"section_id"`
+		DocHash    string `json:"doc_hash"`
+		StartBlock int    `json:"start_block"`
+		MaxBlocks  int    `json:"max_blocks"`
+		MaxChars   int    `json:"max_chars"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在读取笔记视图...", "", fmt.Errorf("invalid tool arguments")
@@ -56,7 +57,7 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 	}
 
 	if args.Mode != "full" {
-		return s.execReadWorkspaceNoteBlockView(result.Path, result.Content, result.Hash, args.View, args.Mode, args.BlockID, args.SectionID, args.DocHash, args.MaxBlocks, args.MaxChars)
+		return s.execReadWorkspaceNoteBlockView(result.Path, result.Content, result.Hash, args.View, args.Mode, args.BlockID, args.SectionID, args.DocHash, args.StartBlock, args.MaxBlocks, args.MaxChars)
 	}
 
 	viewContent := renderNoteView(result.Content, args.View)
@@ -80,7 +81,7 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 	return mustJSON(payload), summary, "正在读取笔记视图...", result.Path, nil
 }
 
-func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view, mode, blockID, sectionID, expectedDocHash string, maxBlocks, maxChars int) (string, string, string, string, error) {
+func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view, mode, blockID, sectionID, expectedDocHash string, startBlock, maxBlocks, maxChars int) (string, string, string, string, error) {
 	doc := buildNoteBlockDocument(fragment)
 	if expectedDocHash = strings.TrimSpace(expectedDocHash); expectedDocHash != "" && expectedDocHash != doc.DocHash {
 		return "", "", "正在读取笔记视图...", path, fmt.Errorf("note view doc_hash is stale; call read_workspace_note_view with mode=index again")
@@ -96,18 +97,25 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 	}
 	switch mode {
 	case "index":
-		blocks, indexTruncated := noteIndexPayloadBlocks(doc.Blocks, maxBlocks)
-		base["blocks"] = blocks
+		page := noteIndexPage(doc.Blocks, startBlock, maxBlocks)
+		base["blocks"] = page.Blocks
 		base["sections"] = noteIndexPayloadSections(doc.Sections)
 		base["total_blocks"] = len(doc.Blocks)
-		base["returned_blocks"] = len(blocks)
-		base["index_truncated"] = indexTruncated
+		base["returned_blocks"] = len(page.Blocks)
+		base["start_block"] = page.StartBlock
+		base["next_start_block"] = page.NextStartBlock
+		base["has_more_blocks"] = page.HasMore
+		base["index_truncated"] = page.HasMore
 		base["total_text_chars"] = doc.TotalTextRune
 		base["total_raw_chars"] = doc.TotalRawRune
-		base["truncated"] = indexTruncated
-		base["next_action"] = "Choose a block_id or section_id from this index and call read_workspace_note_view with mode=block or mode=section. Use view=raw only for exact HTML edits."
+		base["truncated"] = page.HasMore
+		if page.HasMore {
+			base["next_action"] = fmt.Sprintf("Choose a visible block_id/section_id when enough, or continue the index with start_block=%d. For exact HTML edits, read the chosen target with mode=block or mode=section and view=raw.", page.NextStartBlock)
+		} else {
+			base["next_action"] = "Choose a block_id or section_id from this index and call read_workspace_note_view with mode=block or mode=section. Use view=raw only for exact HTML edits."
+		}
 		payload := workspaceToolPayload("read_workspace_note_view", path, base)
-		summary := fmt.Sprintf("indexed %s note blocks for %s (%d blocks)", view, path, len(doc.Blocks))
+		summary := fmt.Sprintf("indexed %s note blocks for %s (%d/%d blocks)", view, path, len(page.Blocks), len(doc.Blocks))
 		return mustJSON(payload), summary, "正在读取笔记视图...", path, nil
 	case "block":
 		blockID = strings.TrimSpace(blockID)

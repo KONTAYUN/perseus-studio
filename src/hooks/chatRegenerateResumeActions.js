@@ -1,5 +1,5 @@
 import { apiPost } from '../api/client';
-import { formatChatError } from './chatErrorUtils';
+import { chatFailureMetadata, formatRetryAfterLabel, isResumeBlockedByFailure, formatChatError } from './chatErrorUtils';
 import { buildAssistantRunShell, mapPendingAssistant } from './chatStateUtils.js';
 import { isWorkspaceRefreshEvent } from './ideUtils.js';
 
@@ -99,6 +99,11 @@ export function createChatRegenerateResumeActions({
 
   async function continueAgentRun(runId = resumableRun?.runId, conversationID = resumableRun?.conversationId || currentConversationId) {
     if (!runId || !conversationID || isChatSending) return;
+    if (resumableRun?.runId === runId && isResumeBlockedByFailure(resumableRun)) {
+      const waitLabel = formatRetryAfterLabel(resumableRun.retryAfterMs, resumableRun.resetAt);
+      setChatError(resumableRun.recommendedAction || `Provider rate limit is active; ${waitLabel}. Switch model or retry later.`);
+      return;
+    }
     const thinkingId = `temp_resume_${Date.now()}`;
     setChatError('');
     setResumableRun(null);
@@ -125,11 +130,31 @@ export function createChatRegenerateResumeActions({
       const message = formatChatError(error);
       setChatError(message);
       if (error?.runId) {
+        const failureMetadata = chatFailureMetadata(error);
         setResumableRun({
           runId: error.runId,
           conversationId: error.conversationId || conversationID,
           diagnosticLogId: error.diagnosticLogId || '',
+          message,
+          ...failureMetadata,
         });
+        if (isResumeBlockedByFailure(failureMetadata)) {
+          setConversationMessages((current) =>
+            (current || [])
+              .filter((item) => item.id !== thinkingId)
+              .map((item) =>
+                item.resumableRunId === error.runId
+                  ? {
+                      ...item,
+                      content: message,
+                      diagnosticLogId: error.diagnosticLogId || item.diagnosticLogId || '',
+                      ...failureMetadata,
+                    }
+                  : item
+              )
+          );
+          return;
+        }
       }
       const isBudgetExhausted = error?.stage === 'budget_exhausted' || error?.incompleteReason === 'budget_exhausted';
       const prefix = error?.runId
@@ -142,6 +167,7 @@ export function createChatRegenerateResumeActions({
           error: true,
           resumableRunId: error?.runId || '',
           diagnosticLogId: error?.diagnosticLogId || '',
+          ...chatFailureMetadata(error),
           content: isBudgetExhausted ? message : `${prefix}：${message}`,
         }))
       );

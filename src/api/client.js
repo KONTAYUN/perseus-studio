@@ -25,8 +25,17 @@ async function request(path, options = {}) {
       error.status = response.status;
       error.payload = payload;
       if (isJSON && payload?.diagnostic_log_id) {
-        error.diagnosticLogId = payload.diagnostic_log_id;
-      }
+		error.diagnosticLogId = payload.diagnostic_log_id;
+	  }
+	  if (isJSON) {
+		error.failureClass = payload?.failure_class || '';
+		error.retryAfterMs = Number(payload?.retry_after_ms) || 0;
+		error.resetAt = payload?.reset_at || '';
+		error.providerId = payload?.provider_id || '';
+		error.modelId = payload?.model_id || '';
+		error.canResumeNow = payload?.can_resume_now !== false;
+		error.recommendedAction = payload?.recommended_action || '';
+	  }
       throw error;
     }
 

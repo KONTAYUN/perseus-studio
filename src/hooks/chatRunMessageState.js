@@ -1,4 +1,5 @@
 import { PLAYFUL_PENDING_STATUSES, agentEventText, nextLoadingStatus } from './chatStatusTextUtils.js';
+import { chatFailureMetadata } from './chatErrorUtils.js';
 
 export function buildAssistantRunShell({ id, conversationId, createdAt, content = '', attachments = [], runId = '' } = {}) {
   return {
@@ -272,6 +273,7 @@ export function appendRunTerminalMessage(messages, latestRun) {
     runId: latestRun.id,
     resumableRunId: latestRun.id,
     diagnosticLogId: latestRun.diagnostic_log_id || '',
+    ...chatFailureMetadata(latestRun),
   }, latestRun.user_message_id, latestRun.id);
 }
 

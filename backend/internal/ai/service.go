@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"webide-backend/internal/store"
@@ -14,13 +15,15 @@ import (
 const providerHTTPTransportProtocol = "http/1.1"
 
 type Service struct {
-	configs *store.ConfigStore
-	factory *usersvc.Factory
-	calls   *store.ConversationStore
-	diag    *store.DiagnosticStore
-	runs    *store.AgentRunStore
-	usage   *store.UsageStore
-	client  *http.Client
+	configs     *store.ConfigStore
+	factory     *usersvc.Factory
+	calls       *store.ConversationStore
+	diag        *store.DiagnosticStore
+	runs        *store.AgentRunStore
+	usage       *store.UsageStore
+	client      *http.Client
+	rateLimitMu sync.Mutex
+	rateLimits  map[string]ProviderRateLimitState
 }
 
 type AttachmentPayload struct {
@@ -160,11 +163,12 @@ func NewService(configs *store.ConfigStore, factory *usersvc.Factory, calls *sto
 		diag = diagnostics[0]
 	}
 	return &Service{
-		configs: configs,
-		factory: factory,
-		calls:   calls,
-		diag:    diag,
-		client:  newProviderHTTPClient(),
+		configs:    configs,
+		factory:    factory,
+		calls:      calls,
+		diag:       diag,
+		client:     newProviderHTTPClient(),
+		rateLimits: map[string]ProviderRateLimitState{},
 	}
 }
 
@@ -232,6 +236,9 @@ func (s *Service) generateReply(ctx context.Context, conversationID, messageID, 
 	}
 	if !provider.Enabled {
 		return Reply{}, fmt.Errorf("selected model is disabled")
+	}
+	if state, limited := s.activeProviderRateLimitState(opts.UserID, provider.ID, provider.ModelID, time.Now().UTC()); limited {
+		return Reply{}, &ProviderRateLimitError{State: state, Err: fmt.Errorf("provider cooldown is active")}
 	}
 	messages = s.prepareMessagesWithConversationSummary(ctx, conversationID, provider, messages, opts)
 

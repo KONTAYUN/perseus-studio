@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -770,8 +771,8 @@ func TestGenerateReplyOpenAIStreamsFinalTextAfterToolResult(t *testing.T) {
 	if requestCount.Load() != 2 {
 		t.Fatalf("expected tool execution plus completion, got %d requests", requestCount.Load())
 	}
-	if !strings.Contains(streamed.String(), "我先查看工作区") {
-		t.Fatalf("expected same-turn plan text to stream after tool call appeared, got %q", streamed.String())
+	if streamed.String() != "" {
+		t.Fatalf("codex-parity tool preamble text must stay out of the main chat stream, got %q", streamed.String())
 	}
 	if !strings.Contains(reply.Content, "下面是整理后的结论") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
@@ -2228,8 +2229,8 @@ func TestGenerateReplyRecordsDiagnosticForHTTP502(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 3 {
-		t.Fatalf("expected provider policy to make 3 attempts, got %d requests", requestCount.Load())
+	if requestCount.Load() != 5 {
+		t.Fatalf("expected provider policy to make 5 attempts, got %d requests", requestCount.Load())
 	}
 
 	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 10})
@@ -2284,8 +2285,8 @@ func TestGenerateReplyRetriesTransientHTTP502WithProviderPolicy(t *testing.T) {
 		Event: func(eventType, level string, payload map[string]any) {
 			if eventType == "model_call_retrying" {
 				retryEvents++
-				if payload["max_attempts"] != 3 {
-					t.Fatalf("expected max attempts diagnostic to be 3, got %#v", payload["max_attempts"])
+				if payload["max_attempts"] != 5 {
+					t.Fatalf("expected max attempts diagnostic to be 5, got %#v", payload["max_attempts"])
 				}
 			}
 		},
@@ -2297,7 +2298,7 @@ func TestGenerateReplyRetriesTransientHTTP502WithProviderPolicy(t *testing.T) {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
 	if requestCount.Load() != 3 {
-		t.Fatalf("expected 3 provider policy attempts, got %d requests", requestCount.Load())
+		t.Fatalf("expected server success on third provider policy attempt, got %d requests", requestCount.Load())
 	}
 	if retryEvents != 2 {
 		t.Fatalf("expected 2 retry events, got %d", retryEvents)
@@ -2342,61 +2343,55 @@ func TestProviderSDKNativeRetriesRemainDisabled(t *testing.T) {
 	}
 }
 
-func TestGenerateReplyRetriesHTTP429RetryAfterWithProviderPolicy(t *testing.T) {
+func TestGenerateReplyDoesNotRetryHTTP429AndStoresRateLimitState(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 	t.Setenv("PERSEUS_PROVIDER_RETRY_BASE_DELAY_MS", "0")
 
 	var requestCount atomic.Int32
-	var retryAfterSeen bool
+	var retryEvents atomic.Int32
+	var rateLimitEvents atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if requestCount.Add(1) == 1 {
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", "0.001")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
-			return
-		}
-		writeOpenAIToolCall(t, w, "done_after_429", "attempt_completion", `{"result":"已按 Retry-After 重试后完成。"}`)
+		requestCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"The request exceeds the rate limit on dimension: tpm."}}`))
 	}))
 	defer server.Close()
 
 	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "hello")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
+	_, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
 		UserID: testUserID,
 		Event: func(eventType, level string, payload map[string]any) {
-			if eventType == "model_call_retrying" && numberFromAnyForTest(payload["retry_after_ms"]) > 0 {
-				retryAfterSeen = true
+			switch eventType {
+			case "model_call_retrying":
+				retryEvents.Add(1)
+			case "provider_rate_limited":
+				rateLimitEvents.Add(1)
 			}
 		},
 	})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected GenerateReply rate-limit error")
 	}
-	if !strings.Contains(reply.Content, "Retry-After") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
+	var limited *ProviderRateLimitError
+	if !errors.As(err, &limited) {
+		t.Fatalf("expected ProviderRateLimitError, got %T: %v", err, err)
 	}
-	if requestCount.Load() != 2 {
-		t.Fatalf("expected 2 provider attempts, got %d", requestCount.Load())
+	if limited.State.Kind != ProviderRateLimitTPM || limited.State.RetryAfterMS <= 0 {
+		t.Fatalf("unexpected rate-limit state: %#v", limited.State)
 	}
-	if !retryAfterSeen {
-		t.Fatal("expected retry_after_ms in retry event")
+	if requestCount.Load() != 1 {
+		t.Fatalf("expected 429 to make exactly 1 provider request, got %d", requestCount.Load())
 	}
-}
-
-func numberFromAnyForTest(value any) int64 {
-	switch item := value.(type) {
-	case int64:
-		return item
-	case int:
-		return int64(item)
-	case float64:
-		return int64(item)
-	default:
-		return 0
+	if retryEvents.Load() != 0 {
+		t.Fatalf("429 must not emit request retry events, got %d", retryEvents.Load())
+	}
+	if rateLimitEvents.Load() != 1 {
+		t.Fatalf("expected one provider_rate_limited event, got %d", rateLimitEvents.Load())
 	}
 }
-
 func TestGenerateReplyProviderRetryDiagnostics(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -2416,7 +2411,7 @@ func TestGenerateReplyProviderRetryDiagnostics(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 3 {
+	if requestCount.Load() != 5 {
 		t.Fatalf("expected request-level stream attempts only, got %d requests", requestCount.Load())
 	}
 	logs, err := env.diagnostics.List(ctx, store.DiagnosticLogQuery{UserID: testUserID, Limit: 5})
@@ -2430,7 +2425,7 @@ func TestGenerateReplyProviderRetryDiagnostics(t *testing.T) {
 	if err := json.Unmarshal([]byte(logs[0].RequestSummary), &summary); err != nil {
 		t.Fatalf("invalid request summary: %v\n%s", err, logs[0].RequestSummary)
 	}
-	if summary.SDKMaxAttempts != 3 || summary.RequestAttempts != 3 || !summary.RetryableError || summary.StreamRetryPhase != "stream" || summary.StreamFallbackUsed || summary.FallbackAttempts != 0 {
+	if summary.SDKMaxAttempts != 5 || summary.RequestAttempts != 5 || !summary.RetryableError || summary.StreamRetryPhase != "stream" || summary.StreamFallbackUsed || summary.FallbackAttempts != 0 {
 		t.Fatalf("unexpected retry diagnostics: %#v", summary)
 	}
 }
@@ -2473,7 +2468,7 @@ func TestGenerateReplyTransportErrorDoesNotUseStreamFallback(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected GenerateReply error")
 	}
-	if requestCount.Load() != 3 {
+	if requestCount.Load() != 5 {
 		t.Fatalf("expected request-level retry attempts only, got %d requests", requestCount.Load())
 	}
 	if fallbackRequests.Load() != 0 {
@@ -2568,9 +2563,19 @@ func TestGenerateReplyCheckpointResumeAfterTransientProviderError(t *testing.T) 
 			})
 			return
 		}
-		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte("errorcode:502"))
+		if count >= 3 && count <= 7 {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				panic(http.ErrAbortHandler)
+			}
+			conn, _, hijackErr := hijacker.Hijack()
+			if hijackErr != nil {
+				panic(http.ErrAbortHandler)
+			}
+			_ = conn.Close()
+			return
+		}
+		t.Fatalf("unexpected request count: %d", count)
 	}))
 	defer server.Close()
 
@@ -2624,7 +2629,7 @@ func TestGenerateReplyCheckpointResumeAfterTransientProviderError(t *testing.T) 
 	}
 }
 
-func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *testing.T) {
+func TestGenerateReplyStreamFallbackHTTP5xxDoesNotCheckpointResume(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 	t.Setenv("PERSEUS_AGENT_RECOVERY_BASE_DELAY_MS", "0")
@@ -2635,6 +2640,7 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 
 	var requestCount atomic.Int32
 	var fallbackRequests atomic.Int32
+	var recoveryRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		raw, err := io.ReadAll(r.Body)
@@ -2647,6 +2653,9 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 		}
 		if payload["stream"] == false {
 			fallbackRequests.Add(1)
+		}
+		if openAIProviderMessageContentContainsAll(payload, `"status":"recovery_observation"`, `"reason_code":"provider_connection_interrupted"`) {
+			recoveryRequests.Add(1)
 		}
 		switch requestCount.Add(1) {
 		case 1:
@@ -2678,21 +2687,13 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 				panic(http.ErrAbortHandler)
 			}
 			_ = conn.Close()
-		case 4, 5, 6:
+		case 4, 5, 6, 7, 8:
 			if payload["stream"] != false {
 				t.Fatalf("expected non-stream fallback before checkpoint recovery, got %#v", payload["stream"])
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(529)
 			_, _ = w.Write([]byte(`{"error":{"message":"fallback overloaded"}}`))
-		case 7:
-			if payload["stream"] != true {
-				t.Fatalf("expected checkpoint resume to rebuild a streaming provider turn, got %#v", payload["stream"])
-			}
-			if !openAIProviderMessageContentContainsAll(payload, `"status":"recovery_observation"`, `"reason_code":"provider_connection_interrupted"`) {
-				t.Fatalf("expected checkpoint recovery observation in request %d: %s", requestCount.Load(), string(raw))
-			}
-			writeOpenAIToolCall(t, w, "done_after_resume", "attempt_completion", `{"result":"已从断点继续并完成。"}`)
 		default:
 			t.Fatalf("unexpected request count: %d", requestCount.Load())
 		}
@@ -2713,14 +2714,14 @@ func TestGenerateReplyStreamErrorFallsBackToNonStreamBeforeCheckpointResume(t *t
 		UserID: testUserID,
 		RunID:  run.ID,
 	})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
+	if err == nil {
+		t.Fatalf("expected GenerateReply fallback provider error, got reply %q", reply.Content)
 	}
-	if !strings.Contains(reply.Content, "已从断点继续并完成") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
-	}
-	if fallbackRequests.Load() != 3 {
+	if fallbackRequests.Load() != 5 {
 		t.Fatalf("expected fallback request-level retries before checkpoint resume, got %d fallback requests", fallbackRequests.Load())
+	}
+	if recoveryRequests.Load() != 0 {
+		t.Fatalf("provider HTTP fallback failures must not enter checkpoint recovery, got %d recovery requests", recoveryRequests.Load())
 	}
 }
 
@@ -3488,8 +3489,8 @@ func TestGenerateReplyStreamsAttemptCompletionPreviewWithoutDuplicateModelComple
 	if reply.Content != "最终答复内容" {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
-	if got := strings.Join(modelDeltas, ""); got != "我先检查。我准备完成。" {
-		t.Fatalf("unexpected ordinary model deltas: %#v", modelDeltas)
+	if got := strings.Join(modelDeltas, ""); got != "" {
+		t.Fatalf("codex-parity intermediate model text must not enter ordinary model deltas: %#v", modelDeltas)
 	}
 	if strings.Contains(strings.Join(modelDeltas, ""), "最终答复") {
 		t.Fatalf("attempt_completion.result leaked into ordinary model deltas: %#v", modelDeltas)

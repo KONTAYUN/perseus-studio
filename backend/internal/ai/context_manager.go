@@ -122,6 +122,8 @@ type ProviderRequestSummary struct {
 	RetryableError                bool                 `json:"retryable_error,omitempty"`
 	RetryAfterMS                  int64                `json:"retry_after_ms,omitempty"`
 	StreamRetryPhase              string               `json:"stream_retry_phase,omitempty"`
+	StreamReconnectAttempts       int                  `json:"stream_reconnect_attempts,omitempty"`
+	StreamMaxRetries              int                  `json:"stream_max_retries,omitempty"`
 	FallbackAttempts              int                  `json:"fallback_attempts,omitempty"`
 	StreamFallbackUsed            bool                 `json:"stream_fallback_used,omitempty"`
 	CheckpointResumeAttempt       int                  `json:"checkpoint_resume_attempt,omitempty"`

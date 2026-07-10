@@ -138,6 +138,12 @@ func providerTurnCanStreamAssistantText(req providerTurnRequest) bool {
 	if strings.TrimSpace(req.Opts.TaskID) != "" {
 		return false
 	}
+	if req.ActionBoundaryActive && strings.EqualFold(strings.TrimSpace(req.Snapshot.Summary.KernelMode), agentKernelCodexParity) {
+		return false
+	}
+	if req.ActionBoundaryActive && strings.EqualFold(strings.TrimSpace(req.Snapshot.Summary.KernelMode), agentKernelSidecarBenchmark) {
+		return false
+	}
 	return true
 }
 
@@ -253,6 +259,8 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"retryable_error":                   summary.RetryableError,
 		"retry_after_ms":                    summary.RetryAfterMS,
 		"stream_retry_phase":                summary.StreamRetryPhase,
+		"stream_reconnect_attempts":         summary.StreamReconnectAttempts,
+		"stream_max_retries":                summary.StreamMaxRetries,
 		"fallback_attempts":                 summary.FallbackAttempts,
 		"stream_fallback_used":              summary.StreamFallbackUsed,
 		"checkpoint_resume_attempt":         summary.CheckpointResumeAttempt,

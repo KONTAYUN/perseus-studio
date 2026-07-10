@@ -42,6 +42,7 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 			return nil, false, nil
 		}
 		eventCountBefore := len(r.events)
+		r.appendKernelToolCallItem(call)
 		resultContent, isError, request, completed, err := r.processOneToolCall(ctx, call)
 		if err != nil || request != nil || completed {
 			return request, completed, err
@@ -57,6 +58,7 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 			IsError:    isError,
 			Event:      event,
 		})
+		r.appendKernelToolResultItem(call, event, isError, resultContent)
 		r.recordLoopGuardAction(call, isError, event, resultContent)
 		if isError && call.Name == "attempt_completion" && isActionBoundaryObservation(resultContent) {
 			r.appendToolResults(results)
@@ -171,6 +173,18 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	}
 	if errText := r.validateChunkWriteToolCall(call); errText != "" {
 		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
+		event := r.invalidToolCallEvent(ctx, call, errText)
+		r.events = append(r.events, event)
+		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
+	}
+	if errText := r.validateHTMLNoteMutationPrecondition(ctx, call); errText != "" {
+		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
+		emitToolLifecycleEvent(r.opts, "html_note_write_guard_rejected", "warn", map[string]any{
+			"tool_call_id": call.ID,
+			"tool_name":    call.Name,
+			"status_kind":  manifestStatusKind(call.Name),
+			"reason":       errText,
+		})
 		event := r.invalidToolCallEvent(ctx, call, errText)
 		r.events = append(r.events, event)
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil

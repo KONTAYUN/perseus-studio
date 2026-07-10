@@ -72,10 +72,11 @@ func (s *Service) execManageWorkspacePath(ctx context.Context, userID, arguments
 		return "", "", "正在管理路径...", "", err
 	}
 	var args struct {
-		Action        string `json:"action"`
-		Path          string `json:"path"`
-		NewName       string `json:"new_name"`
-		NewParentPath string `json:"new_parent_path"`
+		Action          string `json:"action"`
+		Path            string `json:"path"`
+		NewName         string `json:"new_name"`
+		NewParentPath   string `json:"new_parent_path"`
+		DestinationPath string `json:"destination_path"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在管理路径...", "", fmt.Errorf("invalid tool arguments")
@@ -121,6 +122,22 @@ func (s *Service) execManageWorkspacePath(ctx context.Context, userID, arguments
 			"changed_paths": result.ChangedPaths,
 		}
 		return mustJSON(workspaceToolPayload("manage_workspace_path", result.NewPath, payload)), fmt.Sprintf("moved %s to %s", result.OldPath, result.NewPath), "正在管理路径...", result.NewPath, nil
+	case "copy":
+		result, err := files.CopyFile(ctx, args.Path, args.DestinationPath)
+		if err != nil {
+			return "", "", "managing workspace path...", args.Path, err
+		}
+		payload := map[string]any{
+			"operation":        "copy",
+			"path":             result.Path,
+			"old_path":         result.OldPath,
+			"new_path":         result.NewPath,
+			"destination_path": result.NewPath,
+			"changed_paths":    result.ChangedPaths,
+			"hash":             result.Hash,
+			"size":             result.Size,
+		}
+		return mustJSON(workspaceToolPayload("manage_workspace_path", result.NewPath, payload)), fmt.Sprintf("copied %s to %s", result.OldPath, result.NewPath), "managing workspace path...", result.NewPath, nil
 	case "trash":
 		result, err := files.MoveToTrash(args.Path)
 		if err != nil {

@@ -29,6 +29,7 @@ type AgentRun struct {
 	Stage              sql.NullString `json:"-"`
 	ErrorMessage       sql.NullString `json:"-"`
 	DiagnosticLogID    sql.NullString `json:"-"`
+	FailureJSON        sql.NullString `json:"-"`
 	CreatedAt          time.Time      `json:"created_at"`
 	StartedAt          sql.NullTime   `json:"-"`
 	CompletedAt        sql.NullTime   `json:"-"`
@@ -62,6 +63,7 @@ type UpdateAgentRunInput struct {
 	Stage              string
 	ErrorMessage       *string
 	DiagnosticLogID    string
+	FailureJSON        *string
 	UserMessageID      string
 	AssistantMessageID string
 	SetStartedAt       bool
@@ -139,6 +141,9 @@ CREATE TABLE IF NOT EXISTS agent_run_checkpoints (
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
 		return err
 	}
+	if err := AddColumnIfNotExists(ctx, s.db, "agent_runs", "failure_json", "TEXT"); err != nil {
+		return err
+	}
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_conversation ON agent_runs(user_id, conversation_id, created_at DESC);
@@ -172,7 +177,7 @@ INSERT INTO agent_runs (
 func (s *AgentRunStore) GetRun(ctx context.Context, userID, id string) (AgentRun, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_provider_id,
-       status, stage, error_message, diagnostic_log_id, created_at, started_at, completed_at, updated_at
+	   status, stage, error_message, diagnostic_log_id, failure_json, created_at, started_at, completed_at, updated_at
 FROM agent_runs
 WHERE id = ? AND user_id = ?
 `, id, userID)
@@ -182,7 +187,7 @@ WHERE id = ? AND user_id = ?
 func (s *AgentRunStore) LatestConversationRun(ctx context.Context, userID, conversationID string) (AgentRun, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_provider_id,
-       status, stage, error_message, diagnostic_log_id, created_at, started_at, completed_at, updated_at
+	   status, stage, error_message, diagnostic_log_id, failure_json, created_at, started_at, completed_at, updated_at
 FROM agent_runs
 WHERE user_id = ? AND conversation_id = ?
 ORDER BY created_at DESC, id DESC
@@ -207,13 +212,14 @@ SET status = COALESCE(NULLIF(?, ''), status),
     stage = COALESCE(NULLIF(?, ''), stage),
     error_message = COALESCE(?, error_message),
     diagnostic_log_id = COALESCE(NULLIF(?, ''), diagnostic_log_id),
+	 failure_json = COALESCE(?, failure_json),
     user_message_id = COALESCE(NULLIF(?, ''), user_message_id),
     assistant_message_id = COALESCE(NULLIF(?, ''), assistant_message_id),
     started_at = COALESCE(?, started_at),
     completed_at = COALESCE(?, completed_at),
     updated_at = ?
 WHERE id = ? AND user_id = ?
-`, input.Status, input.Stage, input.ErrorMessage, input.DiagnosticLogID, input.UserMessageID, input.AssistantMessageID, startedAt, completedAt, now, id, userID)
+`, input.Status, input.Stage, input.ErrorMessage, input.DiagnosticLogID, input.FailureJSON, input.UserMessageID, input.AssistantMessageID, startedAt, completedAt, now, id, userID)
 	if err != nil {
 		return AgentRun{}, err
 	}
@@ -228,6 +234,7 @@ SET status = ?,
     stage = ?,
     error_message = NULL,
     diagnostic_log_id = NULL,
+	 failure_json = NULL,
     started_at = NULL,
     completed_at = NULL,
     updated_at = ?
@@ -277,6 +284,7 @@ func scanAgentRun(s scanner) (AgentRun, error) {
 		&item.Stage,
 		&item.ErrorMessage,
 		&item.DiagnosticLogID,
+		&item.FailureJSON,
 		&item.CreatedAt,
 		&item.StartedAt,
 		&item.CompletedAt,
@@ -304,6 +312,15 @@ func scanAgentEvent(s scanner) (AgentEvent, error) {
 }
 
 func (r AgentRun) MarshalJSON() ([]byte, error) {
+	type failureDTO struct {
+		FailureClass      string     `json:"failure_class,omitempty"`
+		RetryAfterMS      int64      `json:"retry_after_ms,omitempty"`
+		ResetAt           *time.Time `json:"reset_at,omitempty"`
+		ProviderID        string     `json:"provider_id,omitempty"`
+		ModelID           string     `json:"model_id,omitempty"`
+		CanResumeNow      *bool      `json:"can_resume_now,omitempty"`
+		RecommendedAction string     `json:"recommended_action,omitempty"`
+	}
 	type runDTO struct {
 		ID                 string         `json:"id"`
 		UserID             string         `json:"user_id"`
@@ -315,10 +332,25 @@ func (r AgentRun) MarshalJSON() ([]byte, error) {
 		Stage              *string        `json:"stage"`
 		ErrorMessage       *string        `json:"error_message"`
 		DiagnosticLogID    *string        `json:"diagnostic_log_id"`
-		CreatedAt          time.Time      `json:"created_at"`
-		StartedAt          *time.Time     `json:"started_at"`
-		CompletedAt        *time.Time     `json:"completed_at"`
-		UpdatedAt          time.Time      `json:"updated_at"`
+		failureDTO
+		CreatedAt   time.Time  `json:"created_at"`
+		StartedAt   *time.Time `json:"started_at"`
+		CompletedAt *time.Time `json:"completed_at"`
+		UpdatedAt   time.Time  `json:"updated_at"`
+	}
+	failure := failureDTO{}
+	if r.FailureJSON.Valid && strings.TrimSpace(r.FailureJSON.String) != "" {
+		_ = json.Unmarshal([]byte(r.FailureJSON.String), &failure)
+		if failure.ResetAt != nil {
+			remaining := time.Until(*failure.ResetAt)
+			canResume := remaining <= 0
+			failure.CanResumeNow = &canResume
+			if remaining > 0 {
+				failure.RetryAfterMS = remaining.Milliseconds()
+			} else {
+				failure.RetryAfterMS = 0
+			}
+		}
 	}
 	return json.Marshal(runDTO{
 		ID:                 r.ID,
@@ -331,6 +363,7 @@ func (r AgentRun) MarshalJSON() ([]byte, error) {
 		Stage:              nullableString(r.Stage),
 		ErrorMessage:       nullableString(r.ErrorMessage),
 		DiagnosticLogID:    nullableString(r.DiagnosticLogID),
+		failureDTO:         failure,
 		CreatedAt:          r.CreatedAt,
 		StartedAt:          nullableTime(r.StartedAt),
 		CompletedAt:        nullableTime(r.CompletedAt),

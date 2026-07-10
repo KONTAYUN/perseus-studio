@@ -328,6 +328,18 @@ func writeAIError(w http.ResponseWriter, status int, err error) {
 	if id := ai.DiagnosticIDFromError(err); id != "" {
 		payload["diagnostic_log_id"] = id
 	}
+	metadata := ai.FailureMetadataFromError(err)
+	if metadata.FailureClass != "" {
+		payload["failure_class"] = metadata.FailureClass
+		payload["retry_after_ms"] = metadata.RetryAfterMS
+		if !metadata.ResetAt.IsZero() {
+			payload["reset_at"] = metadata.ResetAt
+		}
+		payload["provider_id"] = metadata.ProviderID
+		payload["model_id"] = metadata.ModelID
+		payload["can_resume_now"] = metadata.CanResumeNow
+		payload["recommended_action"] = metadata.RecommendedAction
+	}
 	writeJSON(w, status, payload)
 }
 

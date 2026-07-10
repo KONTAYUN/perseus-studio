@@ -43,6 +43,12 @@ func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn
 			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": "empty model response", "diagnostic_log_id": diagID})
 			return Reply{}, false, nil
 		}
+		r.appendKernelItem(AgentTurnItem{
+			Kind:    "final_message",
+			Phase:   "final",
+			Status:  "completed",
+			Content: truncatePlainRunes(content, 2000),
+		})
 		r.finalizeActiveAssistantMessage(content)
 		emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{
 			"content":                           content,
