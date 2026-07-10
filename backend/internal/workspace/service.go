@@ -103,3 +103,10 @@ func (s *Service) EnsureWorkspace() error {
 	}
 	return s.migrateLegacyTrashDir()
 }
+
+func (s *Service) RootAbs() string {
+	if s == nil {
+		return ""
+	}
+	return s.rootAbs
+}

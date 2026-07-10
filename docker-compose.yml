@@ -15,6 +15,7 @@ services:
       SQLITE_SYNCHRONOUS: "${SQLITE_SYNCHRONOUS:-FULL}"
       FRONTEND_DIST: "/app/dist"
       USER_DATA_ROOT: "/data/users"
+      PERSEUS_AGENT_ENGINE: "codex_app_server"
       ENABLE_DEBUG_API: "${ENABLE_DEBUG_API:-false}"
     ports:
       - "127.0.0.1:8080:8080"
