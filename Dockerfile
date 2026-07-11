@@ -25,7 +25,6 @@ FROM ${IMAGE_REGISTRY}/library/debian:bookworm-slim AS runtime
 ENV BACKEND_ADDR=:8080 \
     BACKEND_DB_PATH=/data/app.db \
     FRONTEND_DIST=/app/dist \
-    PERSEUS_AGENT_ENGINE=codex_app_server \
     TASK_WORKER_COUNT=2 \
     USER_DATA_ROOT=/data/users
 
@@ -34,15 +33,11 @@ RUN apt-get update \
       ca-certificates \
       curl \
       git \
-      nodejs \
-      npm \
       pandoc \
       python3 \
       python3-pip \
       unzip \
       zip \
-    && npm install -g @openai/codex@0.144.1 \
-    && codex --version \
     && python3 -m pip install --no-cache-dir --break-system-packages \
       requests \
       beautifulsoup4 \

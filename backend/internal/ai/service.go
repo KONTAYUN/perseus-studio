@@ -240,9 +240,6 @@ func (s *Service) generateReply(ctx context.Context, conversationID, messageID, 
 	if state, limited := s.activeProviderRateLimitState(opts.UserID, provider.ID, provider.ModelID, time.Now().UTC()); limited {
 		return Reply{}, &ProviderRateLimitError{State: state, Err: fmt.Errorf("provider cooldown is active")}
 	}
-	if codexSidecarEnabled() {
-		return s.generateCodexSidecar(ctx, conversationID, messageID, provider, messages, attachments, opts)
-	}
 	messages = s.prepareMessagesWithConversationSummary(ctx, conversationID, provider, messages, opts)
 
 	switch provider.Protocol {
