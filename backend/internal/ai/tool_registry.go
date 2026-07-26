@@ -33,13 +33,23 @@ func parseBackgroundTaskRequest(argumentsJSON, fallbackGoal string) (BackgroundT
 }
 
 func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, opts RunOptions) (string, string, string, string, error) {
+	result, summary, label, path, err := s.executeToolRaw(ctx, name, argumentsJSON, opts)
+	if err != nil {
+		err = normalizeToolError(err)
+	}
+	return result, summary, label, path, err
+}
+
+func (s *Service) executeToolRaw(ctx context.Context, name, argumentsJSON string, opts RunOptions) (string, string, string, string, error) {
 	switch name {
 	case "attempt_completion":
 		return execAttemptCompletion(argumentsJSON)
 	case "load_perseus_toolset":
 		return execLoadPerseusToolsetForRole(argumentsJSON, opts.UserRole)
-	case "ask_followup_question":
-		return execAskFollowupQuestion(argumentsJSON)
+	case requestUserInputToolName, requestUserChoiceToolName, legacyFollowupQuestionToolName:
+		return execUserRequest(name, argumentsJSON)
+	case "update_task_plan":
+		return "", "", "正在更新任务计划...", "", fmt.Errorf("update_task_plan is handled by the agent runtime")
 	case "inspect_workspace":
 		return s.execListWorkspaceFiles(ctx, opts.UserID, argumentsJSON)
 	case "find_workspace_files":
@@ -116,28 +126,39 @@ func execAttemptCompletion(argumentsJSON string) (string, string, string, string
 	return mustJSON(payload), "attempted completion", "正在完成任务...", "", nil
 }
 
-func execAskFollowupQuestion(argumentsJSON string) (string, string, string, string, error) {
-	var args followupQuestionAttempt
+func execUserRequest(toolName, argumentsJSON string) (string, string, string, string, error) {
+	var args userRequestAttempt
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在询问用户...", "", fmt.Errorf("invalid ask_followup_question arguments")
+		return "", "", "正在等待用户...", "", fmt.Errorf("invalid %s arguments", toolName)
 	}
 	args.Question = strings.TrimSpace(args.Question)
 	if args.Question == "" {
-		return "", "", "正在询问用户...", "", fmt.Errorf("question is required")
+		return "", "", "正在等待用户...", "", fmt.Errorf("question is required")
 	}
-	args.Options = normalizeFollowupOptions(args.Options)
-	allowFreeform := true
-	if args.AllowFreeform != nil {
-		allowFreeform = *args.AllowFreeform
+	switch toolName {
+	case requestUserInputToolName:
+		if len(normalizeUserRequestOptions(args.Options, 3)) > 0 {
+			return "", "", "正在等待用户输入...", "", fmt.Errorf("request_user_input does not accept options")
+		}
+		args.Options = nil
+	case requestUserChoiceToolName:
+		args.Options = normalizeUserRequestOptions(args.Options, 3)
+		if len(args.Options) < 2 || len(args.Options) > 3 {
+			return "", "", "正在等待用户选择...", "", fmt.Errorf("options must contain exactly 2 or 3 choices")
+		}
+	default:
+		args.Options = normalizeFollowupOptions(args.Options)
+		if len(args.Options) == 0 {
+			return "", "", "正在询问用户...", "", fmt.Errorf("options must contain between 1 and 4 non-empty suggestions")
+		}
 	}
 	payload := map[string]any{
-		"status":         "waiting_for_user_answer",
-		"tool_name":      "ask_followup_question",
-		"question":       args.Question,
-		"options":        args.Options,
-		"allow_freeform": allowFreeform,
+		"status":    "waiting_for_user",
+		"tool_name": toolName,
+		"question":  args.Question,
+		"options":   args.Options,
 	}
-	return mustJSON(payload), "asked user a follow-up question", "已询问用户", "", nil
+	return mustJSON(payload), "requested a user response", userFriendlyToolLabel(toolName), "", nil
 }
 
 func execLoadPerseusToolset(argumentsJSON string) (string, string, string, string, error) {
@@ -162,7 +183,6 @@ func execLoadPerseusToolsetForRole(argumentsJSON, role string) (string, string, 
 		"loaded_toolset":       args.Toolset,
 		"available_tools":      actions.JSONTools,
 		"json_tools":           actions.JSONTools,
-		"text_actions":         actions.TextActions,
 		"terminal_actions":     actions.TerminalActions,
 		"capabilities":         toolsetCapabilities(args.Toolset),
 		"next_action_rules":    manifest.NextActionRules,

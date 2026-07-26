@@ -111,23 +111,17 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
 			}
 		}
-		var emitCompletionResult func(string)
-		if req.Opts.OnCompletionResultDelta != nil {
-			emitCompletionResult = req.Opts.OnCompletionResultDelta
-		}
 		turn, err := parseAnthropicStreamWithOptions(streamBody, providerStreamParseOptions{
-			EmitText:                  emitText,
-			EmitCompletionResultDelta: emitCompletionResult,
-			RevealTextAfterTool:       revealTextAfterAction,
+			EmitText:            emitText,
+			RevealTextAfterTool: revealTextAfterAction,
 		})
 		if err != nil {
 			if _, partial := partialTurnFromStreamError(err); !partial && !providerStreamTurnHasStarted(turn) && shouldRetryProviderStreamError(ctx, err) {
 				closeStream()
 				var terminal bool
 				turn, terminal, err = p.retryStream(ctx, &req, payload, endpoint, providerStreamParseOptions{
-					EmitText:                  emitText,
-					EmitCompletionResultDelta: emitCompletionResult,
-					RevealTextAfterTool:       revealTextAfterAction,
+					EmitText:            emitText,
+					RevealTextAfterTool: revealTextAfterAction,
 				}, err)
 				if terminal {
 					return turn, err
@@ -141,10 +135,6 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			if partial, ok := partialTurnFromStreamError(err); ok {
 				if emitText != nil && strings.TrimSpace(partial.PublicStreamedContent) != "" && (!revealTextAfterAction || len(partial.ToolCalls) > 0) {
 					partial.PublicTextStreamed = true
-				}
-				if !partial.CompletionResultStreamed && emitCompletionResult != nil {
-					emitStreamedCompletionResultFromToolCalls(partial.ToolCalls, emitCompletionResult)
-					partial.CompletionResultStreamed = true
 				}
 				log.Printf("[ai] anthropic stream_partial_tool_recovered conversation=%s endpoint=%s tool_calls=%d error=%v", req.ConversationID, endpoint, len(partial.ToolCalls), err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_partial_tool_recovered", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
@@ -168,6 +158,7 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 				closeStream()
 				return partial, nil
 			}
+			err = normalizeProviderStreamError(err)
 			if shouldFallbackAfterStreamError(ctx, err) {
 				log.Printf("[ai] anthropic stream_parse_error_fallback conversation=%s endpoint=%s error=%v", req.ConversationID, endpoint, err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
@@ -200,13 +191,10 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			})
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
-		if !turn.CompletionResultStreamed && emitCompletionResult != nil {
-			emitStreamedCompletionResultFromToolCalls(turn.ToolCalls, emitCompletionResult)
-		}
 		if hasIncompleteToolCallArguments(turn) {
 			req.Snapshot.Summary.StreamToolArgsState = "incomplete_json"
 			annotateStreamToolDiagnostics(&req.Snapshot.Summary, turn)
-			err := fmt.Errorf("provider stream returned incomplete tool call arguments; max_tokens=%d", anthropicAgentMaxTokens)
+			err := &ProviderProtocolError{Code: "incomplete_tool_call_arguments", Cause: fmt.Errorf("provider stream returned incomplete tool call arguments; max_tokens=%d", anthropicAgentMaxTokens)}
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_incomplete_tool_arguments", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 			p.service.recordProviderUsage(ctx, providerUsageRecordInput{
 				Provider:       req.Provider,
@@ -404,7 +392,7 @@ func (p anthropicProviderV2) parseNonStream(ctx context.Context, req providerTur
 	logAnthropicResponseSummary(req.ConversationID, data, toolUses)
 	content := providerVisibleText(data.text())
 	if strings.TrimSpace(content) == "" && len(toolUses) == 0 {
-		err := fmt.Errorf("empty model response")
+		err := &ProviderProtocolError{Code: "empty_provider_response", Cause: fmt.Errorf("empty model response")}
 		p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_empty_response", "warn", duration.Milliseconds(), err, req.Snapshot.Summary)
 		return agentModelTurn{FinishReason: "empty_response"}, nil
 	}
@@ -412,11 +400,12 @@ func (p anthropicProviderV2) parseNonStream(ctx context.Context, req providerTur
 	usage := ProviderUsage{}
 	updateProviderUsageFromAny(&usage, data.Usage)
 	turn := agentModelTurn{
-		Content:      content,
-		FinishReason: data.StopReason,
-		AnthropicRaw: data.Content,
-		ToolCalls:    make([]agentToolCall, 0, len(toolUses)),
-		Usage:        usage,
+		Content:            content,
+		FinishReason:       data.StopReason,
+		ProviderResponseID: data.ID,
+		AnthropicRaw:       data.Content,
+		ToolCalls:          make([]agentToolCall, 0, len(toolUses)),
+		Usage:              usage,
 	}
 	for _, toolUse := range toolUses {
 		rawArgs, _ := json.Marshal(toolUse.Input)

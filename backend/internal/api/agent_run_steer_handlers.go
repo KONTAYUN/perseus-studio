@@ -81,7 +81,7 @@ func (s *Server) steerAgentRun(ctx context.Context, userID, runID string, body i
 		},
 	})
 	if err != nil {
-		if deleteErr := s.conversations.DeleteMessage(context.Background(), userID, run.ConversationID, userMessage.ID); deleteErr != nil && deleteErr != sql.ErrNoRows {
+		if deleteErr := s.deleteConversationMessage(context.Background(), userID, run.ConversationID, userMessage.ID); deleteErr != nil && deleteErr != sql.ErrNoRows {
 			return store.AgentEvent{}, fmt.Errorf("%w; rollback steer message failed: %v", err, deleteErr)
 		}
 		return store.AgentEvent{}, err
@@ -112,7 +112,7 @@ func (s *Server) cancelAgentRunSteer(ctx context.Context, userID, runID string, 
 	messageID := ""
 	if foundMessageID, err := s.conversations.FindSteerMessageID(ctx, userID, run.ConversationID, steerID, clientSteerID); foundMessageID != "" {
 		messageID = foundMessageID
-		if deleteErr := s.conversations.DeleteMessage(ctx, userID, run.ConversationID, messageID); deleteErr != nil && deleteErr != sql.ErrNoRows {
+		if deleteErr := s.deleteConversationMessage(ctx, userID, run.ConversationID, messageID); deleteErr != nil && deleteErr != sql.ErrNoRows {
 			return store.AgentEvent{}, deleteErr
 		}
 	} else if err != nil {

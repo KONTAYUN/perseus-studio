@@ -1,6 +1,7 @@
-import { apiPostFormWithSignal } from '../api/client';
-import { chatFailureMetadata, formatChatError } from './chatErrorUtils';
+import { apiPost, apiPostFormWithSignal } from '../api/client';
+import { chatFailureHeading, chatFailureMetadata, formatChatError } from './chatErrorUtils';
 import { buildAssistantRunShell, mapPendingAssistant, mergeCommittedRunStart } from './chatStateUtils.js';
+import { pendingUserRequest } from '../components/chat/chatUtils.js';
 
 export function createChatSendActions({
   activeAgentRunRef,
@@ -12,6 +13,7 @@ export function createChatSendActions({
   chatSkillReferences,
   compactCurrentConversation,
   conversationTransitionRef,
+  conversationMessages,
   createPendingRunMessage,
   currentConversationIdRef,
   currentConversationId,
@@ -23,7 +25,7 @@ export function createChatSendActions({
   onAssistantToolEvents,
   onTasksChanged,
   selectedModel,
-  setChatAttachments,
+	clearChatAttachments,
   setChatError,
   setChatFileReferences,
   setChatInput,
@@ -43,9 +45,25 @@ export function createChatSendActions({
     const attachmentsForSend = usingOverride ? [] : chatAttachments;
     const fileReferencesForSend = usingOverride ? [] : chatFileReferences;
     const skillReferencesForSend = usingOverride ? [] : chatSkillReferences;
+	const blockedAttachment = attachmentsForSend.find(
+	  (item) => item.kind === 'image' && item.upload_status !== 'uploaded'
+	);
+	if (blockedAttachment) {
+	  setChatError(blockedAttachment.upload_status === 'failed' ? '图片上传失败，请重试或移除后再发送。' : '图片仍在上传，请稍候。');
+	  return;
+	}
     if (!trimmedContent && attachmentsForSend.length === 0 && fileReferencesForSend.length === 0 && skillReferencesForSend.length === 0) return;
     if (/^\/compact(?:\s|$)/i.test(trimmedContent) && attachmentsForSend.length === 0 && fileReferencesForSend.length === 0 && skillReferencesForSend.length === 0) {
       await compactCurrentConversation(trimmedContent.replace(/^\/compact\b/i, '').trim());
+      return;
+    }
+    const userRequest = pendingUserRequest(conversationMessages);
+    if (userRequest && !usingOverride) {
+      if (attachmentsForSend.length > 0 || fileReferencesForSend.length > 0 || skillReferencesForSend.length > 0) {
+        setChatError('回答当前问题时请先发送文字；附件可以在任务恢复后继续补充。');
+        return;
+      }
+      await sendUserResponse(userRequest, trimmedContent);
       return;
     }
     if (!selectedModel?.id) {
@@ -75,13 +93,7 @@ export function createChatSendActions({
     const payload = {
       content: trimmedContent,
       conversationId: currentConversationIdRef?.current || currentConversationId,
-      attachments: attachmentsForSend.map((item) => ({
-        id: item.id,
-        name: item.name,
-        size: item.size,
-        type: item.type,
-        file: item.file,
-      })),
+	  attachments: attachmentsForSend.map((item) => ({ ...item })),
       fileReferences: fileReferencesForSend,
       skillReferences: skillReferencesForSend,
       currentFileContext: buildCurrentFileContext?.() || null,
@@ -90,7 +102,7 @@ export function createChatSendActions({
 
     if (!usingOverride) {
       setChatInput('');
-      setChatAttachments([]);
+	  clearChatAttachments();
       setChatFileReferences([]);
       setChatSkillReferences([]);
     }
@@ -103,28 +115,68 @@ export function createChatSendActions({
     await sendChatPayload(payload);
   }
 
-  async function sendFollowupAnswer(answer) {
+  async function sendUserResponse(request, answer) {
     const trimmedAnswer = String(answer || '').trim();
-    if (!trimmedAnswer) return;
-    if (!selectedModel?.id) {
-      setChatError('请先在设置页配置并启用模型');
-      return;
-    }
+    if (!trimmedAnswer || !request?.runId || !request?.toolCallId || isChatSending) return;
     await waitForConversationTransition(conversationTransitionRef);
-    const payload = {
-      content: trimmedAnswer,
-      attachments: [],
-      fileReferences: [],
-      skillReferences: [],
-      currentFileContext: null,
-      conversationId: currentConversationIdRef?.current || currentConversationId,
-      thinkingMode,
-    };
-    if (isChatSending) {
-      setQueuedUserMessage(payload, trimmedAnswer);
-      return;
+    const conversationID = currentConversationIdRef?.current || currentConversationId;
+    const thinkingId = `temp_assistant_followup_${Date.now()}`;
+    const answerId = globalThis.crypto?.randomUUID?.() || `answer_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const control = { conversationId: conversationID, abort: () => {} };
+    activeChatAbortRef.current = control;
+    setChatInput('');
+    setChatError('');
+    setIsChatSending(true);
+    try {
+      const result = await apiPost(`/api/agent-runs/${encodeURIComponent(request.runId)}/followup-answer`, {
+        tool_call_id: request.toolCallId,
+        answer: trimmedAnswer,
+        answer_id: answerId,
+      });
+      setConversationMessages((current) => {
+        const updated = (current || []).map((item) => {
+          if (result.assistant_message?.id && item.id === result.assistant_message.id) {
+            return { ...item, ...result.assistant_message };
+          }
+          if (item.id !== request.messageId) return item;
+          return {
+            ...item,
+            attachments: (item.attachments || []).map((attachment) =>
+              attachment?.tool_call_id === request.toolCallId
+                ? { ...attachment, status: 'answered', answer_message_id: result.user_message?.id || '' }
+                : attachment
+            ),
+          };
+        });
+        if (result.user_message && !updated.some((item) => item.id === result.user_message.id)) {
+          updated.push(result.user_message);
+        }
+        if (!result.already_applied) {
+          updated.push(buildAssistantRunShell({
+            id: thinkingId,
+            conversationId: conversationID,
+            createdAt: new Date().toISOString(),
+            runId: request.runId,
+          }));
+        }
+        return updated;
+      });
+      if (!result.already_applied) {
+        await waitForAgentRun(
+          request.runId,
+          conversationID,
+          thinkingId,
+          control,
+          result.resume_event?.seq || 0,
+          result.user_message?.id || ''
+        );
+      }
+    } catch (error) {
+      handleSendError(error, thinkingId, conversationID);
+    } finally {
+      if (activeChatAbortRef.current === control) activeChatAbortRef.current = null;
+      setIsChatSending(false);
     }
-    await sendChatPayload(payload);
   }
 
   async function sendChatPayload(payload) {
@@ -139,19 +191,17 @@ export function createChatSendActions({
     const stamp = Date.now();
     const optimisticId = `temp_user_${stamp}`;
     const thinkingId = `temp_assistant_${stamp}`;
-    const attachments = payload.attachments.map((item) => ({
-      id: item.id,
-      name: item.name,
-      size: item.size,
-      type: item.type,
-    }));
+	const attachments = payload.attachments.map(({ file, preview_url, client_id, fingerprint, upload_error, ...item }) => item);
     const metadataAttachments = [
       ...attachments,
       ...(payload.fileReferences || []),
       ...(payload.skillReferences || []),
       ...(payload.currentFileContext ? [payload.currentFileContext] : []),
     ];
-    const filesToSend = payload.attachments.map((item) => item.file).filter(Boolean);
+	const filesToSend = payload.attachments
+	  .filter((item) => item.kind !== 'image' || item.upload_status !== 'uploaded')
+	  .map((item) => item.file)
+	  .filter(Boolean);
 
     if (shouldUpdateVisibleConversation()) {
       setChatError('');
@@ -296,9 +346,11 @@ export function createChatSendActions({
       });
     }
     const isBudgetExhausted = error?.stage === 'budget_exhausted' || error?.incompleteReason === 'budget_exhausted';
-    const prefix = error?.runId
-      ? (isBudgetExhausted ? '达到轮次上限，已总结当前进度，可继续本轮' : '连接中断，可继续这轮任务')
-      : '回复失败';
+    const failureMetadata = chatFailureMetadata(error);
+    const prefix = chatFailureHeading(failureMetadata.failureClass, {
+      resumable: Boolean(error?.runId),
+      budgetExhausted: isBudgetExhausted,
+    });
     setConversationMessages((current) =>
       mapPendingAssistant(current, thinkingId, (item) => ({
         ...item,
@@ -306,7 +358,7 @@ export function createChatSendActions({
         error: true,
         resumableRunId: error?.runId || '',
         diagnosticLogId: error?.diagnosticLogId || '',
-        ...chatFailureMetadata(error),
+        ...failureMetadata,
         content: isBudgetExhausted ? message : `${prefix}：${message}`,
       }))
     );
@@ -315,7 +367,7 @@ export function createChatSendActions({
   return {
     sendChatMessage,
     sendChatPayload,
-    sendFollowupAnswer,
+    sendUserResponse,
   };
 }
 
@@ -335,13 +387,15 @@ function buildMessageFormData(payload, modelProviderId, defaultThinkingMode, fil
   formData.append('content', payload.content.trim());
   formData.append('model_provider_id', modelProviderId);
   formData.append('thinking_mode', payload.thinkingMode || defaultThinkingMode || 'standard');
-  for (const attachment of payload.attachments) {
-    formData.append('attachment_ids[]', attachment.id);
+	for (const attachment of payload.attachments) {
+	  if (attachment.kind === 'image' && attachment.upload_status === 'uploaded') {
+		formData.append('attachment_ids[]', attachment.id);
+	  }
   }
   formData.append('workspace_refs_json', JSON.stringify(payload.fileReferences || []));
   formData.append('selected_skills_json', JSON.stringify(payload.skillReferences || []));
   if (payload.currentFileContext) {
-    formData.append('current_file_context_json', JSON.stringify(payload.currentFileContext));
+    formData.append('editor_context_json', JSON.stringify(payload.currentFileContext));
   }
   for (const file of filesToSend) {
     formData.append('files[]', file, file.name);

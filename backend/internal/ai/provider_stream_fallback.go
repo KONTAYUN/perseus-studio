@@ -25,7 +25,24 @@ func shouldFallbackAfterStreamError(ctx context.Context, err error) bool {
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
-	return providerStreamFallbackEnabled()
+	failure := classifyProviderFailure(err)
+	return providerStreamFallbackEnabled() &&
+		(failure.Class == ProviderFailureStreamInterrupted || failure.Class == ProviderFailureConnection)
+}
+
+func normalizeProviderStreamError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var protocolErr *ProviderProtocolError
+	var responseErr *ProviderResponseError
+	if errors.As(err, &protocolErr) || errors.As(err, &responseErr) {
+		return err
+	}
+	if failure := classifyProviderTransportFailure(err); failure.Class != ProviderFailureUnknown {
+		return err
+	}
+	return &ProviderProtocolError{Code: "stream_interrupted", Cause: err}
 }
 
 func providerStreamMaxRetries() int {
@@ -60,9 +77,9 @@ func shouldRetryProviderStreamError(ctx context.Context, err error) bool {
 	if errors.As(err, &providerErr) {
 		return false
 	}
-	text := strings.ToLower(err.Error())
-	if strings.Contains(text, "empty stream") || strings.Contains(text, "empty anthropic stream") {
-		return true
+	var protocolErr *ProviderProtocolError
+	if errors.As(err, &protocolErr) {
+		return protocolErr.Code == "empty_provider_response" || protocolErr.Code == "stream_interrupted"
 	}
 	return isTransientTransportError(err)
 }
@@ -79,12 +96,12 @@ func providerStreamRetryDelay(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
-	delay := 200 * time.Millisecond
+	delay := 500 * time.Millisecond
 	for index := 1; index < attempt; index++ {
 		delay *= 2
 	}
-	if delay > 5*time.Second {
-		delay = 5 * time.Second
+	if delay > 8*time.Second {
+		delay = 8 * time.Second
 	}
 	return jitterProviderRetryDelay(delay, attempt)
 }

@@ -95,7 +95,7 @@ func (r *agentRuntime) processToolCalls(ctx context.Context, calls []agentToolCa
 				"tool_call_id":              call.ID,
 				"arguments_summary":         summarizeToolArguments(executionToolArgumentsJSON(call)),
 			})
-			return nil, false, fmt.Errorf("%s", r.repeatedToolErrorMessage())
+			return nil, false, newAgentRuntimeError(AgentRuntimeToolErrorLoop, r.repeatedToolErrorMessage(), nil)
 		}
 	}
 	r.appendToolResults(results)
@@ -145,21 +145,25 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
 	}
 	if r.allowTask && call.Name == "start_background_task" {
-		r.requiresCompletion = true
-		request, err := parseBackgroundTaskRequest(call.ArgumentsJSON, lastUserMessageContent(r.messages))
+		request, err := parseBackgroundTaskRequest(call.ArgumentsJSON, r.currentUserMessageContent())
 		if err != nil {
 			r.recordToolError(call.Name, executionToolArgumentsJSON(call), err.Error())
 			return r.toolErrorJSON(call.Name, err.Error()), true, nil, false, nil
 		}
+		r.terminalState = AgentTerminationDelegated
 		return "", false, &request, false, nil
 	}
 	if call.Name == "attempt_completion" {
 		content, isError, completed := r.handleCompletionAttempt(call.ArgumentsJSON)
 		return content, isError, nil, completed, nil
 	}
-	if call.Name == "ask_followup_question" {
-		content, isError, completed := r.handleFollowupQuestion(call.ID, call.ArgumentsJSON)
+	if isUserRequestTool(call.Name) {
+		content, isError, completed := r.handleUserRequest(call.Name, call.ID, call.ArgumentsJSON)
 		return content, isError, nil, completed, nil
+	}
+	if call.Name == "update_task_plan" {
+		content, isError := r.handleTaskPlanUpdate(call.ID, call.ArgumentsJSON)
+		return content, isError, nil, false, nil
 	}
 	if errText := r.validateSelectedReferenceScope(call); errText != "" {
 		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
@@ -188,10 +192,6 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		event := r.invalidToolCallEvent(ctx, call, errText)
 		r.events = append(r.events, event)
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
-	}
-	r.toolLoopActive = true
-	if toolRequiresCompletionAfterUse(call.Name) {
-		r.requiresCompletion = true
 	}
 	operationHash := ""
 	if isWorkspaceMutationTool(call.Name) {
@@ -247,12 +247,11 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	}
 	if event.Status == "success" && call.Name == "run_workspace_command" && len(event.ChangedPaths) > 0 {
 		r.performedMutation = true
-		r.requiresCompletion = true
 	}
 	if event.Status == "success" {
 		r.clearToolErrors()
 	} else {
-		r.recordToolError(call.Name, executionToolArgumentsJSON(call), event.Error)
+		r.recordTypedToolError(call.Name, executionToolArgumentsJSON(call), toolErrorFromEvent(event))
 		r.recordConditionSatisfiedFromToolResult(call, event, result)
 	}
 	emitToolLifecycleEvent(r.opts, "tool_result_returned", eventLevel(event.Status), map[string]any{
@@ -324,7 +323,7 @@ func (r *agentRuntime) invalidToolCallEvent(ctx context.Context, call agentToolC
 		"error":             err.Error(),
 		"arguments_summary": summarizeToolArguments(argumentsJSON),
 		"target_summary":    targetSummary,
-		"recovery_hint":     toolFailureRecoveryHint(call.Name, err.Error()),
+		"recovery_hint":     toolFailureRecoveryHint(err),
 		"verification":      ToolVerification{Status: "skipped", Message: "tool arguments failed validation before execution"},
 	})
 	return event
@@ -356,28 +355,16 @@ func (r *agentRuntime) normalizedToolArguments(call agentToolCall) (string, stri
 		return "", fmt.Sprintf("unknown or unavailable tool %q", call.Name)
 	}
 	if call.Name == "apply_workspace_patch" {
-		if strings.TrimSpace(call.PatchText) == "" {
-			if providerNativePatchEnabled(r.provider) {
-				argumentsJSON := strings.TrimSpace(executionToolArgumentsJSON(call))
-				var decoded map[string]any
-				if err := json.Unmarshal([]byte(argumentsJSON), &decoded); err != nil {
-					return "", "tool arguments must be valid JSON: " + err.Error()
-				}
-				if strings.TrimSpace(stringFromAny(decoded["patch"])) == "" {
-					return "", "patch is required"
-				}
-				decoded["transport"] = "provider_native_tool"
-				raw, _ := json.Marshal(decoded)
-				return string(raw), ""
-			}
-			return "", "apply_workspace_patch is an assistant text patch channel for this provider; output a complete *** Begin Patch / *** End Patch patch block instead of calling it as a JSON tool"
-		}
-		argumentsJSON := strings.TrimSpace(executionToolArgumentsJSON(call))
-		var decoded any
+		var decoded map[string]any
 		if err := json.Unmarshal([]byte(argumentsJSON), &decoded); err != nil {
 			return "", "tool arguments must be valid JSON: " + err.Error()
 		}
-		return argumentsJSON, ""
+		if strings.TrimSpace(stringFromAny(decoded["patch"])) == "" {
+			return "", "patch is required"
+		}
+		decoded["transport"] = "structured_tool"
+		raw, _ := json.Marshal(decoded)
+		return string(raw), ""
 	}
 	schema := toolInputSchema(call.Name, r.tools())
 	if len(schema) == 0 && isLegacyWorkspaceMutationTool(call.Name) {

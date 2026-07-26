@@ -90,7 +90,7 @@ INSERT INTO users (id, username, password_hash, role, disabled, created_at, upda
 VALUES (?, ?, ?, ?, 0, ?, ?)`,
 		id, username, string(hash), role, now, now)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isSQLiteUniqueConstraint(err) {
 			return User{}, fmt.Errorf("username already exists")
 		}
 		return User{}, err

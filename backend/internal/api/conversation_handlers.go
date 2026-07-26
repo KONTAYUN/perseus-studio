@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"webide-backend/internal/store"
@@ -83,9 +84,15 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusOK, item)
 			return
 		case http.MethodDelete:
-			if err := s.conversations.DeleteConversation(r.Context(), user.UserID, conversationID); err != nil {
+			attachments, err := s.conversations.DeleteConversationWithAttachments(r.Context(), user.UserID, conversationID)
+			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
+			}
+			for _, attachment := range attachments {
+				if path, pathErr := s.chatAttachmentDiskPath(attachment); pathErr == nil {
+					_ = os.Remove(path)
+				}
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"id": conversationID})
 			return
@@ -113,6 +120,7 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		messages = s.projectConversationChatAttachments(r.Context(), user.UserID, conversation.ID, messages)
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"conversation": conversation,
 			"messages":     messages,
@@ -202,13 +210,14 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		items = s.projectConversationChatAttachments(r.Context(), user.UserID, conversationID, items)
 		response := map[string]any{"items": items}
 		if run, err := s.runs.LatestConversationRun(r.Context(), user.UserID, conversationID); err == nil {
 			response["latest_run"] = run
 		}
 		writeJSON(w, http.StatusOK, response)
 	case http.MethodPost:
-		content, modelProviderID, thinkingMode, attachmentsJSON, attachmentPayloads, err := s.parseConversationMessageRequest(r)
+		content, modelProviderID, thinkingMode, attachmentsJSON, attachmentPayloads, attachmentIDs, err := s.parseConversationMessageRequest(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -242,10 +251,18 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		userMessage, err := s.conversations.AppendMessage(r.Context(), user.UserID, conversationID, "user", strings.TrimSpace(content), string(attachmentsJSON))
+		userMessage, err := s.conversations.AppendMessageWithAttachmentIDs(r.Context(), store.MessageInput{
+			UserID: user.UserID, ConversationID: conversationID, Role: "user",
+			Content: strings.TrimSpace(content), AttachmentsJSON: string(attachmentsJSON), Status: "final",
+		}, attachmentIDs)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		for index := range attachmentPayloads {
+			if attachmentPayloads[index].Kind == "image" {
+				attachmentPayloads[index].MessageID = userMessage.ID
+			}
 		}
 
 		run, err := s.runs.CreateRun(r.Context(), store.CreateAgentRunInput{

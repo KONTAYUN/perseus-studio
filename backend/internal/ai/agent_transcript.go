@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"webide-backend/internal/store"
 )
 
 type ProviderUsage struct {
@@ -242,7 +240,6 @@ func cloneAgentToolCalls(items []agentToolCall) []agentToolCall {
 			Name:           item.Name,
 			ArgumentsJSON:  item.ArgumentsJSON,
 			AnthropicInput: cloneMapAny(item.AnthropicInput),
-			PatchText:      item.PatchText,
 		})
 	}
 	return next
@@ -254,25 +251,12 @@ func cloneTranscriptAgentToolCalls(items []agentToolCall) []agentToolCall {
 	}
 	next := make([]agentToolCall, 0, len(items))
 	for _, item := range items {
-		clone := agentToolCall{
+		next = append(next, agentToolCall{
 			ID:             item.ID,
 			Name:           item.Name,
 			ArgumentsJSON:  item.ArgumentsJSON,
 			AnthropicInput: cloneMapAny(item.AnthropicInput),
-		}
-		if item.Name == "apply_workspace_patch" && strings.TrimSpace(item.PatchText) != "" {
-			clone.ArgumentsJSON = mustJSON(map[string]any{
-				"patch":       "[assistant_text_patch captured by backend]",
-				"transport":   "assistant_text_patch",
-				"patch_chars": len([]rune(item.PatchText)),
-			})
-			clone.AnthropicInput = map[string]any{
-				"patch":       "[assistant_text_patch captured by backend]",
-				"transport":   "assistant_text_patch",
-				"patch_chars": len([]rune(item.PatchText)),
-			}
-		}
-		next = append(next, clone)
+		})
 	}
 	return next
 }
@@ -352,8 +336,6 @@ type AgentRuntimeCheckpoint struct {
 	RepeatedToolErrorKey      string                              `json:"repeated_tool_error_key,omitempty"`
 	RepeatedToolErrorCount    int                                 `json:"repeated_tool_error_count,omitempty"`
 	LoadedToolsets            map[string]bool                     `json:"loaded_toolsets"`
-	RequiresCompletion        bool                                `json:"requires_completion"`
-	ToolLoopActive            bool                                `json:"tool_loop_active"`
 	LastProviderFinishReason  string                              `json:"last_provider_finish_reason"`
 	LastProviderEmptyResponse bool                                `json:"last_provider_empty_response"`
 	CompletedContent          string                              `json:"completed_content"`
@@ -379,8 +361,6 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 		RepeatedToolErrorKey:      r.repeatedToolErrorKey,
 		RepeatedToolErrorCount:    r.repeatedToolErrorCount,
 		LoadedToolsets:            map[string]bool{},
-		RequiresCompletion:        r.requiresCompletion,
-		ToolLoopActive:            r.toolLoopActive,
 		LastProviderFinishReason:  r.lastProviderFinishReason,
 		LastProviderEmptyResponse: r.lastProviderEmptyResponse,
 		CompletedContent:          r.completedContent,
@@ -424,8 +404,6 @@ func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
 	for key, value := range checkpoint.LoadedToolsets {
 		r.loadedToolsets[key] = value
 	}
-	r.requiresCompletion = checkpoint.RequiresCompletion
-	r.toolLoopActive = checkpoint.ToolLoopActive || checkpoint.ToolCalls > 0 || checkpoint.RequiresCompletion
 	r.lastProviderFinishReason = checkpoint.LastProviderFinishReason
 	r.lastProviderEmptyResponse = checkpoint.LastProviderEmptyResponse
 	r.completedContent = checkpoint.CompletedContent
@@ -433,16 +411,4 @@ func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
 	r.actionProgress = checkpoint.ActionProgress
 	r.loopGuard = checkpoint.LoopGuard
 	r.kernel = normalizeAgentKernelState(checkpoint.Kernel)
-}
-
-func initialRuntimeCheckpoint(messages []store.Message, attachments []AttachmentPayload, allowTask bool, requiresCompletion bool) AgentRuntimeCheckpoint {
-	return AgentRuntimeCheckpoint{
-		Transcript:         newAgentTranscript(),
-		AppliedMutations:   map[string]ToolEvent{},
-		ChunkWrites:        map[string]workspaceChunkWriteState{},
-		LoadedToolsets:     allAgentToolsets(allowTask),
-		RequiresCompletion: requiresCompletion,
-		ToolLoopActive:     requiresCompletion,
-		Kernel:             newAgentKernelState(),
-	}
 }

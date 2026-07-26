@@ -82,7 +82,7 @@ func (s *Service) CreateBytes(ctx context.Context, path string, content []byte) 
 		return FileWriteResult{}, trashManagedOnlyError()
 	}
 	if _, err := os.Stat(absPath); err == nil {
-		return FileWriteResult{}, fmt.Errorf("path already exists")
+		return FileWriteResult{}, ErrPathExists
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return FileWriteResult{}, err
 	}
@@ -100,15 +100,15 @@ func (s *Service) WriteExistingTextFile(ctx context.Context, path, content, sour
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return FileWriteResult{}, fmt.Errorf("file does not exist")
+			return FileWriteResult{}, ErrPathNotFound
 		}
 		return FileWriteResult{}, err
 	}
 	if info.IsDir() {
-		return FileWriteResult{}, fmt.Errorf("path is a directory")
+		return FileWriteResult{}, ErrPathIsDirectory
 	}
 	if !isTextPath(cleanPath) {
-		return FileWriteResult{}, fmt.Errorf("only text files can be written")
+		return FileWriteResult{}, ErrUnsupportedFile
 	}
 	if source == "" {
 		source = "ai_write"
@@ -127,15 +127,15 @@ func (s *Service) AppendTextFile(ctx context.Context, path, content, source stri
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return FileWriteResult{}, fmt.Errorf("file does not exist")
+			return FileWriteResult{}, ErrPathNotFound
 		}
 		return FileWriteResult{}, err
 	}
 	if info.IsDir() {
-		return FileWriteResult{}, fmt.Errorf("path is a directory")
+		return FileWriteResult{}, ErrPathIsDirectory
 	}
 	if !isTextPath(cleanPath) {
-		return FileWriteResult{}, fmt.Errorf("only text files can be written")
+		return FileWriteResult{}, ErrUnsupportedFile
 	}
 	raw, err := os.ReadFile(absPath)
 	if err != nil {
@@ -166,15 +166,15 @@ func (s *Service) EditTextFileSmart(ctx context.Context, path, oldText, newText,
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return TextEditResult{}, fmt.Errorf("file does not exist")
+			return TextEditResult{}, ErrPathNotFound
 		}
 		return TextEditResult{}, err
 	}
 	if info.IsDir() {
-		return TextEditResult{}, fmt.Errorf("path is a directory")
+		return TextEditResult{}, ErrPathIsDirectory
 	}
 	if !isTextPath(cleanPath) {
-		return TextEditResult{}, fmt.Errorf("only text files can be edited")
+		return TextEditResult{}, ErrUnsupportedFile
 	}
 	if oldText == "" {
 		return TextEditResult{}, fmt.Errorf("old_text is required")
@@ -216,15 +216,15 @@ func (s *Service) ReplaceTextFileLines(ctx context.Context, path string, startLi
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return LineReplaceResult{}, fmt.Errorf("file does not exist")
+			return LineReplaceResult{}, ErrPathNotFound
 		}
 		return LineReplaceResult{}, err
 	}
 	if info.IsDir() {
-		return LineReplaceResult{}, fmt.Errorf("path is a directory")
+		return LineReplaceResult{}, ErrPathIsDirectory
 	}
 	if !isTextPath(cleanPath) {
-		return LineReplaceResult{}, fmt.Errorf("only text files can be edited")
+		return LineReplaceResult{}, ErrUnsupportedFile
 	}
 	raw, err := os.ReadFile(absPath)
 	if err != nil {
@@ -237,19 +237,19 @@ func (s *Service) ReplaceTextFileLines(ctx context.Context, path string, startLi
 	}
 	totalBefore := countTextLines(content)
 	if startLine <= 0 {
-		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: start_line must be a positive integer")
+		return LineReplaceResult{}, fmt.Errorf("%w: start_line must be a positive integer", ErrInvalidLineRange)
 	}
 	if endLine <= 0 {
-		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: end_line must be a positive integer")
+		return LineReplaceResult{}, fmt.Errorf("%w: end_line must be a positive integer", ErrInvalidLineRange)
 	}
 	if startLine > endLine {
-		return LineReplaceResult{}, fmt.Errorf("invalid tool arguments: start_line must be less than or equal to end_line")
+		return LineReplaceResult{}, fmt.Errorf("%w: start_line must be less than or equal to end_line", ErrInvalidLineRange)
 	}
 	if startLine > len(lines) {
-		return LineReplaceResult{}, fmt.Errorf("line range starts after end of file")
+		return LineReplaceResult{}, fmt.Errorf("%w: range starts after end of file", ErrInvalidLineRange)
 	}
 	if endLine > len(lines) {
-		return LineReplaceResult{}, fmt.Errorf("line range ends after end of file")
+		return LineReplaceResult{}, fmt.Errorf("%w: range ends after end of file", ErrInvalidLineRange)
 	}
 	nextContent := strings.Join(lines[:startLine-1], "") + newText + strings.Join(lines[endLine:], "")
 	if source == "" {

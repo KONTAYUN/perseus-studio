@@ -177,7 +177,7 @@ export function createFileTreeMutationActions({
         try {
           await apiUploadFile(relativePath, file, false);
         } catch (error) {
-          if (error.message.toLowerCase().includes('already exists')) {
+          if (error.code === 'path_exists' || error.status === 409) {
             const shouldOverwrite = await openConfirmDialog({
               title: '覆盖文件',
               message: `${relativePath} 已存在，是否覆盖？`,

@@ -72,18 +72,6 @@ func TestShouldFinalizeModelMessageCompletedSkipsAlreadyFinalizedContent(t *test
 	}
 }
 
-func TestShouldAppendModelDeltaSuppressesTextWhileCompletionPreviewIsActive(t *testing.T) {
-	if !shouldAppendModelDelta(assistantStreamState{}) {
-		t.Fatal("ordinary assistant text should append without a completion preview")
-	}
-	if !shouldAppendModelDelta(assistantStreamState{ActiveMessageID: "msg_preamble", CompletionPreviewID: "msg_completion"}) {
-		t.Fatal("assistant text for a different active message should append")
-	}
-	if shouldAppendModelDelta(assistantStreamState{ActiveMessageID: "msg_completion", CompletionPreviewID: "msg_completion"}) {
-		t.Fatal("ordinary model_delta must not be appended into the completion preview message")
-	}
-}
-
 func TestMessageMetaJSONIncludesRunOwnership(t *testing.T) {
 	raw := messageMetaJSON("assistant_segment", 3, " run-1 ")
 	var payload map[string]any

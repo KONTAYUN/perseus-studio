@@ -43,7 +43,7 @@ INSERT INTO llm_model_prices (
 		maxInt64(0, input.InputPriceMicro), maxInt64(0, input.OutputPriceMicro),
 		maxInt64(0, input.CacheCreationPriceMicro), maxInt64(0, input.CacheReadPriceMicro), now, now)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isSQLiteUniqueConstraint(err) {
 			return LLMModelPrice{}, fmt.Errorf("price already exists for provider and model")
 		}
 		return LLMModelPrice{}, err
@@ -65,7 +65,7 @@ WHERE id = ?`,
 		maxInt64(0, input.InputPriceMicro), maxInt64(0, input.OutputPriceMicro),
 		maxInt64(0, input.CacheCreationPriceMicro), maxInt64(0, input.CacheReadPriceMicro), now, strings.TrimSpace(id))
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isSQLiteUniqueConstraint(err) {
 			return LLMModelPrice{}, fmt.Errorf("price already exists for provider and model")
 		}
 		return LLMModelPrice{}, err

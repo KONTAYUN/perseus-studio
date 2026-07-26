@@ -9,6 +9,8 @@ import (
 type discoverModelsRequest struct {
 	ProviderID string `json:"provider_id"`
 	Protocol   string `json:"protocol"`
+	AdapterMode string `json:"adapter_mode"`
+	AuthMode    string `json:"auth_mode"`
 	BaseURL    string `json:"base_url"`
 	APIKey     string `json:"api_key"`
 }
@@ -26,6 +28,8 @@ type discoveredModel struct {
 type testModelProviderRequest struct {
 	ProviderID                string `json:"provider_id"`
 	Protocol                  string `json:"protocol"`
+	AdapterMode               string `json:"adapter_mode"`
+	AuthMode                  string `json:"auth_mode"`
 	BaseURL                   string `json:"base_url"`
 	APIKey                    string `json:"api_key"`
 	ModelID                   string `json:"model_id"`

@@ -1,36 +1,45 @@
 # Perseus Agent Kernel
 
 Agent Kernel is the stability layer for long workspace tasks. It is not a new
-storage format and it is not a Codex CLI wrapper. The goal is to make Perseus
-behave like mature agent runners: bounded context, typed turn items, explicit
-tool progress, recoverable checkpoints, and targeted file reads.
+storage format and it is not a Codex CLI wrapper. The goal is a lightweight
+Perseus-native runner with mature-agent guardrails: bounded context, typed turn
+items, explicit tool progress, recoverable checkpoints, provider compatibility,
+and targeted file reads.
 
 ## Runtime Switch
 
 `PERSEUS_AGENT_KERNEL_MODE` controls the execution guard behavior:
 
-- `codex_parity` is the default.
+- `kernel_v3` is the default lightweight execution loop.
+- `codex_parity` is accepted only as a legacy alias and is normalized to
+  `kernel_v3`.
 - `kernel_v2_current` keeps the previous v2 streaming behavior for compatibility.
 - `kernel_v2` is accepted as an alias for `kernel_v2_current`.
-- `codex_sidecar_benchmark` uses the same internal guard behavior as
-  `codex_parity` and is reserved for comparison harnesses.
 - `legacy` keeps the previous loop-guard target behavior and disables v2 read
   progress tracking.
 
-The switch is intentionally coarse so a local deployment can roll back the new
-target/progress accounting without changing user data or workspace files.
+The switch is intentionally coarse so a local deployment can roll back execution
+behavior without changing user data or workspace files.
 
-## Core Items And Ledgers
+## Canonical Turn Items And Ledgers
 
-The kernel records a `Turn` as typed items instead of treating every intermediate
-model sentence as a normal assistant chat bubble:
+The `agent_turn_items` table is the only model-history source. Every user input
+creates a turn and every model/tool transition is stored in global sequence
+order. Legacy `messages` remain the UI and audit projection.
 
-- `turn_started`
+Persisted item kinds are:
+
+- `user_message`
+- `assistant_message`
 - `tool_call`
 - `tool_result`
+- `environment_snapshot`
+- `workspace_observation`
+- `external_observation`
 - `file_change`
-- `context_compaction`
-- `final_message`
+- `task_plan`
+- `compaction`
+- `aborted`
 
 Intermediate planning/commentary stays in the item stream and diagnostics. The
 main chat should show user messages, final assistant replies, and actionable
@@ -46,7 +55,7 @@ The kernel also records these internal ledgers on each run checkpoint:
 - `ToolResultLedger`: bounded tool-result metadata for diagnostics and context
   compaction.
 
-Before building provider context, the transcript is normalized:
+Before building provider context, ordered items are normalized:
 
 - assistant tool calls without results get an `aborted` tool result.
 - orphan tool results without a matching call are dropped.
@@ -85,16 +94,35 @@ Line ranges are still valid for ordinary text files, but they are not the right
 continuation strategy for rich-text HTML fragments because a short note can have
 very long HTML lines.
 
+## Editor Environment And Task Working Set
+
+The editor sends paths only: active file, visible editor files, open tabs, and
+panel position. File bodies, HTML fragments, previews, selections, and cached
+editor content are excluded unless the user explicitly attaches content.
+
+Successful reads and explicit file references create `workspace_observation`
+items. Mutations create `file_change` items. This session working set is not
+filtered by the currently active tab, so switching from a whitepaper to a misc
+note does not erase the whitepaper task. A mutation marks an older exact read
+stale; its path and purpose remain known, but precise editing requires a reread.
+
 ## Context Policy
 
-The model-visible context stays bounded:
+`ContextAssembler` is the only provider-context entry. Its fixed order is:
 
-- Large tool results are compacted to metadata/reference records.
-- Current read working set and recent relevant blocks are preserved.
-- Older exact payloads are replaced with instructions to re-read the target when
-  exact text is needed.
-- On checkpoint resume or overflow retry, the message builder can compact before
-  the next provider call.
+1. Load canonical items and the active compaction boundary.
+2. Repair tool pairs and omit orphan results.
+3. Add path-only turn environment and the session task working set.
+4. Estimate tokens for system prompts, tools, messages, environment, results,
+   and reserved output.
+5. Prune only eligible old tool-result bodies after the configured token threshold or an explicit provider context-overflow response.
+6. If token pressure remains, write a semantic `compaction` item and retain up
+   to 20,000 tokens of the latest complete turn suffix.
+7. Serialize the same semantic items to OpenAI or Anthropic protocol shapes.
+
+There is no message-count, single-message character, or 48KB chat-history
+limit. Request bytes are diagnostic unless a provider explicitly declares a
+transport limit. Original item rows remain stored after pruning or compaction.
 
 When a note read is truncated for the model, the next action must point back to
 `mode=index -> mode=block/section`, not to line-based continuation.
@@ -113,13 +141,13 @@ Provider request summaries include:
 
 These fields are visible in Settings -> Diagnostics and in diagnostic exports.
 
-## Codex Sidecar Policy
+## Reference Policy
 
-Codex CLI / SDK / App Server behavior is the reference model for this kernel:
-bounded context, tool-result ledgers, compaction, checkpoint-style recovery, and
-targeted file reads.
+Codex CLI / SDK / App Server, Roo Code, and similar mature agents are reference
+projects for specific behaviors: bounded context, tool-result ledgers,
+compaction, checkpoint-style recovery, provider compatibility, and targeted file
+reads.
 
-A Codex sidecar may be used as a non-production comparison harness for real
-failure cases, but Perseus production runs must not depend on `codex exec` as a
-black-box backend. Any sidecar experiment should expose Perseus-style tools and
-compare behavior against Kernel v2 before changing production code.
+Perseus production runs must not depend on `codex exec` or a Codex App Server
+sidecar as a black-box backend. Any reference behavior must be implemented in
+the Perseus-native loop with an explicit test or documented gap.

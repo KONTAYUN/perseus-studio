@@ -88,6 +88,30 @@ function checkForbiddenResidue(file) {
   }
 }
 
+function checkStructuredStatePolicy(file) {
+  const source = fs.readFileSync(file, 'utf8');
+  const relativePath = rel(file);
+  if (relativePath === 'backend/internal/ai/legacy_provider_text_fallback.go') return;
+
+  const patterns = [
+    [/\bstrings\.(?:Contains|HasPrefix)\(\s*(?:strings\.ToLower\(\s*)?err\.Error\(\)/g, 'errors must be classified by typed errors or stable codes, not error text'],
+    [/\berror\.message\.(?:includes|startsWith|endsWith)\(/g, 'frontend behavior must use status and error codes, not localized error text'],
+    [/\bisMutationToolName\b/g, 'tool side effects must come from ToolManifestEntry'],
+    [/\busesClaudeCodeProxy\b/g, 'provider adapters must be explicit configuration, not inferred from URLs'],
+    [/\bisKnownOpenAIImageModel\b/g, 'model capabilities must come from explicit configuration or the versioned catalog'],
+    [/\bassistant_text_patch\b/g, 'assistant text must never be an executable patch transport'],
+    [/\bModelResponseTextPatchAction\b/g, 'model text must never be classified as a workspace action'],
+    [/\bnewProviderPatchFilteredEmitter\b/g, 'stream text must not be intercepted as an executable patch'],
+    [/\bextractWorkspacePatchBlock\b/g, 'workspace patches must come from apply_workspace_patch arguments, not assistant text'],
+  ];
+  for (const [pattern, message] of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const line = source.slice(0, match.index).split(/\r?\n/).length;
+      fail(`${relativePath}:${line} ${message}; see docs/STRUCTURED_STATE_POLICY.md`);
+    }
+  }
+}
+
 function checkCSS() {
   const indexPath = path.join(root, 'src', 'index.css');
   const source = fs.readFileSync(indexPath, 'utf8');
@@ -135,6 +159,7 @@ for (const file of frontendFiles) {
   if (/\.test\.(jsx|js)$/.test(relativePath)) continue;
   checkLineBudget(file, 'frontend production file');
   checkForbiddenResidue(file);
+  checkStructuredStatePolicy(file);
 }
 
 const backendFiles = walk(path.join(root, 'backend'), (_full, name) => name.endsWith('.go'));
@@ -142,6 +167,7 @@ for (const file of backendFiles) {
   const relativePath = rel(file);
   if (relativePath.endsWith('_test.go')) continue;
   checkLineBudget(file, 'backend production Go file');
+  checkStructuredStatePolicy(file);
 }
 
 checkCSS();

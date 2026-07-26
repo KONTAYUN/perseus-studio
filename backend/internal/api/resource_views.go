@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
 )
 
@@ -11,6 +12,11 @@ type publicModelProviderView struct {
 	Name                        string                `json:"name"`
 	Visibility                  string                `json:"visibility"`
 	Protocol                    string                `json:"protocol"`
+	AdapterMode                 string                `json:"adapter_mode"`
+	AuthMode                    string                `json:"auth_mode"`
+	SupportsTools               string                `json:"supports_tools"`
+	SupportsVision              string                `json:"supports_vision"`
+	CapabilitySource            string                `json:"capability_source"`
 	ModelID                     string                `json:"model_id"`
 	Enabled                     bool                  `json:"enabled"`
 	IsDefault                   bool                  `json:"is_default"`
@@ -20,11 +26,11 @@ type publicModelProviderView struct {
 	ReasoningSupport            string                `json:"reasoning_support"`
 	ThinkingProfile             store.ThinkingProfile `json:"thinking_profile"`
 	ContextWindowTokens         int                   `json:"context_window_tokens"`
+	ContextWindowSource         string                `json:"context_window_source,omitempty"`
 	AutoCompactEnabled          bool                  `json:"auto_compact_enabled"`
 	AutoCompactThresholdPercent int                   `json:"auto_compact_threshold_percent"`
 	CompactReservedTokens       int                   `json:"compact_reserved_tokens"`
 	PruneToolOutputsEnabled     bool                  `json:"prune_tool_outputs_enabled"`
-	NativePatchToolEnabled      bool                  `json:"native_patch_tool_enabled"`
 	CreatedAt                   time.Time             `json:"created_at"`
 	UpdatedAt                   time.Time             `json:"updated_at"`
 }
@@ -50,6 +56,9 @@ type publicSkillView struct {
 }
 
 func modelProvidersForResponse(role string, items []store.ModelProvider) any {
+	for index := range items {
+		_, items[index].ContextWindowSource = ai.ContextWindowProfileInfo(items[index])
+	}
 	if role == "admin" {
 		return items
 	}
@@ -60,6 +69,11 @@ func modelProvidersForResponse(role string, items []store.ModelProvider) any {
 			Name:                        item.Name,
 			Visibility:                  item.Visibility,
 			Protocol:                    item.Protocol,
+			AdapterMode:                 item.AdapterMode,
+			AuthMode:                    item.AuthMode,
+			SupportsTools:               item.SupportsTools,
+			SupportsVision:              item.SupportsVision,
+			CapabilitySource:            item.CapabilitySource,
 			ModelID:                     item.ModelID,
 			Enabled:                     item.Enabled,
 			IsDefault:                   item.IsDefault,
@@ -69,11 +83,11 @@ func modelProvidersForResponse(role string, items []store.ModelProvider) any {
 			ReasoningSupport:            item.ReasoningSupport,
 			ThinkingProfile:             item.ThinkingProfile,
 			ContextWindowTokens:         item.ContextWindowTokens,
+			ContextWindowSource:         item.ContextWindowSource,
 			AutoCompactEnabled:          item.AutoCompactEnabled,
 			AutoCompactThresholdPercent: item.AutoCompactThresholdPercent,
 			CompactReservedTokens:       item.CompactReservedTokens,
 			PruneToolOutputsEnabled:     item.PruneToolOutputsEnabled,
-			NativePatchToolEnabled:      item.NativePatchToolEnabled,
 			CreatedAt:                   item.CreatedAt,
 			UpdatedAt:                   item.UpdatedAt,
 		})

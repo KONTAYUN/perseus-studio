@@ -267,6 +267,7 @@ function latestRunRecoveryEventTypes(run) {
   return [
     'assistant_message_started',
     'assistant_message_completed',
+    'assistant_message_presentation_updated',
     'tool_call_started',
     'tool_call_completed',
     'tool_call_failed',
@@ -285,6 +286,8 @@ function latestRunRecoveryEventTypes(run) {
     'agent_budget_summary_failed',
     'conversation_title_updated',
     'completion_rejected',
+	'agent_protocol_retry',
+	'agent_protocol_failed',
     'local_persistence_failed',
     ...steerTypes,
   ];

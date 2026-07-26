@@ -75,7 +75,7 @@ func (s *Server) completeConversationRunWithTask(ctx context.Context, userID, us
 		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
 		return
 	}
-	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunSucceeded, "completed", store.UpdateAgentRunInput{
+	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunDelegated, "delegated", store.UpdateAgentRunInput{
 		AssistantMessageID: assistantMessage.ID,
 		SetCompletedAt:     true,
 	}); err != nil {

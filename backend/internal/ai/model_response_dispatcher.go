@@ -5,15 +5,6 @@ import "strings"
 type ModelResponseDispatcher struct{}
 
 func (d ModelResponseDispatcher) Classify(turn agentModelTurn) ModelResponseClassification {
-	patch := normalizeTextPatchTurn(turn)
-	if patch.Extracted {
-		return ModelResponseClassification{
-			Kind:      ModelResponseTextPatchAction,
-			Turn:      patch.Turn,
-			Patch:     patch,
-			ToolNames: toolCallNames(patch.Turn.ToolCalls),
-		}
-	}
 	if len(turn.ToolCalls) == 0 {
 		if strings.TrimSpace(turn.Content) == "" {
 			return ModelResponseClassification{Kind: ModelResponseEmptyOrReasoningOnly, Turn: turn}

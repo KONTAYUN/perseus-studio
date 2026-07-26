@@ -25,7 +25,7 @@ func discoverModels(r *http.Request, req discoverModelsRequest) ([]discoveredMod
 	}
 
 	baseURL := strings.TrimRight(req.BaseURL, "/")
-	endpoints, headerMode, err := modelDiscoveryEndpoints(req.Protocol, baseURL)
+	endpoints, headerMode, err := modelDiscoveryEndpoints(req.Protocol, req.AdapterMode, req.AuthMode, baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -43,13 +43,16 @@ func discoverModels(r *http.Request, req discoverModelsRequest) ([]discoveredMod
 	return nil, lastErr
 }
 
-func modelDiscoveryEndpoints(protocol string, baseURL string) ([]string, string, error) {
+func modelDiscoveryEndpoints(protocol, adapterMode, authMode, baseURL string) ([]string, string, error) {
 	switch strings.ToLower(strings.TrimSpace(protocol)) {
 	case "", "openai":
 		return []string{baseURL + "/models"}, "openai", nil
 	case "anthropic":
-		if strings.Contains(strings.ToLower(baseURL), "claude-code-proxy") {
+		if adapterMode == store.ModelAdapterAnthropicBearerProxy {
 			return []string{baseURL + "/v1/models", baseURL + "/models"}, "anthropic_bearer", nil
+		}
+		if authMode == store.ModelAuthBearer {
+			return []string{baseURL + "/models"}, "anthropic_bearer", nil
 		}
 		return []string{baseURL + "/models"}, "anthropic", nil
 	default:

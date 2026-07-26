@@ -8,6 +8,15 @@ import (
 const (
 	ResourceVisibilityPrivate = "private"
 	ResourceVisibilityPublic  = "public"
+
+	ModelAdapterOpenAICompatible     = "openai_compatible"
+	ModelAdapterAnthropicNative      = "anthropic_native"
+	ModelAdapterAnthropicBearerProxy = "anthropic_bearer_proxy"
+	ModelAuthBearer                  = "bearer"
+	ModelAuthAPIKey                  = "x_api_key"
+	ModelCapabilitySupported         = "supported"
+	ModelCapabilityUnsupported       = "unsupported"
+	ModelCapabilityUnknown           = "unknown"
 )
 
 func NormalizeResourceVisibility(value string) string {
@@ -28,6 +37,15 @@ func validateModelProvider(input ModelProviderInput, requireKey bool) error {
 	}
 	if input.Protocol != "openai" && input.Protocol != "anthropic" {
 		return fmt.Errorf("protocol must be openai or anthropic")
+	}
+	if !validModelAdapterMode(input.AdapterMode) {
+		return fmt.Errorf("adapter_mode is invalid")
+	}
+	if !validModelAuthMode(input.AuthMode) {
+		return fmt.Errorf("auth_mode is invalid")
+	}
+	if !validModelCapability(input.SupportsTools) || !validModelCapability(input.SupportsVision) {
+		return fmt.Errorf("model capabilities must be supported, unsupported, or unknown")
 	}
 	if strings.TrimSpace(input.ReasoningCapability) != "" && NormalizeReasoningCapability(input.ReasoningCapability) != strings.ToLower(strings.TrimSpace(input.ReasoningCapability)) {
 		return fmt.Errorf("reasoning_capability must be auto, disabled, openai_reasoning, or anthropic_adaptive")
@@ -89,6 +107,11 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 		&item.Name,
 		&item.Visibility,
 		&item.Protocol,
+		&item.AdapterMode,
+		&item.AuthMode,
+		&item.SupportsTools,
+		&item.SupportsVision,
+		&item.CapabilitySource,
 		&item.BaseURL,
 		&item.APIKey,
 		&item.ModelID,
@@ -115,10 +138,77 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 	item.ReasoningCapability = NormalizeReasoningCapability(item.ReasoningCapability)
 	item.ReasoningCapabilitySource = NormalizeReasoningCapabilitySource(item.ReasoningCapabilitySource)
 	item.ReasoningProfileLevels = NormalizeReasoningProfileLevels(item.ReasoningProfileLevels)
+	item.AdapterMode = normalizeModelAdapterMode(item.AdapterMode, item.Protocol)
+	item.AuthMode = normalizeModelAuthMode(item.AuthMode, item.AdapterMode)
+	item.SupportsTools = normalizeModelCapability(item.SupportsTools)
+	item.SupportsVision = normalizeModelCapability(item.SupportsVision)
+	if strings.TrimSpace(item.CapabilitySource) == "" {
+		item.CapabilitySource = "default"
+	}
 	item.ThinkingProfile = ResolveModelThinkingProfile(item)
 	item.ReasoningSupport = ReasoningSupportFromThinkingProfile(item.ThinkingProfile)
 	item.MaskedKey = maskKey(item.APIKey)
 	return item, err
+}
+
+func validModelAdapterMode(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "", ModelAdapterOpenAICompatible, ModelAdapterAnthropicNative, ModelAdapterAnthropicBearerProxy:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeModelAdapterMode(value, protocol string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	if strings.EqualFold(protocol, "anthropic") {
+		return ModelAdapterAnthropicNative
+	}
+	return ModelAdapterOpenAICompatible
+}
+
+func validModelAuthMode(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "", ModelAuthBearer, ModelAuthAPIKey:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeModelAuthMode(value, adapterMode string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	if adapterMode == ModelAdapterAnthropicNative {
+		return ModelAuthAPIKey
+	}
+	return ModelAuthBearer
+}
+
+func validModelCapability(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "", ModelCapabilitySupported, ModelCapabilityUnsupported, ModelCapabilityUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeModelCapability(value string) string {
+	switch strings.TrimSpace(value) {
+	case ModelCapabilitySupported:
+		return ModelCapabilitySupported
+	case ModelCapabilityUnsupported:
+		return ModelCapabilityUnsupported
+	default:
+		return ModelCapabilityUnknown
+	}
 }
 
 type modelProviderContextSettings struct {

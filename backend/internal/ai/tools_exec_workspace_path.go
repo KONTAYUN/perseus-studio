@@ -86,7 +86,7 @@ func (s *Service) execManageWorkspacePath(ctx context.Context, userID, arguments
 		result, err := files.MkdirNew(args.Path)
 		if err != nil {
 			if payload, path, ok := s.workspacePathExistsObservation(userID, "manage_workspace_path", "mkdir", args.Path); ok {
-				return payload, "path already exists", "正在管理路径...", path, fmt.Errorf("path already exists")
+				return payload, "path already exists", "正在管理路径...", path, newToolError(ToolErrorPathExists, "path already exists", err)
 			}
 			return "", "", "正在管理路径...", args.Path, err
 		}
@@ -173,6 +173,7 @@ func (s *Service) workspacePathExistsObservation(userID, toolName, operation, pa
 		"operation":     operation,
 		"path":          info.Path,
 		"error":         "path already exists",
+		"error_code":    ToolErrorPathExists,
 		"reason":        "already_exists",
 		"path_type":     pathType,
 		"recoverable":   true,

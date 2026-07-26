@@ -28,10 +28,11 @@ export default function useChatState({
     chatAttachments,
     chatFileReferences,
     chatSkillReferences,
+    clearChatAttachments,
     removeChatAttachment,
+    retryChatAttachment,
     removeSkillReference,
     removeWorkspaceFileReference,
-    setChatAttachments,
     setChatFileReferences,
     setChatSkillReferences,
   } = useChatReferenceActions();
@@ -78,6 +79,7 @@ export default function useChatState({
     contextUsageRequestRef,
     conversations,
     conversationTransitionRef,
+    conversationMessages,
     currentConversationIdRef,
     currentConversationId,
     selectedModel,
@@ -211,7 +213,7 @@ export default function useChatState({
     thinkingMode,
   });
 
-  const { sendChatMessage, sendChatPayload, sendFollowupAnswer } = createChatSendActions({
+  const { sendChatMessage, sendChatPayload, sendUserResponse } = createChatSendActions({
     activeAgentRunRef,
     activeChatAbortRef,
     buildCurrentFileContext,
@@ -222,6 +224,7 @@ export default function useChatState({
     compactCurrentConversation,
     createPendingRunMessage,
     conversationTransitionRef,
+    conversationMessages,
     currentConversationIdRef,
     currentConversationId,
     ensureConversation,
@@ -232,7 +235,7 @@ export default function useChatState({
     onAssistantToolEvents,
     onTasksChanged,
     selectedModel,
-    setChatAttachments,
+    clearChatAttachments,
     setChatError,
     setChatFileReferences,
     setChatInput,
@@ -314,6 +317,7 @@ export default function useChatState({
     loadConversations,
     pendingRunMessage,
     removeChatAttachment,
+    retryChatAttachment,
     removeSkillReference,
     removeWorkspaceFileReference,
     resumableRun,
@@ -328,7 +332,7 @@ export default function useChatState({
     retryRunSteerItem,
     queueRunSteerItemAfterRun,
     discardRunSteerItem,
-    sendFollowupAnswer,
+    sendUserResponse,
     compactCurrentConversation,
     stopChatGeneration,
     setChatInput,

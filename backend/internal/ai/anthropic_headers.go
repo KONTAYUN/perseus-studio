@@ -16,8 +16,13 @@ const (
 )
 
 func providerCompat(provider store.ModelProvider) providerCompatKind {
-	if usesClaudeCodeProxy(provider.BaseURL) {
+	switch provider.AdapterMode {
+	case store.ModelAdapterAnthropicBearerProxy:
 		return providerCompatClaudeCodeProxy
+	case store.ModelAdapterAnthropicNative:
+		return providerCompatAnthropic
+	case store.ModelAdapterOpenAICompatible:
+		return providerCompatOpenAICompatible
 	}
 	if strings.EqualFold(strings.TrimSpace(provider.Protocol), "anthropic") {
 		return providerCompatAnthropic
@@ -29,9 +34,10 @@ func openAIChatEndpoint(baseURL string) string {
 	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/chat/completions"
 }
 
-func anthropicMessagesEndpoint(baseURL string) string {
+func anthropicMessagesEndpointForProvider(provider store.ModelProvider) string {
+	baseURL := provider.BaseURL
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if usesClaudeCodeProxy(base) {
+	if providerCompat(provider) == providerCompatClaudeCodeProxy {
 		return base + "/v1/messages"
 	}
 	return base + "/messages"
@@ -56,16 +62,12 @@ func applyAnthropicHeaders(req *http.Request, provider store.ModelProvider) {
 		return
 	}
 
-	if providerCompat(provider) == providerCompatClaudeCodeProxy {
+	if provider.AuthMode == store.ModelAuthBearer {
 		req.Header.Set("Authorization", bearerToken(apiKey))
 		return
 	}
 
 	req.Header.Set("x-api-key", apiKey)
-}
-
-func usesClaudeCodeProxy(baseURL string) bool {
-	return strings.Contains(strings.ToLower(baseURL), "claude-code-proxy")
 }
 
 func bearerToken(value string) string {

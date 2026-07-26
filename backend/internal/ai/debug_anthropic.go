@@ -37,7 +37,7 @@ func (s *Service) debugAnthropicToolTest(ctx context.Context, provider store.Mod
 	)
 
 	raw, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicMessagesEndpoint(provider.BaseURL), bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicMessagesEndpointForProvider(provider), bytes.NewReader(raw))
 	if err != nil {
 		return DebugToolTestResult{}, err
 	}

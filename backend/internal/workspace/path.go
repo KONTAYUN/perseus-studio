@@ -68,5 +68,5 @@ func IsPathError(err error) bool {
 }
 
 func IsNotExist(err error) bool {
-	return errors.Is(err, fs.ErrNotExist)
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, ErrPathNotFound)
 }

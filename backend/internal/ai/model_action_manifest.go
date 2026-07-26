@@ -43,8 +43,8 @@ func injectModelActionManifest(protocol agentProtocol, snapshot ContextSnapshot,
 }
 
 func manifestWithWorkspaceState(manifest ModelActionManifest, snapshot ContextSnapshot) ModelActionManifest {
-	workingSet := currentReadWorkingSetFromTranscript(snapshot.Transcript, 4)
-	if !workingSet.Available && (manifest.WorkspaceState == nil || !manifest.WorkspaceState.RecentWorkspaceReads.Available) {
+	workingSet := currentReadWorkingSetFromContext(snapshot.WorkingSet, 8)
+	if !workingSet.Available && manifest.WorkspaceState == nil {
 		return manifest
 	}
 	state := ModelWorkspaceState{}
@@ -56,6 +56,32 @@ func manifestWithWorkspaceState(manifest ModelActionManifest, snapshot ContextSn
 	}
 	manifest.WorkspaceState = &state
 	return manifest
+}
+
+func currentReadWorkingSetFromContext(files []contextWorkingFile, limit int) CurrentReadWorkingSet {
+	set := CurrentReadWorkingSet{}
+	for _, file := range files {
+		if file.Path == "" {
+			continue
+		}
+		state := string(ReadContentStateMetadataOnly)
+		if file.ContentAvailable {
+			state = string(ReadContentStateAvailable)
+		}
+		if file.Stale {
+			state = string(ReadContentStateStaleAfterMutation)
+		}
+		set.Spans = append(set.Spans, CurrentReadSpanView{
+			Path: file.Path, ToolName: file.Source, Mode: file.Mode, View: file.View,
+			BlockID: file.BlockID, SectionID: file.SectionID, DocHash: file.Hash, LedgerID: file.LedgerID,
+			ReadContentState: state, ContentAvailableInRecentContext: file.ContentAvailable,
+		})
+		if limit > 0 && len(set.Spans) >= limit {
+			break
+		}
+	}
+	set.Available = len(set.Spans) > 0
+	return set
 }
 
 func modelActionManifestAnchor(manifest ModelActionManifest) string {
@@ -70,19 +96,6 @@ func modelActionManifestDigest(manifest ModelActionManifest) string {
 	raw, _ := json.Marshal(manifest)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:8])
-}
-
-func modelTextActionNames(manifest ModelActionManifest) []string {
-	if len(manifest.TextActions) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(manifest.TextActions))
-	for _, action := range manifest.TextActions {
-		if strings.TrimSpace(action.Name) != "" {
-			out = append(out, action.Name)
-		}
-	}
-	return out
 }
 
 func modelJSONToolActionNames(manifest ModelActionManifest) []string {

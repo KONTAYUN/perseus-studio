@@ -2,16 +2,22 @@ package ai
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -56,7 +62,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "search_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_files")
-	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
 	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
 	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
 	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "save_workspace_file")
@@ -70,13 +76,15 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_skill")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "install_skill_from_attachment")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "delete_skill")
-	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "ask_followup_question")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), requestUserInputToolName)
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), requestUserChoiceToolName)
+	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), legacyFollowupQuestionToolName)
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "inspect_workspace")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "find_workspace_files")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "search_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_files")
-	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
 	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
 	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
 	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "save_workspace_file")
@@ -90,7 +98,9 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_skill")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "install_skill_from_attachment")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "delete_skill")
-	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "ask_followup_question")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), requestUserInputToolName)
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), requestUserChoiceToolName)
+	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), legacyFollowupQuestionToolName)
 }
 
 func TestProviderHTTPClientUsesConservativeHTTP1Transport(t *testing.T) {
@@ -110,131 +120,6 @@ func TestProviderHTTPClientUsesConservativeHTTP1Transport(t *testing.T) {
 	}
 	if got := transport.TLSClientConfig.NextProtos; len(got) != 1 || got[0] != providerHTTPTransportProtocol {
 		t.Fatalf("expected provider ALPN %q only, got %#v", providerHTTPTransportProtocol, got)
-	}
-}
-
-func TestTurnWithExtractedTextPatchCreatesToolCallAndHidesPatchText(t *testing.T) {
-	content := "我来编辑文件。\n\n```text\n*** Begin Patch\n*** Add File: draft.md\n+# 标题\n*** End Patch\n```\n\n继续。"
-	turn, ok := turnWithExtractedTextPatch(agentModelTurn{Content: content})
-	if !ok {
-		t.Fatal("expected text patch to be captured")
-	}
-	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].Name != "apply_workspace_patch" {
-		t.Fatalf("unexpected tool calls: %#v", turn.ToolCalls)
-	}
-	if !strings.Contains(turn.ToolCalls[0].PatchText, "*** Begin Patch") {
-		t.Fatalf("expected raw patch stored on tool call")
-	}
-	if strings.Contains(turn.Content, "*** Begin Patch") || !strings.Contains(turn.Content, "我来编辑文件") || !strings.Contains(turn.Content, "继续") {
-		t.Fatalf("unexpected visible content: %q", turn.Content)
-	}
-	if strings.Contains(turn.Content, "```") {
-		t.Fatalf("patch code fence should not remain visible: %q", turn.Content)
-	}
-	if strings.Contains(toolCallTranscriptArgumentsJSON(turn.ToolCalls[0]), "# 标题") {
-		t.Fatalf("transcript args should not retain full patch content")
-	}
-}
-
-func TestTurnWithExtractedTextPatchMergesMultiplePatchBlocks(t *testing.T) {
-	content := "先写第一份。\n\n```patch\n*** Begin Patch\n*** Add File: a.txt\n+alpha\n*** End Patch\n```\n\n再写第二份。\n\n*** Begin Patch\n*** Add File: b.txt\n+beta\n*** End Patch\n完成。"
-	turn, ok := turnWithExtractedTextPatch(agentModelTurn{Content: content})
-	if !ok {
-		t.Fatal("expected multiple text patches to be captured")
-	}
-	if len(turn.ToolCalls) != 1 {
-		t.Fatalf("expected one internal patch call, got %#v", turn.ToolCalls)
-	}
-	patch := turn.ToolCalls[0].PatchText
-	if strings.Count(patch, "*** Begin Patch") != 1 || strings.Count(patch, "*** End Patch") != 1 {
-		t.Fatalf("expected merged single patch envelope, got %q", patch)
-	}
-	for _, want := range []string{"*** Add File: a.txt", "*** Add File: b.txt", "+alpha", "+beta"} {
-		if !strings.Contains(patch, want) {
-			t.Fatalf("merged patch missing %q: %q", want, patch)
-		}
-	}
-	if strings.Contains(turn.Content, "*** Begin Patch") || strings.Contains(turn.Content, "```") {
-		t.Fatalf("visible content leaked patch syntax: %q", turn.Content)
-	}
-	if !strings.Contains(turn.Content, "先写第一份") || !strings.Contains(turn.Content, "再写第二份") || !strings.Contains(turn.Content, "完成") {
-		t.Fatalf("visible prose should remain, got %q", turn.Content)
-	}
-}
-
-func TestTextPatchNormalizationSupersedesMixedJSONToolCall(t *testing.T) {
-	content := "我来修改。\n\n*** Begin Patch\n*** Update File: draft.md\n@@\n-old\n+new\n*** End Patch"
-	result := normalizeTextPatchTurn(agentModelTurn{
-		Content: content,
-		ToolCalls: []agentToolCall{{
-			ID:            "call_search",
-			Name:          "search_workspace_text",
-			ArgumentsJSON: `{"query":"old"}`,
-		}},
-		PublicStreamedContent: "我来修改。\n\n",
-		PublicTextStreamed:    true,
-	})
-	if !result.Extracted {
-		t.Fatal("expected text patch to be captured even when JSON tool calls are present")
-	}
-	if result.DiscardedToolCalls != 1 || len(result.DiscardedToolNames) != 1 || result.DiscardedToolNames[0] != "search_workspace_text" {
-		t.Fatalf("expected mixed JSON tool call to be recorded as discarded, got %#v", result)
-	}
-	turn := result.Turn
-	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].Name != "apply_workspace_patch" {
-		t.Fatalf("expected internal patch tool call only, got %#v", turn.ToolCalls)
-	}
-	if strings.Contains(turn.Content, "*** Begin Patch") || strings.Contains(turn.PublicStreamedContent, "*** Begin Patch") {
-		t.Fatalf("patch text must not remain visible: content=%q public=%q", turn.Content, turn.PublicStreamedContent)
-	}
-	if len(turn.OpenAIMessage.ToolCalls) != 1 || turn.OpenAIMessage.ToolCalls[0].Function.Name != "apply_workspace_patch" {
-		t.Fatalf("OpenAI transcript should keep internal patch call only, got %#v", turn.OpenAIMessage.ToolCalls)
-	}
-	if strings.Contains(string(turn.OpenAIMessage.ToolCalls[0].Function.Arguments), "search_workspace_text") {
-		t.Fatalf("discarded JSON tool call leaked into patch call arguments: %#v", turn.OpenAIMessage.ToolCalls[0])
-	}
-}
-
-func TestTextPatchNormalizationKeepsExecutionPatchSeparateFromTranscript(t *testing.T) {
-	turn, ok := turnWithExtractedTextPatch(agentModelTurn{Content: "*** Begin Patch\n*** Add File: draft.md\n+hello\n*** End Patch"})
-	if !ok {
-		t.Fatal("expected text patch to be captured")
-	}
-	runtime := &agentRuntime{
-		protocol:       agentProtocolOpenAI,
-		loadedToolsets: allAgentToolsets(true),
-	}
-	call := turn.ToolCalls[0]
-	if errText := runtime.normalizeAndValidateToolCall(&call); errText != "" {
-		t.Fatalf("normalizeAndValidateToolCall returned %q", errText)
-	}
-	if !strings.Contains(executionToolArgumentsJSON(call), "+hello") {
-		t.Fatalf("execution arguments lost raw patch: %s", executionToolArgumentsJSON(call))
-	}
-	if strings.Contains(toolCallTranscriptArgumentsJSON(call), "+hello") {
-		t.Fatalf("transcript arguments leaked raw patch: %s", toolCallTranscriptArgumentsJSON(call))
-	}
-}
-
-func TestApplyWorkspacePatchIsInternalTextPatchChannel(t *testing.T) {
-	loaded := map[string]bool{"workspace": true}
-	if toolNamesFromOpenAITools(openAIToolsForLoadedToolsets(loaded, true))["apply_workspace_patch"] {
-		t.Fatal("apply_workspace_patch must not be exposed as a JSON function tool")
-	}
-	turn, ok := turnWithExtractedTextPatch(agentModelTurn{Content: "*** Begin Patch\n*** Add File: draft.md\n+hello\n*** End Patch"})
-	if !ok || len(turn.ToolCalls) != 1 {
-		t.Fatalf("expected text patch to create internal tool call, got %#v ok=%v", turn.ToolCalls, ok)
-	}
-	runtime := &agentRuntime{protocol: agentProtocolOpenAI, loadedToolsets: loaded}
-	call := turn.ToolCalls[0]
-	if errText := runtime.normalizeAndValidateToolCall(&call); errText != "" {
-		t.Fatalf("internal text patch call should validate even when hidden from provider tools: %s", errText)
-	}
-	if errText := runtime.validateToolCall(agentToolCall{
-		Name:          "apply_workspace_patch",
-		ArgumentsJSON: `{"patch":"*** Begin Patch\n*** Add File: draft.md\n+hello\n*** End Patch"}`,
-	}); !strings.Contains(errText, "assistant text patch channel") {
-		t.Fatalf("JSON patch function calls should be rejected, got %q", errText)
 	}
 }
 
@@ -464,6 +349,12 @@ func TestToolEventLabelsUseCompletedVoice(t *testing.T) {
 	if label := userFriendlyToolLabel("ask_followup_question"); label != "已询问用户" {
 		t.Fatalf("expected completed question label, got %q", label)
 	}
+	if label := userFriendlyToolLabel(requestUserInputToolName); label != "等待用户输入" {
+		t.Fatalf("expected input request label, got %q", label)
+	}
+	if label := userFriendlyToolLabel(requestUserChoiceToolName); label != "等待用户选择" {
+		t.Fatalf("expected choice request label, got %q", label)
+	}
 
 	runtime := &agentRuntime{}
 	_, event := runtime.alreadyAppliedToolResult(agentToolCall{ID: "call_1", Name: "save_workspace_file"}, ToolEvent{
@@ -501,13 +392,11 @@ func TestLedgerToolArgumentsJSONKeepsValidJSONForLargeArguments(t *testing.T) {
 	}
 }
 
-func TestHandleFollowupQuestionCompletesRun(t *testing.T) {
-	allowFreeform := false
+func TestHandleFollowupQuestionWaitsWithoutCompletingToolResult(t *testing.T) {
 	runtime := &agentRuntime{}
 	result, isError, completed := runtime.handleFollowupQuestion("call_question_1", mustJSON(map[string]any{
-		"question":       "这篇文章面向谁？",
-		"options":        []string{"普通读者", "专业编辑", "普通读者", "  "},
-		"allow_freeform": allowFreeform,
+		"question": "这篇文章面向谁？",
+		"options":  []string{"普通读者", "专业编辑", "普通读者", "  "},
 	}))
 	if isError || !completed {
 		t.Fatalf("expected follow-up question to complete successfully, isError=%v completed=%v result=%s", isError, completed, result)
@@ -515,15 +404,18 @@ func TestHandleFollowupQuestionCompletesRun(t *testing.T) {
 	if runtime.completedContent != "这篇文章面向谁？" {
 		t.Fatalf("unexpected completed content: %q", runtime.completedContent)
 	}
+	if runtime.terminalState != AgentTerminationWaitingForUser {
+		t.Fatalf("expected waiting terminal state, got %q", runtime.terminalState)
+	}
 	if len(runtime.events) != 1 {
 		t.Fatalf("expected one event, got %#v", runtime.events)
 	}
 	event := runtime.events[0]
-	if event.ToolName != "ask_followup_question" || event.Status != "success" || event.Question != "这篇文章面向谁？" {
+	if event.ToolName != "ask_followup_question" || event.Status != "waiting_for_user" || event.Question != "这篇文章面向谁？" {
 		t.Fatalf("unexpected question event: %#v", event)
 	}
-	if event.AllowFreeform == nil || *event.AllowFreeform {
-		t.Fatalf("expected allow_freeform=false, got %#v", event.AllowFreeform)
+	if event.AllowFreeform != nil {
+		t.Fatalf("new follow-up events must not expose allow_freeform, got %#v", event.AllowFreeform)
 	}
 	if len(event.Options) != 2 || event.Options[0] != "普通读者" || event.Options[1] != "专业编辑" {
 		t.Fatalf("unexpected options: %#v", event.Options)
@@ -536,6 +428,17 @@ func TestHandleFollowupQuestionRejectsEmptyQuestion(t *testing.T) {
 	_, isError, completed := runtime.handleFollowupQuestion("call_question_1", `{"question":"   "}`)
 	if !isError || completed {
 		t.Fatalf("expected empty question to be rejected, isError=%v completed=%v", isError, completed)
+	}
+}
+
+func TestHandleFollowupQuestionDoesNotRequireCustomEvidenceGate(t *testing.T) {
+	runtime := &agentRuntime{}
+	arguments := mustJSON(map[string]any{
+		"question": "Which server should I use?",
+		"options":  []string{"Use the production server"},
+	})
+	if result, isError, completed := runtime.handleFollowupQuestion("call-question", arguments); isError || !completed {
+		t.Fatalf("the explicit question action should not require custom evidence fields: error=%v completed=%v result=%s", isError, completed, result)
 	}
 }
 
@@ -558,35 +461,25 @@ func TestHandleCompletionAttemptRequiresUserVisibleResult(t *testing.T) {
 	}
 }
 
-func TestHandleCompletionAttemptRejectsInternalEditProtocolLeak(t *testing.T) {
-	var discarded int
-	runtime := &agentRuntime{
-		opts: RunOptions{
-			OnCompletionResultDiscard: func() {
-				discarded++
-			},
-		},
-	}
+func TestHandleCompletionAttemptTreatsInternalEditWordsAsPresentation(t *testing.T) {
+	runtime := &agentRuntime{}
 	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"我需要继续用 *** Begin Patch / *** End Patch 补丁协议来修改文件。"}`)
-	if !isError || completed {
-		t.Fatalf("expected internal edit protocol completion to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
+	if isError || !completed {
+		t.Fatalf("expected presentation text to be accepted without semantic inspection, isError=%v completed=%v result=%s", isError, completed, result)
 	}
-	if !strings.Contains(result, "最终用户可见答复") || !strings.Contains(result, "*** Begin Patch") {
-		t.Fatalf("expected user-visible completion rejection, got %s", result)
-	}
-	if discarded != 1 {
-		t.Fatalf("expected streamed completion preview to be discarded once, got %d", discarded)
+	if !strings.Contains(runtime.completedContent, "*** Begin Patch") {
+		t.Fatalf("expected user-visible text to be preserved, got %q", runtime.completedContent)
 	}
 }
 
-func TestHandleCompletionAttemptRejectsChineseInternalEditProtocolLeak(t *testing.T) {
+func TestHandleCompletionAttemptTreatsChineseInternalEditWordsAsPresentation(t *testing.T) {
 	runtime := &agentRuntime{}
 	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"我已经通过补丁块写入了文件。"}`)
-	if !isError || completed {
-		t.Fatalf("expected Chinese internal edit protocol completion to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
+	if isError || !completed {
+		t.Fatalf("expected presentation text to be accepted without semantic inspection, isError=%v completed=%v result=%s", isError, completed, result)
 	}
-	if !strings.Contains(result, "补丁块") {
-		t.Fatalf("expected rejected marker in result, got %s", result)
+	if !strings.Contains(runtime.completedContent, "补丁块") {
+		t.Fatalf("expected presentation text to be preserved, got %q", runtime.completedContent)
 	}
 }
 
@@ -607,7 +500,11 @@ func TestRuntimeCheckpointPreservesLastToolFailureDetails(t *testing.T) {
 		chunkWrites:      map[string]workspaceChunkWriteState{},
 		loadedToolsets:   map[string]bool{"workspace": true},
 	}
-	runtime.recordToolError("manage_workspace_path", `{"action":"mkdir","path":"docs"}`, "path already exists")
+	runtime.recordTypedToolError(
+		"manage_workspace_path",
+		`{"action":"mkdir","path":"docs"}`,
+		newToolError(ToolErrorPathExists, "path already exists", nil),
+	)
 	checkpoint := runtime.checkpoint()
 	restored := &agentRuntime{}
 	restored.restoreCheckpoint(checkpoint)
@@ -618,63 +515,62 @@ func TestRuntimeCheckpointPreservesLastToolFailureDetails(t *testing.T) {
 
 func TestHandleCompletionAttemptRejectsAfterRecoverablePatchFailure(t *testing.T) {
 	runtime := &agentRuntime{}
-	runtime.recordToolError("apply_workspace_patch", mustJSON(map[string]any{
-		"patch": "*** Begin Patch\n*** Add File: draft.txt\n+hello\n*** End Patch",
-	}), "patch apply failed: content after *** End Patch")
+	runtime.recordTypedToolError(
+		"apply_workspace_patch",
+		mustJSON(map[string]any{
+			"patch": "*** Begin Patch\n*** Add File: draft.txt\n+hello\n*** End Patch",
+		}),
+		newToolError(ToolErrorPatchApplyFailed, "patch apply failed: content after *** End Patch", nil),
+	)
 	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"只创建了文件夹，正文没有写入。","failed_items":["draft.txt"]}`)
 	if !isError || completed {
 		t.Fatalf("expected recoverable patch failure to reject completion, isError=%v completed=%v result=%s", isError, completed, result)
 	}
-	if !strings.Contains(result, "上一项可恢复工具调用失败") || !runtime.lastToolFailed {
+	if !strings.Contains(result, "unresolved failed tool call") || !runtime.lastToolFailed {
 		t.Fatalf("expected recoverable failure to remain active, result=%s last=%#v", result, runtime.lastToolFailure)
 	}
 }
 
-func TestHandleCompletionAttemptRejectsAfterExistingFolderMkdirFailure(t *testing.T) {
+func TestHandleCompletionAttemptAllowsCompletionWhenExistingFolderConditionIsSatisfied(t *testing.T) {
 	runtime := &agentRuntime{
-		toolLoopActive: true,
-		toolCalls:      3,
+		toolCalls: 3,
 		events: []ToolEvent{
 			{ToolName: "load_perseus_toolset", Status: "success"},
 			{ToolName: "find_workspace_files", Status: "success"},
 			{ToolName: "manage_workspace_path", Status: "failed", Path: "向北方/修改版3", Error: "path already exists"},
 		},
 	}
-	runtime.recordToolError("manage_workspace_path", `{"action":"mkdir","path":"向北方/修改版3"}`, "path already exists")
+	runtime.recordTypedToolError(
+		"manage_workspace_path",
+		`{"action":"mkdir","path":"向北方/修改版3"}`,
+		newToolError(ToolErrorPathExists, "path already exists", nil),
+	)
 	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"抱歉，这轮没有成功把大纲写进文件里。已确认目标目录存在，但当前可用工具里没有完成文本文件写入的执行通道。","failed_items":["向北方/修改版3/向北方_10集大纲.txt"]}`)
-	if !isError || completed {
-		t.Fatalf("expected existing-folder failure to reject completion, isError=%v completed=%v result=%s", isError, completed, result)
+	if isError || !completed {
+		t.Fatalf("expected satisfied directory condition to allow an honest completion, isError=%v completed=%v result=%s", isError, completed, result)
 	}
-	if !strings.Contains(result, "目录条件已满足不等于文件已写入") || strings.Contains(result, "上一项可恢复工具调用失败") {
-		t.Fatalf("expected condition-satisfied edit rejection, got %s", result)
-	}
-	if !runtime.lastToolFailed || !runtime.lastToolFailure.Recoverable || runtime.lastToolFailure.FailureClass != "workspace_path_already_exists" {
-		t.Fatalf("expected recoverable already_exists failure to remain active, got %#v", runtime.lastToolFailure)
+	if runtime.lastToolFailed {
+		t.Fatalf("expected accepted completion to clear satisfied failure state, got %#v", runtime.lastToolFailure)
 	}
 }
 
-func TestHandleCompletionAttemptRejectsFailedItemsWithoutFailedObservation(t *testing.T) {
+func TestHandleCompletionAttemptDoesNotInferFailureFromFailedItemsPresentation(t *testing.T) {
 	runtime := &agentRuntime{
-		toolLoopActive: true,
-		toolCalls:      2,
+		toolCalls: 2,
 		events: []ToolEvent{
 			{ToolName: "load_perseus_toolset", Status: "success"},
 			{ToolName: "read_workspace_text", Status: "success", Path: "draft.txt"},
 		},
 	}
 	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"已读取 draft.txt，但尚未修改文件。","failed_items":["draft.txt"]}`)
-	if !isError || completed {
-		t.Fatalf("expected completion without failed observation to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
-	}
-	if !strings.Contains(result, "没有对应的工具失败结果") {
-		t.Fatalf("expected missing failure-observation rejection, got %s", result)
+	if isError || !completed {
+		t.Fatalf("expected presentation-only failed_items to avoid creating hidden runtime state, isError=%v completed=%v result=%s", isError, completed, result)
 	}
 }
 
-func TestHandleCompletionAttemptRejectsSelfReportedUnfinishedWriteWithoutFailedObservation(t *testing.T) {
+func TestHandleCompletionAttemptDoesNotInferMutationStateFromResultText(t *testing.T) {
 	runtime := &agentRuntime{
-		toolLoopActive: true,
-		toolCalls:      3,
+		toolCalls: 3,
 		events: []ToolEvent{
 			{ToolName: "load_perseus_toolset", Status: "success"},
 			{ToolName: "inspect_workspace", Status: "success", Path: "向北方/修改版3"},
@@ -682,18 +578,14 @@ func TestHandleCompletionAttemptRejectsSelfReportedUnfinishedWriteWithoutFailedO
 		},
 	}
 	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"我已确认修改方向，但是这轮我未能实际写入文件，因此“修改版3”内容还没有保存到 workspace。"}`)
-	if !isError || completed {
-		t.Fatalf("expected self-reported unfinished write to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
-	}
-	if !strings.Contains(result, "没有对应的工具失败结果") {
-		t.Fatalf("expected missing failure-observation rejection, got %s", result)
+	if isError || !completed {
+		t.Fatalf("expected result prose to remain presentation-only, isError=%v completed=%v result=%s", isError, completed, result)
 	}
 }
 
 func TestHandleCompletionAttemptRejectsUnverifiedChangedPaths(t *testing.T) {
 	runtime := &agentRuntime{
-		toolLoopActive: true,
-		toolCalls:      1,
+		toolCalls: 1,
 		events: []ToolEvent{{
 			ToolName: "read_workspace_text",
 			Status:   "success",
@@ -711,27 +603,27 @@ func TestHandleCompletionAttemptRejectsUnverifiedChangedPaths(t *testing.T) {
 
 func TestHandleCompletionAttemptAllowsHonestUnsupportedFileFailure(t *testing.T) {
 	runtime := &agentRuntime{}
-	runtime.recordToolError("read_workspace_text", `{"path":"demo.docx"}`, "unsupported file type")
+	runtime.recordTypedToolError(
+		"read_workspace_text",
+		`{"path":"demo.docx"}`,
+		newToolError(ToolErrorUnsupportedFileType, "unsupported file type", nil),
+	)
 	_, isError, completed := runtime.handleCompletionAttempt(`{"result":"当前 workspace 文本工具不支持读取 demo.docx。","failed_items":["demo.docx"]}`)
 	if isError || !completed {
 		t.Fatalf("expected non-recoverable unsupported-file failure to allow honest completion, isError=%v completed=%v", isError, completed)
 	}
 }
 
-func TestHandleCompletionAttemptRejectsToolLoopCompletionBeforeAnyEvidence(t *testing.T) {
-	runtime := &agentRuntime{toolLoopActive: true}
+func TestHandleCompletionAttemptAllowsSimpleChatWithoutOtherTools(t *testing.T) {
+	runtime := &agentRuntime{}
 	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"完成"}`)
-	if !isError || completed {
-		t.Fatalf("expected completion before tool evidence to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
-	}
-	if !strings.Contains(result, "还没有执行任何工具") {
-		t.Fatalf("expected missing tool rejection, got %s", result)
+	if isError || !completed {
+		t.Fatalf("expected explicit completion to finish simple chat, isError=%v completed=%v result=%s", isError, completed, result)
 	}
 }
 
 func TestHandleCompletionAttemptAllowsPrefetchedWorkspaceFileContent(t *testing.T) {
 	runtime := &agentRuntime{
-		toolLoopActive: true,
 		attachments: []AttachmentPayload{{
 			Kind:              "workspace_file",
 			Path:              "draft.txt",
@@ -748,22 +640,16 @@ func TestHandleCompletionAttemptAllowsPrefetchedWorkspaceFileContent(t *testing.
 	}
 }
 
-func TestHandleCompletionAttemptDiscardsStreamedPreviewWhenRejected(t *testing.T) {
-	var discarded int
+func TestHandleCompletionAttemptDoesNotPublishRejectedResult(t *testing.T) {
 	runtime := &agentRuntime{
 		performedMutation: true,
-		opts: RunOptions{
-			OnCompletionResultDiscard: func() {
-				discarded++
-			},
-		},
 	}
 	_, isError, completed := runtime.handleCompletionAttempt(`{"result":"已完成。","changed_paths":[]}`)
 	if !isError || completed {
 		t.Fatalf("expected completion to be rejected, isError=%v completed=%v", isError, completed)
 	}
-	if discarded != 1 {
-		t.Fatalf("expected streamed completion preview to be discarded once, got %d", discarded)
+	if runtime.completedContent != "" {
+		t.Fatalf("rejected completion must not become user-visible content, got %q", runtime.completedContent)
 	}
 }
 
@@ -780,45 +666,67 @@ func TestAttemptCompletionSchemaRequiresResult(t *testing.T) {
 	if _, ok := props["changed_paths"]; ok {
 		t.Fatalf("attempt_completion schema must not expose changed_paths; backend derives verified paths")
 	}
+	resultSchema, _ := props["result"].(map[string]any)
+	resultDescription, _ := resultSchema["description"].(string)
+	for _, want := range []string{"Markdown", "fenced code blocks", "language tag", "```bash"} {
+		if !strings.Contains(resultDescription, want) {
+			t.Fatalf("attempt_completion result description missing %q: %s", want, resultDescription)
+		}
+	}
+	for name, tool := range map[string]map[string]any{
+		"openai":    openAICompletionTool(),
+		"anthropic": anthropicCompletionTool(),
+	} {
+		raw, err := json.Marshal(tool)
+		if err != nil {
+			t.Fatalf("marshal %s completion tool: %v", name, err)
+		}
+		for _, want := range []string{"complete final user-visible Markdown", "fenced code blocks", "```bash"} {
+			if !strings.Contains(string(raw), want) {
+				t.Fatalf("%s completion tool missing %q: %s", name, want, raw)
+			}
+		}
+	}
 }
 
-func TestModelActionManifestExposesPatchAsTextAction(t *testing.T) {
-	manifest := modelActionManifest(map[string]bool{"workspace": true}, true, "admin")
-	if !containsModelJSONTool(manifest, "read_workspace_text") || !containsModelJSONTool(manifest, "manage_workspace_path") {
-		t.Fatalf("workspace JSON tools missing from action manifest: %#v", manifest.JSONTools)
+func TestHandleCompletionAttemptPreservesMarkdownResultAsOnlyVisibleBody(t *testing.T) {
+	markdown := "请执行：\n\n```bash\nssh -p 52822 root@example.com\n```"
+	runtime := &agentRuntime{}
+	payload, isError, completed := runtime.handleCompletionAttempt(mustJSON(map[string]any{
+		"result":       markdown,
+		"summary":      "internal summary",
+		"failed_items": []string{},
+		"notes":        "internal note",
+	}))
+	if isError || !completed {
+		t.Fatalf("expected Markdown completion to succeed, isError=%v completed=%v payload=%s", isError, completed, payload)
 	}
-	if !containsModelTextAction(manifest, "apply_workspace_patch") {
-		t.Fatalf("apply_workspace_patch must be a model-visible text action: %#v", manifest.TextActions)
+	if runtime.completedContent != markdown {
+		t.Fatalf("expected exact Markdown result without metadata append, got %q", runtime.completedContent)
 	}
-	if !containsModelTerminalAction(manifest, "attempt_completion") {
-		t.Fatalf("attempt_completion must be terminal action: %#v", manifest.TerminalActions)
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		t.Fatalf("decode completion payload: %v", err)
 	}
-	if containsModelJSONTool(manifest, "apply_workspace_patch") {
-		t.Fatalf("apply_workspace_patch must not be a JSON tool action: %#v", manifest.JSONTools)
+	if decoded["result"] != markdown {
+		t.Fatalf("expected payload result to preserve fences, got %#v", decoded["result"])
 	}
 }
 
-func TestModelActionManifestCanExposeNativePatchTool(t *testing.T) {
-	manifest := modelActionManifestForProvider(map[string]bool{"workspace": true}, true, "admin", true)
-	if !containsModelJSONTool(manifest, "apply_workspace_patch") {
-		t.Fatalf("native patch provider should expose apply_workspace_patch JSON tool: %#v", manifest.JSONTools)
+func TestHandleCompletionAttemptDoesNotAutoWrapPlainText(t *testing.T) {
+	plain := "ssh -p 52822 root@example.com"
+	runtime := &agentRuntime{}
+	_, isError, completed := runtime.handleCompletionAttempt(mustJSON(map[string]any{"result": plain}))
+	if isError || !completed {
+		t.Fatalf("expected plain completion to succeed, isError=%v completed=%v", isError, completed)
 	}
-	if !containsModelTextAction(manifest, "apply_workspace_patch") {
-		t.Fatalf("fallback text action should remain documented: %#v", manifest.TextActions)
+	if runtime.completedContent != plain {
+		t.Fatalf("completion content must be passed through without heuristic wrapping, got %q", runtime.completedContent)
 	}
 }
 
 func containsModelJSONTool(manifest ModelActionManifest, name string) bool {
 	for _, item := range manifest.JSONTools {
-		if item.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func containsModelTextAction(manifest ModelActionManifest, name string) bool {
-	for _, item := range manifest.TextActions {
 		if item.Name == name {
 			return true
 		}
@@ -920,15 +828,80 @@ func TestProviderPlainEOFIsRecoverableTransportError(t *testing.T) {
 	if !isTransientTransportError(fmt.Errorf("provider stream read: %w", io.EOF)) {
 		t.Fatal("wrapped io.EOF should be treated as a transient provider transport error")
 	}
-	err := fmt.Errorf(`Post "https://api.jellix.top/v1/chat/completions": EOF`)
+	err := fmt.Errorf("provider stream read: %w", io.EOF)
 	if !isCheckpointRecoverableProviderError(err) {
 		t.Fatal("wrapped provider EOF should be checkpoint recoverable")
 	}
-	if got := providerFailureClass(err, ProviderRequestSummary{}); got != "provider_transport_eof" {
-		t.Fatalf("expected provider_transport_eof, got %q", got)
+	if got := providerFailureClass(err, ProviderRequestSummary{}); got != string(ProviderFailureStreamInterrupted) {
+		t.Fatalf("expected typed stream interruption, got %q", got)
 	}
-	if got := sanitizeUserFacingAIError(err.Error()); got != "模型供应商连接中断，本轮请求没有拿到有效响应" {
-		t.Fatalf("unexpected sanitized EOF message: %q", got)
+	if got := UserFacingErrorMessage(err); got != "模型供应商连接中断，本轮请求没有拿到完整响应" {
+		t.Fatalf("unexpected structured EOF message: %q", got)
+	}
+}
+
+func TestProviderRequestWrappedTLSFailureIsRetryable(t *testing.T) {
+	err := &url.Error{
+		Op:  "Post",
+		URL: "https://provider.example/v1/chat/completions",
+		// crypto/tls uses an unexported alert type for some record failures.
+		// The HTTP request wrapper is the stable typed boundary available here.
+		Err: errors.New("opaque TLS alert"),
+	}
+	failure := classifyProviderFailure(err)
+	if failure.Class != ProviderFailureConnection || !failure.Retryable {
+		t.Fatalf("expected retryable TLS transport failure, got %#v", failure)
+	}
+	if !isRetryableProviderAttemptError(err, 0) {
+		t.Fatal("request-wrapped TLS transport failure should be retried")
+	}
+}
+
+func TestRunSDKAttemptRetriesRequestWrappedTLSFailure(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://provider.example/v1/chat/completions", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	policy := ProviderRetryPolicy{MaxAttempts: 4}
+	var attempts int
+	var summary ProviderRequestSummary
+	resp, err := runSDKAttempt(req, func(*http.Request) (*http.Response, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, &url.Error{
+				Op:  "Post",
+				URL: req.URL.String(),
+				Err: errors.New("opaque TLS alert"),
+			}
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			Request:    req,
+		}, nil
+	}, nil, new(int64), policy, &summary)
+	if err != nil {
+		t.Fatalf("runSDKAttempt returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if attempts != 3 || summary.RequestAttempts != 3 {
+		t.Fatalf("expected success on attempt 3, got attempts=%d summary=%d", attempts, summary.RequestAttempts)
+	}
+}
+
+func TestProviderRequestWrappedCertificateFailureIsNotRetryable(t *testing.T) {
+	err := &url.Error{
+		Op:  "Post",
+		URL: "https://provider.example/v1/chat/completions",
+		Err: &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}},
+	}
+	failure := classifyProviderFailure(err)
+	if failure.Class != ProviderFailureConnection || failure.Retryable {
+		t.Fatalf("expected terminal TLS certificate failure, got %#v", failure)
+	}
+	if isRetryableProviderAttemptError(err, 0) {
+		t.Fatal("TLS certificate verification failure must not be retried")
 	}
 }
 
@@ -1181,7 +1154,7 @@ func TestExecuteAndRecordToolApplyWorkspacePatchFailureKeepsStructuredPayload(t 
 		"*** End Patch"
 	result, event, err := env.service.executeAndRecordTool(ctx, "conv-1", "msg-1", "apply_workspace_patch", mustJSON(map[string]any{
 		"patch":     patch,
-		"transport": "assistant_text_patch",
+		"transport": "structured_tool",
 	}), "", RunOptions{UserID: testUserID}, runtimeProfileForProvider(store.ModelProvider{}))
 	if err != nil {
 		t.Fatalf("executeAndRecordTool returned execution error: %v", err)
@@ -1232,7 +1205,7 @@ func TestExecuteAndRecordToolWorkspaceMutationMarksTypedChangeEvent(t *testing.T
 	var changedPayload map[string]any
 	_, event, err := env.service.executeAndRecordTool(ctx, "conv-typed", "msg-typed", "apply_workspace_patch", mustJSON(map[string]any{
 		"patch":     patch,
-		"transport": "assistant_text_patch",
+		"transport": "structured_tool",
 	}), "", RunOptions{
 		UserID: testUserID,
 		Event: func(eventType, level string, payload map[string]any) {
@@ -1269,7 +1242,7 @@ func TestExecuteAndRecordToolApplyWorkspacePatchParseFailureKeepsLocationPayload
 		"*** End Patch\n"
 	result, event, err := env.service.executeAndRecordTool(ctx, "conv-parse", "msg-parse", "apply_workspace_patch", mustJSON(map[string]any{
 		"patch":     patch,
-		"transport": "assistant_text_patch",
+		"transport": "structured_tool",
 	}), "", RunOptions{UserID: testUserID}, runtimeProfileForProvider(store.ModelProvider{}))
 	if err != nil {
 		t.Fatalf("executeAndRecordTool returned execution error: %v", err)
@@ -1608,9 +1581,9 @@ func TestAgentRuntimeHTMLPatchRequiresCurrentRawRead(t *testing.T) {
 		"*** End Patch"
 
 	content, isError := runTestAgentToolCall(t, runtime, agentToolCall{
-		ID:        "patch_without_raw",
-		Name:      "apply_workspace_patch",
-		PatchText: patch,
+		ID:            "patch_without_raw",
+		Name:          "apply_workspace_patch",
+		ArgumentsJSON: mustJSON(map[string]any{"patch": patch}),
 	})
 	if !isError || !strings.Contains(content, "html note mutation rejected") || !strings.Contains(content, "view=raw") {
 		t.Fatalf("expected raw-read guard rejection, content=%s isError=%v", content, isError)
@@ -1645,9 +1618,9 @@ func TestAgentRuntimeHTMLPatchRequiresCurrentRawRead(t *testing.T) {
 	}
 
 	content, isError = runTestAgentToolCall(t, runtime, agentToolCall{
-		ID:        "patch_after_raw",
-		Name:      "apply_workspace_patch",
-		PatchText: patch,
+		ID:            "patch_after_raw",
+		Name:          "apply_workspace_patch",
+		ArgumentsJSON: mustJSON(map[string]any{"patch": patch}),
 	})
 	if isError || !strings.Contains(content, `"tool_name":"apply_workspace_patch"`) {
 		t.Fatalf("expected patch after raw read to succeed, content=%s isError=%v", content, isError)
@@ -1698,9 +1671,9 @@ func TestAgentRuntimeHTMLPatchRejectsStaleRawRead(t *testing.T) {
 		"+<p>new text</p>\n" +
 		"*** End Patch"
 	content, isError := runTestAgentToolCall(t, runtime, agentToolCall{
-		ID:        "patch_stale_raw",
-		Name:      "apply_workspace_patch",
-		PatchText: patch,
+		ID:            "patch_stale_raw",
+		Name:          "apply_workspace_patch",
+		ArgumentsJSON: mustJSON(map[string]any{"patch": patch}),
 	})
 	if !isError || !strings.Contains(content, "current doc_hash") {
 		t.Fatalf("expected stale raw read rejection, content=%s isError=%v", content, isError)
@@ -1969,7 +1942,8 @@ func TestExecuteToolManageWorkspacePathCopiesHTMLWithoutOverwrite(t *testing.T) 
 	}
 
 	_, _, _, _, err = service.executeTool(context.Background(), "manage_workspace_path", `{"action":"copy","path":"notes/source.html","destination_path":"archive/copy.html"}`, RunOptions{UserID: testUserID})
-	if err == nil || !strings.Contains(err.Error(), "target path already exists") {
+	var pathExistsErr *ToolError
+	if err == nil || !errors.As(err, &pathExistsErr) || pathExistsErr.Code != ToolErrorPathExists {
 		t.Fatalf("expected copy overwrite rejection, got %v", err)
 	}
 }
@@ -1980,7 +1954,7 @@ func TestExecuteAndRecordToolMkdirExistingFolderReturnsStructuredRecoverableObse
 		t.Fatalf("MkdirNew returned error: %v", err)
 	}
 
-	result, event, err := service.executeAndRecordTool(context.Background(), "conv", "msg", "manage_workspace_path", `{"action":"mkdir","path":"docs/guides"}`, "", RunOptions{UserID: testUserID}, providerRuntimeProfile{MaxToolResultRunes: 4000})
+	result, event, err := service.executeAndRecordTool(context.Background(), "conv", "msg", "manage_workspace_path", `{"action":"mkdir","path":"docs/guides"}`, "", RunOptions{UserID: testUserID}, providerRuntimeProfile{})
 	if err != nil {
 		t.Fatalf("executeAndRecordTool returned wrapper error: %v", err)
 	}
@@ -2299,16 +2273,13 @@ func TestExecuteToolRunWorkspaceCommandTimesOut(t *testing.T) {
 		"timeout_sec": 1,
 	})
 
-	result, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", string(args), RunOptions{UserID: testUserID})
-	if err != nil {
-		t.Fatalf("executeTool returned error: %v", err)
+	_, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", string(args), RunOptions{UserID: testUserID})
+	var timedOutErr *ToolError
+	if !errors.As(err, &timedOutErr) || timedOutErr.Code != ToolErrorCommandTimedOut {
+		t.Fatalf("expected structured timeout error, got %v", err)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(result), &payload); err != nil {
-		t.Fatalf("invalid result json: %v", err)
-	}
-	if payload["timed_out"] != true || int(payload["exit_code"].(float64)) != -1 {
-		t.Fatalf("expected timeout payload, got %#v", payload)
+	if timedOutErr.Details["timed_out"] != true || timedOutErr.Details["exit_code"] != -1 {
+		t.Fatalf("expected timeout details, got %#v", timedOutErr.Details)
 	}
 }
 
@@ -2322,7 +2293,7 @@ func TestExecuteToolWebSearchWithoutProviderReturnsClearError(t *testing.T) {
 }
 
 func TestToolDiagnosticClassifiesExpectedToolFailures(t *testing.T) {
-	missingPathErr := fmt.Errorf("stat /data/users/user-1/workspace/docs/missing.md: no such file or directory")
+	missingPathErr := newToolError(ToolErrorPathNotFound, "stat /data/users/user-1/workspace/docs/missing.md: no such file or directory", os.ErrNotExist)
 	diag := buildToolDiagnostic("read_workspace_text", `{"path":"docs/missing.md"}`, "docs/missing.md", 12, missingPathErr)
 	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_path_not_found"`) {
 		t.Fatalf("unexpected missing path diagnostic: %#v", diag)
@@ -2331,34 +2302,34 @@ func TestToolDiagnosticClassifiesExpectedToolFailures(t *testing.T) {
 		t.Fatalf("expected sanitized workspace path, got %q", diag.ErrorMessage)
 	}
 
-	diag = buildToolDiagnostic("perseus_search_web", `{"query":"openai"}`, "“openai”", 3, fmt.Errorf("未配置可用搜索工具，请先在设置页配置 Tavily 或 Brave。"))
+	diag = buildToolDiagnostic("perseus_search_web", `{"query":"openai"}`, "“openai”", 3, newToolError(ToolErrorSearchNotConfigured, "未配置可用搜索工具，请先在设置页配置 Tavily 或 Brave。", nil))
 	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"search_provider_not_configured"`) {
 		t.Fatalf("unexpected search diagnostic: %#v", diag)
 	}
 
-	diag = buildToolDiagnostic("save_workspace_file", `{}`, "", 0, fmt.Errorf("invalid tool arguments: mode is required"))
+	diag = buildToolDiagnostic("save_workspace_file", `{}`, "", 0, invalidToolArgumentsError("invalid tool arguments: mode is required"))
 	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"tool_invalid_arguments"`) {
 		t.Fatalf("unexpected invalid arguments diagnostic: %#v", diag)
 	}
 
-	diag = buildToolDiagnostic("edit_workspace_text", `{"path":"script.txt","old_text":"abc","new_text":"def"}`, "script.txt", 0, fmt.Errorf("old_text was not found"))
-	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_exact_edit_unstable"`) {
+	diag = buildToolDiagnostic("edit_workspace_text", `{"path":"script.txt","old_text":"abc","new_text":"def"}`, "script.txt", 0, newToolError(ToolErrorTextMatchMissing, "old_text was not found", nil))
+	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_text_match_not_found"`) {
 		t.Fatalf("unexpected exact edit diagnostic: %#v", diag)
 	}
-	if !strings.Contains(diag.RequestSummary, `"old_text_chars":3`) || !strings.Contains(diag.RequestSummary, "*** Begin Patch") {
+	if !strings.Contains(diag.RequestSummary, `"old_text_chars":3`) || !strings.Contains(diag.RequestSummary, `"recommended_protocol":"apply_workspace_patch"`) {
 		t.Fatalf("expected edit argument details and patch recovery hint, got %#v", diag)
 	}
 
-	diag = buildToolDiagnostic("read_workspace_text", `{"path":"demo.docx"}`, "demo.docx", 5, fmt.Errorf("unsupported file type"))
+	diag = buildToolDiagnostic("read_workspace_text", `{"path":"demo.docx"}`, "demo.docx", 5, newToolError(ToolErrorUnsupportedFileType, "unsupported file type", nil))
 	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_unsupported_file_type"`) {
 		t.Fatalf("unexpected unsupported file diagnostic: %#v", diag)
 	}
-	if !strings.Contains(diag.RequestSummary, "only reads supported plain-text files") {
+	if !strings.Contains(diag.RequestSummary, "Use a supported text or note view") {
 		t.Fatalf("expected unsupported file recovery hint, got %#v", diag)
 	}
 
 	patch := "*** Begin Patch\n*** Add File: draft.txt\n+hello\n*** End Patch\nextra\n"
-	diag = buildToolDiagnostic("apply_workspace_patch", mustJSON(map[string]any{"patch": patch}), "draft.txt", 5, fmt.Errorf("patch apply failed: content after *** End Patch"))
+	diag = buildToolDiagnostic("apply_workspace_patch", mustJSON(map[string]any{"patch": patch}), "draft.txt", 5, newToolError(ToolErrorPatchApplyFailed, "patch apply failed: content after *** End Patch", nil))
 	for _, want := range []string{`"failure_class":"workspace_patch_apply_failed"`, `"patch_chars":`, `"patch_sha":`, `"patch_head":`, `"patch_tail":`, `"patch_block_count":1`, `"detected_paths":["draft.txt"]`} {
 		if !strings.Contains(diag.RequestSummary, want) {
 			t.Fatalf("expected patch diagnostic to contain %s, got %#v", want, diag)
@@ -2513,204 +2484,6 @@ func TestSelectedReferenceScopeRejectsAppendingUnrelatedChunkFile(t *testing.T) 
 	}
 }
 
-func TestBudgetToolResultForModelTruncatesCommandOutput(t *testing.T) {
-	raw := mustJSON(map[string]any{
-		"command":   "find . -type f",
-		"cwd":       "",
-		"stdout":    strings.Repeat("a", 100),
-		"stderr":    strings.Repeat("b", 80),
-		"exit_code": 0,
-	})
-	budgeted := budgetToolResultForModel("run_workspace_command", raw, providerRuntimeProfile{
-		MaxToolResultRunes:    1000,
-		MaxCommandOutputRunes: 20,
-	})
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
-		t.Fatalf("budgeted result is not json: %v", err)
-	}
-	if got := len([]rune(payload["stdout"].(string))); got != 20 {
-		t.Fatalf("expected stdout truncated to 20 chars, got %d", got)
-	}
-	if payload["stdout_truncated_for_model"] != true {
-		t.Fatalf("expected stdout truncation flag, got %#v", payload)
-	}
-	if got := len([]rune(payload["stderr"].(string))); got != 10 {
-		t.Fatalf("expected stderr truncated to 10 chars, got %d", got)
-	}
-}
-
-func TestBudgetToolResultForModelTruncatesSearchResults(t *testing.T) {
-	results := make([]any, 0, 8)
-	for index := 0; index < 8; index++ {
-		results = append(results, map[string]any{
-			"title":   "result",
-			"url":     "https://example.com",
-			"snippet": strings.Repeat("s", 50),
-			"content": strings.Repeat("c", 80),
-		})
-	}
-	raw := mustJSON(map[string]any{"provider": "tavily", "query": "ai news", "results": results})
-	budgeted := budgetToolResultForModel("perseus_search_web", raw, providerRuntimeProfile{
-		MaxToolResultRunes:       10000,
-		MaxWebSearchSnippetRunes: 12,
-	})
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
-		t.Fatalf("budgeted result is not json: %v", err)
-	}
-	gotResults := payload["results"].([]any)
-	if len(gotResults) != 6 {
-		t.Fatalf("expected search results limited to 6, got %d", len(gotResults))
-	}
-	first := gotResults[0].(map[string]any)
-	if got := len([]rune(first["snippet"].(string))); got != 12 {
-		t.Fatalf("expected snippet truncated to 12 chars, got %d", got)
-	}
-	if first["content_truncated_for_model"] != true {
-		t.Fatalf("expected content truncation flag, got %#v", first)
-	}
-}
-
-func TestBudgetToolResultForModelPreservesReadWorkspaceTextShape(t *testing.T) {
-	raw := mustJSON(map[string]any{
-		"tool":    "read_workspace_text",
-		"path":    "draft.txt",
-		"content": strings.Repeat("x", 5000),
-	})
-	budgeted := budgetToolResultForModel("read_workspace_text", raw, providerRuntimeProfile{
-		MaxToolResultRunes:      900,
-		MaxReadFileContentRunes: 5000,
-	})
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
-		t.Fatalf("budgeted result is not json: %v", err)
-	}
-	if payload["path"] != "draft.txt" || payload["content"] == nil || payload["raw_prefix"] != nil {
-		t.Fatalf("expected structured read payload, got %#v", payload)
-	}
-	if payload["content_truncated_for_model"] != true {
-		t.Fatalf("expected content truncation flag, got %#v", payload)
-	}
-	if got := len([]rune(budgeted)); got > 900 {
-		t.Fatalf("expected payload within budget, got %d chars", got)
-	}
-}
-
-func TestBudgetToolResultForModelUsesSingleNumberedReadView(t *testing.T) {
-	raw := mustJSON(map[string]any{
-		"tool":             "read_workspace_text",
-		"path":             "draft.txt",
-		"content":          strings.Repeat("plain", 1200),
-		"numbered_content": strings.Repeat("1: numbered\n", 1200),
-		"start_line":       1,
-		"end_line":         1200,
-		"total_lines":      1200,
-	})
-	budgeted := budgetToolResultForModel("read_workspace_text", raw, providerRuntimeProfile{
-		MaxToolResultRunes:      1200,
-		MaxReadFileContentRunes: 10000,
-	})
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
-		t.Fatalf("budgeted result is not json: %v", err)
-	}
-	if _, ok := payload["content"]; ok {
-		t.Fatalf("expected duplicate plain content to be omitted when numbered view exists: %#v", payload)
-	}
-	if payload["content_omitted_for_model"] != true {
-		t.Fatalf("expected content omission flag, got %#v", payload)
-	}
-	if payload["numbered_content"] == nil {
-		t.Fatalf("expected numbered content to remain as model view, got %#v", payload)
-	}
-	if payload["numbered_content_truncated_for_model"] != true {
-		t.Fatalf("expected numbered content to be budgeted, got %#v", payload)
-	}
-	if got := len([]rune(budgeted)); got > 1200 {
-		t.Fatalf("expected payload within budget, got %d chars", got)
-	}
-}
-
-func TestBudgetToolResultForModelPreservesBatchReadItemsShape(t *testing.T) {
-	raw := mustJSON(map[string]any{
-		"tool": "read_workspace_files",
-		"items": []any{
-			map[string]any{"path": "a.txt", "content": strings.Repeat("a", 2500), "start_line": 1, "end_line": 50},
-			map[string]any{"path": "b.txt", "content": strings.Repeat("b", 2500), "start_line": 1, "end_line": 50},
-		},
-		"failed": []any{map[string]any{"path": "missing.txt", "error": "not found"}},
-	})
-	budgeted := budgetToolResultForModel("read_workspace_files", raw, providerRuntimeProfile{
-		MaxToolResultRunes:      1200,
-		MaxReadFileContentRunes: 2500,
-	})
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
-		t.Fatalf("budgeted result is not json: %v", err)
-	}
-	items, ok := payload["items"].([]any)
-	if !ok || len(items) == 0 || payload["raw_prefix"] != nil {
-		t.Fatalf("expected structured batch read payload, got %#v", payload)
-	}
-	first := items[0].(map[string]any)
-	if first["path"] == "" || first["content"] == nil {
-		t.Fatalf("expected item path/content to remain, got %#v", first)
-	}
-	if got := len([]rune(budgeted)); got > 1200 {
-		t.Fatalf("expected payload within budget, got %d chars", got)
-	}
-}
-
-func TestBudgetToolResultForModelBudgetsBatchNumberedContent(t *testing.T) {
-	raw := mustJSON(map[string]any{
-		"tool": "read_workspace_files",
-		"items": []any{
-			map[string]any{
-				"path":             "a.txt",
-				"content":          strings.Repeat("a", 2400),
-				"numbered_content": strings.Repeat("1: a\n", 2400),
-				"start_line":       1,
-				"end_line":         2400,
-			},
-			map[string]any{
-				"path":             "b.txt",
-				"content":          strings.Repeat("b", 2400),
-				"numbered_content": strings.Repeat("1: b\n", 2400),
-				"start_line":       1,
-				"end_line":         2400,
-			},
-		},
-	})
-	budgeted := budgetToolResultForModel("read_workspace_files", raw, providerRuntimeProfile{
-		MaxToolResultRunes:      1800,
-		MaxReadFileContentRunes: 10000,
-	})
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
-		t.Fatalf("budgeted result is not json: %v", err)
-	}
-	items := payload["items"].([]any)
-	for _, rawItem := range items {
-		item := rawItem.(map[string]any)
-		if _, ok := item["content"]; ok {
-			t.Fatalf("expected duplicate plain content omitted for batch item, got %#v", item)
-		}
-		if item["numbered_content"] == nil {
-			t.Fatalf("expected numbered content model view for batch item, got %#v", item)
-		}
-	}
-	if got := len([]rune(budgeted)); got > 1800 {
-		t.Fatalf("expected payload within budget, got %d chars", got)
-	}
-}
-
 func TestLedgerToolResultJSONKeepsLargeReadResultValid(t *testing.T) {
 	raw := mustJSON(map[string]any{
 		"tool_name": "read_workspace_files",
@@ -2737,22 +2510,8 @@ func TestLedgerToolResultJSONKeepsLargeReadResultValid(t *testing.T) {
 		"truncated": true,
 	})
 	ledger := ledgerToolResultJSON("read_workspace_files", raw)
-	if len([]rune(ledger)) > ledgerToolResultMaxRunes {
-		t.Fatalf("expected ledger result under max size, got %d", len([]rune(ledger)))
-	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(ledger), &payload); err != nil {
-		t.Fatalf("ledger result should be valid JSON: %v\n%s", err, ledger)
-	}
-	if payload["ledger_result_truncated"] != true {
-		t.Fatalf("expected ledger truncation flag, got %#v", payload)
-	}
-	if payload["source_read_truncated"] != true {
-		t.Fatalf("expected source read truncation flag, got %#v", payload)
-	}
-	items, ok := payload["items"].([]any)
-	if !ok || len(items) != 2 {
-		t.Fatalf("expected item snapshots, got %#v", payload["items"])
+	if ledger != raw {
+		t.Fatal("ledger must retain the complete tool result verbatim")
 	}
 }
 
@@ -2769,151 +2528,6 @@ func TestToolTargetSummaryAvoidsContentAndKeepsSafeTarget(t *testing.T) {
 	}
 	if got := toolTargetSummary("search_workspace_text", `{"query":"关键线索"}`); got != "“关键线索”" {
 		t.Fatalf("unexpected search target summary: %q", got)
-	}
-}
-
-func TestSanitizeConversationMessagesTruncatesOlderHistory(t *testing.T) {
-	messages := []store.Message{
-		{Role: "user", Content: strings.Repeat("old", 100)},
-		{Role: "assistant", Content: strings.Repeat("new", 100)},
-	}
-	sanitized := sanitizeConversationMessages(messages, providerRuntimeProfile{
-		MaxHistoryMessages:    10,
-		MaxRecentMessageRunes: 20,
-		MaxOlderMessageRunes:  10,
-	})
-
-	if !strings.Contains(sanitized[0].Content, "truncated") {
-		t.Fatalf("expected old message truncation note, got %q", sanitized[0].Content)
-	}
-	if !strings.Contains(sanitized[1].Content, "truncated") {
-		t.Fatalf("expected recent message truncation note, got %q", sanitized[1].Content)
-	}
-}
-
-func TestSanitizeConversationMessagesDropsAssistantEllipsisPlaceholders(t *testing.T) {
-	messages := []store.Message{
-		{Role: "user", Content: "..."},
-		{Role: "assistant", Content: "..."},
-		{Role: "assistant", Content: "我先读取文件。"},
-		{Role: "assistant", Content: "……"},
-	}
-	sanitized := sanitizeConversationMessages(messages, providerRuntimeProfile{
-		MaxHistoryMessages:    10,
-		MaxRecentMessageRunes: 100,
-		MaxOlderMessageRunes:  100,
-	})
-
-	if len(sanitized) != 2 {
-		t.Fatalf("expected two non-placeholder messages, got %#v", sanitized)
-	}
-	if sanitized[0].Role != "user" || sanitized[0].Content != "..." {
-		t.Fatalf("user ellipsis must be preserved, got %#v", sanitized[0])
-	}
-	if sanitized[1].Content != "我先读取文件。" {
-		t.Fatalf("assistant useful text must be preserved, got %#v", sanitized[1])
-	}
-}
-
-func TestInjectConversationSummaryDropsSummarizedPrefix(t *testing.T) {
-	messages := []store.Message{
-		{ID: "m1", Role: "user", Content: "old"},
-		{ID: "m2", Role: "assistant", Content: "summarized"},
-		{ID: "m3", Role: "user", Content: "recent"},
-	}
-	next := injectConversationSummary(messages, "用户正在调试项目。", "m2")
-
-	if len(next) != 2 {
-		t.Fatalf("expected summary plus one recent message, got %#v", next)
-	}
-	if next[0].Role != "system" || !strings.Contains(next[0].Content, "用户正在调试项目") {
-		t.Fatalf("expected injected system summary, got %#v", next[0])
-	}
-	if next[1].ID != "m3" {
-		t.Fatalf("expected only messages after summarized prefix, got %#v", next)
-	}
-}
-
-func TestMaybeRefreshConversationSummaryUsesTokenWatermark(t *testing.T) {
-	service, _, _, _ := newTestAIService(t)
-	ctx := context.Background()
-	provider := store.ModelProvider{
-		Name:                        "test",
-		Protocol:                    "openai",
-		BaseURL:                     "http://127.0.0.1",
-		ModelID:                     "gpt-test",
-		AutoCompactEnabled:          true,
-		AutoCompactThresholdPercent: 85,
-		CompactReservedTokens:       100,
-		PruneToolOutputsEnabled:     true,
-	}
-	messages := make([]store.Message, 0, 30)
-	for index := 0; index < 30; index++ {
-		messages = append(messages, store.Message{
-			ID:      fmt.Sprintf("m%d", index),
-			Role:    "user",
-			Content: strings.Repeat("长上下文", 200),
-		})
-	}
-	var events []string
-	result := service.maybeRefreshConversationSummary(ctx, "conv-test", provider, messages, store.ConversationSummary{}, RunOptions{
-		UserID: testUserID,
-		Event: func(eventType, level string, payload map[string]any) {
-			events = append(events, eventType)
-		},
-	}, providerRuntimeProfile{
-		ContextWindowTokens:     1000,
-		AutoCompactEnabled:      true,
-		CompactThresholdPercent: 80,
-		CompactReservedTokens:   100,
-	}, "auto_threshold", "")
-
-	if !result.Skipped {
-		t.Fatalf("expected summary to skip because test provider is unreachable, got %#v", result)
-	}
-	if len(events) == 0 || events[0] != "context_compaction_started" {
-		t.Fatalf("expected compaction start event, got %#v", events)
-	}
-}
-
-func TestPressureCompactionCanSummarizeShortButLargeConversation(t *testing.T) {
-	service, _, _, _ := newTestAIService(t)
-	ctx := context.Background()
-	provider := store.ModelProvider{
-		Name:                        "test",
-		Protocol:                    "openai",
-		BaseURL:                     "http://127.0.0.1",
-		ModelID:                     "gpt-test",
-		AutoCompactEnabled:          true,
-		AutoCompactThresholdPercent: 85,
-		CompactReservedTokens:       100,
-	}
-	messages := make([]store.Message, 0, 10)
-	for index := 0; index < 10; index++ {
-		messages = append(messages, store.Message{
-			ID:      fmt.Sprintf("big%d", index),
-			Role:    "user",
-			Content: strings.Repeat("single huge message ", 600),
-		})
-	}
-	var events []string
-	result := service.maybeRefreshConversationSummary(ctx, "conv-short-big", provider, messages, store.ConversationSummary{}, RunOptions{
-		UserID: testUserID,
-		Event: func(eventType, level string, payload map[string]any) {
-			events = append(events, eventType)
-		},
-	}, providerRuntimeProfile{
-		ContextWindowTokens:     1000,
-		AutoCompactEnabled:      true,
-		CompactThresholdPercent: 80,
-		CompactReservedTokens:   100,
-	}, "auto_threshold", "")
-
-	if result.CompactedMessageCount == 0 {
-		t.Fatalf("expected pressure compaction to select a chunk, got %#v", result)
-	}
-	if len(events) == 0 || events[0] != "context_compaction_started" {
-		t.Fatalf("expected compaction start event, got %#v", events)
 	}
 }
 
@@ -2947,54 +2561,28 @@ func TestPickSearchProviderUsesPriority(t *testing.T) {
 	}
 }
 
-func TestSideEffectToolsRequireCompletionAfterUse(t *testing.T) {
-	for _, name := range []string{
-		"save_workspace_file",
-		"write_workspace_chunk",
-		"finalize_workspace_write",
-		"replace_workspace_lines",
-		"manage_workspace_path",
-		"organize_workspace_matches",
-		"install_skill_from_attachment",
-		"delete_skill",
-		"run_workspace_command",
-		"start_background_task",
-	} {
-		if !toolRequiresCompletionAfterUse(name) {
-			t.Fatalf("expected %s to require completion after use", name)
-		}
-	}
-	for _, name := range []string{"inspect_workspace", "read_workspace_text", "list_skills", "perseus_search_web"} {
-		if toolRequiresCompletionAfterUse(name) {
-			t.Fatalf("did not expect %s to require completion after use", name)
-		}
-	}
-}
-
 func TestRuntimeDoesNotPickWorkspaceToolFromUserKeywords(t *testing.T) {
-	runtime := &agentRuntime{
-		messages: []store.Message{{Role: "user", Content: "请创建 demo.txt"}},
-	}
-	if runtime.requiresCompletion || runtime.performedMutation {
-		t.Fatalf("runtime should not infer completion or mutation from user wording")
+	runtime := &agentRuntime{}
+	if runtime.performedMutation {
+		t.Fatalf("runtime should not infer mutation from user wording")
 	}
 }
 
-func TestAttachmentsRequireToolLoop(t *testing.T) {
-	if !attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "workspace_file", Path: "draft.txt"}}) {
-		t.Fatal("expected workspace file reference to activate tool loop")
+func TestAttachmentsIdentifyExplicitWorkspaceReferences(t *testing.T) {
+	if !attachmentsIncludeWorkspaceReference([]AttachmentPayload{{Kind: "workspace_file", Path: "draft.txt"}}) {
+		t.Fatal("expected workspace file reference to be identified")
 	}
-	if !attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "workspace_file", Path: "draft.txt", Text: "preview"}}) {
-		t.Fatal("expected workspace file reference with preview to activate tool loop")
+	if !attachmentsIncludeWorkspaceReference([]AttachmentPayload{{Kind: "workspace_file", Path: "draft.txt", Text: "preview"}}) {
+		t.Fatal("expected workspace file reference with preview to be identified")
 	}
-	if attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}}) {
-		t.Fatal("did not expect passive current file context to activate tool loop")
+	if attachmentsIncludeWorkspaceReference([]AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}}) {
+		t.Fatal("current file context is passive metadata")
 	}
-	if attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "editor_panels_context"}}) {
-		t.Fatal("did not expect passive editor panels context to activate tool loop")
+	if attachmentsIncludeWorkspaceReference([]AttachmentPayload{{Kind: "editor_panels_context"}}) {
+		t.Fatal("editor panels context is passive metadata")
 	}
-	if attachmentsRequireToolLoop([]AttachmentPayload{{Kind: "text", Name: "note.txt"}}) {
-		t.Fatal("did not expect plain text attachment to activate tool loop")
+	if attachmentsIncludeWorkspaceReference([]AttachmentPayload{{Kind: "text", Name: "note.txt"}}) {
+		t.Fatal("plain attachment is not a workspace reference")
 	}
 }
 
@@ -3046,10 +2634,12 @@ func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 		assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
 		assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
 	}
-	for _, name := range []string{"apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write"} {
+	for _, name := range []string{"edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write"} {
 		assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
 		assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
 	}
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
 	if group := toolGroup("find_workspace_files"); group != ToolGroupSearch {
 		t.Fatalf("expected find_workspace_files search group, got %q", group)
 	}
@@ -3074,198 +2664,6 @@ func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	}
 }
 
-func TestHandleNoToolTurnRejectsPlainTextBeforeToolSucceeds(t *testing.T) {
-	runtime := &agentRuntime{
-		requiresCompletion: true,
-		toolLoopActive:     true,
-		transcript:         newAgentTranscript(),
-	}
-	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
-		Content:      "我先建文件夹，再写内容。",
-		FinishReason: "stop",
-	})
-	if err != nil {
-		t.Fatalf("expected no hard error, got %v", err)
-	}
-	if ok {
-		t.Fatalf("expected corrective loop, got reply %#v", reply)
-	}
-	if len(runtime.transcript.Entries) == 0 {
-		t.Fatal("expected corrective message appended to transcript")
-	}
-	last := runtime.transcript.Entries[len(runtime.transcript.Entries)-1]
-	if last.Kind != transcriptEntryRuntimeObservation || !strings.Contains(last.Text, `"status":"action_rejected"`) || strings.Contains(last.Text, `"required_next_action":"apply_workspace_patch"`) {
-		t.Fatalf("unexpected corrective transcript entry: %#v", last)
-	}
-	if !strings.Contains(last.Text, `"allowed_next_actions"`) {
-		t.Fatalf("expected allowed next actions in corrective observation: %#v", last)
-	}
-}
-
-func TestHandleNoToolTurnUsesWorkspaceReferenceActionBoundary(t *testing.T) {
-	runtime := &agentRuntime{
-		attachments: []AttachmentPayload{{Kind: "workspace_file", Path: "draft.txt"}},
-		transcript:  newAgentTranscript(),
-	}
-	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
-		Content:      "我会先读取这个文件。",
-		FinishReason: "stop",
-	})
-	if err != nil {
-		t.Fatalf("expected no hard error, got %v", err)
-	}
-	if ok {
-		t.Fatalf("workspace reference action boundary must reject plain text completion, got reply %#v", reply)
-	}
-	if len(runtime.transcript.Entries) == 0 {
-		t.Fatal("expected corrective message appended to transcript")
-	}
-	last := runtime.transcript.Entries[len(runtime.transcript.Entries)-1]
-	if last.Kind != transcriptEntryRuntimeObservation || !strings.Contains(last.Text, `"status":"action_rejected"`) || !strings.Contains(last.Text, `"model_action_manifest"`) {
-		t.Fatalf("unexpected corrective transcript entry: %#v", last)
-	}
-	if strings.Contains(last.Text, `"required_next_action":"apply_workspace_patch"`) {
-		t.Fatalf("read-only workspace reference should not force patch action: %#v", last)
-	}
-}
-
-func TestHandleNoToolTurnRejectsPlainTextAfterReadOnlyTool(t *testing.T) {
-	var discarded []string
-	runtime := &agentRuntime{
-		requiresCompletion:       true,
-		toolLoopActive:           true,
-		transcript:               newAgentTranscript(),
-		activeAssistantMessageID: "active_1",
-		activeAssistantSegment:   1,
-		opts: RunOptions{
-			OnAssistantMessageDiscarded: func(messageID string, reason string, segmentIndex int) {
-				discarded = append(discarded, messageID+"|"+reason)
-			},
-		},
-		events: []ToolEvent{{
-			ToolName: "read_workspace_text",
-			Status:   "success",
-			Path:     "demo.txt",
-		}},
-	}
-	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
-		Content:      "已读取 demo.txt，下面是整理后的结论。",
-		FinishReason: "stop",
-	})
-	if err != nil {
-		t.Fatalf("expected no hard error after read-only tool text, ok=%v err=%v", ok, err)
-	}
-	if ok {
-		t.Fatalf("expected corrective loop after read-only tool text, got reply %#v", reply)
-	}
-	if strings.TrimSpace(reply.Content) != "" {
-		t.Fatalf("expected no completion after read-only tool, got reply %#v", reply)
-	}
-	if len(discarded) != 1 || !strings.Contains(discarded[0], "action_required_plain_text_rejected") {
-		t.Fatalf("expected streamed planning text to be discarded, got %#v", discarded)
-	}
-}
-
-func TestHandleNoToolTurnAcceptsReadOnlyContentWithoutSelectedWorkspaceReference(t *testing.T) {
-	runtime := &agentRuntime{
-		toolLoopActive: true,
-		transcript:     newAgentTranscript(),
-		events: []ToolEvent{{
-			ToolName: "read_workspace_text",
-			Status:   "success",
-			Path:     "demo.txt",
-		}},
-	}
-	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
-		Content:      "demo.txt 的核心问题是节奏需要更紧。",
-		FinishReason: "stop",
-	})
-	if err != nil {
-		t.Fatalf("expected no hard error after read-only text, got %v", err)
-	}
-	if !ok || !strings.Contains(reply.Content, "节奏") {
-		t.Fatalf("expected read-only content completion, ok=%v reply=%#v", ok, reply)
-	}
-	if len(runtime.transcript.Entries) != 0 {
-		t.Fatalf("did not expect corrective observation, got %#v", runtime.transcript.Entries)
-	}
-}
-
-func TestHandleNoToolTurnRejectsContentAfterMutation(t *testing.T) {
-	runtime := &agentRuntime{
-		toolLoopActive:    true,
-		performedMutation: true,
-		transcript:        newAgentTranscript(),
-		events: []ToolEvent{{
-			ToolName: "apply_workspace_patch",
-			Status:   "success",
-			Path:     "demo.txt",
-		}},
-	}
-	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
-		Content:      "demo.txt 已经改好了。",
-		FinishReason: "stop",
-	})
-	if err != nil {
-		t.Fatalf("expected corrective loop, got %v", err)
-	}
-	if ok || strings.TrimSpace(reply.Content) != "" {
-		t.Fatalf("expected mutation content to be rejected, ok=%v reply=%#v", ok, reply)
-	}
-	if len(runtime.transcript.Entries) == 0 || runtime.transcript.Entries[len(runtime.transcript.Entries)-1].Kind != transcriptEntryRuntimeObservation {
-		t.Fatalf("expected corrective observation, got %#v", runtime.transcript.Entries)
-	}
-}
-
-func TestRecentWorkspaceReadMemoryUsesLedgerAndMutationInvalidation(t *testing.T) {
-	env := newTestAIEnv(t)
-	ctx := context.Background()
-	conversation, err := env.conversations.CreateConversation(ctx, store.CreateConversationInput{
-		UserID: testUserID,
-		Title:  "recent reads",
-	})
-	if err != nil {
-		t.Fatalf("CreateConversation returned error: %v", err)
-	}
-	readResult := mustJSON(map[string]any{
-		"status":           "success",
-		"tool_name":        "read_workspace_text",
-		"path":             "draft.txt",
-		"numbered_content": "1: 第一行\n2: 第二行",
-		"start_line":       1,
-		"end_line":         2,
-		"total_lines":      2,
-	})
-	if _, err := env.conversations.RecordToolCall(ctx, store.ToolCallInput{
-		UserID:         testUserID,
-		ConversationID: conversation.ID,
-		ToolName:       "read_workspace_text",
-		Status:         "success",
-		ResultJSON:     readResult,
-	}); err != nil {
-		t.Fatalf("RecordToolCall read returned error: %v", err)
-	}
-	memory := env.service.recentWorkspaceReadMemory(ctx, testUserID, conversation.ID, []AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}})
-	if !memory.Available || len(memory.Reads) != 1 || !strings.Contains(memory.Reads[0].NumberedContent, "第一行") {
-		t.Fatalf("expected recent read memory with content, got %#v", memory)
-	}
-	changedPaths, _ := json.Marshal([]string{"draft.txt"})
-	if _, err := env.conversations.RecordToolCall(ctx, store.ToolCallInput{
-		UserID:           testUserID,
-		ConversationID:   conversation.ID,
-		ToolName:         "apply_workspace_patch",
-		Status:           "success",
-		ResultJSON:       mustJSON(map[string]any{"path": "draft.txt", "changed_paths": []string{"draft.txt"}}),
-		ChangedPathsJSON: string(changedPaths),
-	}); err != nil {
-		t.Fatalf("RecordToolCall mutation returned error: %v", err)
-	}
-	memory = env.service.recentWorkspaceReadMemory(ctx, testUserID, conversation.ID, []AttachmentPayload{{Kind: "current_file", Path: "draft.txt"}})
-	if memory.Available {
-		t.Fatalf("expected mutation to invalidate older read memory, got %#v", memory)
-	}
-}
-
 func TestAnthropicSystemBlockBuilderKeepsActionManifestDynamic(t *testing.T) {
 	system := "stable prompt\n\n" + actionManifestAnchorPrefix + `{"json_tools":[]}`
 	payload := AnthropicSystemBlockBuilder{}.Build(system, true)
@@ -3281,25 +2679,8 @@ func TestAnthropicSystemBlockBuilderKeepsActionManifestDynamic(t *testing.T) {
 	}
 }
 
-func TestNormalizeTextPatchTurnStripsRepeatedEndPatchResidue(t *testing.T) {
-	turn, ok := turnWithExtractedTextPatch(agentModelTurn{
-		Content: "*** Begin Patch\n*** Add File: draft.md\n+hello\n*** End Patch\n*** End Patch\n我会核对文件。",
-	})
-	if !ok {
-		t.Fatal("expected patch to be captured")
-	}
-	if strings.Contains(turn.Content, "*** End Patch") || strings.Contains(turn.PublicStreamedContent, "*** End Patch") {
-		t.Fatalf("patch end marker leaked into visible content: content=%q public=%q", turn.Content, turn.PublicStreamedContent)
-	}
-	if strings.TrimSpace(turn.Content) != "我会核对文件。" {
-		t.Fatalf("unexpected visible content: %q", turn.Content)
-	}
-}
-
 func TestRuntimeToolChoiceRequiresCompletionActionAfterVerifiedTool(t *testing.T) {
 	runtime := &agentRuntime{
-		requiresCompletion: true,
-		toolLoopActive:     true,
 		events: []ToolEvent{{
 			ToolName: "read_workspace_text",
 			Status:   "success",
@@ -3318,7 +2699,7 @@ func TestRuntimeToolChoiceRequiresCompletionActionAfterVerifiedTool(t *testing.T
 }
 
 func TestRuntimeToolChoiceRequiresToolsBeforeVerifiedTool(t *testing.T) {
-	runtime := &agentRuntime{requiresCompletion: true, toolLoopActive: true}
+	runtime := &agentRuntime{}
 	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceAuto {
 		t.Fatalf("expected provider-auto before verified tool, got %#v", choice)
 	}
@@ -3331,13 +2712,6 @@ func TestRuntimeToolChoiceRequiresToolsBeforeVerifiedTool(t *testing.T) {
 	}
 	if !runtime.actionBoundaryActive() {
 		t.Fatal("expected local action boundary before verified tool")
-	}
-}
-
-func TestRuntimeTaskToolChoiceAllowsTextPatchChannel(t *testing.T) {
-	runtime := &agentRuntime{opts: RunOptions{TaskID: "task_1"}, requiresCompletion: true, toolLoopActive: true}
-	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceAuto {
-		t.Fatalf("expected background task to allow auto tool choice for text patch capture, got %#v", choice)
 	}
 }
 
@@ -3382,7 +2756,7 @@ func TestNativeReasoningPolicyDoesNotSendUnknownModelParams(t *testing.T) {
 	}
 }
 
-func TestNativeReasoningPolicyUsesSourceBackedOpenAIModelTable(t *testing.T) {
+func TestNativeReasoningPolicyDoesNotInferFromOfficialURLOrModelName(t *testing.T) {
 	provider := store.ModelProvider{
 		Protocol:            "openai",
 		BaseURL:             "https://api.openai.com/v1",
@@ -3391,8 +2765,8 @@ func TestNativeReasoningPolicyUsesSourceBackedOpenAIModelTable(t *testing.T) {
 	}
 	payload := map[string]any{}
 	policy := applyOpenAIReasoningPayload(payload, provider, ThinkingModeExpert)
-	if policy.Support != store.ReasoningSupportOpenAI || payload["reasoning_effort"] != "xhigh" {
-		t.Fatalf("expected source-backed OpenAI model reasoning params, policy=%#v payload=%#v", policy, payload)
+	if policy.Support != store.ReasoningSupportNone || len(payload) != 0 {
+		t.Fatalf("expected auto capability to remain disabled until configured or discovered, policy=%#v payload=%#v", policy, payload)
 	}
 }
 
@@ -3476,7 +2850,6 @@ func TestRuntimeForceToolOnlyBeforeFirstToolAttempt(t *testing.T) {
 		t.Fatalf("expected OpenAI auto tool choice, got %#v", got)
 	}
 	runtime.toolCalls = 1
-	runtime.requiresCompletion = true
 	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceAuto {
 		t.Fatalf("expected provider-auto after first forced attempt before verified result, got %#v", choice)
 	}
@@ -3487,27 +2860,6 @@ func TestRuntimeForceToolOnlyBeforeFirstToolAttempt(t *testing.T) {
 	}
 	if !runtime.actionBoundaryActive() {
 		t.Fatal("expected local action boundary after forced tool attempt")
-	}
-}
-
-func TestRecoverableFinalResponseErrorFailsInsteadOfFakeSuccess(t *testing.T) {
-	runtime := &agentRuntime{
-		performedMutation: true,
-		events: []ToolEvent{{
-			ToolName:     "save_workspace_file",
-			Status:       "success",
-			Path:         "demo.txt",
-			ChangedPaths: []string{"demo.txt"},
-		}},
-	}
-	reply, ok, err := runtime.handleNoToolTurn(context.Background(), agentModelTurn{
-		FinishReason: "recoverable_final_response_error",
-	})
-	if err == nil || !ok {
-		t.Fatalf("expected recoverable final response error, ok=%v err=%v reply=%#v", ok, err, reply)
-	}
-	if !strings.Contains(err.Error(), "可继续本轮") {
-		t.Fatalf("expected continue hint in error, got %v", err)
 	}
 }
 
@@ -3563,8 +2915,9 @@ func TestApplyAnthropicHeadersUsesClaudeCodeProxyBearerAuth(t *testing.T) {
 	}
 
 	applyAnthropicHeaders(req, store.ModelProvider{
-		BaseURL: "https://wanqing.streamlakeapi.com/api/gateway/coding/kat-coder-pro-v2/claude-code-proxy",
-		APIKey:  "test-token",
+		BaseURL:  "https://wanqing.streamlakeapi.com/api/gateway/coding/kat-coder-pro-v2/claude-code-proxy",
+		APIKey:   "test-token",
+		AuthMode: store.ModelAuthBearer,
 	})
 
 	if req.Header.Get("Authorization") != "Bearer test-token" {
@@ -3623,7 +2976,10 @@ func TestOpenAIChatEndpointTrimsTrailingSlash(t *testing.T) {
 func TestAnthropicMessagesEndpointUsesClaudeCodeProxyV1Path(t *testing.T) {
 	baseURL := "https://wanqing.streamlakeapi.com/api/gateway/coding/kat-coder-pro-v2/claude-code-proxy"
 	expected := baseURL + "/v1/messages"
-	if actual := anthropicMessagesEndpoint(baseURL); actual != expected {
+	if actual := anthropicMessagesEndpointForProvider(store.ModelProvider{
+		BaseURL:     baseURL,
+		AdapterMode: store.ModelAdapterAnthropicBearerProxy,
+	}); actual != expected {
 		t.Fatalf("expected %q, got %q", expected, actual)
 	}
 }
@@ -3631,7 +2987,10 @@ func TestAnthropicMessagesEndpointUsesClaudeCodeProxyV1Path(t *testing.T) {
 func TestAnthropicMessagesEndpointKeepsStandardPath(t *testing.T) {
 	baseURL := "https://api.anthropic.com/v1"
 	expected := baseURL + "/messages"
-	if actual := anthropicMessagesEndpoint(baseURL); actual != expected {
+	if actual := anthropicMessagesEndpointForProvider(store.ModelProvider{
+		BaseURL:     baseURL,
+		AdapterMode: store.ModelAdapterAnthropicNative,
+	}); actual != expected {
 		t.Fatalf("expected %q, got %q", expected, actual)
 	}
 }
@@ -3641,12 +3000,17 @@ func TestProviderFailureClassSeparatesConfigFromTransientHTTP(t *testing.T) {
 		StatusCode:      http.StatusServiceUnavailable,
 		Message:         "模型供应商请求失败（HTTP 503）：No available channel for model claude-opus-4-7-thinking under group default",
 		ResponseSnippet: `{"error":{"code":"model_not_found","message":"No available channel for model claude-opus-4-7-thinking"}}`,
+		ErrorCode:       "model_not_found",
 	}
 	if got := providerFailureClass(err, ProviderRequestSummary{}); got != "provider_model_unavailable" {
 		t.Fatalf("expected provider_model_unavailable, got %q", got)
 	}
-	if got := providerFailureClass(fmt.Errorf(`Post "https://pomo.zanbi.fun/v1/chat/completions": dial tcp: lookup pomo.zanbi.fun on 127.0.0.11:53: no such host`), ProviderRequestSummary{}); got != "provider_dns_lookup_failed" {
-		t.Fatalf("expected provider_dns_lookup_failed, got %q", got)
+	dnsErr := &net.DNSError{Name: "pomo.zanbi.fun", Err: "no such host"}
+	if got := providerFailureClass(dnsErr, ProviderRequestSummary{}); got != string(ProviderFailureConnection) {
+		t.Fatalf("expected provider connection failure, got %q", got)
+	}
+	if failure := classifyProviderFailure(dnsErr); failure.Code != "dns_lookup_failed" {
+		t.Fatalf("expected structured DNS detail, got %#v", failure)
 	}
 }
 
@@ -3658,23 +3022,23 @@ func TestProviderFailureClassKeepsTransportSubclasses(t *testing.T) {
 	}{
 		{
 			name: "connection reset",
-			err:  fmt.Errorf(`Post "https://api.jellix.top/v1/chat/completions": read tcp 127.0.0.1:1->127.0.0.1:2: connection reset by peer`),
-			want: "provider_connection_interrupted",
+			err:  fmt.Errorf("provider connection: %w", syscall.ECONNRESET),
+			want: string(ProviderFailureConnection),
 		},
 		{
 			name: "timeout",
-			err:  fmt.Errorf(`Post "https://api.jellix.top/v1/chat/completions": context deadline exceeded`),
-			want: "provider_transport_timeout",
+			err:  context.DeadlineExceeded,
+			want: string(ProviderFailureConnection),
 		},
 		{
-			name: "tls",
-			err:  fmt.Errorf(`Post "https://api.jellix.top/v1/chat/completions": local error: tls: bad record mac`),
-			want: "provider_tls_interrupted",
+			name: "unexpected eof",
+			err:  io.ErrUnexpectedEOF,
+			want: string(ProviderFailureStreamInterrupted),
 		},
 		{
-			name: "malformed response",
-			err:  fmt.Errorf(`Post "https://api.jellix.top/v1/chat/completions": net/http: HTTP/1.x transport connection broken: malformed HTTP response`),
-			want: "provider_transport_protocol_error",
+			name: "typed stream protocol error",
+			err:  &ProviderProtocolError{Code: "stream_interrupted", Cause: io.EOF},
+			want: string(ProviderFailureStreamInterrupted),
 		},
 	}
 	for _, tc := range cases {
@@ -3701,8 +3065,8 @@ func TestProviderFailureClassDoesNotGuessRequiredToolChoice(t *testing.T) {
 		ReasoningEffort: "medium",
 		ToolsCount:      20,
 	}
-	if got := providerFailureClass(err, summary); got != "provider_bad_request_with_reasoning" {
-		t.Fatalf("expected generic bad request with reasoning, got %q", got)
+	if got := providerFailureClass(err, summary); got != string(ProviderFailureInvalidRequest) {
+		t.Fatalf("expected structured invalid request, got %q", got)
 	}
 }
 
@@ -3717,8 +3081,8 @@ func TestProviderFailureClassUsesRequiredOnlyWhenProviderSaysSo(t *testing.T) {
 		RequiresTool: true,
 		ToolsCount:   20,
 	}
-	if got := providerFailureClass(err, summary); got != "provider_rejected_required_tool_choice" {
-		t.Fatalf("expected explicit required rejection, got %q", got)
+	if got := providerFailureClass(err, summary); got != string(ProviderFailureInvalidRequest) {
+		t.Fatalf("provider prose must not create a new failure state, got %q", got)
 	}
 }
 
@@ -3726,7 +3090,8 @@ func TestExecuteToolWriteWorkspaceFileRejectsMissingFile(t *testing.T) {
 	service, _, _, _ := newTestAIService(t)
 
 	_, _, _, _, err := service.executeTool(context.Background(), "save_workspace_file", `{"path":"missing.txt","content":"x","mode":"overwrite"}`, RunOptions{UserID: testUserID})
-	if err == nil || err.Error() != "file does not exist" {
+	var missingErr *ToolError
+	if err == nil || !errors.As(err, &missingErr) || missingErr.Code != ToolErrorPathNotFound {
 		t.Fatalf("expected missing file error, got %v", err)
 	}
 }
@@ -3899,6 +3264,9 @@ const testUserID = "test-user-id"
 
 func newTestAIEnv(t *testing.T) *testAIEnv {
 	t.Helper()
+	// Historical integration fixtures exercise the explicit rollback path. New
+	// turn-engine behavior uses newTurnEngineTestAIEnv below.
+	t.Setenv("PERSEUS_AGENT_KERNEL_MODE", agentKernelLegacy)
 
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "test.db")
@@ -3956,4 +3324,11 @@ func newTestAIEnv(t *testing.T) *testAIEnv {
 		runs:          runs,
 		files:         files,
 	}
+}
+
+func newTurnEngineTestAIEnv(t *testing.T) *testAIEnv {
+	t.Helper()
+	env := newTestAIEnv(t)
+	t.Setenv("PERSEUS_AGENT_KERNEL_MODE", agentKernelV3)
+	return env
 }

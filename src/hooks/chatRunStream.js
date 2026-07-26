@@ -128,17 +128,18 @@ export async function waitForAgentRunStream({
     }
     setVisibleConversationMessages((current) => appendRunProgressItem(current, thinkingId, nextItem));
   };
-  const applyFollowupQuestion = (payload = {}) => {
+  const applyUserRequest = (payload = {}) => {
     const question = (payload.question || '').trim();
     if (!question) return;
+    const toolName = payload.tool_name || 'ask_followup_question';
+    const kind = userRequestMessageKind(toolName);
     const attachment = {
       tool_call_id: payload.tool_call_id || '',
-      tool_name: 'ask_followup_question',
-      status: payload.status || 'success',
-      label: payload.label || '已询问用户',
+      tool_name: toolName,
+      status: payload.status || 'waiting_for_user',
+      label: payload.label || userRequestLabel(toolName),
       question,
-      options: payload.options || [],
-      allow_freeform: payload.allow_freeform !== false,
+      options: toolName === 'request_user_input' ? [] : payload.options || [],
     };
     setVisibleConversationMessages((current) =>
       current.map((messageItem) => {
@@ -148,6 +149,7 @@ export async function waitForAgentRunStream({
         if (!isTarget) return messageItem;
         return {
           ...messageItem,
+          kind,
           content: question,
           attachments: [attachment],
         };
@@ -199,7 +201,7 @@ export async function waitForAgentRunStream({
 
   const handleRun = async (run) => {
     if (!run) return;
-    if (run.status === 'succeeded') {
+    if (run.status === 'succeeded' || run.status === 'waiting_for_user' || run.status === 'delegated') {
       await finish();
     } else if (run.status === 'failed' || run.status === 'canceled') {
       await refreshFromLatestAssistantMessage();
@@ -251,6 +253,20 @@ export async function waitForAgentRunStream({
         setVisibleConversationMessages((current) => (current || []).filter((messageItem) => messageItem.id !== messageId));
       }
       clearVisibleRunSteerNotice();
+    } else if (item?.type === 'user_response_answered' || item?.type === 'user_question_answered') {
+      if (payload.user_message) {
+        setVisibleConversationMessages((current) => {
+          const updated = current.map((messageItem) => ({
+            ...messageItem,
+            attachments: (messageItem.attachments || []).map((attachment) =>
+              attachment?.tool_call_id === payload.tool_call_id
+                ? { ...attachment, status: 'answered', answer_message_id: payload.answer_message_id || '' }
+                : attachment
+            ),
+          }));
+          return mergeRunUserMessage(updated, payload.user_message, activeUserMessageId, runId);
+        });
+      }
     }
     if (item?.type === 'user_message_committed') {
       activeUserMessageId = payload.user_message?.id || activeUserMessageId;
@@ -292,8 +308,8 @@ export async function waitForAgentRunStream({
         setVisibleConversationMessages((current) => current.filter((messageItem) => messageItem.id !== messageId));
       }
     } else if (item?.type === 'tool_call_completed') {
-      if (payload.tool_name === 'ask_followup_question') {
-        applyFollowupQuestion(payload);
+      if (isUserRequestToolName(payload.tool_name)) {
+        applyUserRequest(payload);
         return;
       }
       if (payload.status === 'success' && payload.tool_name) {
@@ -302,9 +318,9 @@ export async function waitForAgentRunStream({
       appendProgress(item?.type, payload, message);
     } else if (item?.type === 'model_message_started') {
       ensureThinkingShell();
-    } else if (item?.type === 'user_question_requested') {
-      applyFollowupQuestion(payload);
-    } else if (message && !['assistant_message_completed', 'run_completed', 'model_delta'].includes(item?.type)) {
+    } else if (item?.type === 'user_input_requested' || item?.type === 'user_choice_requested' || item?.type === 'user_question_requested') {
+      applyUserRequest(payload);
+    } else if (message && !['assistant_message_completed', 'assistant_message_presentation_updated', 'run_completed', 'model_delta'].includes(item?.type)) {
       appendProgress(item?.type, payload, message);
     }
     if (item?.type === 'assistant_message_completed') {
@@ -316,6 +332,13 @@ export async function waitForAgentRunStream({
       }
       if (payload.task) {
         onTasksChanged?.(payload.task);
+      }
+    } else if (item?.type === 'assistant_message_presentation_updated') {
+      if (payload.assistant_message) {
+        setVisibleConversationMessages((current) =>
+          mergeAssistantMessageCompleted(current, thinkingId, payload.assistant_message, { runId })
+        );
+        await onAssistantToolEvents?.(payload.assistant_message.attachments || []);
       }
     } else if (item?.type === 'workspace_file_changed') {
       if (payload.status === 'success' && payload.tool_name) {
@@ -426,4 +449,20 @@ export async function waitForAgentRunStream({
     };
     openStream();
   });
+}
+
+function isUserRequestToolName(toolName = '') {
+  return toolName === 'request_user_input' || toolName === 'request_user_choice' || toolName === 'ask_followup_question';
+}
+
+function userRequestMessageKind(toolName = '') {
+  if (toolName === 'request_user_input') return 'user_input_request';
+  if (toolName === 'request_user_choice') return 'user_choice_request';
+  return 'followup_question';
+}
+
+function userRequestLabel(toolName = '') {
+  if (toolName === 'request_user_input') return '等待用户输入';
+  if (toolName === 'request_user_choice') return '等待用户选择';
+  return '已询问用户';
 }

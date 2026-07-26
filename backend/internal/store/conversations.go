@@ -178,6 +178,12 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
 		return err
 	}
+	if err := s.migrateChatAttachments(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateAgentTurnItems(ctx); err != nil {
+		return err
+	}
 	for _, tbl := range []string{"conversations", "messages", "tool_calls"} {
 		if err := AddColumnIfNotExists(ctx, s.db, tbl, "user_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
@@ -237,7 +243,15 @@ CREATE INDEX IF NOT EXISTS idx_tool_calls_run_created_at ON tool_calls(run_id, c
 CREATE INDEX IF NOT EXISTS idx_tool_calls_operation_hash ON tool_calls(user_id, run_id, operation_hash);
 `
 	_, err := s.db.ExecContext(ctx, indexes)
-	return err
+	if err != nil {
+		return err
+	}
+	report, err := s.RepairMessagePresentationEvents(ctx)
+	if err != nil {
+		return err
+	}
+	logMessagePresentationRepair(report)
+	return nil
 }
 
 func (s *ConversationStore) ListConversations(ctx context.Context, userID string) ([]Conversation, error) {
@@ -314,11 +328,14 @@ WHERE id = ? AND user_id = ?
 }
 
 func (s *ConversationStore) DeleteConversation(ctx context.Context, userID, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM conversations WHERE id = ? AND user_id = ?`, id, userID)
+	_, err := s.DeleteConversationWithAttachments(ctx, userID, id)
 	return err
 }
 
 func (s *ConversationStore) BranchConversation(ctx context.Context, userID, conversationID, messageID string) (Conversation, []Message, error) {
+	if err := s.EnsureAgentTurnItems(ctx, userID, conversationID); err != nil {
+		return Conversation{}, nil, err
+	}
 	source, err := s.GetConversation(ctx, userID, conversationID)
 	if err != nil {
 		return Conversation{}, nil, err
@@ -359,13 +376,76 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 		return Conversation{}, nil, err
 	}
 
+	messageIDMap := make(map[string]string, len(selected))
 	for index, item := range selected {
-		messageID := fmt.Sprintf("%s_%d", nextStoreID("msg", now), index)
+		newMessageID := fmt.Sprintf("%s_%d", nextStoreID("msg", now), index)
+		messageIDMap[item.ID] = newMessageID
 		createdAt := now.Add(time.Duration(index) * time.Nanosecond)
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO messages (id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, messageID, userID, newID, item.Role, item.Content, item.AttachmentsJSON, firstNonEmptyString(item.Status, "final"), item.SegmentIndex, item.MetaJSON, createdAt, item.UpdatedAt); err != nil {
+`, newMessageID, userID, newID, item.Role, item.Content, item.AttachmentsJSON, firstNonEmptyString(item.Status, "final"), item.SegmentIndex, item.MetaJSON, createdAt, item.UpdatedAt); err != nil {
+			return Conversation{}, nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO message_attachments (message_id, attachment_id, ordinal, included_in_context)
+SELECT ?, attachment_id, ordinal, included_in_context
+FROM message_attachments
+WHERE message_id = ?
+`, newMessageID, item.ID); err != nil {
+			return Conversation{}, nil, err
+		}
+	}
+	var cutoffSeq int64
+	if err := tx.QueryRowContext(ctx, `
+SELECT COALESCE(MAX(seq), 0) FROM agent_turn_items
+WHERE user_id = ? AND conversation_id = ? AND created_at <= ?
+`, userID, conversationID, selected[len(selected)-1].CreatedAt).Scan(&cutoffSeq); err != nil {
+		return Conversation{}, nil, err
+	}
+	if cutoffSeq > 0 {
+		rows, err := tx.QueryContext(ctx, `
+SELECT run_id, turn_id, kind, role, status, visibility, source_id, payload_json, created_at
+FROM agent_turn_items
+WHERE user_id = ? AND conversation_id = ? AND seq <= ?
+ORDER BY seq ASC
+`, userID, conversationID, cutoffSeq)
+		if err != nil {
+			return Conversation{}, nil, err
+		}
+		defer rows.Close()
+		itemIndex := 0
+		for rows.Next() {
+			var runID, turnID, kind, role, status, visibility, sourceID, payloadJSON string
+			var createdAt time.Time
+			if err := rows.Scan(&runID, &turnID, &kind, &role, &status, &visibility, &sourceID, &payloadJSON, &createdAt); err != nil {
+				return Conversation{}, nil, err
+			}
+			if mapped := messageIDMap[turnID]; mapped != "" {
+				turnID = mapped
+			}
+			if mapped := messageIDMap[sourceID]; mapped != "" {
+				sourceID = mapped
+			} else if sourceID != "" {
+				sourceID = "branch:" + newID + ":" + sourceID
+			}
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO agent_turn_items
+  (id, user_id, conversation_id, run_id, turn_id, kind, role, status, visibility, source_id, payload_json, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, fmt.Sprintf("%s_%d", nextStoreID("item", now), itemIndex), userID, newID, runID, turnID, kind, role, status, visibility, sourceID, payloadJSON, now.Add(time.Duration(len(selected)+itemIndex)*time.Nanosecond)); err != nil {
+				return Conversation{}, nil, err
+			}
+			itemIndex++
+		}
+		if err := rows.Close(); err != nil {
+			return Conversation{}, nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO agent_item_migrations (user_id, conversation_id, status, error, migrated_at)
+VALUES (?, ?, 'completed', '', ?)
+ON CONFLICT(user_id, conversation_id) DO UPDATE SET status = 'completed', error = '', migrated_at = excluded.migrated_at
+`, userID, newID, now); err != nil {
 			return Conversation{}, nil, err
 		}
 	}

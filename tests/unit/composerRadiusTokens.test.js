@@ -12,7 +12,6 @@ test('composer surfaces share the same semantic radius token', () => {
   assert.match(composerCss, /\.composer-shell\s*\{[\s\S]*border-radius:\s*var\(--radius-composer\);/);
 
   for (const selector of [
-    '.followup-question-panel',
     '.pending-run-message-panel',
     '.run-steer-notice-panel',
   ]) {

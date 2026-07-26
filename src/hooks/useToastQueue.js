@@ -54,41 +54,15 @@ function normalizeToastInput(input, options = {}) {
   const text = String(raw.message ?? raw.text ?? '').trim();
   return {
     text,
-    tone: normalizeToastTone(raw.tone ?? options.tone, text),
+    tone: normalizeToastTone(raw.tone ?? options.tone),
     duration: Number(raw.duration ?? options.duration) > 0
       ? Number(raw.duration ?? options.duration)
       : DEFAULT_TOAST_DURATION,
   };
 }
 
-function normalizeToastTone(tone, text) {
+function normalizeToastTone(tone) {
   const normalized = String(tone || '').toLowerCase();
   if (['success', 'error', 'warning', 'info'].includes(normalized)) return normalized;
-
-  const lowerText = String(text || '').toLowerCase();
-  if (
-    lowerText.includes('error') ||
-    lowerText.includes('failed') ||
-    lowerText.includes('失败') ||
-    lowerText.includes('错误')
-  ) {
-    return 'error';
-  }
-  if (
-    lowerText.includes('warn') ||
-    lowerText.includes('无法') ||
-    lowerText.includes('不能') ||
-    lowerText.includes('跳过')
-  ) {
-    return 'warning';
-  }
-  if (
-    lowerText.includes('已') ||
-    lowerText.includes('完成') ||
-    lowerText.includes('成功') ||
-    lowerText.includes('插入')
-  ) {
-    return 'success';
-  }
   return 'info';
 }

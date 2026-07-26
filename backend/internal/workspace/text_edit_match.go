@@ -16,7 +16,7 @@ type textReplacementPlan struct {
 func planTextReplacement(content, oldText, newText string, replaceAll bool) (textReplacementPlan, error) {
 	if count := strings.Count(content, oldText); count > 0 {
 		if !replaceAll && count > 1 {
-			return textReplacementPlan{}, fmt.Errorf("old_text matched %d times; set replace_all=true or provide a more specific old_text", count)
+			return textReplacementPlan{}, fmt.Errorf("%w: old_text matched %d times; set replace_all=true or provide a more specific old_text", ErrTextMatchMany, count)
 		}
 		limit := 1
 		if replaceAll {
@@ -34,7 +34,7 @@ func planTextReplacement(content, oldText, newText string, replaceAll bool) (tex
 	if plan, ok, err := planIndentationFlexibleReplacement(content, oldText, newText, replaceAll); err != nil || ok {
 		return plan, err
 	}
-	return textReplacementPlan{}, fmt.Errorf("old_text was not found")
+	return textReplacementPlan{}, ErrTextMatchMissing
 }
 
 func planTrimmedLineReplacement(content, oldText, newText string, replaceAll bool) (textReplacementPlan, bool, error) {
@@ -54,7 +54,7 @@ func planTrimmedLineReplacement(content, oldText, newText string, replaceAll boo
 		return textReplacementPlan{}, false, nil
 	}
 	if !replaceAll && len(matches) > 1 {
-		return textReplacementPlan{}, true, fmt.Errorf("old_text matched %d times after trimming line whitespace; provide more context", len(matches))
+		return textReplacementPlan{}, true, fmt.Errorf("%w: old_text matched %d times after trimming line whitespace; provide more context", ErrTextMatchMany, len(matches))
 	}
 	next := replaceLineWindows(lines, matches, oldLines, newText, replaceAll)
 	return textReplacementPlan{content: next, replacements: len(matches), matchKind: TextEditMatchTrimmedLines}, true, nil
@@ -77,7 +77,7 @@ func planIndentationFlexibleReplacement(content, oldText, newText string, replac
 		return textReplacementPlan{}, false, nil
 	}
 	if !replaceAll && len(matches) > 1 {
-		return textReplacementPlan{}, true, fmt.Errorf("old_text matched %d times with flexible indentation; provide more context", len(matches))
+		return textReplacementPlan{}, true, fmt.Errorf("%w: old_text matched %d times with flexible indentation; provide more context", ErrTextMatchMany, len(matches))
 	}
 	next := replaceLineWindows(lines, matches, oldLines, newText, replaceAll)
 	return textReplacementPlan{content: next, replacements: len(matches), matchKind: TextEditMatchIndentationFlexible}, true, nil

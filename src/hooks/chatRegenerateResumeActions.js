@@ -1,5 +1,5 @@
 import { apiPost } from '../api/client';
-import { chatFailureMetadata, formatRetryAfterLabel, isResumeBlockedByFailure, formatChatError } from './chatErrorUtils';
+import { chatFailureHeading, chatFailureMetadata, formatRetryAfterLabel, isResumeBlockedByFailure, formatChatError } from './chatErrorUtils';
 import { buildAssistantRunShell, mapPendingAssistant } from './chatStateUtils.js';
 import { isWorkspaceRefreshEvent } from './ideUtils.js';
 
@@ -108,17 +108,34 @@ export function createChatRegenerateResumeActions({
     setChatError('');
     setResumableRun(null);
     setIsChatSending(true);
-    setConversationMessages((current) => [
-      ...current,
-      buildAssistantRunShell({
-        id: thinkingId,
-        conversationId: conversationID,
-        createdAt: new Date().toISOString(),
-        content: '',
-        attachments: [],
-        runId,
-      }),
-    ]);
+    setConversationMessages((current) => {
+      let reused = false;
+      const next = (current || []).map((item) => {
+        if (item.resumableRunId !== runId) return item;
+        reused = true;
+        return {
+          ...item,
+          pending: true,
+          error: false,
+          canceled: false,
+          content: '',
+          runId,
+          resumableRunId: '',
+        };
+      });
+      if (reused) return next;
+      return [
+        ...next,
+        buildAssistantRunShell({
+          id: thinkingId,
+          conversationId: conversationID,
+          createdAt: new Date().toISOString(),
+          content: '',
+          attachments: [],
+          runId,
+        }),
+      ];
+    });
     const control = { abort: () => {} };
     activeChatAbortRef.current = control;
     try {
@@ -157,9 +174,11 @@ export function createChatRegenerateResumeActions({
         }
       }
       const isBudgetExhausted = error?.stage === 'budget_exhausted' || error?.incompleteReason === 'budget_exhausted';
-      const prefix = error?.runId
-        ? (isBudgetExhausted ? '达到轮次上限，已总结当前进度，可继续本轮' : '连接中断，可继续这轮任务')
-        : '继续失败';
+      const failureMetadata = chatFailureMetadata(error);
+      const prefix = chatFailureHeading(failureMetadata.failureClass, {
+        resumable: Boolean(error?.runId),
+        budgetExhausted: isBudgetExhausted,
+      });
       setConversationMessages((current) =>
         mapPendingAssistant(current, thinkingId, (item) => ({
           ...item,
@@ -167,7 +186,7 @@ export function createChatRegenerateResumeActions({
           error: true,
           resumableRunId: error?.runId || '',
           diagnosticLogId: error?.diagnosticLogId || '',
-          ...chatFailureMetadata(error),
+          ...failureMetadata,
           content: isBudgetExhausted ? message : `${prefix}：${message}`,
         }))
       );

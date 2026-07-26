@@ -28,7 +28,7 @@ type WorkspaceEditActionState struct {
 	VerifiedChangedPaths     []string `json:"verified_changed_paths,omitempty"`
 	LastFailureRecoverable   bool     `json:"last_failure_recoverable,omitempty"`
 	LastFailureTool          string   `json:"last_failure_tool,omitempty"`
-	NativePatchToolAvailable bool     `json:"native_patch_tool_available,omitempty"`
+	StructuredPatchAvailable bool     `json:"structured_patch_available,omitempty"`
 }
 
 func (r *agentRuntime) actionRejectedObservation(reason, rejectedAction string, targetPaths []string) string {
@@ -113,11 +113,6 @@ func (r *agentRuntime) allowedNextActionsForBoundaryUnscoped() []string {
 			actions = append(actions, action.Name)
 		}
 	}
-	for _, action := range manifest.TextActions {
-		if strings.TrimSpace(action.Name) != "" {
-			actions = append(actions, action.Name)
-		}
-	}
 	for _, action := range manifest.TerminalActions {
 		if strings.TrimSpace(action.Name) != "" {
 			actions = append(actions, action.Name)
@@ -155,7 +150,7 @@ func (r *agentRuntime) workspaceEditActionState() WorkspaceEditActionState {
 		state.LastFailureRecoverable = r.lastToolFailure.Recoverable
 		state.LastFailureTool = r.lastToolFailure.ToolName
 	}
-	state.NativePatchToolAvailable = providerNativePatchEnabled(r.provider)
+	state.StructuredPatchAvailable = state.WorkspaceLoaded
 	return state
 }
 

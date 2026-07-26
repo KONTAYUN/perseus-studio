@@ -12,7 +12,6 @@ import {
   buildProgressItem,
   formatContextTokenCount,
   hasStreamingAssistantMessage,
-  isPendingStatusText,
   mergeCommittedRunStart,
   mergeAssistantMessageCompleted,
   mergeAssistantMessageStarted,
@@ -58,11 +57,11 @@ test('buildProgressItem maps tool calls to friendly text', () => {
     '已读取文件'
   );
   assert.equal(
-    buildProgressItem('tool_call_completed', { tool_call_id: 'tc2', tool_name: 'ask_followup_question' }),
+    buildProgressItem('tool_call_completed', { tool_call_id: 'tc2', tool_name: 'request_user_input' }),
     null
   );
   assert.equal(
-    buildProgressItem('user_question_requested', { tool_call_id: 'tc2', question: '要哪种语气？' }),
+    buildProgressItem('user_input_requested', { tool_call_id: 'tc2', question: '请粘贴日志' }),
     null
   );
 });
@@ -70,11 +69,22 @@ test('buildProgressItem maps tool calls to friendly text', () => {
 test('buildProgressItem separates provider request retry from checkpoint recovery wording', () => {
   assert.equal(
     buildProgressItem('model_call_retrying', { attempt: 1, max_attempts: 3, delay_ms: 1500 }).text,
-    '连接中断，2 秒后重试 1/3'
+    '请求失败，2 秒后重试 1/3'
   );
   assert.equal(
     buildAgentRecoveryNotice('agent_recovery_retrying', { attempt: 1, max_attempts: 2, delay_ms: 10000 }).text,
     '连接中断，10 秒后从断点继续 1/2'
+  );
+});
+
+test('agent protocol correction stays in progress instead of becoming a chat bubble', () => {
+  assert.equal(
+    buildProgressItem('agent_protocol_retry', { attempt: 1, limit: 3 }).text,
+    '正在继续执行'
+  );
+  assert.equal(
+    buildProgressItem('agent_protocol_failed', { attempt: 3, limit: 3 }).text,
+    '模型没有选择可执行动作'
   );
 });
 
@@ -107,6 +117,31 @@ test('assistant message merges keep live progress while pending and clear it on 
   assert.equal(completed[0].pending, false);
   assert.equal(completed[0].content, '完成');
   assert.deepEqual(completed[0].progressItems, []);
+});
+
+test('presentation update replaces attachments on the same message without duplicating it', () => {
+  const messages = [{
+    id: 'a1',
+    role: 'assistant',
+    kind: 'assistant_segment',
+    content: 'The server check is complete.',
+    attachments: [{ tool_name: 'ask_followup_question', tool_call_id: 'old-question' }],
+    status: 'final',
+    runId: 'run-1',
+  }];
+
+  const updated = mergeAssistantMessageCompleted(messages, 'shell-1', {
+    id: 'a1',
+    role: 'assistant',
+    content: 'The server check is complete.',
+    attachments: [{ tool_name: 'read_workspace_note_view', tool_call_id: 'new-read' }],
+    status: 'final',
+    meta: { kind: 'completion_result', run_id: 'run-1' },
+  }, { runId: 'run-1' });
+
+  assert.equal(updated.length, 1);
+  assert.equal(updated[0].kind, 'completion_result');
+  assert.deepEqual(updated[0].attachments, [{ tool_name: 'read_workspace_note_view', tool_call_id: 'new-read' }]);
 });
 
 test('empty completed assistant segment is discarded instead of rendered as a bubble', () => {
@@ -729,9 +764,4 @@ test('updateLoadingState advances holding loader after minimum display time', ()
   };
   assert.equal(updateLoadingState(message, 3999).loadingState.stage, 'holding');
   assert.equal(updateLoadingState(message, 4000).loadingState.stage, 'deleting');
-});
-
-test('isPendingStatusText recognizes short generated waiting labels', () => {
-  assert.equal(isPendingStatusText('正在检查火候'), true);
-  assert.equal(isPendingStatusText('这是正式正文，不应被当成等待状态'), false);
 });

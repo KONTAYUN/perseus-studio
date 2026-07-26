@@ -40,7 +40,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 			StartedAt:      startedAt,
 		})
 		if recordErr != nil {
-			wrapped := fmt.Errorf("local tool ledger start failed for %s: %w", name, recordErr)
+			wrapped := newToolError(ToolErrorLocalPersistence, fmt.Sprintf("local tool ledger start failed for %s", name), recordErr)
 			diagID := s.recordLocalPersistenceDiagnostic(ctx, opts, conversationID, messageID, "tool_ledger_start_failed", wrapped)
 			emitToolLifecycleEvent(opts, "local_persistence_failed", "error", map[string]any{
 				"tool_call_id":      toolCallID,
@@ -50,7 +50,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 				"diagnostic_log_id": diagID,
 				"operation_hash":    operationHash,
 			})
-			return "", ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: userFriendlyToolLabel(name), Status: "failed", Error: wrapped.Error(), OperationHash: operationHash}, WithDiagnosticID(wrapped, diagID)
+			return "", ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: userFriendlyToolLabel(name), Status: "failed", Error: wrapped.Error(), ErrorCode: wrapped.Code, ErrorCategory: wrapped.Category, Retryable: wrapped.Retryable, RecommendedAction: wrapped.RecommendedAction, OperationHash: operationHash}, WithDiagnosticID(wrapped, diagID)
 		}
 		if recorded.ID != "" {
 			toolCallID = recorded.ID
@@ -62,13 +62,11 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	status := "success"
 	errorText := ""
 	if err != nil {
+		err = normalizeToolError(err)
 		status = "failed"
 		errorText = err.Error()
 		if !jsonObjectHasField(result, "error") {
-			result = mustJSON(map[string]any{
-				"error":         errorText,
-				"recovery_hint": toolFailureRecoveryHint(name, errorText),
-			})
+			result = toolErrorJSONPayload(name, err)
 		}
 		summary = errorText
 		s.recordToolDiagnostic(ctx, opts, conversationID, messageID, name, argumentsJSON, targetSummary, durationMS, err)
@@ -77,11 +75,8 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	if status == "success" && verification.Status == "failed" {
 		status = "failed"
 		errorText = verification.Message
-		result = mustJSON(map[string]any{
-			"error":         errorText,
-			"recovery_hint": "The tool ran but verification failed. Inspect the workspace state before claiming success.",
-			"verification":  verification,
-		})
+		err = newToolError(ToolErrorVerificationFailed, errorText, nil)
+		result = toolErrorJSONPayload(name, err)
 		summary = "workspace verification failed: " + verification.Message
 		s.recordToolDiagnostic(ctx, opts, conversationID, messageID, name, argumentsJSON, targetSummary, durationMS, fmt.Errorf("workspace verification failed: %s", verification.Message))
 	}
@@ -103,10 +98,21 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		"verification":      verification,
 	}
 	if errorText != "" {
+		typed := normalizeToolError(err)
 		eventPayload["error"] = errorText
-		eventPayload["recovery_hint"] = toolFailureRecoveryHint(name, errorText)
+		eventPayload["error_code"] = typed.Code
+		eventPayload["error_category"] = typed.Category
+		eventPayload["retryable"] = typed.Retryable
+		eventPayload["recommended_action"] = typed.RecommendedAction
 	}
 	event := ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: label, Status: status, TargetSummary: targetSummary, OperationHash: operationHash, Path: path, Error: errorText, DurationMS: durationMS}
+	if err != nil {
+		typed := normalizeToolError(err)
+		event.ErrorCode = typed.Code
+		event.ErrorCategory = typed.Category
+		event.Retryable = typed.Retryable
+		event.RecommendedAction = typed.RecommendedAction
+	}
 	if status == "success" {
 		var meta struct {
 			Path          string              `json:"path"`
@@ -189,7 +195,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 				"version_id":        event.VersionID,
 				"hash":              event.Hash,
 			})
-			return budgetToolResultForModel(name, result, profile), event, WithDiagnosticID(wrapped, diagID)
+			return result, event, WithDiagnosticID(wrapped, diagID)
 		}
 		if recorded.ID != "" {
 			toolCallID = recorded.ID
@@ -256,7 +262,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		logTask(opts, "error", fmt.Sprintf("tool call failed: %s: %s", name, errorText))
 		emitToolLifecycleEvent(opts, "tool_call_failed", "error", eventPayload)
 	}
-	return budgetToolResultForModel(name, result, profile), event, nil
+	return result, event, nil
 }
 
 func jsonObjectHasField(raw string, field string) bool {

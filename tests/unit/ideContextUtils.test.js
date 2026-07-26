@@ -10,7 +10,7 @@ test('editorPositionLabels maps common editor counts to natural labels', () => {
   assert.deepEqual(editorPositionLabels(5), ['left', 'middle-1', 'middle-2', 'middle-3', 'right']);
 });
 
-test('buildEditorContextFromEntries returns current_file for a single active editor', () => {
+test('buildEditorContextFromEntries returns path-only panel metadata for a single active editor', () => {
   const context = buildEditorContextFromEntries([
     {
       panel: { id: 'editor_1' },
@@ -22,9 +22,15 @@ test('buildEditorContextFromEntries returns current_file for a single active edi
     },
   ]);
 
-  assert.equal(context.type, 'current_file');
-  assert.equal(context.path, 'notes/today.md');
-  assert.equal(context.name, 'today.md');
+  assert.equal(context.type, 'editor_panels_context');
+  assert.deepEqual(context.panels, [{
+    panel_id: 'editor_1',
+    index: 1,
+    position_label: 'current',
+    active_file_path: 'notes/today.md',
+    active_file_name: 'today.md',
+    open_tabs: ['notes/today.md'],
+  }]);
 });
 
 test('buildEditorContextFromEntries returns panel metadata without file bodies', () => {

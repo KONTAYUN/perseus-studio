@@ -2,11 +2,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  chatFailureHeading,
   chatFailureMetadata,
   formatRetryAfterLabel,
   isProviderRateLimitFailure,
   isResumeBlockedByFailure,
 } from '../../src/hooks/chatErrorUtils.js';
+
+test('chatFailureHeading reserves connection wording for transport failures', () => {
+  assert.equal(chatFailureHeading('agent_protocol_violation', { resumable: true }), '模型动作协议错误');
+  assert.equal(chatFailureHeading('tool_failure', { resumable: true }), '工具执行失败');
+  assert.equal(chatFailureHeading('context_window_exceeded', { resumable: true }), '上下文超出模型限制');
+  assert.equal(chatFailureHeading('provider_stream_interrupted', { resumable: true }), '连接中断');
+  assert.equal(chatFailureHeading('provider_connection_failed', { resumable: true }), '连接中断');
+});
 
 test('chatFailureMetadata normalizes snake_case run failure fields', () => {
   const metadata = chatFailureMetadata({

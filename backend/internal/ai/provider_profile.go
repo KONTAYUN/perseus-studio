@@ -1,84 +1,41 @@
 package ai
 
 import (
-	"os"
-	"strconv"
 	"strings"
 
 	"webide-backend/internal/store"
 )
 
 type providerRuntimeProfile struct {
-	Name                     string
-	ContextWindowTokens      int
-	AutoCompactEnabled       bool
-	CompactThresholdPercent  int
-	CompactReservedTokens    int
-	PruneToolOutputsEnabled  bool
-	AggressiveContextPruning bool
-	MaxHistoryMessages       int
-	MaxRecentMessageRunes    int
-	MaxOlderMessageRunes     int
-	MaxAttachmentTextRunes   int
-	MaxSkillTextRunes        int
-	MaxToolResultRunes       int
-	MaxCommandOutputRunes    int
-	MaxReadFileContentRunes  int
-	MaxWebSearchSnippetRunes int
-	MaxWebExtractRunes       int
-	PayloadSoftBudgetBytes   int
-	PayloadHardBudgetBytes   int
+	Name                    string
+	ModelID                 string
+	AdapterMode             string
+	SupportsTools           string
+	SupportsVision          string
+	CapabilitySource        string
+	ContextWindowTokens     int
+	ContextWindowSource     string
+	AutoCompactEnabled      bool
+	CompactThresholdPercent int
+	CompactReservedTokens   int
+	PruneToolOutputsEnabled bool
 }
 
 func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProfile {
+	windowTokens, windowSource := providerContextWindowProfile(provider)
 	profile := providerRuntimeProfile{
-		Name:                     "standard",
-		ContextWindowTokens:      providerContextWindowTokens(provider),
-		AutoCompactEnabled:       provider.AutoCompactEnabled,
-		CompactThresholdPercent:  provider.AutoCompactThresholdPercent,
-		CompactReservedTokens:    provider.CompactReservedTokens,
-		PruneToolOutputsEnabled:  provider.PruneToolOutputsEnabled,
-		MaxHistoryMessages:       60,
-		MaxRecentMessageRunes:    12000,
-		MaxOlderMessageRunes:     3000,
-		MaxAttachmentTextRunes:   12000,
-		MaxSkillTextRunes:        12000,
-		MaxToolResultRunes:       14000,
-		MaxCommandOutputRunes:    6000,
-		MaxReadFileContentRunes:  18000,
-		MaxWebSearchSnippetRunes: 700,
-		MaxWebExtractRunes:       12000,
-		PayloadSoftBudgetBytes:   envIntDefault("PERSEUS_PROVIDER_PAYLOAD_SOFT_BYTES", 96*1024),
-		PayloadHardBudgetBytes:   envIntDefault("PERSEUS_PROVIDER_PAYLOAD_HARD_BYTES", 128*1024),
-	}
-
-	protocol := strings.ToLower(strings.TrimSpace(provider.Protocol))
-	modelText := strings.ToLower(provider.Name + " " + provider.ModelID + " " + provider.BaseURL)
-	if protocol == "anthropic" || strings.Contains(modelText, "claude") || usesClaudeCodeProxy(provider.BaseURL) {
-		profile.Name = "claude_like"
-		profile.MaxHistoryMessages = 50
-		profile.MaxRecentMessageRunes = 10000
-		profile.MaxOlderMessageRunes = 2200
-		profile.MaxAttachmentTextRunes = 10000
-		profile.MaxSkillTextRunes = 10000
-		profile.MaxToolResultRunes = 10000
-		profile.MaxCommandOutputRunes = 4000
-		profile.MaxReadFileContentRunes = 14000
-		profile.MaxWebSearchSnippetRunes = 500
-		profile.MaxWebExtractRunes = 8000
-	}
-	if strings.Contains(modelText, "kat-coder") || strings.Contains(modelText, "claude-code-proxy") {
-		profile.Name = "strict_claude_proxy"
-		profile.MaxHistoryMessages = 44
-		profile.MaxRecentMessageRunes = 9000
-		profile.MaxOlderMessageRunes = 1800
-		profile.MaxAttachmentTextRunes = 9000
-		profile.MaxSkillTextRunes = 9000
-		profile.MaxToolResultRunes = 8500
-		profile.MaxCommandOutputRunes = 3500
-		profile.MaxReadFileContentRunes = 12000
-		profile.MaxWebSearchSnippetRunes = 450
-		profile.MaxWebExtractRunes = 7000
+		Name:                    "token_budget",
+		ModelID:                 provider.ModelID,
+		AdapterMode:             provider.AdapterMode,
+		SupportsTools:           provider.SupportsTools,
+		SupportsVision:          provider.SupportsVision,
+		CapabilitySource:        provider.CapabilitySource,
+		ContextWindowTokens:     windowTokens,
+		ContextWindowSource:     windowSource,
+		AutoCompactEnabled:      provider.AutoCompactEnabled,
+		CompactThresholdPercent: provider.AutoCompactThresholdPercent,
+		CompactReservedTokens:   provider.CompactReservedTokens,
+		PruneToolOutputsEnabled: provider.PruneToolOutputsEnabled,
 	}
 	if profile.CompactThresholdPercent == 0 {
 		profile.CompactThresholdPercent = 80
@@ -88,12 +45,6 @@ func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProf
 	}
 	if profile.CompactReservedTokens == 0 {
 		profile.CompactReservedTokens = defaultCompactReservedTokens(profile.ContextWindowTokens)
-	}
-	if profile.PayloadSoftBudgetBytes <= 0 {
-		profile.PayloadSoftBudgetBytes = 96 * 1024
-	}
-	if profile.PayloadHardBudgetBytes <= profile.PayloadSoftBudgetBytes {
-		profile.PayloadHardBudgetBytes = profile.PayloadSoftBudgetBytes + 32*1024
 	}
 	return profile
 }
@@ -121,33 +72,58 @@ func defaultCompactReservedTokens(windowTokens int) int {
 	}
 }
 
-func providerContextWindowTokens(provider store.ModelProvider) int {
-	if provider.ContextWindowTokens > 0 {
-		return provider.ContextWindowTokens
-	}
-	modelText := strings.ToLower(provider.Name + " " + provider.ModelID + " " + provider.BaseURL)
-	switch {
-	case strings.Contains(modelText, "gpt-4.1") || strings.Contains(modelText, "gpt-5"):
-		return 1000000
-	case strings.Contains(modelText, "gemini-1.5") || strings.Contains(modelText, "gemini-2"):
-		return 1000000
-	case strings.Contains(modelText, "claude"):
-		return 200000
-	case strings.Contains(modelText, "gpt-4o") || strings.Contains(modelText, "o3") || strings.Contains(modelText, "o4"):
-		return 128000
-	default:
-		return defaultContextWindowTokens
-	}
+var builtInContextWindows = map[string]int{
+	"gpt-4o":                   128000,
+	"gpt-4o-mini":              128000,
+	"gpt-4.1":                  1000000,
+	"gpt-4.1-mini":             1000000,
+	"gpt-4.1-nano":             1000000,
+	"o3":                       200000,
+	"o3-mini":                  200000,
+	"o4-mini":                  200000,
+	"claude-3-5-sonnet-latest": 200000,
+	"claude-3-7-sonnet-latest": 200000,
+	"claude-sonnet-4-20250514": 200000,
+	"claude-opus-4-20250514":   200000,
 }
 
-func envIntDefault(name string, fallback int) int {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback
+type visualTokenStrategy string
+
+const (
+	visualTokenStrategyOpenAI    visualTokenStrategy = "openai_tiles"
+	visualTokenStrategyAnthropic visualTokenStrategy = "anthropic_pixels"
+)
+
+var builtInVisualTokenStrategies = map[string]visualTokenStrategy{
+	"gpt-4o":                   visualTokenStrategyOpenAI,
+	"gpt-4o-mini":              visualTokenStrategyOpenAI,
+	"gpt-4.1":                  visualTokenStrategyOpenAI,
+	"gpt-4.1-mini":             visualTokenStrategyOpenAI,
+	"gpt-4.1-nano":             visualTokenStrategyOpenAI,
+	"o3":                       visualTokenStrategyOpenAI,
+	"o4-mini":                  visualTokenStrategyOpenAI,
+	"claude-3-5-sonnet-latest": visualTokenStrategyAnthropic,
+	"claude-3-7-sonnet-latest": visualTokenStrategyAnthropic,
+	"claude-sonnet-4-20250514": visualTokenStrategyAnthropic,
+	"claude-opus-4-20250514":   visualTokenStrategyAnthropic,
+}
+
+func providerContextWindowProfile(provider store.ModelProvider) (int, string) {
+	if provider.ContextWindowTokens > 0 {
+		return provider.ContextWindowTokens, "user"
 	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
-		return fallback
+	modelID := strings.ToLower(strings.TrimSpace(provider.ModelID))
+	if tokens, ok := builtInContextWindows[modelID]; ok {
+		return tokens, "builtin"
 	}
-	return parsed
+	return defaultContextWindowTokens, "default"
+}
+
+func providerContextWindowTokens(provider store.ModelProvider) int {
+	tokens, _ := providerContextWindowProfile(provider)
+	return tokens
+}
+
+func ContextWindowProfileInfo(provider store.ModelProvider) (int, string) {
+	return providerContextWindowProfile(provider)
 }

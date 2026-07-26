@@ -14,7 +14,7 @@ type htmlMutationPreconditionTarget struct {
 }
 
 func (r *agentRuntime) validateHTMLNoteMutationPrecondition(ctx context.Context, call agentToolCall) string {
-	if r == nil || !r.codexParityKernelActive() || !isWorkspaceMutationTool(call.Name) {
+	if r == nil || (!r.codexParityKernelActive() && !r.kernelV3Active()) || !isWorkspaceMutationTool(call.Name) {
 		return ""
 	}
 	targets, errText := htmlMutationPreconditionTargets(call)
@@ -42,16 +42,13 @@ func (r *agentRuntime) validateHTMLNoteMutationPrecondition(ctx context.Context,
 func htmlMutationPreconditionTargets(call agentToolCall) ([]htmlMutationPreconditionTarget, string) {
 	switch call.Name {
 	case "apply_workspace_patch":
-		patchText := strings.TrimSpace(call.PatchText)
-		if patchText == "" {
-			var args struct {
-				Patch string `json:"patch"`
-			}
-			if err := json.Unmarshal([]byte(executionToolArgumentsJSON(call)), &args); err != nil {
-				return nil, "tool arguments must be valid JSON: " + err.Error()
-			}
-			patchText = strings.TrimSpace(args.Patch)
+		var args struct {
+			Patch string `json:"patch"`
 		}
+		if err := json.Unmarshal([]byte(executionToolArgumentsJSON(call)), &args); err != nil {
+			return nil, "tool arguments must be valid JSON: " + err.Error()
+		}
+		patchText := strings.TrimSpace(args.Patch)
 		if patchText == "" {
 			return nil, "patch is required"
 		}

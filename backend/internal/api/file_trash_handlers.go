@@ -44,9 +44,9 @@ func (s *Server) handleFilesTrashRestore(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		if errors.Is(err, workspace.ErrPathExists) {
 			writeJSON(w, http.StatusConflict, map[string]any{
-				"error":    "原路径已存在，是否覆盖？",
-				"conflict": true,
-				"path":     req.Path,
+				"error": "原路径已存在，是否覆盖？",
+				"code":  "path_exists",
+				"path":  req.Path,
 			})
 			return
 		}

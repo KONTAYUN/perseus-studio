@@ -38,6 +38,23 @@ export function isProviderRateLimitFailure(failureClass = '') {
   return value === 'provider_rate_limited' || /^provider_(tpm|rpm|quota|unknown)_rate_limited$/.test(value);
 }
 
+export function chatFailureHeading(failureClass = '', { resumable = false, budgetExhausted = false } = {}) {
+  if (budgetExhausted) return '达到轮次上限，已保留当前进度';
+  const value = String(failureClass || '');
+  if (value === 'agent_protocol_violation' || value === 'provider_protocol_error') return '模型动作协议错误';
+  if (value === 'agent_tool_error_loop' || value === 'tool_failure') return '工具执行失败';
+  if (value === 'context_window_exceeded') return '上下文超出模型限制';
+  if (isProviderRateLimitFailure(value) || value === 'provider_quota_exhausted') return '模型供应商限流';
+  if (value === 'provider_capability_unsupported') return '当前模型不支持所需能力';
+  if (value === 'provider_auth_failed') return '模型供应商认证失败';
+  if (value === 'provider_invalid_request') return '模型请求无效';
+  if (value === 'provider_model_unavailable') return '当前模型不可用';
+  if (value === 'provider_overloaded') return '模型供应商繁忙';
+  if (value === 'provider_connection_failed' || value === 'provider_stream_interrupted') return '连接中断';
+  if (value === 'local_run_persistence' || value === 'history_integrity_error') return '本地运行状态保存失败';
+  return resumable ? '任务未完成，可继续本轮' : '回复失败';
+}
+
 export function formatRetryAfterLabel(retryAfterMs = 0, resetAt = '') {
   const ms = Number(retryAfterMs) || 0;
   if (ms > 0) {

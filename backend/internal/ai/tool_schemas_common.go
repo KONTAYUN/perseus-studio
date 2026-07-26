@@ -9,18 +9,11 @@ func openAIToolsForLoadedToolsets(loaded map[string]bool, includeLoader bool, ro
 	if len(roles) > 0 {
 		role = normalizeRunUserRole(roles[0])
 	}
-	return openAIToolsForLoadedToolsetsWithNativePatch(loaded, includeLoader, role, false)
-}
-
-func openAIToolsForLoadedToolsetsWithNativePatch(loaded map[string]bool, includeLoader bool, role string, nativePatch bool) []map[string]any {
 	var tools []map[string]any
 	for _, name := range providerVisibleToolNames(loaded, includeLoader, role) {
 		if tool := openAIToolByName(name); tool != nil {
 			tools = append(tools, tool)
 		}
-	}
-	if nativePatch && normalizeModelActionLoadedToolsets(loaded)["workspace"] {
-		tools = append(tools, openAIWorkspaceToolByName("apply_workspace_patch"))
 	}
 	return tools
 }
@@ -47,8 +40,12 @@ func openAIToolByName(name string) map[string]any {
 	switch name {
 	case "attempt_completion":
 		return openAICompletionTool()
-	case "ask_followup_question":
-		return openAIQuestionTool()
+	case requestUserInputToolName:
+		return openAIUserInputTool()
+	case requestUserChoiceToolName:
+		return openAIUserChoiceTool()
+	case "update_task_plan":
+		return openAITaskPlanTool()
 	case "load_perseus_toolset":
 		return openAIToolsetLoaderTool()
 	case "run_workspace_command":
@@ -68,8 +65,12 @@ func anthropicToolByName(name string) map[string]any {
 	switch name {
 	case "attempt_completion":
 		return anthropicCompletionTool()
-	case "ask_followup_question":
-		return anthropicQuestionTool()
+	case requestUserInputToolName:
+		return anthropicUserInputTool()
+	case requestUserChoiceToolName:
+		return anthropicUserChoiceTool()
+	case "update_task_plan":
+		return anthropicTaskPlanTool()
 	case "load_perseus_toolset":
 		return anthropicToolsetLoaderTool()
 	case "run_workspace_command":

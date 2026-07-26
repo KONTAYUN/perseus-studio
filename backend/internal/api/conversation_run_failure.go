@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -25,10 +26,13 @@ func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conve
 	eventType := "run_failed"
 	level := "error"
 	failure := ai.FailureMetadataFromError(err)
-	if strings.Contains(failure.FailureClass, "rate_limited") || failure.FailureClass == "provider_quota_exhausted" {
+	if failure.FailureClass == "provider_rate_limited" ||
+		failure.FailureClass == "provider_tpm_rate_limited" ||
+		failure.FailureClass == "provider_rpm_rate_limited" ||
+		failure.FailureClass == "provider_quota_exhausted" {
 		stage = "rate_limited"
 	}
-	if ctx.Err() != nil || strings.Contains(strings.ToLower(message), "context canceled") {
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
 		status = store.AgentRunCanceled
 		stage = "canceled"
 		eventType = "run_canceled"

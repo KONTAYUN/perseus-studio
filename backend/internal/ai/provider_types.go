@@ -32,6 +32,7 @@ type openAIToolCall struct {
 }
 
 type openAIResponse struct {
+	ID      string         `json:"id"`
 	Error   any            `json:"error"`
 	Choices []openAIChoice `json:"choices"`
 	Usage   map[string]any `json:"usage"`
@@ -64,6 +65,7 @@ func (m openAIMessage) toRuntimeMessage() map[string]any {
 }
 
 type anthropicResponse struct {
+	ID         string           `json:"id"`
 	Error      any              `json:"error"`
 	Content    []map[string]any `json:"content"`
 	StopReason string           `json:"stop_reason"`
@@ -115,7 +117,6 @@ func sanitizeAnthropicVisibleTextBlocks(content []map[string]any) []map[string]a
 		}
 		text, _ := block["text"].(string)
 		visible := filter.Feed(text)
-		visible, _, _ = extractWorkspacePatchBlock(visible)
 		if strings.TrimSpace(visible) == "" {
 			continue
 		}
@@ -127,10 +128,6 @@ func sanitizeAnthropicVisibleTextBlocks(content []map[string]any) []map[string]a
 		next = append(next, clean)
 	}
 	if tail := filter.Close(); strings.TrimSpace(tail) != "" {
-		tail, _, _ = extractWorkspacePatchBlock(tail)
-		if strings.TrimSpace(tail) == "" {
-			return next
-		}
 		next = append(next, map[string]any{"type": "text", "text": tail})
 	}
 	return next

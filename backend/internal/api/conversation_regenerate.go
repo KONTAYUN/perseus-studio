@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -73,8 +74,12 @@ func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "selected model is not available")
 		return
 	}
-	attachmentPayloads := payloadsFromStoredMessageAttachments(lastUser)
+	attachmentPayloads := s.payloadsFromStoredMessageAttachments(r.Context(), userID, lastUser)
 	segments := &assistantSegmentBuffer{}
+	if err := s.deleteConversationMessagesAfter(r.Context(), userID, conversationID, lastUser.ID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	reply, err := s.ai.GenerateReply(r.Context(), conversationID, lastUser.ID, conversation.SelectedModelProviderID, history, attachmentPayloads, ai.RunOptions{
 		UserID:       userID,
@@ -100,11 +105,6 @@ func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Requ
 	if len(segments.Items) == 0 && strings.TrimSpace(reply.Content) != "" {
 		segments.Items = append(segments.Items, strings.TrimSpace(reply.Content))
 	}
-	if err := s.conversations.DeleteMessagesAfter(r.Context(), userID, conversationID, lastUser.ID); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
 	for index, content := range segments.Items {
 		if reply.BackgroundTask == nil && index == len(segments.Items)-1 {
 			break
@@ -164,8 +164,8 @@ func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Requ
 	}
 
 	assistantAttachments := "[]"
-	if len(reply.ToolEvents) > 0 {
-		rawToolEvents, _ := json.Marshal(reply.ToolEvents)
+	if len(reply.PresentationEvents) > 0 {
+		rawToolEvents, _ := json.Marshal(reply.PresentationEvents)
 		assistantAttachments = string(rawToolEvents)
 	}
 	assistantContent := strings.TrimSpace(reply.Content)
@@ -193,7 +193,7 @@ func lastUserMessage(messages []store.Message) *store.Message {
 	return nil
 }
 
-func payloadsFromStoredMessageAttachments(message store.Message) []ai.AttachmentPayload {
+func (s *Server) payloadsFromStoredMessageAttachments(ctx context.Context, userID string, message store.Message) []ai.AttachmentPayload {
 	var metadata []chatAttachmentMetadata
 	if err := json.Unmarshal([]byte(message.AttachmentsJSON), &metadata); err != nil {
 		return nil
@@ -230,6 +230,13 @@ func payloadsFromStoredMessageAttachments(message store.Message) []ai.Attachment
 				SkillID:     skillID,
 				Description: item.Description,
 			})
+		}
+	}
+	if stored, err := s.conversations.ListMessageChatAttachments(ctx, userID, message.ID); err == nil {
+		for _, item := range stored {
+			if payload, loadErr := s.chatAttachmentPayload(item, message.ID); loadErr == nil {
+				payloads = append(payloads, payload)
+			}
 		}
 	}
 	return payloads

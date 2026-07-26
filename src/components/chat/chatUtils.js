@@ -84,7 +84,7 @@ function toolCallProgressKey(item = {}) {
 export function visibleMessageAttachments(message) {
   return (message.attachments || []).filter(
     (item) =>
-      item?.tool_name !== 'ask_followup_question' &&
+      !isUserRequestToolName(item?.tool_name) &&
       item?.type !== 'phase_message' &&
       item?.kind !== 'phase_message' &&
       item?.type !== 'current_file' &&
@@ -125,6 +125,8 @@ export function formatDate(value) {
 }
 
 export function formatToolLabel(item) {
+  if (item.tool_name === 'request_user_input') return '等待用户输入';
+  if (item.tool_name === 'request_user_choice') return '等待用户选择';
   if (item.tool_name === 'ask_followup_question') return '已询问用户';
   const byKind = formatToolLabelByKind(item.status_kind || item.statusKind || '');
   if (byKind) return byKind;
@@ -166,7 +168,7 @@ export function completedActionItems(message) {
   if (!message || message.pending || message.role !== 'assistant') return [];
   const seen = new Set();
   return visibleMessageAttachments(message)
-    .filter((item) => item?.tool_name && item.tool_name !== 'ask_followup_question' && (item.status === 'success' || item.status === 'already_applied'))
+    .filter((item) => item?.tool_name && !isUserRequestToolName(item.tool_name) && (item.status === 'success' || item.status === 'already_applied'))
     .map((item, index) => {
       const label = formatToolLabel(item);
       const key = `${item.tool_name}:${label}`;
@@ -181,41 +183,62 @@ export function completedActionItems(message) {
     .filter(Boolean);
 }
 
-export function followupQuestionAttachment(message) {
-  if (!message || message.role !== 'assistant' || message.pending) return null;
+export function userRequestAttachment(message) {
+  if (!message || message.role !== 'assistant' || message.pending || !isUserRequestMessageKind(message.kind)) return null;
   const item = (message.attachments || []).find(
-    (attachment) => attachment?.tool_name === 'ask_followup_question' && attachment?.status === 'success'
+    (attachment) => isUserRequestToolName(attachment?.tool_name) &&
+      ['waiting_for_user', 'answered', 'success'].includes(attachment?.status)
   );
   if (!item || !(item.question || '').trim()) return null;
+  const requestKind = userRequestKind(item.tool_name);
   const seen = new Set();
-  const options = (item.options || [])
+  const options = (requestKind === 'input' ? [] : item.options || [])
     .map((option) => String(option || '').trim())
     .filter((option) => {
       if (!option || seen.has(option)) return false;
       seen.add(option);
       return true;
     })
-    .slice(0, 4);
+    .slice(0, requestKind === 'choice' ? 3 : 4);
   return {
     question: item.question.trim(),
     options,
-    allowFreeform: item.allow_freeform !== false,
+    requestKind,
+    toolName: item.tool_name,
+    status: item.status === 'answered' ? 'answered' : 'waiting_for_user',
+    toolCallId: item.tool_call_id || '',
+    runId: message.runId || message.meta?.run_id || '',
+    answerMessageId: item.answer_message_id || '',
   };
 }
 
-export function pendingFollowupQuestion(messages) {
+export function pendingUserRequest(messages) {
   for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (!message || message.error) continue;
     if (message.role === 'user') return null;
     if (message.role !== 'assistant') continue;
-    const question = followupQuestionAttachment(message);
-    if (!question) continue;
+    const request = userRequestAttachment(message);
+    if (!request || request.status !== 'waiting_for_user') continue;
     return {
-      ...question,
+      ...request,
       messageId: message.id,
       createdAt: message.created_at || '',
     };
   }
   return null;
+}
+
+export function isUserRequestToolName(toolName = '') {
+  return toolName === 'request_user_input' || toolName === 'request_user_choice' || toolName === 'ask_followup_question';
+}
+
+function isUserRequestMessageKind(kind = '') {
+  return kind === 'user_input_request' || kind === 'user_choice_request' || kind === 'followup_question';
+}
+
+function userRequestKind(toolName = '') {
+  if (toolName === 'request_user_input') return 'input';
+  if (toolName === 'request_user_choice') return 'choice';
+  return 'legacy_followup';
 }

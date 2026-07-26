@@ -9,14 +9,22 @@ export function filesToChatAttachments(fileList, randomSuffix = () => Math.rando
       seenInBatch.add(key);
       return true;
     })
-    .map((file) => ({
-      id: `${attachmentFingerprint(file)}-${randomSuffix(file)}`,
-      file,
-      name: file.name,
-      size: file.size,
-      type: file.type || 'unknown',
-      fingerprint: attachmentFingerprint(file),
-    }));
+    .map((file) => {
+      const id = `${attachmentFingerprint(file)}-${randomSuffix(file)}`;
+      const isImage = file.type?.startsWith('image/');
+      return {
+        id,
+        client_id: id,
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'unknown',
+        kind: isImage ? 'image' : 'file',
+        upload_status: isImage ? 'pending' : 'local',
+		preview_url: isImage && globalThis.URL?.createObjectURL ? URL.createObjectURL(file) : '',
+        fingerprint: attachmentFingerprint(file),
+      };
+    });
 }
 
 export function mergeChatAttachments(current, nextFiles) {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
 )
 
@@ -32,6 +33,7 @@ func (s *Server) handleModelProviders(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		_, item.ContextWindowSource = ai.ContextWindowProfileInfo(item)
 		writeJSON(w, http.StatusCreated, item)
 	default:
 		http.NotFound(w, r)
@@ -60,6 +62,7 @@ func (s *Server) handleModelProviderRoutes(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		_, item.ContextWindowSource = ai.ContextWindowProfileInfo(item)
 		writeJSON(w, http.StatusOK, item)
 		return
 	}
@@ -89,6 +92,7 @@ func (s *Server) handleModelProviderRoutes(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		_, item.ContextWindowSource = ai.ContextWindowProfileInfo(item)
 		writeJSON(w, http.StatusOK, item)
 	case http.MethodDelete:
 		if !s.requireAdminOrWriteForbidden(w, r) {
@@ -139,6 +143,12 @@ func (s *Server) handleDiscoverModelProviders(w http.ResponseWriter, r *http.Req
 		if req.Protocol == "" {
 			req.Protocol = existing.Protocol
 		}
+		if req.AdapterMode == "" {
+			req.AdapterMode = existing.AdapterMode
+		}
+		if req.AuthMode == "" {
+			req.AuthMode = existing.AuthMode
+		}
 	}
 
 	models, err := discoverModels(r, req)
@@ -178,6 +188,12 @@ func (s *Server) handleTestModelProvider(w http.ResponseWriter, r *http.Request)
 		}
 		if req.Protocol == "" {
 			req.Protocol = existing.Protocol
+		}
+		if req.AdapterMode == "" {
+			req.AdapterMode = existing.AdapterMode
+		}
+		if req.AuthMode == "" {
+			req.AuthMode = existing.AuthMode
 		}
 		if req.ModelID == "" {
 			req.ModelID = existing.ModelID

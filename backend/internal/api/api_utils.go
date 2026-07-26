@@ -158,7 +158,7 @@ func detectAttachmentMIME(name string, raw []byte) string {
 
 func isSupportedImageMIME(mimeType string) bool {
 	switch strings.ToLower(mimeType) {
-	case "image/png", "image/jpeg", "image/webp":
+	case "image/png", "image/jpeg", "image/webp", "image/gif":
 		return true
 	default:
 		return false

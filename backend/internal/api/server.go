@@ -106,6 +106,7 @@ type updateConversationRequest struct {
 type createConversationMessageRequest struct {
 	Content         string          `json:"content"`
 	AttachmentsJSON json.RawMessage `json:"attachments"`
+	AttachmentIDs   []string        `json:"attachment_ids"`
 	ModelProviderID string          `json:"model_provider_id"`
 	ThinkingMode    string          `json:"thinking_mode"`
 }
@@ -137,6 +138,13 @@ type chatAttachmentMetadata struct {
 	Size              int64  `json:"size"`
 	Type              string `json:"type"`
 	Kind              string `json:"kind"`
+	MIMEType          string `json:"mime_type,omitempty"`
+	Width             int    `json:"width,omitempty"`
+	Height            int    `json:"height,omitempty"`
+	Status            string `json:"status,omitempty"`
+	Available         bool   `json:"available"`
+	ContentURL        string `json:"content_url,omitempty"`
+	DownloadURL       string `json:"download_url,omitempty"`
 	Path              string `json:"path,omitempty"`
 	FileType          string `json:"file_type,omitempty"`
 	SkillID           string `json:"skill_id,omitempty"`
@@ -221,6 +229,8 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/skills/", s.handleSkillRoutes)
 	s.mux.HandleFunc("/api/conversations", s.handleConversations)
 	s.mux.HandleFunc("/api/conversations/", s.handleConversationRoutes)
+	s.mux.HandleFunc("/api/chat-attachments", s.handleChatAttachments)
+	s.mux.HandleFunc("/api/chat-attachments/", s.handleChatAttachmentRoutes)
 	s.mux.HandleFunc("/api/agent-runs/", s.handleAgentRunRoutes)
 	s.mux.HandleFunc("/api/diagnostics/logs", s.handleDiagnosticLogs)
 	s.mux.HandleFunc("/api/diagnostics/logs/", s.handleDiagnosticLogRoutes)
@@ -321,6 +331,10 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{"error": message})
+}
+
+func writeCodedError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]any{"error": message, "code": code})
 }
 
 func writeAIError(w http.ResponseWriter, status int, err error) {

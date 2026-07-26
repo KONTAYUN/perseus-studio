@@ -2,7 +2,6 @@ package ai
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -14,7 +13,7 @@ func (r *agentRuntime) actionSelectionState(targetPaths []string) ActionSelectio
 	state.WorkspaceLoaded = normalizeModelActionLoadedToolsets(r.loadedToolsets)["workspace"]
 	state.HasVerifiedMutation = r.hasSuccessfulWorkspaceMutation()
 	state.VerifiedChangedPaths = r.verifiedWorkspaceChangedPaths()
-	state.NativePatchToolAvailable = providerNativePatchEnabled(r.provider)
+	state.StructuredPatchToolAvailable = state.WorkspaceLoaded
 	state.DirectoryConditionsSatisfied = dedupeStrings(r.actionProgress.ConditionSatisfiedPaths)
 	state.TargetPaths = normalizedProviderPaths(targetPaths)
 	if len(state.TargetPaths) == 0 && r.lastToolFailure.Target != "" {
@@ -63,11 +62,11 @@ func (r *agentRuntime) recordConditionSatisfiedFromToolResult(call agentToolCall
 	r.recordConditionSatisfiedPath(firstNonEmpty(payload.Path, event.Path))
 }
 
-func (r *agentRuntime) recordConditionSatisfiedFromToolError(toolName, argumentsJSON, message string) {
+func (r *agentRuntime) recordConditionSatisfiedFromToolError(toolName, argumentsJSON string, err error) {
 	if r == nil || strings.TrimSpace(toolName) != "manage_workspace_path" {
 		return
 	}
-	if toolFailureClass(toolName, fmt.Errorf("%s", message)) != "workspace_path_already_exists" {
+	if normalizeToolError(err).Code != ToolErrorPathExists {
 		return
 	}
 	var payload struct {
@@ -117,7 +116,7 @@ func (r *agentRuntime) lastFailureConditionSatisfied() bool {
 
 func (r *agentRuntime) narrowedAllowedNextActions(state ActionSelectionState) []string {
 	if state.RequiresWorkspaceMutation && !state.HasVerifiedMutation {
-		actions := []string{"apply_workspace_patch", "ask_followup_question"}
+		actions := []string{"apply_workspace_patch", requestUserInputToolName, requestUserChoiceToolName}
 		if !r.hasAnySuccessfulReadOrSearch() {
 			actions = append([]string{"read_workspace_note_view", "read_workspace_text", "read_workspace_files", "find_workspace_files", "search_workspace_text"}, actions...)
 		}

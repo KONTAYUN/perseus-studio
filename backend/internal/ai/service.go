@@ -28,9 +28,13 @@ type Service struct {
 
 type AttachmentPayload struct {
 	ID                string
+	MessageID         string
 	Name              string
 	Size              int64
 	MIMEType          string
+	Width             int
+	Height            int
+	StorageKey        string
 	Kind              string
 	Path              string
 	FileType          string
@@ -55,36 +59,41 @@ type EditorPanelContext struct {
 }
 
 type ToolEvent struct {
-	Type          string              `json:"type,omitempty"`
-	ToolCallID    string              `json:"tool_call_id,omitempty"`
-	ToolName      string              `json:"tool_name"`
-	StatusKind    string              `json:"status_kind,omitempty"`
-	Label         string              `json:"label"`
-	Status        string              `json:"status"`
-	TargetSummary string              `json:"target_summary,omitempty"`
-	OperationHash string              `json:"operation_hash,omitempty"`
-	Question      string              `json:"question,omitempty"`
-	Options       []string            `json:"options,omitempty"`
-	AllowFreeform *bool               `json:"allow_freeform,omitempty"`
-	SkillID       string              `json:"skill_id,omitempty"`
-	Path          string              `json:"path,omitempty"`
-	OldPath       string              `json:"old_path,omitempty"`
-	NewPath       string              `json:"new_path,omitempty"`
-	ChangedPaths  []string            `json:"changed_paths,omitempty"`
-	Moved         []WorkspacePathMove `json:"moved,omitempty"`
-	Operation     string              `json:"operation,omitempty"`
-	VersionID     string              `json:"version_id,omitempty"`
-	Hash          string              `json:"hash,omitempty"`
-	Command       string              `json:"command,omitempty"`
-	Cwd           string              `json:"cwd,omitempty"`
-	Stdout        string              `json:"stdout,omitempty"`
-	Stderr        string              `json:"stderr,omitempty"`
-	ExitCode      *int                `json:"exit_code,omitempty"`
-	TimedOut      bool                `json:"timed_out,omitempty"`
-	Provider      string              `json:"provider,omitempty"`
-	URL           string              `json:"url,omitempty"`
-	Error         string              `json:"error,omitempty"`
-	DurationMS    int64               `json:"duration_ms,omitempty"`
+	Type              string              `json:"type,omitempty"`
+	ToolCallID        string              `json:"tool_call_id,omitempty"`
+	ToolName          string              `json:"tool_name"`
+	StatusKind        string              `json:"status_kind,omitempty"`
+	Label             string              `json:"label"`
+	Status            string              `json:"status"`
+	TargetSummary     string              `json:"target_summary,omitempty"`
+	OperationHash     string              `json:"operation_hash,omitempty"`
+	Question          string              `json:"question,omitempty"`
+	Options           []string            `json:"options,omitempty"`
+	AllowFreeform     *bool               `json:"allow_freeform,omitempty"`
+	AnswerMessageID   string              `json:"answer_message_id,omitempty"`
+	SkillID           string              `json:"skill_id,omitempty"`
+	Path              string              `json:"path,omitempty"`
+	OldPath           string              `json:"old_path,omitempty"`
+	NewPath           string              `json:"new_path,omitempty"`
+	ChangedPaths      []string            `json:"changed_paths,omitempty"`
+	Moved             []WorkspacePathMove `json:"moved,omitempty"`
+	Operation         string              `json:"operation,omitempty"`
+	VersionID         string              `json:"version_id,omitempty"`
+	Hash              string              `json:"hash,omitempty"`
+	Command           string              `json:"command,omitempty"`
+	Cwd               string              `json:"cwd,omitempty"`
+	Stdout            string              `json:"stdout,omitempty"`
+	Stderr            string              `json:"stderr,omitempty"`
+	ExitCode          *int                `json:"exit_code,omitempty"`
+	TimedOut          bool                `json:"timed_out,omitempty"`
+	Provider          string              `json:"provider,omitempty"`
+	URL               string              `json:"url,omitempty"`
+	Error             string              `json:"error,omitempty"`
+	ErrorCode         ToolErrorCode       `json:"error_code,omitempty"`
+	ErrorCategory     string              `json:"error_category,omitempty"`
+	Retryable         bool                `json:"retryable,omitempty"`
+	RecommendedAction string              `json:"recommended_action,omitempty"`
+	DurationMS        int64               `json:"duration_ms,omitempty"`
 }
 
 type WorkspacePathMove struct {
@@ -112,13 +121,23 @@ type WebExtractResult struct {
 }
 
 type Reply struct {
-	Content          string                 `json:"content"`
-	ToolEvents       []ToolEvent            `json:"tool_events,omitempty"`
-	BackgroundTask   *BackgroundTaskRequest `json:"background_task,omitempty"`
-	IncompleteReason string                 `json:"incomplete_reason,omitempty"`
-	Recoverable      bool                   `json:"recoverable,omitempty"`
-	Budget           *BudgetExhaustionInfo  `json:"budget,omitempty"`
+	Content            string                 `json:"content"`
+	RunEvents          []ToolEvent            `json:"run_events,omitempty"`
+	PresentationEvents []ToolEvent            `json:"presentation_events,omitempty"`
+	BackgroundTask     *BackgroundTaskRequest `json:"background_task,omitempty"`
+	TerminalState      AgentTerminationState  `json:"terminal_state,omitempty"`
+	IncompleteReason   string                 `json:"incomplete_reason,omitempty"`
+	Recoverable        bool                   `json:"recoverable,omitempty"`
+	Budget             *BudgetExhaustionInfo  `json:"budget,omitempty"`
 }
+
+type AgentTerminationState string
+
+const (
+	AgentTerminationCompleted      AgentTerminationState = "completed"
+	AgentTerminationWaitingForUser AgentTerminationState = "waiting_for_user"
+	AgentTerminationDelegated      AgentTerminationState = "delegated"
+)
 
 type ConversationTitleResult struct {
 	Title string `json:"title"`
@@ -139,8 +158,6 @@ type RunOptions struct {
 	OnAssistantMessageCompleted func(messageID string, finalContent string, segmentIndex int)
 	OnAssistantMessageDiscarded func(messageID string, reason string, segmentIndex int)
 	OnAssistantToolBoundary     func()
-	OnCompletionResultDelta     func(delta string)
-	OnCompletionResultDiscard   func()
 	OnProviderAttempt           func()
 }
 
@@ -227,6 +244,11 @@ func (s *Service) GenerateTaskReply(ctx context.Context, conversationID, message
 
 func (s *Service) generateReply(ctx context.Context, conversationID, messageID, modelProviderID string, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {
 	opts.UserRole = normalizeRunUserRole(opts.UserRole)
+	var err error
+	attachments, err = s.hydrateStoredImageAttachments(ctx, opts.UserID, conversationID, attachments)
+	if err != nil {
+		return Reply{}, err
+	}
 	attachments = s.enrichSelectedSkillAttachmentsForRole(ctx, opts.UserID, opts.UserRole, attachments)
 	opts.Attachments = attachments
 	opts.ThinkingMode = normalizeThinkingMode(opts.ThinkingMode)
@@ -240,8 +262,6 @@ func (s *Service) generateReply(ctx context.Context, conversationID, messageID, 
 	if state, limited := s.activeProviderRateLimitState(opts.UserID, provider.ID, provider.ModelID, time.Now().UTC()); limited {
 		return Reply{}, &ProviderRateLimitError{State: state, Err: fmt.Errorf("provider cooldown is active")}
 	}
-	messages = s.prepareMessagesWithConversationSummary(ctx, conversationID, provider, messages, opts)
-
 	switch provider.Protocol {
 	case "openai":
 		return s.generateOpenAI(ctx, conversationID, messageID, provider, messages, attachments, opts)

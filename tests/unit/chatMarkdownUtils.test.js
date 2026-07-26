@@ -57,3 +57,14 @@ test('isLikelyBlockCode distinguishes inline code from fenced blocks', () => {
   assert.equal(isLikelyBlockCode('', 'echo ok\n'), true);
   assert.equal(isLikelyBlockCode('', ['echo', '\nnext']), true);
 });
+
+test('fenced bash command keeps its language label and clean copy payload', () => {
+  const className = 'hljs language-bash';
+  const highlightedChildren = ['ssh -p 52822 ', { props: { children: 'root@example.com' } }, '\n'];
+  const language = languageFromClassName(className);
+  const code = normalizeCodeForCopy(reactNodeToPlainText(highlightedChildren));
+
+  assert.equal(displayLanguageName(language), 'Bash');
+  assert.equal(isLikelyBlockCode(className, highlightedChildren), true);
+  assert.equal(code, 'ssh -p 52822 root@example.com');
+});

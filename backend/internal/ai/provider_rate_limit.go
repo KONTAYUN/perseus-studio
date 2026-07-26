@@ -12,7 +12,9 @@ import (
 	"webide-backend/internal/store"
 )
 
-const defaultProviderRateLimitCooldown = 60 * time.Second
+const defaultProviderRateLimitCooldown = 20 * time.Second
+
+var providerRateLimitCooldown = defaultProviderRateLimitCooldown
 
 type ProviderRateLimitKind string
 
@@ -85,13 +87,16 @@ func (e *ProviderRateLimitError) Unwrap() error {
 }
 
 type AgentRunFailureMetadata struct {
-	FailureClass      string    `json:"failure_class,omitempty"`
-	RetryAfterMS      int64     `json:"retry_after_ms,omitempty"`
-	ResetAt           time.Time `json:"reset_at,omitempty"`
-	ProviderID        string    `json:"provider_id,omitempty"`
-	ModelID           string    `json:"model_id,omitempty"`
-	CanResumeNow      bool      `json:"can_resume_now"`
-	RecommendedAction string    `json:"recommended_action,omitempty"`
+	FailureClass         string    `json:"failure_class,omitempty"`
+	FailureCode          string    `json:"failure_code,omitempty"`
+	ClassificationSource string    `json:"classification_source,omitempty"`
+	Retryable            bool      `json:"retryable"`
+	RetryAfterMS         int64     `json:"retry_after_ms,omitempty"`
+	ResetAt              time.Time `json:"reset_at,omitempty"`
+	ProviderID           string    `json:"provider_id,omitempty"`
+	ModelID              string    `json:"model_id,omitempty"`
+	CanResumeNow         bool      `json:"can_resume_now"`
+	RecommendedAction    string    `json:"recommended_action,omitempty"`
 }
 
 func FailureMetadataFromError(err error) AgentRunFailureMetadata {
@@ -99,9 +104,35 @@ func FailureMetadataFromError(err error) AgentRunFailureMetadata {
 	if err == nil {
 		return metadata
 	}
+	var runtimeErr *AgentRuntimeError
+	if errors.As(err, &runtimeErr) {
+		metadata.FailureClass = string(runtimeErr.Code)
+		metadata.FailureCode = string(runtimeErr.Code)
+		metadata.ClassificationSource = "agent_runtime"
+		metadata.Retryable = runtimeErr.Retryable
+		metadata.CanResumeNow = runtimeErr.Retryable
+		if runtimeErr.Retryable {
+			metadata.RecommendedAction = "continue"
+		} else {
+			metadata.RecommendedAction = "review_diagnostic"
+		}
+		return metadata
+	}
+	var toolErr *ToolError
+	if errors.As(err, &toolErr) {
+		metadata.FailureClass = "tool_failure"
+		metadata.FailureCode = string(toolErr.Code)
+		metadata.ClassificationSource = "tool_error"
+		metadata.Retryable = toolErr.Retryable
+		metadata.CanResumeNow = toolErr.Retryable
+		metadata.RecommendedAction = toolErr.RecommendedAction
+		return metadata
+	}
 	var limited *ProviderRateLimitError
 	if errors.As(err, &limited) {
 		metadata.FailureClass = rateLimitFailureClass(limited.State.Kind)
+		metadata.ClassificationSource = "rate_limit_state"
+		metadata.Retryable = false
 		metadata.RetryAfterMS = limited.State.Remaining(time.Now().UTC()).Milliseconds()
 		metadata.ResetAt = limited.State.ResetAt
 		metadata.ProviderID = limited.State.ProviderID
@@ -112,21 +143,32 @@ func FailureMetadataFromError(err error) AgentRunFailureMetadata {
 	}
 	if isContextOverflowError(err) {
 		metadata.FailureClass = "context_window_exceeded"
+		metadata.ClassificationSource = classifyProviderFailure(err).ClassificationSource
 		metadata.RecommendedAction = "compact_then_continue"
-		return metadata
-	}
-	if class := providerTransportFailureClass(err); class != "" {
-		metadata.FailureClass = class
-		metadata.RecommendedAction = "continue"
 		return metadata
 	}
 	var providerErr *ProviderResponseError
 	if errors.As(err, &providerErr) {
-		metadata.FailureClass = providerResponseFailureClass(providerErr, err)
-		if metadata.FailureClass == "" {
-			metadata.FailureClass = "provider_http_error"
+		failure := classifyProviderResponseFailure(providerErr)
+		metadata.FailureClass = string(failure.Class)
+		metadata.FailureCode = failure.Code
+		metadata.ClassificationSource = failure.ClassificationSource
+		metadata.Retryable = failure.Retryable
+		if failure.Class == ProviderFailureCapabilityUnsupported {
+			metadata.CanResumeNow = false
+			metadata.RecommendedAction = "review_model_capabilities"
+		} else {
+			metadata.RecommendedAction = "review_provider_error"
 		}
-		metadata.RecommendedAction = "review_provider_error"
+		return metadata
+	}
+	failure := classifyProviderFailure(err)
+	if failure.Class != "" && failure.Class != ProviderFailureUnknown {
+		metadata.FailureClass = string(failure.Class)
+		metadata.FailureCode = failure.Code
+		metadata.ClassificationSource = failure.ClassificationSource
+		metadata.Retryable = failure.Retryable
+		metadata.RecommendedAction = "continue"
 	}
 	return metadata
 }
@@ -151,13 +193,12 @@ func (s *Service) classifyProviderError(opts RunOptions, provider store.ModelPro
 	if _, ok := ProviderRateLimitStateFromError(err); ok {
 		return err
 	}
+	failure := classifyProviderFailure(err)
+	if failure.Class != ProviderFailureRateLimited && failure.Class != ProviderFailureQuotaExhausted {
+		return err
+	}
 	var providerErr *ProviderResponseError
-	if !errors.As(err, &providerErr) && !looksLikeProviderRateLimit(err.Error()) {
-		return err
-	}
-	if providerErr != nil && providerErr.StatusCode != http.StatusTooManyRequests && !looksLikeProviderRateLimit(providerErr.Error()) {
-		return err
-	}
+	_ = errors.As(err, &providerErr)
 	now := time.Now().UTC()
 	state := ProviderRateLimitState{
 		Kind:         classifyProviderRateLimitKind(err),
@@ -173,15 +214,12 @@ func (s *Service) classifyProviderError(opts RunOptions, provider store.ModelPro
 			state.StatusCode = providerErr.StatusCode
 		}
 		state.RequestID = providerErr.RequestID
-		state.ResetAt = parseProviderRateLimitReset(providerErr.RetryAfter, providerErr.RateLimitReset, now)
 	}
-	if state.ResetAt.IsZero() {
-		state.ResetAt = now.Add(defaultProviderRateLimitCooldown)
-		state.ResetTimeInferred = true
-	}
+	state.ResetAt = now.Add(providerRateLimitCooldown)
+	state.ResetTimeInferred = true
 	state.RetryAfterMS = state.Remaining(now).Milliseconds()
 	s.setProviderRateLimitState(state)
-	emitToolLifecycleEvent(opts, "provider_rate_limited", "error", providerRateLimitEventPayload(state, now))
+	emitToolLifecycleEvent(opts, "provider_rate_limited", "warn", providerRateLimitEventPayload(state, now))
 	emitToolLifecycleEvent(opts, "provider_cooldown_updated", "warn", providerRateLimitEventPayload(state, now))
 	return &ProviderRateLimitError{State: state, Err: err}
 }
@@ -256,22 +294,20 @@ func providerRateLimitEventPayload(state ProviderRateLimitState, now time.Time) 
 }
 
 func classifyProviderRateLimitKind(err error) ProviderRateLimitKind {
-	text := strings.ToLower(errString(err))
-	switch {
-	case strings.Contains(text, "insufficient_quota") || strings.Contains(text, "quota exceeded") || strings.Contains(text, "额度"):
+	var providerErr *ProviderResponseError
+	if !errors.As(err, &providerErr) {
+		return ProviderRateLimitUnknown
+	}
+	switch strings.ToLower(strings.TrimSpace(providerErr.ErrorCode)) {
+	case "insufficient_quota", "quota_exceeded", "billing_hard_limit_reached":
 		return ProviderRateLimitQuota
-	case strings.Contains(text, "tpm") || strings.Contains(text, "token per minute") || strings.Contains(text, "tokens per minute"):
+	case "tpm_limit_exceeded", "tokens_per_minute_limit_exceeded":
 		return ProviderRateLimitTPM
-	case strings.Contains(text, "rpm") || strings.Contains(text, "request per minute") || strings.Contains(text, "requests per minute"):
+	case "rpm_limit_exceeded", "requests_per_minute_limit_exceeded":
 		return ProviderRateLimitRPM
 	default:
 		return ProviderRateLimitUnknown
 	}
-}
-
-func looksLikeProviderRateLimit(value string) bool {
-	text := strings.ToLower(value)
-	return strings.Contains(text, "rate limit") || strings.Contains(text, "too many requests") || strings.Contains(text, "tpm") || strings.Contains(text, "rpm")
 }
 
 func providerRateLimitResetHeader(header http.Header) string {

@@ -23,6 +23,7 @@ export function shouldEnsureProgressShell(type = '') {
     type.startsWith('tool_call_') ||
     type === 'tool_scope_rejected' ||
     type === 'completion_rejected' ||
+	type === 'agent_protocol_retry' ||
     type === 'local_persistence_failed'
   );
 }

@@ -26,7 +26,7 @@ func (r *agentRuntime) validateSelectedReferenceScope(call agentToolCall) string
 			continue
 		}
 		if !scope.allows(candidate) {
-			return fmt.Sprintf("tool target %q is outside the user's selected workspace file references. Treat phrases like “这几集/这些文件/选中的” as the selected references only. If you need to include this extra file or a whole folder/series, call ask_followup_question to confirm before continuing.", candidate)
+			return fmt.Sprintf("tool target %q is outside the user's selected workspace file references. Treat phrases like “这几集/这些文件/选中的” as the selected references only. If including this extra target requires the user's bounded authorization, call request_user_choice before continuing.", candidate)
 		}
 	}
 	return ""

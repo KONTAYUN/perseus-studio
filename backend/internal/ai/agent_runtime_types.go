@@ -6,7 +6,7 @@ const (
 	agentChatMaxRounds               = 48
 	agentWorkspaceMaxRounds          = 96
 	agentTaskMaxRounds               = 240
-	agentMaxInvalidTurns             = 2
+	agentMaxProtocolMistakes         = 3
 	agentChatMaxToolCalls            = 60
 	agentWorkspaceMaxToolCalls       = 160
 	agentTaskMaxToolCalls            = 240
@@ -36,7 +36,6 @@ type ModelResponseKind string
 
 const (
 	ModelResponseJSONToolCall         ModelResponseKind = "json_tool_call"
-	ModelResponseTextPatchAction      ModelResponseKind = "text_patch_action"
 	ModelResponseTerminalAction       ModelResponseKind = "terminal_action"
 	ModelResponseContentOnly          ModelResponseKind = "content_only"
 	ModelResponseEmptyOrReasoningOnly ModelResponseKind = "empty_or_reasoning_only"
@@ -45,21 +44,12 @@ const (
 type ModelResponseClassification struct {
 	Kind      ModelResponseKind
 	Turn      agentModelTurn
-	Patch     extractedTextPatchTurn
 	ToolNames []string
 }
 
-type ProviderNativePatchCapability string
-
-const (
-	ProviderNativePatchDisabled ProviderNativePatchCapability = "disabled"
-	ProviderNativePatchEnabled  ProviderNativePatchCapability = "enabled"
-)
-
 type WorkspaceEditAction struct {
-	Name      string                        `json:"name"`
-	Provider  ProviderNativePatchCapability `json:"provider_native_patch"`
-	Transport ToolTransport                 `json:"transport"`
+	Name      string        `json:"name"`
+	Transport ToolTransport `json:"transport"`
 }
 
 type ActionSelectionState struct {
@@ -71,7 +61,7 @@ type ActionSelectionState struct {
 	DirectoryConditionsSatisfied []string `json:"directory_conditions_satisfied,omitempty"`
 	LastFailureTool              string   `json:"last_failure_tool,omitempty"`
 	LastFailureBlocking          bool     `json:"last_failure_blocking,omitempty"`
-	NativePatchToolAvailable     bool     `json:"native_patch_tool_available,omitempty"`
+	StructuredPatchToolAvailable bool     `json:"structured_patch_tool_available,omitempty"`
 }
 
 type ActionProgressLedger struct {
@@ -98,19 +88,18 @@ type LoopGuardObservation struct {
 }
 
 type agentRuntime struct {
-	service          *Service
-	protocol         agentProtocol
-	conversationID   string
-	messageID        string
-	provider         store.ModelProvider
-	messages         []store.Message
-	attachments      []AttachmentPayload
-	opts             RunOptions
-	profile          providerRuntimeProfile
-	allowTask        bool
-	recentReadMemory RecentWorkspaceReadMemory
+	service        *Service
+	protocol       agentProtocol
+	conversationID string
+	messageID      string
+	provider       store.ModelProvider
+	attachments    []AttachmentPayload
+	opts           RunOptions
+	profile        providerRuntimeProfile
+	allowTask      bool
 
 	events                    []ToolEvent
+	presentationEventStart    int
 	appliedMutations          map[string]ToolEvent
 	chunkWrites               map[string]workspaceChunkWriteState
 	performedMutation         bool
@@ -122,14 +111,12 @@ type agentRuntime struct {
 	repeatedToolErrorKey      string
 	repeatedToolErrorCount    int
 	loadedToolsets            map[string]bool
-	requiresCompletion        bool
-	toolLoopActive            bool
 	lastProviderFinishReason  string
 	lastProviderEmptyResponse bool
 	completedContent          string
+	terminalState             AgentTerminationState
 	currentRound              int
 	transcript                *AgentTranscript
-	contextManager            *agentContextManager
 	lastContextSnapshot       ContextSnapshot
 	contextOverflowRetried    bool
 	checkpointResumeAttempts  int
@@ -140,27 +127,34 @@ type agentRuntime struct {
 	actionProgress            ActionProgressLedger
 	loopGuard                 AgentLoopGuard
 	kernel                    AgentKernelState
+	contextItems              []store.AgentTurnItem
+	contextPersistenceErr     error
+	pendingTaskPlan           *taskPlanUpdate
 }
 
 type runtimeToolFailure struct {
-	ToolName     string
-	Message      string
-	FailureClass string
-	Target       string
-	Mutation     bool
-	Recoverable  bool
+	ToolName          string
+	Message           string
+	FailureClass      string
+	Category          string
+	Target            string
+	Mutation          bool
+	Recoverable       bool
+	RecommendedAction string
 }
 
 type agentModelTurn struct {
 	Content                  string
 	FinishReason             string
+	ProviderResponseID       string
+	StreamLastEventID        string
+	StreamDuplicateEvents    int
 	ToolCalls                []agentToolCall
 	OpenAIMessage            openAIMessage
 	AnthropicRaw             []map[string]any
 	Streamed                 bool
 	PublicTextStreamed       bool
 	PublicStreamedContent    string
-	CompletionResultStreamed bool
 	Usage                    ProviderUsage
 }
 
@@ -169,7 +163,6 @@ type agentToolCall struct {
 	Name           string
 	ArgumentsJSON  string
 	AnthropicInput map[string]any
-	PatchText      string
 }
 
 type workspaceChunkWriteState struct {
@@ -188,11 +181,21 @@ type completionAttempt struct {
 	Notes        string   `json:"notes"`
 }
 
-type followupQuestionAttempt struct {
+type userRequestAttempt struct {
 	Question      string   `json:"question"`
 	Options       []string `json:"options"`
-	AllowFreeform *bool    `json:"allow_freeform"`
-	Reason        string   `json:"reason"`
+	AllowFreeform *bool    `json:"allow_freeform,omitempty"` // Legacy input only; free-form answers are always allowed.
+}
+
+type taskPlanUpdate struct {
+	Goal            string   `json:"goal"`
+	LocalTargets    []string `json:"local_targets"`
+	ExternalTargets []string `json:"external_targets"`
+	CompletedSteps  []string `json:"completed_steps"`
+	CurrentStep     string   `json:"current_step"`
+	NextSteps       []string `json:"next_steps"`
+	VerifiedFacts   []string `json:"verified_facts"`
+	MissingInfo     []string `json:"missing_info"`
 }
 
 type BudgetExhaustionInfo struct {

@@ -159,8 +159,5 @@ func invalidToolArgumentsError(message string) error {
 	if message == "" {
 		message = "invalid tool arguments"
 	}
-	if !strings.Contains(strings.ToLower(message), "invalid tool arguments") {
-		message = "invalid tool arguments: " + message
-	}
-	return fmt.Errorf("%s", message)
+	return newToolError(ToolErrorInvalidArguments, message, nil)
 }

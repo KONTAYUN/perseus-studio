@@ -288,6 +288,7 @@ export default function useIdeState(options = {}) {
     refreshWorkspaceAfterAssistantTools,
     reloadCurrentFileFromConflict: activeEditor.reloadCurrentFileFromConflict,
     removeChatAttachment: chat.removeChatAttachment,
+	retryChatAttachment: chat.retryChatAttachment,
     removeSkillReference: chat.removeSkillReference,
     removeWorkspaceFileReference: chat.removeWorkspaceFileReference,
     renameConversation: chat.renameConversation,

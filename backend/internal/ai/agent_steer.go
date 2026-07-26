@@ -70,6 +70,24 @@ func (r *agentRuntime) applyPendingSteers(ctx context.Context, round int) error 
 			}
 			steerMessage = message
 		}
+		steerTurnID := firstNonEmpty(steerMessage.ID, item.MessageID, item.SteerID, item.ClientSteerID)
+		if steerTurnID == "" {
+			return fmt.Errorf("applied user guidance is missing a stable turn id")
+		}
+		if _, err := r.service.calls.AppendAgentTurnItem(ctx, store.AgentTurnItemInput{
+			UserID: r.opts.UserID, ConversationID: r.conversationID, RunID: r.opts.RunID,
+			TurnID: steerTurnID, Kind: "user_message", Role: "user", Status: "completed",
+			Visibility: store.AgentItemVisibilityModel, SourceID: firstNonEmpty(steerMessage.ID, item.MessageID, "steer:"+steerTurnID),
+			PayloadJSON: mustJSON(map[string]any{
+				"content": formatSteerTranscriptText(content), "steer_id": item.SteerID,
+				"client_steer_id": item.ClientSteerID, "received_seq": item.Seq,
+			}),
+			CreatedAt: item.ReceivedAt,
+		}); err != nil {
+			return err
+		}
+		r.ensureKernelState()
+		r.kernel.TurnID = steerTurnID
 		r.transcript.AppendUserText(formatSteerTranscriptText(content), map[string]any{
 			"reason":           "runtime_user_steer",
 			"steer_id":         item.SteerID,

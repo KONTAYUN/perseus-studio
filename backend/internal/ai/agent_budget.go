@@ -23,15 +23,30 @@ func (r *agentRuntime) handleBudgetExhausted(ctx context.Context, reason string,
 	emitToolLifecycleEvent(r.opts, "agent_budget_summary_started", "info", payload)
 	logTask(r.opts, "warn", fmt.Sprintf("agent budget exhausted: %s", reason))
 
-	originalTranscript := r.transcript.Clone()
-	r.transcript.AppendUserText(r.budgetSummaryPrompt(info), map[string]any{
-		"reason":         IncompleteReasonBudgetExhausted,
-		"budget_reason":  reason,
-		"max_rounds":     maxRounds,
-		"max_tool_calls": maxToolCalls,
+	items, buildErr := r.loadPersistentContextItems(ctx)
+	if buildErr != nil {
+		return Reply{}, buildErr
+	}
+	assembly := (ContextAssembler{}).Assemble(ContextAssemblerInput{
+		Protocol: r.protocol, Items: items, Attachments: r.attachments, Profile: r.profile,
+		Round: r.currentRound + 1, CurrentTurnID: firstNonEmpty(r.kernel.TurnID, r.messageID),
+		Phase: "final_reply", ForcePrune: true,
 	})
-	r.lastContextSnapshot = r.contextManager.BuildWithOptions(r.protocol, r.messages, r.attachments, r.transcript, r.profile, r.currentRound+1, r.providerMessageBuildOptionsForPhase("final_reply", true))
-	r.annotateRequestSummary()
+	if assembly.NeedsCompaction {
+		if _, buildErr = r.compactAgentItemContext(ctx, "budget_summary"); buildErr != nil {
+			return Reply{}, buildErr
+		}
+		items, buildErr = r.loadPersistentContextItems(ctx)
+		if buildErr != nil {
+			return Reply{}, buildErr
+		}
+		assembly = (ContextAssembler{}).Assemble(ContextAssemblerInput{
+			Protocol: r.protocol, Items: items, Attachments: r.attachments, Profile: r.profile,
+			Round: r.currentRound + 1, CurrentTurnID: firstNonEmpty(r.kernel.TurnID, r.messageID),
+			Phase: "final_reply", ForcePrune: true,
+		})
+	}
+	r.lastContextSnapshot = injectContextSystemInstruction(r.protocol, assembly.Snapshot, r.budgetSummaryPrompt(info))
 	r.annotateBudgetSummaryRequest(info)
 	r.lastContextSnapshot.Summary.ActionBoundaryActive = false
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
@@ -50,14 +65,12 @@ func (r *agentRuntime) handleBudgetExhausted(ctx context.Context, reason string,
 		ActionBoundaryActive: false,
 		Opts:                 r.opts,
 	})
-	r.transcript = originalTranscript
-
 	content := strings.TrimSpace(turn.Content)
 	if err != nil || content == "" || len(turn.ToolCalls) > 0 {
 		if err != nil {
 			log.Printf("[ai] budget summary model call failed conversation=%s error=%v", r.conversationID, err)
 			failedPayload := budgetEventPayload(info)
-			failedPayload["error"] = sanitizeUserFacingAIError(err.Error())
+			failedPayload["error"] = UserFacingErrorMessage(err)
 			emitToolLifecycleEvent(r.opts, "agent_budget_summary_failed", "warn", failedPayload)
 		} else {
 			emitToolLifecycleEvent(r.opts, "agent_budget_summary_failed", "warn", budgetEventPayload(info))
@@ -73,13 +86,28 @@ func (r *agentRuntime) handleBudgetExhausted(ctx context.Context, reason string,
 	if err := r.service.saveRunCheckpoint(ctx, r.opts, r.budgetResumeCheckpoint(info)); err != nil {
 		return Reply{}, err
 	}
+	runEvents, presentationEvents := r.replyEvents()
 	return Reply{
-		Content:          content,
-		ToolEvents:       r.events,
-		IncompleteReason: IncompleteReasonBudgetExhausted,
-		Recoverable:      true,
-		Budget:           info,
+		Content:            content,
+		RunEvents:          runEvents,
+		PresentationEvents: presentationEvents,
+		IncompleteReason:   IncompleteReasonBudgetExhausted,
+		Recoverable:        true,
+		Budget:             info,
 	}, nil
+}
+
+func injectContextSystemInstruction(protocol agentProtocol, snapshot ContextSnapshot, instruction string) ContextSnapshot {
+	instruction = strings.TrimSpace(instruction)
+	if instruction == "" {
+		return snapshot
+	}
+	if protocol == agentProtocolAnthropic {
+		snapshot.AnthropicSystem = strings.TrimSpace(snapshot.AnthropicSystem + "\n\n" + instruction)
+		return snapshot
+	}
+	snapshot.OpenAIMessages = append([]map[string]any{{"role": "system", "content": instruction}}, snapshot.OpenAIMessages...)
+	return snapshot
 }
 
 func (r *agentRuntime) annotateBudgetSummaryRequest(info *BudgetExhaustionInfo) {
@@ -147,8 +175,6 @@ func (r *agentRuntime) budgetResumeCheckpoint(info *BudgetExhaustionInfo) AgentR
 	checkpoint.InvalidTurns = 0
 	checkpoint.ConsecutiveToolErrors = 0
 	checkpoint.CompletedContent = ""
-	checkpoint.RequiresCompletion = checkpoint.RequiresCompletion || checkpoint.ToolLoopActive || checkpoint.PerformedMutation
-	checkpoint.ToolLoopActive = true
 	return checkpoint
 }
 

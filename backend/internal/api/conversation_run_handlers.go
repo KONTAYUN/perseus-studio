@@ -117,16 +117,6 @@ func missingAssistantFinalDelta(currentContent string, finalContent string) stri
 	return ""
 }
 
-type assistantStreamState struct {
-	ActiveMessageID      string
-	CompletionPreviewID  string
-	LastFinalizedContent string
-}
-
-func shouldAppendModelDelta(state assistantStreamState) bool {
-	return state.CompletionPreviewID == "" || state.ActiveMessageID != state.CompletionPreviewID
-}
-
 func shouldFinalizeModelMessageCompleted(finalContent string, lastFinalizedContent string) bool {
 	finalContent = strings.TrimSpace(finalContent)
 	if finalContent == "" {

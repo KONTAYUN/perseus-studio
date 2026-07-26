@@ -32,7 +32,7 @@ func (s *Service) ReorderPath(path, targetParentPath, previousPath, nextPath str
 	parentInfo, err := os.Stat(absParent)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return PathChangeResult{}, fmt.Errorf("target parent folder does not exist")
+			return PathChangeResult{}, fmt.Errorf("%w: target parent folder", ErrPathNotFound)
 		}
 		return PathChangeResult{}, err
 	}

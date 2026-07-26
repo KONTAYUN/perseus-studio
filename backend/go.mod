@@ -8,6 +8,7 @@ require (
 	golang.org/x/crypto v0.50.0
 	golang.org/x/net v0.52.0
 	modernc.org/sqlite v1.36.0
+	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (

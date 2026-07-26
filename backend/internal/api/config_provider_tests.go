@@ -272,7 +272,7 @@ func providerTestRequest(ctx context.Context, req testModelProviderRequest, payl
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 	if req.Protocol == "anthropic" {
-		if strings.Contains(strings.ToLower(req.BaseURL), "claude-code-proxy") {
+		if req.AuthMode == store.ModelAuthBearer {
 			httpReq.Header.Set("Authorization", bearerToken(req.APIKey))
 		} else {
 			httpReq.Header.Set("x-api-key", req.APIKey)
@@ -300,7 +300,7 @@ func providerTestRequest(ctx context.Context, req testModelProviderRequest, payl
 func providerTestEndpoint(req testModelProviderRequest) string {
 	baseURL := strings.TrimRight(req.BaseURL, "/")
 	if req.Protocol == "anthropic" {
-		if strings.Contains(strings.ToLower(baseURL), "claude-code-proxy") {
+		if req.AdapterMode == store.ModelAdapterAnthropicBearerProxy {
 			return baseURL + "/v1/messages"
 		}
 		return baseURL + "/messages"

@@ -9,12 +9,14 @@ import (
 type sseEvent struct {
 	Event string
 	Data  string
+	ID    string
 }
 
 func readSSEEvents(body io.Reader, handle func(sseEvent) error) error {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var eventName string
+	var eventID string
 	var dataLines []string
 	flush := func() error {
 		if len(dataLines) == 0 {
@@ -23,8 +25,9 @@ func readSSEEvents(body io.Reader, handle func(sseEvent) error) error {
 		}
 		data := strings.Join(dataLines, "\n")
 		dataLines = nil
-		event := sseEvent{Event: eventName, Data: data}
+		event := sseEvent{Event: eventName, Data: data, ID: eventID}
 		eventName = ""
+		eventID = ""
 		return handle(event)
 	}
 	for scanner.Scan() {
@@ -46,6 +49,8 @@ func readSSEEvents(body io.Reader, handle func(sseEvent) error) error {
 		switch field {
 		case "event":
 			eventName = value
+		case "id":
+			eventID = value
 		case "data":
 			dataLines = append(dataLines, value)
 		}

@@ -63,6 +63,8 @@ func anthropicWorkspaceToolByName(name string) map[string]any {
 		return anthropicTool(name, "Perform a validated workspace path operation: mkdir, rename, move, copy, or trash. Use copy for deterministic file duplication without asking the model to rewrite whole files.", workspaceManageParams())
 	case "organize_workspace_matches":
 		return anthropicTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
+	case "apply_workspace_patch":
+		return anthropicTool(name, "Apply one complete workspace patch to create, update, delete, or move text files. Use this as the primary file content editing action. The backend parses, verifies, and applies the patch atomically.", workspacePatchParams())
 	default:
 		return nil
 	}

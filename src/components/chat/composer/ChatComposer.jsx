@@ -1,25 +1,26 @@
 import React from 'react';
-import { pendingFollowupQuestion } from '../chatUtils';
 import ComposerAttachments from './ComposerAttachments';
 import ComposerInput from './ComposerInput';
 import ComposerReferences from './ComposerReferences';
-import FollowupQuestionPanel from './FollowupQuestionPanel';
 import PendingRunMessagePanel from './PendingRunMessagePanel';
 import RunSteerPreviewPanel from './RunSteerPreviewPanel';
+import { pendingUserRequest } from '../chatUtils';
 
 export default function ChatComposer({ ide, panelId = 'chat', composerRef, submitChatMessage }) {
   const attachmentInputRef = React.useRef(null);
   const chatInputRef = React.useRef(null);
   const didMountFocusRef = React.useRef(false);
   const [isSkillMenuOpen, setIsSkillMenuOpen] = React.useState(false);
-  const [answeringQuestionId, setAnsweringQuestionId] = React.useState('');
   const isCurrentConversationSending = ide.isCurrentConversationSending ?? ide.isChatSending;
   const visiblePendingRunMessage = visibleConversationItem(ide.pendingRunMessage, ide.currentConversationId);
   const visibleRunSteerItems = (ide.runSteerItems || []).filter((item) => item.conversation_id === ide.currentConversationId);
   const visibleRunSteerNotice = visibleConversationItem(ide.runSteerNotice, ide.currentConversationId);
-  const followupQuestion = pendingFollowupQuestion(ide.conversationMessages);
-  const isAnsweringFollowup = !!answeringQuestionId && answeringQuestionId === followupQuestion?.messageId;
+  const activeUserRequest = pendingUserRequest(ide.conversationMessages);
+	const hasBlockedAttachment = ide.chatAttachments.some(
+	  (item) => item.kind === 'image' && item.upload_status !== 'uploaded'
+	);
   const isSendDisabled =
+	hasBlockedAttachment ||
     !isCurrentConversationSending &&
     !ide.chatInput.trim() &&
     ide.chatAttachments.length === 0 &&
@@ -37,10 +38,10 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
   }, [isCurrentConversationSending]);
 
   React.useEffect(() => {
-    if (!followupQuestion || answeringQuestionId !== followupQuestion.messageId) {
-      setAnsweringQuestionId('');
+    if (activeUserRequest?.requestKind === 'input') {
+      window.setTimeout(() => chatInputRef.current?.focus(), 0);
     }
-  }, [answeringQuestionId, followupQuestion]);
+  }, [activeUserRequest?.messageId, activeUserRequest?.requestKind]);
 
   const handleDragOver = React.useCallback((e) => {
     if (isComposerDrag(e)) {
@@ -74,20 +75,6 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
           e.target.value = '';
         }}
       />
-      {followupQuestion && (
-        <FollowupQuestionPanel
-          question={followupQuestion}
-          disabled={isCurrentConversationSending || isAnsweringFollowup}
-          onChoose={async (option) => {
-            setAnsweringQuestionId(followupQuestion.messageId);
-            try {
-              await ide.sendFollowupAnswer?.(option);
-            } finally {
-              setAnsweringQuestionId('');
-            }
-          }}
-        />
-      )}
       {visiblePendingRunMessage && (
         <PendingRunMessagePanel
           message={visiblePendingRunMessage}
@@ -122,6 +109,7 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
         <ComposerAttachments
           attachments={ide.chatAttachments}
           onRemove={ide.removeChatAttachment}
+		  onRetry={ide.retryChatAttachment}
         />
         <ComposerReferences
           fileReferences={ide.chatFileReferences}

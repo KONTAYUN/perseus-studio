@@ -40,9 +40,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		"messages": req.Snapshot.OpenAIMessages,
 		"stream":   true,
 	}
-	if store.IsOfficialOpenAIBaseURL(req.Provider.BaseURL) {
-		payload["stream_options"] = map[string]any{"include_usage": true}
-	}
+	payload["stream_options"] = map[string]any{"include_usage": true}
 	reasoningPolicy := applyOpenAIReasoningPayload(payload, req.Provider, req.Opts.ThinkingMode)
 	req.Snapshot.Summary.ReasoningSupport = reasoningPolicy.Support
 	req.Snapshot.Summary.ReasoningEffort = reasoningPolicy.OpenAIEffort
@@ -101,23 +99,17 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
 			}
 		}
-		var emitCompletionResult func(string)
-		if req.Opts.OnCompletionResultDelta != nil {
-			emitCompletionResult = req.Opts.OnCompletionResultDelta
-		}
 		turn, err := parseOpenAIStreamWithOptions(streamBody, providerStreamParseOptions{
-			EmitText:                  emitText,
-			EmitCompletionResultDelta: emitCompletionResult,
-			RevealTextAfterTool:       revealTextAfterAction,
+			EmitText:            emitText,
+			RevealTextAfterTool: revealTextAfterAction,
 		})
 		if err != nil {
 			if _, partial := partialTurnFromStreamError(err); !partial && !providerStreamTurnHasStarted(turn) && shouldRetryProviderStreamError(ctx, err) {
 				closeStream()
 				var terminal bool
 				turn, terminal, err = p.retryStream(ctx, &req, payload, endpoint, providerStreamParseOptions{
-					EmitText:                  emitText,
-					EmitCompletionResultDelta: emitCompletionResult,
-					RevealTextAfterTool:       revealTextAfterAction,
+					EmitText:            emitText,
+					RevealTextAfterTool: revealTextAfterAction,
 				}, err)
 				if terminal {
 					return turn, err
@@ -131,10 +123,6 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 			if partial, ok := partialTurnFromStreamError(err); ok {
 				if emitText != nil && strings.TrimSpace(partial.PublicStreamedContent) != "" && (!revealTextAfterAction || len(partial.ToolCalls) > 0) {
 					partial.PublicTextStreamed = true
-				}
-				if !partial.CompletionResultStreamed && emitCompletionResult != nil {
-					emitStreamedCompletionResultFromToolCalls(partial.ToolCalls, emitCompletionResult)
-					partial.CompletionResultStreamed = true
 				}
 				log.Printf("[ai] openai stream_partial_tool_recovered conversation=%s endpoint=%s tool_calls=%d error=%v", req.ConversationID, endpoint, len(partial.ToolCalls), err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_partial_tool_recovered", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
@@ -151,6 +139,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 				closeStream()
 				return partial, nil
 			}
+			err = normalizeProviderStreamError(err)
 			if shouldFallbackAfterStreamError(ctx, err) {
 				log.Printf("[ai] openai stream_parse_error_fallback conversation=%s endpoint=%s error=%v", req.ConversationID, endpoint, err)
 				diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_parse", "warn", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
@@ -190,13 +179,10 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 			})
 			return agentModelTurn{}, WithDiagnosticID(err, diagID)
 		}
-		if !turn.CompletionResultStreamed && emitCompletionResult != nil {
-			emitStreamedCompletionResultFromToolCalls(turn.ToolCalls, emitCompletionResult)
-		}
 		if hasIncompleteToolCallArguments(turn) {
 			req.Snapshot.Summary.StreamToolArgsState = "incomplete_json"
 			annotateStreamToolDiagnostics(&req.Snapshot.Summary, turn)
-			err := fmt.Errorf("provider stream returned incomplete tool call arguments")
+			err := &ProviderProtocolError{Code: "incomplete_tool_call_arguments", Cause: fmt.Errorf("provider stream returned incomplete tool call arguments")}
 			diagID := p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_stream_incomplete_tool_arguments", "error", time.Since(startedAt).Milliseconds(), err, req.Snapshot.Summary)
 			p.service.recordProviderUsage(ctx, providerUsageRecordInput{
 				Provider:       req.Provider,
@@ -355,7 +341,7 @@ func (p openAIProviderV2) parseNonStream(ctx context.Context, req providerTurnRe
 		return agentModelTurn{}, WithDiagnosticID(err, diagID)
 	}
 	if len(data.Choices) == 0 {
-		err := fmt.Errorf("empty model response")
+		err := &ProviderProtocolError{Code: "empty_provider_response", Cause: fmt.Errorf("empty model response")}
 		p.service.recordProviderDiagnosticWithSummary(ctx, req.Opts, req.Provider, req.ConversationID, req.MessageID, "provider_empty_response", "warn", duration.Milliseconds(), err, req.Snapshot.Summary)
 		return agentModelTurn{FinishReason: "empty_response"}, nil
 	}
@@ -367,11 +353,12 @@ func (p openAIProviderV2) parseNonStream(ctx context.Context, req providerTurnRe
 	usage := ProviderUsage{}
 	updateProviderUsageFromAny(&usage, data.Usage)
 	turn := agentModelTurn{
-		Content:       content,
-		FinishReason:  choice.FinishReason,
-		OpenAIMessage: choice.Message,
-		ToolCalls:     make([]agentToolCall, 0, len(parsedToolCalls)),
-		Usage:         usage,
+		Content:            content,
+		FinishReason:       choice.FinishReason,
+		ProviderResponseID: data.ID,
+		OpenAIMessage:      choice.Message,
+		ToolCalls:          make([]agentToolCall, 0, len(parsedToolCalls)),
+		Usage:              usage,
 	}
 	for _, call := range parsedToolCalls {
 		turn.ToolCalls = append(turn.ToolCalls, agentToolCall{

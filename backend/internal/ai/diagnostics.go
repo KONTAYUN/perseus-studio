@@ -54,7 +54,52 @@ func UserFacingErrorMessage(err error) string {
 	if err == nil {
 		return ""
 	}
-	return sanitizeUserFacingAIError(err.Error())
+	var runtimeErr *AgentRuntimeError
+	if errors.As(err, &runtimeErr) {
+		return strings.TrimSpace(runtimeErr.Error())
+	}
+	var toolErr *ToolError
+	if errors.As(err, &toolErr) {
+		return strings.TrimSpace(toolErr.Error())
+	}
+	var limited *ProviderRateLimitError
+	if errors.As(err, &limited) {
+		return limited.Error()
+	}
+	var contextErr *ContextWindowError
+	if errors.As(err, &contextErr) {
+		if contextErr.EstimatedTokens > 0 && contextErr.BudgetTokens > 0 {
+			return fmt.Sprintf("上下文窗口已超过预算：预计 %d tokens，预算 %d tokens", contextErr.EstimatedTokens, contextErr.BudgetTokens)
+		}
+		return "上下文窗口已超过预算"
+	}
+	var capabilityErr *ProviderCapabilityError
+	if errors.As(err, &capabilityErr) {
+		return "当前模型不支持本轮需要的能力：" + capabilityErr.Capability
+	}
+	failure := classifyProviderFailure(err)
+	switch failure.Class {
+	case ProviderFailureAuthentication:
+		return "模型供应商认证失败，请检查 API Key 和认证方式"
+	case ProviderFailureQuotaExhausted:
+		return "模型供应商额度不足"
+	case ProviderFailureRateLimited:
+		return "模型供应商限流，请稍后继续"
+	case ProviderFailureModelUnavailable:
+		return "当前模型不可用，请检查模型配置"
+	case ProviderFailureCapabilityUnsupported:
+		return "当前模型不支持本轮需要的能力"
+	case ProviderFailureInvalidRequest:
+		return "模型供应商拒绝了本轮请求，请查看诊断日志"
+	case ProviderFailureOverloaded:
+		return "模型供应商当前繁忙，请稍后继续"
+	case ProviderFailureConnection, ProviderFailureStreamInterrupted:
+		return "模型供应商连接中断，本轮请求没有拿到完整响应"
+	case ProviderFailureProtocol:
+		return "模型供应商返回了无法处理的响应"
+	default:
+		return strings.TrimSpace(err.Error())
+	}
 }
 
 func (s *Service) recordProviderDiagnostic(ctx context.Context, opts RunOptions, provider store.ModelProvider, conversationID, messageID, stage, level string, duration time.Duration, err error) string {
@@ -154,9 +199,9 @@ func diagnosticErrorMessage(err error) string {
 		return ""
 	}
 	if id := DiagnosticIDFromError(err); id != "" {
-		return fmt.Sprintf("%s（已记录诊断日志 ID：%s，可在 设置 → 诊断日志 中导出。）", sanitizeUserFacingAIError(err.Error()), id)
+		return fmt.Sprintf("%s（已记录诊断日志 ID：%s，可在 设置 → 诊断日志 中导出。）", UserFacingErrorMessage(err), id)
 	}
-	return sanitizeUserFacingAIError(err.Error())
+	return UserFacingErrorMessage(err)
 }
 
 func fallbackProviderDiagnosticSummary(stage string, err error) string {
@@ -172,25 +217,7 @@ func fallbackProviderDiagnosticSummary(stage string, err error) string {
 }
 
 func sanitizeUserFacingAIError(message string) string {
-	text := strings.TrimSpace(message)
-	lower := strings.ToLower(text)
-	switch {
-	case strings.Contains(lower, "tool_ledger") || strings.Contains(lower, "run checkpoint") || strings.Contains(lower, "local") && strings.Contains(lower, "persistence"):
-		return "本地状态保存失败，本轮已暂停；可以检查磁盘/数据库状态后继续本轮"
-	case strings.Contains(lower, "malformed http response"):
-		return "模型供应商连接协议异常，本轮请求没有拿到有效响应"
-	case strings.Contains(lower, "eof") ||
-		strings.Contains(lower, "connection reset") ||
-		strings.Contains(lower, "connection aborted") ||
-		strings.Contains(lower, "server closed idle connection"):
-		return "模型供应商连接中断，本轮请求没有拿到有效响应"
-	case strings.Contains(lower, "tls: bad record mac"):
-		return "模型供应商 TLS 连接中断，本轮请求没有拿到有效响应"
-	case strings.Contains(lower, "transport connection broken"):
-		return "模型供应商连接中断，本轮请求没有拿到有效响应"
-	default:
-		return text
-	}
+	return strings.TrimSpace(message)
 }
 
 func diagnosticStage(protocol string, performedMutation bool, hasEvents bool) string {

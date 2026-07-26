@@ -41,8 +41,9 @@ func TestBuildUserTextWithEditorPanelsContextDoesNotIncludeFileContent(t *testin
 		"当前打开的编辑器面板如下",
 		"left: panel_id=editor_1, active_file=notes/plan.md, open_tabs=[notes/plan.md, draft.txt]",
 		"right: panel_id=editor_2, active_file=src/app.js, open_tabs=[src/app.js]",
-		"不代表必须读取",
-		"没有可复用 recent read observation/current_read_working_set",
+		"打开状态本身不是读取指令",
+		"任务明确引用某个文档或所需事实可能位于其中",
+		"切换标签只更新当前环境，不改变任务目标和文件工作集",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected context to contain %q, got:\n%s", expected, text)
@@ -120,8 +121,9 @@ func TestBuildUserTextWithWorkspaceAndCurrentFileReferencesNeverIncludeText(t *t
 		"workspace file reference: path=draft/chapter.txt",
 		"current workspace file reference: path=draft/current.txt",
 		"不包含文件内容",
-		"不代表必须读取",
-		"没有可复用 recent read observation/current_read_working_set",
+		"打开状态本身不是读取指令",
+		"任务所需事实可能位于其中",
+		"若与任务无关则不要读取",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected attachment text to contain %q, got:\n%s", expected, text)

@@ -115,6 +115,7 @@ func main() {
 	manager.Start(ctx)
 
 	handler := api.NewServer(taskStore, agentRunStore, configStore, conversationStore, diagnosticStore, usageStore, userStore, sessionStore, broker, runBroker, factory, aiService, cfg)
+	handler.StartChatAttachmentCleanup(ctx)
 	server := &http.Server{
 		Addr:    cfg.ListenAddr,
 		Handler: handler.Routes(),

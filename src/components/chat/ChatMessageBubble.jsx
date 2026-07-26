@@ -1,19 +1,21 @@
 import React from 'react';
 import { Copy, GitBranch, RefreshCw, Trash2 } from 'lucide-react';
-import { completedActionItems, latestLiveProgressItem, loadingStatusDisplayText, loadingStatusReserveText, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
+import { latestLiveProgressItem, loadingStatusDisplayText, loadingStatusReserveText, userRequestAttachment, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
 import { Button, IconButton } from '../ui';
 import { RUN_STEER_STATUS, runSteerStatusLabel } from '../../hooks/chatSteerItems';
 import { formatRetryAfterLabel, isResumeBlockedByFailure } from '../../hooks/chatErrorUtils';
 import ChatMarkdownRenderer from './markdown/ChatMarkdownRenderer';
+import UserRequestMessage from './UserRequestMessage';
+import ChatImageAttachments from './ChatImageAttachments';
 
 const STEER_FAILURE_BUTTON_CLASS = 'border-white/20 bg-white/10 text-blue-50 hover:bg-white/15 hover:text-white dark:border-white/15 dark:bg-white/10';
 
-function MessageBubble({ message, ide, canRegenerate }) {
+function MessageBubble({ message, ide, canRegenerate, isActiveUserRequest = false }) {
   const attachments = visibleMessageAttachments(message);
-  const actionItems = completedActionItems(message);
   const showLoadingOnly = message.pending && !(message.content || '').trim();
   const shouldShowFooterGap = shouldReserveMessageFooter(message);
   const isSteerMessage = message.kind === 'steer';
+  const userRequest = userRequestAttachment(message);
   const resumeBlocked = message.error && isResumeBlockedByFailure(message);
   const resumeButtonLabel = resumeBlocked ? formatRetryAfterLabel(message.retryAfterMs, message.resetAt) : '继续';
   return (
@@ -31,8 +33,14 @@ function MessageBubble({ message, ide, canRegenerate }) {
               : 'message-bubble-assistant border border-gray-100 bg-white text-gray-800 dark:border-white/5 dark:bg-[#2C2C2E] dark:text-gray-200'
           }`}
         >
-          {attachments.length > 0 && <MessageAttachmentBadges attachments={attachments} message={message} ide={ide} />}
-          {showLoadingOnly ? (
+          {attachments.length > 0 && !userRequest && <MessageAttachmentBadges attachments={attachments} message={message} ide={ide} />}
+          {userRequest ? (
+            <UserRequestMessage
+              request={{ ...userRequest, messageId: message.id }}
+              ide={ide}
+              isActive={isActiveUserRequest}
+            />
+          ) : showLoadingOnly ? (
             <LoadingStateBubble message={message} fallbackText={message.content} />
           ) : message.role === 'assistant' && !message.error ? (
             <ChatMarkdownRenderer content={message.content} />
@@ -42,7 +50,6 @@ function MessageBubble({ message, ide, canRegenerate }) {
             </div>
           )}
           {!showLoadingOnly && message.pending && <LiveProgressLine message={message} />}
-          {actionItems.length > 0 && <CompletedActionItems items={actionItems} />}
           {isSteerMessage && message.status === RUN_STEER_STATUS.failed && (
             <SteerFailureActions message={message} ide={ide} />
           )}
@@ -121,6 +128,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, areMessageBubblePropsEqu
 function areMessageBubblePropsEqual(previous, next) {
   return (
     previous.canRegenerate === next.canRegenerate &&
+    previous.isActiveUserRequest === next.isActiveUserRequest &&
     previous.ide?.isChatSending === next.ide?.isChatSending &&
     isSameRenderableMessage(previous.message, next.message)
   );
@@ -237,22 +245,6 @@ function SteerFailureActions({ message, ide }) {
   );
 }
 
-function CompletedActionItems({ items }) {
-  if ((items || []).length === 0) return null;
-  return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {items.map((item) => (
-        <span
-          key={item.id}
-          className="rounded-full border border-blue-500/15 bg-blue-500/10 px-2 py-0.5 text-[11px] font-semibold text-blue-500 dark:border-blue-300/15 dark:bg-blue-300/10 dark:text-blue-200"
-        >
-          {item.label}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function LoadingStateBubble({ message, fallbackText }) {
   const visibleText = loadingStatusDisplayText(message, fallbackText);
   const reserveText = loadingStatusReserveText(message, visibleText, fallbackText);
@@ -327,8 +319,16 @@ export function lastAssistantMessageId(messages) {
 
 function MessageAttachmentBadges({ attachments, message, ide }) {
   const taskAttachments = attachments.filter((item) => item.type === 'task');
-  const badgeAttachments = attachments.filter((item) => !item.tool_name && item.type !== 'task');
-  if (taskAttachments.length === 0 && badgeAttachments.length === 0) return null;
+	const imageAttachments = attachments.filter((item) =>
+	  !item.tool_name && (item.kind === 'image' || String(item.mime_type || item.type || '').startsWith('image/'))
+	);
+	const badgeAttachments = attachments.filter((item) =>
+	  !item.tool_name &&
+	  item.type !== 'task' &&
+	  !imageAttachments.includes(item) &&
+	  Boolean(String(item.name || '').trim())
+	);
+	if (taskAttachments.length === 0 && badgeAttachments.length === 0 && imageAttachments.length === 0) return null;
   return (
     <div className={`mb-2 space-y-2 ${message.role === 'user' ? 'text-blue-50' : 'text-gray-400'}`}>
       {taskAttachments.map((item, index) => (
@@ -352,6 +352,7 @@ function MessageAttachmentBadges({ attachments, message, ide }) {
           </Button>
         </div>
       ))}
+	  {imageAttachments.length > 0 && <ChatImageAttachments images={imageAttachments} messageId={message.id} />}
       {badgeAttachments.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {badgeAttachments.map((item, index) => (
@@ -363,7 +364,7 @@ function MessageAttachmentBadges({ attachments, message, ide }) {
                   : 'bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-gray-400'
               }`}
             >
-              {item.name || '附件'}
+              {item.name}
             </span>
           ))}
         </div>

@@ -10,10 +10,10 @@ export default function ChatPanel({ ide, panelId = 'chat' }) {
   const [renamingConversation, setRenamingConversation] = React.useState(null);
   const [renameDraft, setRenameDraft] = React.useState('');
   const {
-    bottomRef,
     composerHeight,
     composerRef,
     messagesBottomInset,
+    messagesContentRef,
     messagesScrollbarBottomInset,
     messagesRef,
     scrollToBottom,
@@ -59,7 +59,7 @@ export default function ChatPanel({ ide, panelId = 'chat' }) {
       <ChatMessages
         ide={ide}
         messagesRef={messagesRef}
-        bottomRef={bottomRef}
+        messagesContentRef={messagesContentRef}
         messagesBottomInset={messagesBottomInset}
         messagesScrollbarBottomInset={messagesScrollbarBottomInset}
       />
@@ -70,7 +70,7 @@ export default function ChatPanel({ ide, panelId = 'chat' }) {
           data-testid="scroll-to-bottom-button"
           onClick={(e) => {
             e.stopPropagation();
-            scrollToBottom('smooth', { force: true });
+            void scrollToBottom('smooth');
           }}
           className="scroll-to-bottom-button motion-button motion-soft-focus absolute left-1/2 z-30 flex h-8 w-11 items-center justify-center rounded-2xl border border-transparent backdrop-blur-2xl"
           style={{ bottom: `${composerHeight + 18}px`, transform: 'translateX(-50%)' }}

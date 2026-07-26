@@ -126,36 +126,17 @@ func (s *Server) runFailureDiagnosticSummary(userID, runID string, err error, st
 			}
 		}
 	}
-	if failureClass := localRunFailureClass(err); failureClass != "" {
-		summary["failure_class"] = failureClass
+	if metadata := ai.FailureMetadataFromError(err); metadata.FailureClass != "" {
+		summary["failure_class"] = metadata.FailureClass
+		if metadata.FailureCode != "" {
+			summary["failure_code"] = metadata.FailureCode
+		}
+		if metadata.ClassificationSource != "" {
+			summary["classification_source"] = metadata.ClassificationSource
+		}
 	}
 	raw, _ := json.Marshal(summary)
 	return string(raw)
-}
-
-func localRunFailureClass(err error) string {
-	if err == nil {
-		return ""
-	}
-	text := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(text, "工具调用连续失败") || strings.Contains(text, "同一个工具调用连续失败"):
-		return "agent_runtime_tool_error_loop"
-	case strings.Contains(text, "模型没有返回可执行工具调用") || strings.Contains(text, "workspace 任务未执行完成"):
-		return "agent_runtime_no_tool_completion"
-	case strings.Contains(text, "模型没有调用所需的 workspace 变更工具"):
-		return "agent_runtime_missing_workspace_mutation"
-	case strings.Contains(text, "unsupported protocol"):
-		return "model_provider_unsupported_protocol"
-	case strings.Contains(text, "selected model is disabled"):
-		return "model_provider_disabled"
-	case strings.Contains(text, "sql: no rows in result set"):
-		return "local_missing_record"
-	case strings.Contains(text, "run checkpoint") || strings.Contains(text, "tool_ledger") || strings.Contains(text, "local") && strings.Contains(text, "persistence"):
-		return "local_run_persistence"
-	default:
-		return "local_run_failure"
-	}
 }
 
 func (s *Server) runCancelSnapshot(runID string) *runCancelEntry {

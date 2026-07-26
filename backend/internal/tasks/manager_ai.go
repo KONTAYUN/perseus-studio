@@ -111,8 +111,8 @@ func (m *Manager) executeAIAgentTask(ctx context.Context, task store.Task, worke
 
 	m.logAndPublish(taskCtx, userID, task.ID, "info", "writing assistant message")
 	assistantAttachments := "[]"
-	if len(reply.ToolEvents) > 0 {
-		rawToolEvents, _ := json.Marshal(reply.ToolEvents)
+	if len(reply.PresentationEvents) > 0 {
+		rawToolEvents, _ := json.Marshal(reply.PresentationEvents)
 		assistantAttachments = string(rawToolEvents)
 	}
 	if _, err := m.conversations.AppendMessage(taskCtx, userID, payload.ConversationID, "assistant", reply.Content, assistantAttachments); err != nil {

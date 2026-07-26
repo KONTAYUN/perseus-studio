@@ -2,18 +2,19 @@ package ai
 
 import (
 	"encoding/json"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
+
+	"webide-backend/internal/idgen"
 )
 
 const (
-	agentKernelV2Version         = "codex_parity"
+	agentKernelV2Version         = "perseus_agent_kernel_v3"
+	agentKernelV3                = "kernel_v3"
 	agentKernelLegacy            = "legacy"
 	agentKernelV2Current         = "kernel_v2_current"
 	agentKernelCodexParity       = "codex_parity"
-	agentKernelSidecarBenchmark  = "codex_sidecar_benchmark"
 	agentKernelLegacyV2EnvAlias  = "kernel_v2"
 	agentKernelCurrentV2EnvAlias = "current_v2"
 	maxKernelProgressLog         = 40
@@ -64,20 +65,19 @@ type AgentTurnItem struct {
 	Content      string   `json:"content,omitempty"`
 	Error        string   `json:"error,omitempty"`
 	ChangedPaths []string `json:"changed_paths,omitempty"`
+	Path         string   `json:"path,omitempty"`
+	Hash         string   `json:"hash,omitempty"`
+	View         string   `json:"view,omitempty"`
+	Mode         string   `json:"mode,omitempty"`
+	BlockID      string   `json:"block_id,omitempty"`
+	SectionID    string   `json:"section_id,omitempty"`
+	DocHash      string   `json:"doc_hash,omitempty"`
 }
 
 func newAgentKernelState() AgentKernelState {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("PERSEUS_AGENT_KERNEL_MODE")))
-	if mode == "" {
-		mode = agentKernelCodexParity
-	}
-	mode = normalizeAgentKernelMode(mode)
-	if mode == "" {
-		mode = agentKernelCodexParity
-	}
 	return AgentKernelState{
 		Version:     agentKernelV2Version,
-		Mode:        mode,
+		Mode:        agentKernelV3,
 		ReadTargets: map[string]AgentReadTarget{},
 	}
 }
@@ -88,7 +88,7 @@ func normalizeAgentKernelState(state AgentKernelState) AgentKernelState {
 	}
 	state.Mode = normalizeAgentKernelMode(state.Mode)
 	if strings.TrimSpace(state.Mode) == "" {
-		state.Mode = agentKernelCodexParity
+		state.Mode = agentKernelV3
 	}
 	if state.ReadTargets == nil {
 		state.ReadTargets = map[string]AgentReadTarget{}
@@ -104,35 +104,19 @@ func (r *agentRuntime) ensureKernelState() {
 }
 
 func (r *agentRuntime) kernelV2Active() bool {
-	if r == nil {
-		return true
-	}
-	r.ensureKernelState()
-	return r.kernel.Mode != agentKernelLegacy
+	return true
 }
 
 func (r *agentRuntime) codexParityKernelActive() bool {
-	if r == nil {
-		return true
-	}
-	r.ensureKernelState()
-	return r.kernel.Mode == agentKernelCodexParity || r.kernel.Mode == agentKernelSidecarBenchmark
+	return true
+}
+
+func (r *agentRuntime) kernelV3Active() bool {
+	return true
 }
 
 func normalizeAgentKernelMode(mode string) string {
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	switch mode {
-	case "", agentKernelCodexParity:
-		return agentKernelCodexParity
-	case agentKernelLegacy:
-		return agentKernelLegacy
-	case agentKernelV2Current, agentKernelLegacyV2EnvAlias, agentKernelCurrentV2EnvAlias:
-		return agentKernelV2Current
-	case agentKernelSidecarBenchmark:
-		return agentKernelSidecarBenchmark
-	default:
-		return ""
-	}
+	return agentKernelV3
 }
 
 func (r *agentRuntime) recordKernelToolProgress(call agentToolCall, isError bool, event ToolEvent, result string) {
@@ -140,9 +124,6 @@ func (r *agentRuntime) recordKernelToolProgress(call agentToolCall, isError bool
 		return
 	}
 	r.ensureKernelState()
-	if r.kernel.Mode == agentKernelLegacy {
-		return
-	}
 	status := firstNonEmpty(event.Status, "success")
 	if isError {
 		status = "failed"
@@ -183,8 +164,10 @@ func (r *agentRuntime) emitKernelTurnStarted() {
 		return
 	}
 	r.ensureKernelState()
-	if r.kernel.TurnID == "" {
-		r.kernel.TurnID = firstNonEmpty(r.opts.RunID, r.messageID)
+	if strings.TrimSpace(r.messageID) != "" {
+		r.kernel.TurnID = r.messageID
+	} else if r.kernel.TurnID == "" {
+		r.kernel.TurnID = r.opts.RunID
 	}
 	emitToolLifecycleEvent(r.opts, "turn_started", "info", map[string]any{
 		"turn_id":        r.kernel.TurnID,
@@ -198,11 +181,13 @@ func (r *agentRuntime) appendKernelItem(item AgentTurnItem) {
 		return
 	}
 	r.ensureKernelState()
-	if r.kernel.TurnID == "" {
-		r.kernel.TurnID = firstNonEmpty(r.opts.RunID, r.messageID)
+	if strings.TrimSpace(r.messageID) != "" {
+		r.kernel.TurnID = r.messageID
+	} else if r.kernel.TurnID == "" {
+		r.kernel.TurnID = r.opts.RunID
 	}
 	if item.ID == "" {
-		item.ID = agentKernelLedgerID(item.Kind, item.ToolCallID, item.ToolName, intString(r.currentRound), intString(len(r.kernel.Items)+1))
+		item.ID = idgen.New("item")
 	}
 	item.TurnID = r.kernel.TurnID
 	if item.Round == 0 {
@@ -215,6 +200,7 @@ func (r *agentRuntime) appendKernelItem(item AgentTurnItem) {
 	if len(r.kernel.Items) > maxKernelTurnItems {
 		r.kernel.Items = r.kernel.Items[len(r.kernel.Items)-maxKernelTurnItems:]
 	}
+	r.persistKernelTurnItem(item)
 	payload := map[string]any{
 		"item":           item,
 		"turn_id":        item.TurnID,
@@ -226,13 +212,13 @@ func (r *agentRuntime) appendKernelItem(item AgentTurnItem) {
 	}
 	emitToolLifecycleEvent(r.opts, "item_completed", "info", payload)
 	switch item.Kind {
-	case "tool_call", "tool_result", "file_change", "context_compaction", "final_message":
+	case "tool_call", "tool_result", "file_change", "context_compaction", "final_message", "task_plan", "external_observation":
 		emitToolLifecycleEvent(r.opts, item.Kind, "info", payload)
 	}
 }
 
 func (r *agentRuntime) appendKernelAssistantItem(phase, content string) {
-	content = truncatePlainRunes(strings.TrimSpace(content), 1200)
+	content = strings.TrimSpace(content)
 	if content == "" {
 		return
 	}
@@ -251,6 +237,7 @@ func (r *agentRuntime) appendKernelToolCallItem(call agentToolCall) {
 		ToolCallID: call.ID,
 		ToolName:   call.Name,
 		Target:     toolTargetSummary(call.Name, executionToolArgumentsJSON(call)),
+		Content:    executionToolArgumentsJSON(call),
 	})
 }
 
@@ -268,8 +255,33 @@ func (r *agentRuntime) appendKernelToolResultItem(call agentToolCall, event Tool
 		Target:       firstNonEmpty(event.TargetSummary, event.Path, target.Path, toolTargetSummary(call.Name, executionToolArgumentsJSON(call))),
 		LedgerID:     target.LedgerID,
 		Error:        event.Error,
+		Content:      result,
 		ChangedPaths: append([]string(nil), event.ChangedPaths...),
+		Path:         firstNonEmpty(event.Path, target.Path),
+		Hash:         event.Hash,
+		View:         target.View,
+		Mode:         target.Mode,
+		BlockID:      target.BlockID,
+		SectionID:    target.SectionID,
+		DocHash:      target.DocHash,
 	})
+	if isReadWorkspaceTool(call.Name) && !isError && status == "success" {
+		r.appendKernelItem(AgentTurnItem{
+			Kind:       "workspace_observation",
+			Status:     "completed",
+			ToolCallID: call.ID,
+			ToolName:   call.Name,
+			Target:     firstNonEmpty(target.Path, event.Path),
+			LedgerID:   target.LedgerID,
+			Path:       firstNonEmpty(target.Path, event.Path),
+			Hash:       firstNonEmpty(target.DocHash, event.Hash),
+			View:       target.View,
+			Mode:       target.Mode,
+			BlockID:    target.BlockID,
+			SectionID:  target.SectionID,
+			DocHash:    target.DocHash,
+		})
+	}
 	if len(event.ChangedPaths) > 0 {
 		r.appendKernelItem(AgentTurnItem{
 			Kind:         "file_change",
@@ -278,6 +290,8 @@ func (r *agentRuntime) appendKernelToolResultItem(call agentToolCall, event Tool
 			ToolName:     call.Name,
 			Target:       firstNonEmpty(event.Path, event.TargetSummary),
 			ChangedPaths: append([]string(nil), event.ChangedPaths...),
+			Path:         event.Path,
+			Hash:         event.Hash,
 		})
 	}
 }

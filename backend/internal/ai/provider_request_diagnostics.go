@@ -407,15 +407,7 @@ func unsupportedOpenAIParams(provider store.ModelProvider, payload map[string]an
 	if strings.ToLower(strings.TrimSpace(provider.Protocol)) != "openai" {
 		return nil
 	}
-	var unsupported []string
-	if _, ok := payload["reasoning_effort"]; ok {
-		source := policy.Profile.Source
-		if source == store.ThinkingProfileSourceModelsDev && !store.IsOfficialOpenAIBaseURL(provider.BaseURL) {
-			unsupported = append(unsupported, "reasoning_effort_from_official_model_table_on_compatible_provider")
-		}
-	}
-	sort.Strings(unsupported)
-	return unsupported
+	return nil
 }
 
 func stringFromAny(value any) string {

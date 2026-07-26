@@ -31,4 +31,3 @@ type docxRunStyle struct {
 	BackgroundColor    string
 	FontSizeHalfPoints int
 }
-

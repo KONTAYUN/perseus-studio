@@ -66,7 +66,7 @@ func (r *agentRuntime) restoreLatestCheckpointForRecovery(ctx context.Context, e
 		r.service.closeIdleProviderConnections()
 	}
 	payload := map[string]any{
-		"reason":         sanitizeUserFacingAIError(err.Error()),
+		"reason":         UserFacingErrorMessage(err),
 		"attempt":        r.checkpointResumeAttempts,
 		"max_attempts":   maxAttempts,
 		"checkpoint_seq": checkpoint.Seq,
@@ -82,11 +82,18 @@ func (r *agentRuntime) restoreLatestCheckpointForRecovery(ctx context.Context, e
 		return false
 	}
 	r.restoreCheckpoint(checkpoint)
-	r.transcript.AppendRuntimeObservation(r.recoveryObservation("provider_connection_interrupted", err, checkpoint.Seq), map[string]any{
+	observation := r.recoveryObservation("provider_connection_interrupted", err, checkpoint.Seq)
+	r.transcript.AppendRuntimeObservation(observation, map[string]any{
 		"reason":         "checkpoint_resume_after_provider_error",
 		"attempt":        r.checkpointResumeAttempts,
 		"checkpoint_seq": checkpoint.Seq,
 		"diagnostic_id":  diagID,
+	})
+	r.appendKernelItem(AgentTurnItem{
+		Kind:    "workspace_observation",
+		Phase:   "checkpoint_recovery",
+		Status:  "completed",
+		Content: observation,
 	})
 	return true
 }
@@ -140,7 +147,7 @@ func (r *agentRuntime) checkpointRecoveryFailedError(ctx context.Context, err er
 		return err
 	}
 	emitToolLifecycleEvent(r.opts, "agent_recovery_failed", "error", map[string]any{
-		"reason":         sanitizeUserFacingAIError(err.Error()),
+		"reason":         UserFacingErrorMessage(err),
 		"attempt":        r.checkpointResumeAttempts,
 		"max_attempts":   agentMaxCheckpointResumes(),
 		"diagnostic_id":  DiagnosticIDFromError(err),
@@ -158,7 +165,7 @@ func (r *agentRuntime) checkpointRecoveryFailedError(ctx context.Context, err er
 	if diagID == "" {
 		return err
 	}
-	message := fmt.Errorf("%s，已自动从断点继续 %d/%d 次但仍失败。可以稍后点击“继续本轮”，或切换到更稳定的模型/中转后再试", sanitizeUserFacingAIError(err.Error()), r.checkpointResumeAttempts, agentMaxCheckpointResumes())
+	message := fmt.Errorf("%s，已自动从断点继续 %d/%d 次但仍失败。可以稍后点击“继续本轮”，或切换到更稳定的模型/中转后再试", UserFacingErrorMessage(err), r.checkpointResumeAttempts, agentMaxCheckpointResumes())
 	return &DiagnosticError{ID: diagID, Err: message}
 }
 

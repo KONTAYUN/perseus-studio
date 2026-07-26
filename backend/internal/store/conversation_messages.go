@@ -186,25 +186,81 @@ WHERE id = ? AND user_id = ?
 	return s.GetMessage(ctx, userID, messageID)
 }
 
+func (s *ConversationStore) UpdateMessagePresentation(ctx context.Context, userID, messageID, attachmentsJSON, metaJSON string) (Message, error) {
+	if attachmentsJSON == "" {
+		attachmentsJSON = "[]"
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE messages
+SET attachments_json = ?,
+    meta_json = COALESCE(NULLIF(?, ''), meta_json),
+    updated_at = ?
+WHERE id = ? AND user_id = ?
+`, attachmentsJSON, metaJSON, time.Now().UTC(), messageID, userID)
+	if err != nil {
+		return Message{}, err
+	}
+	return s.GetMessage(ctx, userID, messageID)
+}
+
 func (s *ConversationStore) DeleteMessage(ctx context.Context, userID, conversationID, messageID string) error {
+	_, err := s.DeleteMessageWithAttachments(ctx, userID, conversationID, messageID)
+	return err
+}
+
+func (s *ConversationStore) DeleteMessageWithAttachments(ctx context.Context, userID, conversationID, messageID string) ([]ChatAttachment, error) {
+	if err := s.EnsureAgentTurnItems(ctx, userID, conversationID); err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
+	candidates, err := listMessageChatAttachmentsTx(ctx, tx, userID, messageID)
+	if err != nil {
+		return nil, err
+	}
 	result, err := tx.ExecContext(ctx, `
 DELETE FROM messages
 WHERE id = ? AND conversation_id = ? AND user_id = ?
 `, messageID, conversationID, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if rows == 0 {
-		return sql.ErrNoRows
+		return nil, sql.ErrNoRows
+	}
+	var itemKind, turnID string
+	itemErr := tx.QueryRowContext(ctx, `
+SELECT kind, turn_id FROM agent_turn_items
+WHERE user_id = ? AND conversation_id = ? AND source_id = ?
+ORDER BY seq DESC LIMIT 1
+`, userID, conversationID, messageID).Scan(&itemKind, &turnID)
+	if itemErr != nil && itemErr != sql.ErrNoRows {
+		return nil, itemErr
+	}
+	if itemErr == nil {
+		if itemKind == "user_message" {
+			_, err = tx.ExecContext(ctx, `
+DELETE FROM agent_turn_items WHERE user_id = ? AND conversation_id = ? AND turn_id = ?
+`, userID, conversationID, turnID)
+		} else {
+			_, err = tx.ExecContext(ctx, `
+DELETE FROM agent_turn_items WHERE user_id = ? AND conversation_id = ? AND source_id = ?
+`, userID, conversationID, messageID)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	deletedAttachments, err := deleteUnlinkedChatAttachmentsTx(ctx, tx, candidates)
+	if err != nil {
+		return nil, err
 	}
 	_, err = tx.ExecContext(ctx, `
 UPDATE conversations
@@ -212,15 +268,26 @@ SET updated_at = ?
 WHERE id = ? AND user_id = ?
 `, time.Now().UTC(), conversationID, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return deletedAttachments, nil
 }
 
 func (s *ConversationStore) DeleteMessagesAfter(ctx context.Context, userID, conversationID, afterMessageID string) error {
+	_, err := s.DeleteMessagesAfterWithAttachments(ctx, userID, conversationID, afterMessageID)
+	return err
+}
+
+func (s *ConversationStore) DeleteMessagesAfterWithAttachments(ctx context.Context, userID, conversationID, afterMessageID string) ([]ChatAttachment, error) {
+	if err := s.EnsureAgentTurnItems(ctx, userID, conversationID); err != nil {
+		return nil, err
+	}
 	messages, err := s.ListMessages(ctx, userID, conversationID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cutIndex := -1
 	for index, item := range messages {
@@ -230,23 +297,50 @@ func (s *ConversationStore) DeleteMessagesAfter(ctx context.Context, userID, con
 		}
 	}
 	if cutIndex == -1 {
-		return sql.ErrNoRows
+		return nil, sql.ErrNoRows
 	}
 	if cutIndex == len(messages)-1 {
-		return nil
+		return nil, nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
+	var attachmentCandidates []ChatAttachment
+	for _, item := range messages[cutIndex+1:] {
+		attached, err := listMessageChatAttachmentsTx(ctx, tx, userID, item.ID)
+		if err != nil {
+			return nil, err
+		}
+		attachmentCandidates = append(attachmentCandidates, attached...)
+	}
+	var boundarySeq int64
+	if err := tx.QueryRowContext(ctx, `
+SELECT seq FROM agent_turn_items
+WHERE user_id = ? AND conversation_id = ? AND source_id = ?
+ORDER BY seq DESC LIMIT 1
+`, userID, conversationID, afterMessageID).Scan(&boundarySeq); err != nil {
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+	} else if _, err := tx.ExecContext(ctx, `
+DELETE FROM agent_turn_items
+WHERE user_id = ? AND conversation_id = ? AND seq > ?
+`, userID, conversationID, boundarySeq); err != nil {
+		return nil, err
+	}
 	for _, item := range messages[cutIndex+1:] {
 		if _, err := tx.ExecContext(ctx, `
 DELETE FROM messages
 WHERE id = ? AND conversation_id = ? AND user_id = ?
 `, item.ID, conversationID, userID); err != nil {
-			return err
+			return nil, err
 		}
+	}
+	deletedAttachments, err := deleteUnlinkedChatAttachmentsTx(ctx, tx, attachmentCandidates)
+	if err != nil {
+		return nil, err
 	}
 	_, err = tx.ExecContext(ctx, `
 UPDATE conversations
@@ -254,7 +348,10 @@ SET updated_at = ?
 WHERE id = ? AND user_id = ?
 `, time.Now().UTC(), conversationID, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return deletedAttachments, nil
 }

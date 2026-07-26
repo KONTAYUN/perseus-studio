@@ -14,6 +14,8 @@ const (
 	AgentRunQueued    AgentRunStatus = "queued"
 	AgentRunRunning   AgentRunStatus = "running"
 	AgentRunSucceeded AgentRunStatus = "succeeded"
+	AgentRunWaiting   AgentRunStatus = "waiting_for_user"
+	AgentRunDelegated AgentRunStatus = "delegated"
 	AgentRunFailed    AgentRunStatus = "failed"
 	AgentRunCanceled  AgentRunStatus = "canceled"
 )
@@ -137,6 +139,20 @@ CREATE TABLE IF NOT EXISTS agent_run_checkpoints (
   created_at DATETIME NOT NULL,
   FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS agent_followup_answers (
+  id TEXT PRIMARY KEY,
+  answer_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  tool_call_id TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  answer_message_id TEXT NOT NULL,
+  created_at DATETIME NOT NULL,
+  UNIQUE(user_id, run_id, answer_id),
+  UNIQUE(user_id, run_id, tool_call_id),
+  FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
 `
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
 		return err
@@ -152,6 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_run_seq ON agent_events(run_id, seq)
 CREATE INDEX IF NOT EXISTS idx_agent_events_user_created ON agent_events(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_events_conversation_type ON agent_events(user_id, conversation_id, type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_run_checkpoints_run_seq ON agent_run_checkpoints(run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_agent_followup_answers_run ON agent_followup_answers(user_id, run_id, created_at);
 `
 	_, err := s.db.ExecContext(ctx, indexes)
 	return err

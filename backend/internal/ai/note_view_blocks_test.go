@@ -166,81 +166,18 @@ func TestReadWorkspaceNoteViewRejectsStaleDocHash(t *testing.T) {
 	}
 }
 
-func TestBudgetToolResultForModelGivesHTMLBlockContinuationHint(t *testing.T) {
-	raw := mustJSON(map[string]any{
-		"tool":      "read_workspace_note_view",
-		"tool_name": "read_workspace_note_view",
-		"path":      "Long.html",
-		"view":      "raw",
-		"mode":      "full",
-		"content":   strings.Repeat("<p>long html</p>", 600),
-	})
-	budgeted := budgetToolResultForModel("read_workspace_note_view", raw, providerRuntimeProfile{
-		MaxToolResultRunes:      1200,
-		MaxReadFileContentRunes: 6000,
-	})
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
-		t.Fatalf("budgeted payload is not json: %v\n%s", err, budgeted)
-	}
-	if payload["model_view_truncated"] != true {
-		t.Fatalf("expected model_view_truncated, got %#v", payload)
-	}
-	nextAction := stringFromAny(payload["next_action"])
-	if !strings.Contains(nextAction, "mode=index") || strings.Contains(nextAction, "line range") {
-		t.Fatalf("expected HTML block continuation hint, got %q", nextAction)
-	}
-}
-
-func TestBudgetToolResultForModelPreservesNoteIndexStructure(t *testing.T) {
-	blocks := make([]map[string]any, 0, 40)
-	for i := 1; i <= 40; i++ {
-		blocks = append(blocks, map[string]any{
-			"block_id":     fmt.Sprintf("b%04d", i),
-			"tag":          "p",
-			"text_preview": strings.Repeat("preview ", 12),
-			"char_count":   240,
-		})
-	}
-	raw := mustJSON(map[string]any{
-		"tool_name":       "read_workspace_note_view",
-		"path":            "Long.html",
-		"mode":            "index",
-		"doc_hash":        "abc",
-		"start_block":     1,
-		"total_blocks":    40,
-		"returned_blocks": 40,
-		"has_more_blocks": false,
-		"blocks":          blocks,
-	})
-	budgeted := budgetToolResultForModel("read_workspace_note_view", raw, providerRuntimeProfile{
-		MaxToolResultRunes:      1500,
-		MaxReadFileContentRunes: 6000,
-	})
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(budgeted), &payload); err != nil {
-		t.Fatalf("budgeted payload is not json: %v\n%s", err, budgeted)
-	}
-	kept, ok := payload["blocks"].([]any)
-	if !ok || len(kept) == 0 || len(kept) >= len(blocks) {
-		t.Fatalf("expected trimmed but structured blocks, got %#v", payload["blocks"])
-	}
-	if payload["index_truncated_for_model"] != true || payload["model_view_truncated"] != true {
-		t.Fatalf("expected model-view index truncation flags, got %#v", payload)
-	}
-	if intFromAny(payload["next_start_block"]) != 1+len(kept) || payload["has_more_blocks"] != true {
-		t.Fatalf("expected continuation metadata based on kept blocks, got %#v", payload)
-	}
-}
-
 func TestProviderFailureClassClassifiesTPMRateLimit(t *testing.T) {
 	err := &ProviderResponseError{
 		StatusCode:      429,
 		Message:         "The request exceeds the rate limit on dimension: tpm.",
 		ResponseSnippet: `{"code":"429001"}`,
 	}
-	if got := providerFailureClass(err, ProviderRequestSummary{}); got != "provider_tpm_rate_limited" {
-		t.Fatalf("expected provider_tpm_rate_limited, got %q", got)
+	if got := providerFailureClass(err, ProviderRequestSummary{}); got != string(ProviderFailureRateLimited) {
+		t.Fatalf("expected generic structured rate limit, got %q", got)
+	}
+	err.ErrorCode = "tpm_limit_exceeded"
+	if got := classifyProviderRateLimitKind(err); got != ProviderRateLimitTPM {
+		t.Fatalf("expected structured TPM rate-limit kind, got %q", got)
 	}
 }
 
@@ -248,6 +185,20 @@ func TestWorkspacePromptDirectsHTMLTruncationToBlockReads(t *testing.T) {
 	for _, want := range []string{"mode=index", "mode=block", "mode=section", "do not tell the user the file was not returned"} {
 		if !strings.Contains(workspaceToolSystemPrompt, want) {
 			t.Fatalf("workspace prompt missing %q", want)
+		}
+	}
+}
+
+func TestWorkspacePromptRequiresCompleteMarkdownCompletionResult(t *testing.T) {
+	for _, want := range []string{
+		"All user-visible replies are Markdown",
+		"attempt_completion.result",
+		"fenced code blocks",
+		"appropriate language tag",
+		"degraded plain-text result",
+	} {
+		if !strings.Contains(workspaceToolSystemPrompt, want) {
+			t.Fatalf("workspace prompt missing Markdown completion rule %q", want)
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 )
 
 type openAIStreamChunk struct {
+	ID      string         `json:"id"`
 	Usage   map[string]any `json:"usage"`
 	Choices []struct {
 		Delta struct {
@@ -29,11 +30,10 @@ type openAIStreamChunk struct {
 }
 
 type openAIStreamToolBuilder struct {
-	ID               string
-	Type             string
-	Name             string
-	Arguments        strings.Builder
-	CompletionResult partialJSONFieldStreamer
+	ID        string
+	Type      string
+	Name      string
+	Arguments strings.Builder
 }
 
 type partialStreamTurnError struct {
@@ -73,9 +73,8 @@ type streamDeltaEmitter struct {
 }
 
 type providerStreamParseOptions struct {
-	EmitText                  func(string)
-	EmitCompletionResultDelta func(string)
-	RevealTextAfterTool       bool
+	EmitText            func(string)
+	RevealTextAfterTool bool
 }
 
 type toolGatedStreamDeltaEmitter struct {
@@ -83,6 +82,7 @@ type toolGatedStreamDeltaEmitter struct {
 	revealAfterTool bool
 	toolObserved    bool
 	buffer          strings.Builder
+	streamed        strings.Builder
 }
 
 func newStreamDeltaEmitter(emit func(string)) *streamDeltaEmitter {
@@ -132,6 +132,7 @@ func (e *toolGatedStreamDeltaEmitter) Add(text string) {
 		return
 	}
 	if !e.revealAfterTool || e.toolObserved {
+		e.streamed.WriteString(text)
 		e.inner.Add(text)
 		return
 	}
@@ -151,8 +152,16 @@ func (e *toolGatedStreamDeltaEmitter) MarkToolObserved() {
 	if isToolPreamblePlaceholder(text) {
 		return
 	}
+	e.streamed.WriteString(text)
 	e.inner.Add(text)
 	e.inner.Flush()
+}
+
+func (e *toolGatedStreamDeltaEmitter) StreamedContent() string {
+	if e == nil {
+		return ""
+	}
+	return e.streamed.String()
 }
 
 func (e *toolGatedStreamDeltaEmitter) Flush() {
@@ -168,21 +177,24 @@ func (e *toolGatedStreamDeltaEmitter) Flush() {
 
 func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOptions) (agentModelTurn, error) {
 	var content strings.Builder
-	deltas := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(opts))
-	completionDeltas := newStreamDeltaEmitter(opts.EmitCompletionResultDelta)
+	deltas := newToolGatedStreamDeltaEmitter(opts)
 	visibleText := newProviderVisibleTextFilter()
 	toolBuilders := map[int]*openAIStreamToolBuilder{}
 	finishReason := ""
 	usage := ProviderUsage{}
-	completionResultStreamed := false
-	emitCompletionResult := func(text string) {
-		if text == "" || opts.EmitCompletionResultDelta == nil {
-			return
-		}
-		completionResultStreamed = true
-		completionDeltas.Add(text)
-	}
+	providerResponseID := ""
+	lastEventID := ""
+	duplicateEvents := 0
+	seenEventIDs := map[string]string{}
 	err := readSSEEvents(body, func(event sseEvent) error {
+		if event.ID != "" {
+			if previous, exists := seenEventIDs[event.ID]; exists && previous == event.Data {
+				duplicateEvents++
+				return nil
+			}
+			seenEventIDs[event.ID] = event.Data
+			lastEventID = event.ID
+		}
 		data := strings.TrimSpace(event.Data)
 		if data == "" || data == "[DONE]" {
 			return nil
@@ -190,6 +202,9 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return fmt.Errorf("invalid OpenAI stream chunk: %w", err)
+		}
+		if chunk.ID != "" {
+			providerResponseID = chunk.ID
 		}
 		updateProviderUsageFromAny(&usage, chunk.Usage)
 		for _, choice := range chunk.Choices {
@@ -218,21 +233,19 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 				if item.Function.Arguments != "" {
 					builder.Arguments.WriteString(item.Function.Arguments)
 				}
-				// Cline streams attempt_completion.result while the tool block is
-				// still partial; do the same for native tool-call arguments.
-				builder.CompletionResult.EmitNewDelta(builder.Name, builder.Arguments.String(), emitCompletionResult)
 			}
 		}
 		return nil
 	})
 	closeProviderVisibleText(&content, deltas, visibleText)
 	deltas.Flush()
-	completionDeltas.Flush()
 	if err != nil {
 		turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)
 		turn.PublicStreamedContent = deltas.StreamedContent()
-		turn.CompletionResultStreamed = completionResultStreamed
 		turn.Usage = usage
+		turn.ProviderResponseID = providerResponseID
+		turn.StreamLastEventID = lastEventID
+		turn.StreamDuplicateEvents = duplicateEvents
 		if hasCompleteToolCalls(turn) {
 			return agentModelTurn{}, &partialStreamTurnError{turn: turn, err: err}
 		}
@@ -243,8 +256,10 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 	}
 	turn := buildOpenAIStreamTurn(content.String(), finishReason, toolBuilders)
 	turn.PublicStreamedContent = deltas.StreamedContent()
-	turn.CompletionResultStreamed = completionResultStreamed
 	turn.Usage = usage
+	turn.ProviderResponseID = providerResponseID
+	turn.StreamLastEventID = lastEventID
+	turn.StreamDuplicateEvents = duplicateEvents
 	return turn, nil
 }
 

@@ -167,12 +167,20 @@ func providerResponseErrorFromSDK(statusCode int, resp *http.Response, req *http
 	if message == "" && fallback != nil {
 		message = fallback.Error()
 	}
+	errorCode, errorType, errorParam, structuredMessage, structured := providerErrorFields(raw)
+	if structuredMessage != "" {
+		message = structuredMessage
+	}
 	return &ProviderResponseError{
 		StatusCode:      statusCode,
 		ContentType:     contentType,
 		Endpoint:        endpoint,
 		ResponseSnippet: snippet,
 		Message:         message,
+		ErrorCode:       errorCode,
+		ErrorType:       errorType,
+		ErrorParam:      errorParam,
+		StructuredError: structured,
 		RetryAfter:      responseHeaderValue(resp, "Retry-After"),
 		RateLimitReset:  responseRateLimitReset(resp),
 		RequestID:       responseRequestID(resp),

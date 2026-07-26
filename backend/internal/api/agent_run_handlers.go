@@ -78,6 +78,22 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"run": run, "resume_event": event})
+	case "followup-answer":
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		result, err := s.answerAgentFollowupQuestion(r.Context(), user.UserID, runID, r.Body)
+		if err != nil {
+			var conflict *store.AgentFollowupAnswerConflictError
+			if errors.As(err, &conflict) {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusBadRequest, err.Error())
+			}
+			return
+		}
+		writeJSON(w, http.StatusAccepted, result)
 	case "steer":
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
@@ -180,7 +196,7 @@ func (s *Server) resumeAgentRun(ctx context.Context, userID, runID string) (stor
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
 	}
-	attachmentPayloads := payloadsFromStoredMessageAttachments(userMessage)
+	attachmentPayloads := s.payloadsFromStoredMessageAttachments(ctx, user.UserID, userMessage)
 	resumed, err := s.runs.ResumeRun(ctx, userID, runID)
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err

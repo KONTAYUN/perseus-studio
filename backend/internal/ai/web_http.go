@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -23,6 +22,10 @@ type ProviderResponseError struct {
 	ResponseSnippet string
 	ParseError      string
 	Message         string
+	ErrorCode       string
+	ErrorType       string
+	ErrorParam      string
+	StructuredError map[string]any
 	RetryAfter      string
 	RateLimitReset  string
 	RequestID       string
@@ -279,34 +282,7 @@ func isTransientTransportError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, io.EOF) {
-		return true
-	}
-	text := strings.ToLower(err.Error())
-	transientMarkers := []string{
-		"tls: bad record mac",
-		"eof",
-		"unexpected eof",
-		"connection reset",
-		"connection refused",
-		"connection aborted",
-		"transport connection broken",
-		"malformed http response",
-		"server closed idle connection",
-		"timeout awaiting response headers",
-		"client.timeout exceeded",
-		"context deadline exceeded",
-		"temporary failure",
-		"temporary",
-		"stream error",
-		"http2:",
-	}
-	for _, marker := range transientMarkers {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	return classifyProviderTransportFailure(err).Retryable
 }
 
 func decodeProviderResponse(resp *http.Response, endpoint string, target any) error {
@@ -323,12 +299,17 @@ func decodeProviderResponse(resp *http.Response, endpoint string, target any) er
 				Error any `json:"error"`
 			}
 			if err := json.Unmarshal(body, &data); err == nil && data.Error != nil {
+				errorCode, errorType, errorParam, errorMessage, structured := providerErrorFields(data.Error)
 				return &ProviderResponseError{
 					StatusCode:      resp.StatusCode,
 					ContentType:     contentType,
 					Endpoint:        endpoint,
 					ResponseSnippet: responseSnippet(body, 500),
-					Message:         formatProviderError(resp.StatusCode, data.Error).Error(),
+					Message:         errorMessage,
+					ErrorCode:       errorCode,
+					ErrorType:       errorType,
+					ErrorParam:      errorParam,
+					StructuredError: structured,
 					RetryAfter:      resp.Header.Get("Retry-After"),
 					RateLimitReset:  providerRateLimitResetHeader(resp.Header),
 					RequestID:       providerRequestIDHeader(resp.Header),

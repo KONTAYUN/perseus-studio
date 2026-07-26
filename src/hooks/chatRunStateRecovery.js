@@ -44,20 +44,20 @@ export function applyLatestRunState(messages, latestRun, events = [], options = 
     const nextMessages = normalized
       .filter((item) => !isRunShellMessage(item, { thinkingId: shellId, runId: latestRun.id }))
       .map((item) => {
-      if (item.id !== activeMessageID) return item;
-      return {
-        ...item,
-        pending: true,
-        runId: latestRun.id,
-        activeMessageId: activeMessageID,
-        progressItems: snapshot.progressItems,
-        loadingState: {
-          text: snapshot.loadingText,
-          visibleText: snapshot.loadingText,
-          stage: 'holding',
-          activeSince: Date.now(),
-        },
-      };
+        if (item.id !== activeMessageID) return item;
+        return {
+          ...item,
+          pending: true,
+          runId: latestRun.id,
+          activeMessageId: activeMessageID,
+          progressItems: snapshot.progressItems,
+          loadingState: {
+            text: snapshot.loadingText,
+            visibleText: snapshot.loadingText,
+            stage: 'holding',
+            activeSince: Date.now(),
+          },
+        };
       });
     return nextMessages;
   }
@@ -150,6 +150,12 @@ function isRunSnapshotLoadingType(type = '') {
     type.startsWith('model_call_') ||
     type === 'model_message_started' ||
     type === 'model_stream_recovering' ||
+    type === 'stream_reconnecting' ||
+    type === 'transport_fallback' ||
+    type === 'provider_rate_limited' ||
+    type === 'provider_cooldown_updated' ||
+    type === 'provider_auto_resume_scheduled' ||
+    type === 'provider_auto_resume_started' ||
     type === 'context_compaction_started' ||
     type === 'context_compaction_failed' ||
     type === 'agent_recovery_started' ||
@@ -158,6 +164,7 @@ function isRunSnapshotLoadingType(type = '') {
     type === 'agent_budget_summary_started' ||
     type === 'agent_budget_summary_failed' ||
     type === 'completion_rejected' ||
+	type === 'agent_protocol_retry' ||
     type === 'local_persistence_failed'
   );
 }
@@ -176,6 +183,8 @@ function runStageLoadingText(stage = '') {
       return '正在保存回复';
     case 'retrying_model':
       return '正在重新连接模型';
+    case 'rate_limited_waiting':
+      return '模型限流，等待自动继续';
     default:
       return '';
   }

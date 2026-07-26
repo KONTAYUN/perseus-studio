@@ -134,7 +134,7 @@ func (s *Service) execApplyWorkspacePatch(ctx context.Context, userID, arguments
 			"error":               err.Error(),
 			"applied":             false,
 			"files_changed":       false,
-			"transport":           "assistant_text_patch",
+			"transport":           "structured_tool",
 			"failure_stage":       "patch_apply_verification",
 			"recovery_hint":       "The patch was captured, but verification failed before writing. Read the target file/range again and submit a corrected *** Begin Patch text patch before claiming completion.",
 			"unapplied_patch_sha": hashWorkspaceText(patchText),

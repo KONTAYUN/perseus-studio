@@ -77,12 +77,6 @@ func ledgerToolArgumentValue(value any) (any, bool) {
 }
 
 func executionToolArgumentsJSON(call agentToolCall) string {
-	if call.Name == "apply_workspace_patch" && strings.TrimSpace(call.PatchText) != "" {
-		return mustJSON(map[string]any{
-			"patch":     call.PatchText,
-			"transport": "assistant_text_patch",
-		})
-	}
 	return call.ArgumentsJSON
 }
 
@@ -91,13 +85,6 @@ func ledgerToolCallArgumentsJSON(call agentToolCall) string {
 }
 
 func toolCallTranscriptArgumentsJSON(call agentToolCall) string {
-	if call.Name == "apply_workspace_patch" && strings.TrimSpace(call.PatchText) != "" {
-		return mustJSON(map[string]any{
-			"patch":       "[assistant_text_patch captured by backend]",
-			"transport":   "assistant_text_patch",
-			"patch_chars": len([]rune(call.PatchText)),
-		})
-	}
 	return call.ArgumentsJSON
 }
 

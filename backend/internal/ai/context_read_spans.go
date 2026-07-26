@@ -397,6 +397,38 @@ func currentReadWorkingSetFromTranscript(transcript *AgentTranscript, limit int)
 	return set
 }
 
+func currentSuccessfulReadToolCalls(transcript *AgentTranscript) map[string]bool {
+	current := map[string]bool{}
+	if transcript == nil {
+		return current
+	}
+	var newerSpans []readResultSpan
+	for entryIndex := len(transcript.Entries) - 1; entryIndex >= 0; entryIndex-- {
+		entry := transcript.Entries[entryIndex]
+		if entry.Kind != transcriptEntryTool {
+			continue
+		}
+		for resultIndex := len(entry.ToolResults) - 1; resultIndex >= 0; resultIndex-- {
+			result := entry.ToolResults[resultIndex]
+			if !isReadWorkspaceTool(result.ToolName) || result.IsError {
+				continue
+			}
+			spans := readResultSpans(&result)
+			if len(spans) == 0 {
+				continue
+			}
+			for _, span := range spans {
+				if !readSpanSupersededByAny(span, newerSpans) {
+					current[result.ToolCallID] = true
+					break
+				}
+			}
+			newerSpans = append(newerSpans, spans...)
+		}
+	}
+	return current
+}
+
 func readContentStateAvailableForSpan(span readResultSpan, contentAvailable bool) string {
 	if span.Truncated {
 		return string(ReadContentStateSourceTruncated)

@@ -12,6 +12,11 @@ type ModelProvider struct {
 	Name                        string          `json:"name"`
 	Visibility                  string          `json:"visibility"`
 	Protocol                    string          `json:"protocol"`
+	AdapterMode                 string          `json:"adapter_mode"`
+	AuthMode                    string          `json:"auth_mode"`
+	SupportsTools               string          `json:"supports_tools"`
+	SupportsVision              string          `json:"supports_vision"`
+	CapabilitySource            string          `json:"capability_source"`
 	BaseURL                     string          `json:"base_url"`
 	APIKey                      string          `json:"-"`
 	MaskedKey                   string          `json:"masked_key"`
@@ -24,11 +29,12 @@ type ModelProvider struct {
 	ReasoningSupport            string          `json:"reasoning_support"`
 	ThinkingProfile             ThinkingProfile `json:"thinking_profile"`
 	ContextWindowTokens         int             `json:"context_window_tokens"`
+	ContextWindowSource         string          `json:"context_window_source,omitempty"`
 	AutoCompactEnabled          bool            `json:"auto_compact_enabled"`
 	AutoCompactThresholdPercent int             `json:"auto_compact_threshold_percent"`
 	CompactReservedTokens       int             `json:"compact_reserved_tokens"`
 	PruneToolOutputsEnabled     bool            `json:"prune_tool_outputs_enabled"`
-	NativePatchToolEnabled      bool            `json:"native_patch_tool_enabled"`
+	NativePatchToolEnabled      bool            `json:"-"`
 	CreatedAt                   time.Time       `json:"created_at"`
 	UpdatedAt                   time.Time       `json:"updated_at"`
 }
@@ -50,6 +56,11 @@ type ModelProviderInput struct {
 	Name                        string `json:"name"`
 	Visibility                  string `json:"visibility"`
 	Protocol                    string `json:"protocol"`
+	AdapterMode                 string `json:"adapter_mode"`
+	AuthMode                    string `json:"auth_mode"`
+	SupportsTools               string `json:"supports_tools"`
+	SupportsVision              string `json:"supports_vision"`
+	CapabilitySource            string `json:"capability_source"`
 	BaseURL                     string `json:"base_url"`
 	APIKey                      string `json:"api_key"`
 	ModelID                     string `json:"model_id"`
@@ -63,7 +74,7 @@ type ModelProviderInput struct {
 	AutoCompactThresholdPercent int    `json:"auto_compact_threshold_percent"`
 	CompactReservedTokens       int    `json:"compact_reserved_tokens"`
 	PruneToolOutputsEnabled     *bool  `json:"prune_tool_outputs_enabled"`
-	NativePatchToolEnabled      *bool  `json:"native_patch_tool_enabled"`
+	NativePatchToolEnabled      *bool  `json:"-"`
 }
 
 type SearchProviderInput struct {
@@ -133,11 +144,32 @@ CREATE TABLE IF NOT EXISTS search_providers (
 		{"reasoning_capability", "TEXT NOT NULL DEFAULT 'auto'"},
 		{"reasoning_capability_source", "TEXT NOT NULL DEFAULT ''"},
 		{"reasoning_profile_levels", "TEXT NOT NULL DEFAULT ''"},
+		{"adapter_mode", "TEXT NOT NULL DEFAULT ''"},
+		{"auth_mode", "TEXT NOT NULL DEFAULT ''"},
+		{"supports_tools", "TEXT NOT NULL DEFAULT 'unknown'"},
+		{"supports_vision", "TEXT NOT NULL DEFAULT 'unknown'"},
+		{"capability_source", "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, column := range modelProviderColumns {
 		if err := AddColumnIfNotExists(ctx, s.db, "model_providers", column.name, column.def); err != nil {
 			return err
 		}
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE model_providers
+SET adapter_mode = CASE
+      WHEN lower(protocol) = 'anthropic' AND lower(base_url) LIKE '%claude-code-proxy%' THEN 'anthropic_bearer_proxy'
+      WHEN lower(protocol) = 'anthropic' THEN 'anthropic_native'
+      ELSE 'openai_compatible'
+    END,
+    auth_mode = CASE
+      WHEN lower(protocol) = 'anthropic' AND lower(base_url) NOT LIKE '%claude-code-proxy%' THEN 'x_api_key'
+      ELSE 'bearer'
+    END,
+    capability_source = 'legacy_migration'
+WHERE adapter_mode = '' OR auth_mode = ''
+`); err != nil {
+		return err
 	}
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_model_providers_enabled_default ON model_providers(enabled, is_default);

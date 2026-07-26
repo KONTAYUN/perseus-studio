@@ -41,7 +41,7 @@ func TestParseChatReferencesKeepsWorkspaceFilesMetadataOnly(t *testing.T) {
 	server := &Server{factory: factory}
 	form := url.Values{}
 	form.Set("workspace_refs_json", `[{"id":"ref_1","name":"secret.txt","path":"drafts/secret.txt","file_type":"text"}]`)
-	form.Set("current_file_context_json", `{"id":"current_file","name":"current.txt","path":"drafts/current.txt","file_type":"text"}`)
+	form.Set("editor_context_json", `{"id":"editor_panels_context","type":"editor_panels_context","panels":[{"panel_id":"editor_1","index":1,"position_label":"current","active_file_path":"drafts/current.txt","active_file_name":"current.txt","open_tabs":["drafts/current.txt"]}]}`)
 	req := httptest.NewRequest("POST", "/api/conversations/conv/messages", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req = req.WithContext(context.WithValue(req.Context(), ctxSessionKey, &SessionInfo{UserID: "user_1", Role: "user"}))
@@ -57,8 +57,11 @@ func TestParseChatReferencesKeepsWorkspaceFilesMetadataOnly(t *testing.T) {
 		if payload.Text != "" || payload.IncludedInContext || payload.Truncated {
 			t.Fatalf("workspace/current payload must be metadata only, got %#v", payload)
 		}
-		if payload.Path == "" {
+		if payload.Kind == "workspace_file" && payload.Path == "" {
 			t.Fatalf("expected payload path, got %#v", payload)
+		}
+		if payload.Kind == "editor_panels_context" && (len(payload.EditorPanels) != 1 || payload.EditorPanels[0].ActiveFilePath != "drafts/current.txt") {
+			t.Fatalf("expected path-only editor panel metadata, got %#v", payload)
 		}
 	}
 	if len(metadata) != 2 {
@@ -68,7 +71,7 @@ func TestParseChatReferencesKeepsWorkspaceFilesMetadataOnly(t *testing.T) {
 		if item.IncludedInContext || item.Truncated {
 			t.Fatalf("workspace/current metadata must not claim context inclusion, got %#v", item)
 		}
-		if item.Path == "" {
+		if item.Kind == "workspace_file" && item.Path == "" {
 			t.Fatalf("expected metadata path, got %#v", item)
 		}
 	}

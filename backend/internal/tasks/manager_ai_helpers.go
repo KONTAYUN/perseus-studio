@@ -71,9 +71,6 @@ func (m *Manager) runAIAgentOnce(ctx context.Context, userID, taskID string, pay
 		ForceTool: forceTool,
 		Log: func(level, message string) {
 			m.logAndPublish(ctx, userID, taskID, level, message)
-			if strings.HasPrefix(message, "tool call started") {
-				m.updateAndPublish(ctx, taskID, store.TaskRunning, "tool_call", message)
-			}
 		},
 		Event: func(eventType, level string, payload map[string]any) {
 			message := taskAgentEventMessage(eventType, payload)
@@ -182,7 +179,7 @@ func (m *Manager) validateOutputs(ctx context.Context, payload AIAgentPayload, r
 		case "file":
 			path := strings.TrimSpace(output.Path)
 			if path == "" {
-				path = firstChangedFile(reply.ToolEvents)
+				path = firstChangedFile(reply.RunEvents)
 				if path == "" {
 					result.addMissing(missingOutputFile, "file output has no path and no created/modified file was recorded")
 					continue
@@ -201,7 +198,7 @@ func (m *Manager) validateOutputs(ctx context.Context, payload AIAgentPayload, r
 				result.addMissing(missingOutputMessage, "missing assistant message: "+output.Description)
 			}
 		case "command_result":
-			if !hasCommandResult(reply.ToolEvents) {
+			if !hasCommandResult(reply.RunEvents) {
 				result.addMissing(missingOutputCommand, "missing command result: "+output.Description)
 			}
 		}

@@ -208,7 +208,7 @@ func TestModelProviderReasoningAutoIsConservative(t *testing.T) {
 	}
 }
 
-func TestModelProviderReasoningAutoUsesSourceBackedOpenAIModels(t *testing.T) {
+func TestModelProviderReasoningAutoDoesNotInferCapabilityFromURLOrModelName(t *testing.T) {
 	db, err := store.Open(":memory:")
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
@@ -230,8 +230,8 @@ func TestModelProviderReasoningAutoUsesSourceBackedOpenAIModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateModelProvider returned error: %v", err)
 	}
-	if item.ReasoningCapability != "auto" || item.ReasoningSupport != "openai" || item.ThinkingProfile.Source != store.ThinkingProfileSourceModelsDev {
-		t.Fatalf("expected source-backed OpenAI model to support native reasoning, got %#v", item)
+	if item.ReasoningCapability != "auto" || item.ReasoningSupport != "none" || item.ThinkingProfile.Source != store.ThinkingProfileSourceNone {
+		t.Fatalf("expected unknown capability to remain disabled until configured or discovered, got %#v", item)
 	}
 }
 
@@ -694,7 +694,12 @@ func TestParseDiscoveredModelsDoesNotTreatThinkingParameterAsOpenAIReasoning(t *
 }
 
 func TestModelDiscoveryEndpointsForAnthropic(t *testing.T) {
-	endpoints, headerMode, err := modelDiscoveryEndpoints("anthropic", "https://api.anthropic.com/v1")
+	endpoints, headerMode, err := modelDiscoveryEndpoints(
+		"anthropic",
+		store.ModelAdapterAnthropicNative,
+		store.ModelAuthAPIKey,
+		"https://api.anthropic.com/v1",
+	)
 	if err != nil {
 		t.Fatalf("modelDiscoveryEndpoints returned error: %v", err)
 	}
@@ -704,7 +709,12 @@ func TestModelDiscoveryEndpointsForAnthropic(t *testing.T) {
 }
 
 func TestModelDiscoveryEndpointsForClaudeCodeProxy(t *testing.T) {
-	endpoints, headerMode, err := modelDiscoveryEndpoints("anthropic", "https://example.com/claude-code-proxy")
+	endpoints, headerMode, err := modelDiscoveryEndpoints(
+		"anthropic",
+		store.ModelAdapterAnthropicBearerProxy,
+		store.ModelAuthBearer,
+		"https://example.com/claude-code-proxy",
+	)
 	if err != nil {
 		t.Fatalf("modelDiscoveryEndpoints returned error: %v", err)
 	}

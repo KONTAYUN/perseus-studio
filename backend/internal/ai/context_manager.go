@@ -2,8 +2,6 @@ package ai
 
 import (
 	"encoding/json"
-
-	"webide-backend/internal/store"
 )
 
 type ContextSnapshot struct {
@@ -11,12 +9,26 @@ type ContextSnapshot struct {
 	AnthropicSystem   string
 	AnthropicMessages []map[string]any
 	Transcript        *AgentTranscript
+	WorkingSet        []contextWorkingFile
 	Summary           ProviderRequestSummary
 }
 
 type ProviderRequestSummary struct {
+	ImageCount                    int                  `json:"image_count,omitempty"`
+	TextInputTokens               int                  `json:"text_input_tokens,omitempty"`
+	VisualInputTokens             int                  `json:"visual_input_tokens,omitempty"`
+	VisualTokenEstimateSource     string               `json:"visual_token_estimate_source,omitempty"`
+	ActiveContextTokens           int                  `json:"active_context_tokens,omitempty"`
+	CompactionThresholdTokens     int                  `json:"compaction_threshold_tokens,omitempty"`
+	ToolResultsPruned             int                  `json:"tool_results_pruned,omitempty"`
+	CompactionBoundarySeq         int64                `json:"compaction_boundary_seq,omitempty"`
+	RetainedTurns                 int                  `json:"retained_turns,omitempty"`
+	EditorContextPaths            []string             `json:"editor_context_paths,omitempty"`
+	TaskWorkingSetPaths           []string             `json:"task_working_set_paths,omitempty"`
+	ContextWindowSource           string               `json:"context_window_source,omitempty"`
 	KernelVersion                 string               `json:"kernel_version,omitempty"`
 	KernelMode                    string               `json:"kernel_mode,omitempty"`
+	PromptPolicyVersion           string               `json:"prompt_policy_version,omitempty"`
 	KernelProgressEvents          int                  `json:"kernel_progress_events,omitempty"`
 	KernelReadTargets             int                  `json:"kernel_read_targets,omitempty"`
 	Round                         int                  `json:"round"`
@@ -36,26 +48,13 @@ type ProviderRequestSummary struct {
 	ParallelToolCalls             *bool                `json:"parallel_tool_calls,omitempty"`
 	PayloadKeys                   []string             `json:"payload_keys,omitempty"`
 	PayloadBytes                  int                  `json:"payload_bytes,omitempty"`
-	PayloadSoftBudgetBytes        int                  `json:"payload_soft_budget_bytes,omitempty"`
-	PayloadHardBudgetBytes        int                  `json:"payload_hard_budget_bytes,omitempty"`
-	PayloadBudgetExceeded         bool                 `json:"payload_budget_exceeded,omitempty"`
 	PayloadCompactionApplied      bool                 `json:"payload_compaction_applied,omitempty"`
-	MessageBuilderApplied         bool                 `json:"message_builder_applied,omitempty"`
-	MessageBuilderStrategy        string               `json:"message_builder_strategy,omitempty"`
+	ContextAssemblyStrategy       string               `json:"context_assembly_strategy,omitempty"`
 	PayloadBeforeBytes            int                  `json:"payload_before_bytes,omitempty"`
 	PayloadAfterBytes             int                  `json:"payload_after_bytes,omitempty"`
-	CompactedEntries              int                  `json:"compacted_entries,omitempty"`
-	PreservedRecentEntries        int                  `json:"preserved_recent_entries,omitempty"`
-	ContinuationSummaryChars      int                  `json:"continuation_summary_chars,omitempty"`
-	PreservedChangedPaths         []string             `json:"preserved_changed_paths,omitempty"`
-	PreservedReadRanges           []string             `json:"preserved_read_ranges,omitempty"`
-	CurrentReadWorkingSetPaths    []string             `json:"current_read_working_set_paths,omitempty"`
-	CurrentReadWorkingSetRanges   []string             `json:"current_read_working_set_ranges,omitempty"`
 	NoteViewIndexReads            int                  `json:"note_view_index_reads,omitempty"`
 	NoteViewBlockReads            int                  `json:"note_view_block_reads,omitempty"`
 	NoteViewSectionReads          int                  `json:"note_view_section_reads,omitempty"`
-	RecentReadMemoryPaths         []string             `json:"recent_read_memory_paths,omitempty"`
-	RecentReadInlinedChars        int                  `json:"recent_read_inlined_chars,omitempty"`
 	ContentOnlyPolicy             string               `json:"content_only_policy,omitempty"`
 	AcceptedContentOnlyAfterTools bool                 `json:"accepted_content_only_after_tools,omitempty"`
 	AnthropicPromptCacheEnabled   bool                 `json:"anthropic_prompt_cache_enabled,omitempty"`
@@ -72,14 +71,12 @@ type ProviderRequestSummary struct {
 	ToolSchemaDigest              string               `json:"tool_schema_digest,omitempty"`
 	ToolManifestDigest            string               `json:"tool_manifest_digest,omitempty"`
 	ModelActionManifestDigest     string               `json:"model_action_manifest_digest,omitempty"`
-	ModelTextActions              []string             `json:"model_text_actions,omitempty"`
 	ModelTerminalActions          []string             `json:"model_terminal_actions,omitempty"`
 	ToolSchemaWarnings            []string             `json:"tool_schema_warnings,omitempty"`
 	ToolSchemaItems               []ProviderToolLog    `json:"tool_schema_items,omitempty"`
 	ProviderVisibleTools          []string             `json:"provider_visible_tools,omitempty"`
 	LoadedCapabilities            map[string]any       `json:"loaded_capabilities,omitempty"`
 	InternalEditProtocol          string               `json:"internal_edit_protocol,omitempty"`
-	NativePatchToolEnabled        bool                 `json:"native_patch_tool_enabled,omitempty"`
 	ActionSelectionState          ActionSelectionState `json:"action_selection_state,omitempty"`
 	LoopGuardState                AgentLoopGuard       `json:"loop_guard_state,omitempty"`
 	UnsupportedOpenAIParams       []string             `json:"unsupported_openai_params,omitempty"`
@@ -123,6 +120,10 @@ type ProviderRequestSummary struct {
 	RetryAfterMS                  int64                `json:"retry_after_ms,omitempty"`
 	StreamRetryPhase              string               `json:"stream_retry_phase,omitempty"`
 	StreamReconnectAttempts       int                  `json:"stream_reconnect_attempts,omitempty"`
+	ProviderResponseID            string               `json:"provider_response_id,omitempty"`
+	StreamLastEventID             string               `json:"stream_last_event_id,omitempty"`
+	StreamDuplicateEvents         int                  `json:"stream_duplicate_events,omitempty"`
+	ProviderOutputRepeatCount     int                  `json:"provider_output_repeat_count,omitempty"`
 	StreamMaxRetries              int                  `json:"stream_max_retries,omitempty"`
 	FallbackAttempts              int                  `json:"fallback_attempts,omitempty"`
 	StreamFallbackUsed            bool                 `json:"stream_fallback_used,omitempty"`
@@ -190,73 +191,6 @@ func (s ProviderRequestSummary) JSON() string {
 	return string(raw)
 }
 
-type agentContextManager struct{}
-
-func newAgentContextManager() *agentContextManager {
-	return &agentContextManager{}
-}
-
-type ProviderMessageBuildOptions struct {
-	ForceCompact   bool
-	Reason         string
-	Phase          string
-	TargetBytes    int
-	TriggerBytes   int
-	TriggerEntries int
-	PreserveRecent int
-}
-
-func (m *agentContextManager) Build(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, transcript *AgentTranscript, profile providerRuntimeProfile, round int) ContextSnapshot {
-	return m.BuildWithOptions(protocol, messages, attachments, transcript, profile, round, ProviderMessageBuildOptions{})
-}
-
-func (m *agentContextManager) BuildWithOptions(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, transcript *AgentTranscript, profile providerRuntimeProfile, round int, options ProviderMessageBuildOptions) ContextSnapshot {
-	options = normalizeProviderMessageBuildOptions(options)
-	compacted, actions := m.compactTranscript(transcript, profile)
-	snapshot := m.buildFromCompacted(protocol, messages, attachments, compacted, actions, profile, round)
-	snapshot.Summary.ProviderMessagePhase = options.Phase
-	payloadActions := m.compactTranscriptForPayloadPressure(compacted, profile, estimatedContextPayloadBytes(snapshot))
-	if len(payloadActions) == 0 {
-		return m.applyProviderMessageBuilder(protocol, messages, attachments, compacted, actions, profile, round, options, snapshot)
-	}
-	actions = append(actions, payloadActions...)
-	snapshot = m.buildFromCompacted(protocol, messages, attachments, compacted, actions, profile, round)
-	snapshot.Summary.ProviderMessagePhase = options.Phase
-	return m.applyProviderMessageBuilder(protocol, messages, attachments, compacted, actions, profile, round, options, snapshot)
-}
-
-func (m *agentContextManager) applyProviderMessageBuilder(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, transcript *AgentTranscript, actions []string, profile providerRuntimeProfile, round int, options ProviderMessageBuildOptions, snapshot ContextSnapshot) ContextSnapshot {
-	builder := ProviderMessageBuilder{}
-	result := builder.Build(ProviderMessageBuildInput{
-		Protocol:      protocol,
-		Messages:      messages,
-		Attachments:   attachments,
-		Transcript:    transcript,
-		Actions:       actions,
-		Profile:       profile,
-		Round:         round,
-		Options:       options,
-		BeforePayload: estimatedContextPayloadBytes(snapshot),
-	})
-	if !result.Applied {
-		return snapshot
-	}
-	next := m.buildFromCompacted(protocol, result.Messages, attachments, result.Transcript, result.Actions, profile, round)
-	next.Summary.ProviderMessagePhase = result.Phase
-	next.Summary.MessageBuilderApplied = true
-	next.Summary.MessageBuilderStrategy = result.Strategy
-	next.Summary.PayloadBeforeBytes = result.PayloadBeforeBytes
-	next.Summary.PayloadAfterBytes = estimatedContextPayloadBytes(next)
-	next.Summary.CompactedEntries = result.CompactedEntries
-	next.Summary.PreservedRecentEntries = result.PreservedRecentEntries
-	next.Summary.ContinuationSummaryChars = result.ContinuationSummaryChars
-	next.Summary.PreservedChangedPaths = append([]string(nil), result.PreservedChangedPaths...)
-	next.Summary.PreservedReadRanges = append([]string(nil), result.PreservedReadRanges...)
-	next.Summary.PayloadCompactionApplied = true
-	next.Summary.ProviderContextCompacted = true
-	return next
-}
-
 func estimatedContextPayloadBytes(snapshot ContextSnapshot) int {
 	messageBytes := 0
 	switch {
@@ -279,27 +213,4 @@ func estimatedContextPayloadBytes(snapshot ContextSnapshot) int {
 		return 0
 	}
 	return messageBytes + 16*1024
-}
-
-func (m *agentContextManager) buildFromCompacted(protocol agentProtocol, messages []store.Message, attachments []AttachmentPayload, compacted *AgentTranscript, actions []string, profile providerRuntimeProfile, round int) ContextSnapshot {
-	switch protocol {
-	case agentProtocolAnthropic:
-		systemText, runtimeMessages := buildAnthropicMessages(messages, attachments)
-		items := append([]map[string]any{}, runtimeMessages...)
-		items = append(items, anthropicTranscriptMessages(compacted.Entries)...)
-		return ContextSnapshot{
-			AnthropicSystem:   mergeToolSystemPrompt(systemText),
-			AnthropicMessages: items,
-			Transcript:        compacted,
-			Summary:           summarizeAnthropicContext(items, compacted, actions, round, profile),
-		}
-	default:
-		items := prependOpenAISystem(buildOpenAIMessages(messages, attachments))
-		items = append(items, openAITranscriptMessages(compacted.Entries)...)
-		return ContextSnapshot{
-			OpenAIMessages: items,
-			Transcript:     compacted,
-			Summary:        summarizeOpenAIContext(items, compacted, actions, round, profile),
-		}
-	}
 }

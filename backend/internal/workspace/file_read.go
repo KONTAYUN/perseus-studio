@@ -17,12 +17,12 @@ func (s *Service) ReadFile(path string) (FileReadResult, error) {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return FileReadResult{}, fmt.Errorf("file does not exist")
+			return FileReadResult{}, ErrPathNotFound
 		}
 		return FileReadResult{}, err
 	}
 	if info.IsDir() {
-		return FileReadResult{}, fmt.Errorf("path is a directory")
+		return FileReadResult{}, ErrPathIsDirectory
 	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
@@ -48,12 +48,12 @@ func (s *Service) ReadBytes(path string) ([]byte, string, error) {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, "", fmt.Errorf("file does not exist")
+			return nil, "", ErrPathNotFound
 		}
 		return nil, "", err
 	}
 	if info.IsDir() {
-		return nil, "", fmt.Errorf("path is a directory")
+		return nil, "", ErrPathIsDirectory
 	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
@@ -80,15 +80,15 @@ func (s *Service) ReadTextFileRange(path string, startLine, endLine, maxChars in
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return TextReadResult{}, fmt.Errorf("file does not exist")
+			return TextReadResult{}, ErrPathNotFound
 		}
 		return TextReadResult{}, err
 	}
 	if info.IsDir() {
-		return TextReadResult{}, fmt.Errorf("path is a directory")
+		return TextReadResult{}, ErrPathIsDirectory
 	}
 	if !isTextPath(cleanPath) {
-		return TextReadResult{}, fmt.Errorf("unsupported file type")
+		return TextReadResult{}, ErrUnsupportedFile
 	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {

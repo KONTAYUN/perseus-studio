@@ -35,5 +35,17 @@ func (s *Service) execRunWorkspaceCommand(ctx context.Context, userID, arguments
 		path = result.ChangedPaths[0]
 		summary = fmt.Sprintf("%s changed_paths=%d", summary, len(result.ChangedPaths))
 	}
+	if result.TimedOut {
+		typed := newToolError(ToolErrorCommandTimedOut, "workspace command timed out", nil)
+		typed.Target = result.Cwd
+		typed.Details = map[string]any{
+			"exit_code":     result.ExitCode,
+			"timed_out":     true,
+			"changed_paths": result.ChangedPaths,
+			"stdout":        result.Stdout,
+			"stderr":        result.Stderr,
+		}
+		return "", summary, "正在执行命令...", path, typed
+	}
 	return mustJSON(result), summary, "正在执行命令...", path, nil
 }

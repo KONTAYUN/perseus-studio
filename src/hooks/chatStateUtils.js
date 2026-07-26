@@ -1,7 +1,6 @@
 import {
   agentEventText,
   completedToolStatus,
-  isPendingStatusText,
   nextLoadingStatus,
   pendingToolStatus,
   playfulPendingStatus,
@@ -15,7 +14,6 @@ import {
 export {
   agentEventText,
   completedToolStatus,
-  isPendingStatusText,
   nextLoadingStatus,
   pendingToolStatus,
   playfulPendingStatus,

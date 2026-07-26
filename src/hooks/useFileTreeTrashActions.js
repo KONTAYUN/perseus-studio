@@ -85,7 +85,7 @@ export function useFileTreeTrashActions({
       setUploadStatus(`已移出回收站：${result.new_path || item.original_path || item.name}`);
       window.setTimeout(() => setUploadStatus(''), 2200);
     } catch (error) {
-      if (!overwrite && (error.status === 409 || error.payload?.conflict || error.message.includes('原路径已存在'))) {
+      if (!overwrite && (error.code === 'path_exists' || error.status === 409)) {
         const ok = await confirm?.({
           title: '覆盖原路径',
           message: `${item.original_path || item.name} 已存在，是否覆盖？`,

@@ -21,9 +21,7 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 		Round:                   round,
 		Protocol:                protocol,
 		ToolManifestDigest:      toolManifestDigest(),
-		InternalEditProtocol:    string(ToolTransportAssistantTextPatch),
-		PayloadSoftBudgetBytes:  profile.PayloadSoftBudgetBytes,
-		PayloadHardBudgetBytes:  profile.PayloadHardBudgetBytes,
+		InternalEditProtocol:    "structured_tool",
 		MessageCount:            len(messages),
 		TranscriptEntries:       len(transcript.Entries),
 		ContextWindowTokens:     profile.ContextWindowTokens,
@@ -75,9 +73,6 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 			}
 		}
 	}
-	workingSet := currentReadWorkingSetFromTranscript(transcript, 4)
-	summary.CurrentReadWorkingSetPaths = currentReadWorkingSetPaths(workingSet)
-	summary.CurrentReadWorkingSetRanges = currentReadWorkingSetLabels(workingSet)
 	for _, item := range messages {
 		size := estimateMessageChars(item)
 		summary.EstimatedChars += size
@@ -86,9 +81,6 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 		}
 	}
 	summary.EstimatedTokens = estimateRuntimeMessagesTokens(messages)
-	if profile.PayloadHardBudgetBytes > 0 && summary.PayloadBytes > profile.PayloadHardBudgetBytes {
-		summary.PayloadBudgetExceeded = true
-	}
 	for _, action := range actions {
 		if strings.HasPrefix(action, "payload_pressure_") || strings.HasPrefix(action, "budget_tool_result_pruned:") {
 			summary.PayloadCompactionApplied = true

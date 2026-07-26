@@ -32,7 +32,7 @@ func (s *Service) MkdirNew(path string) (PathChangeResult, error) {
 		return PathChangeResult{}, trashManagedOnlyError()
 	}
 	if _, err := os.Stat(absPath); err == nil {
-		return PathChangeResult{}, fmt.Errorf("path already exists")
+		return PathChangeResult{}, ErrPathExists
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return PathChangeResult{}, err
 	}
@@ -91,7 +91,7 @@ func (s *Service) MovePath(oldPath, newParentPath string) (PathChangeResult, err
 	parentInfo, err := os.Stat(absParent)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return PathChangeResult{}, fmt.Errorf("target parent folder does not exist")
+			return PathChangeResult{}, fmt.Errorf("%w: target parent folder", ErrPathNotFound)
 		}
 		return PathChangeResult{}, err
 	}
@@ -128,7 +128,7 @@ func (s *Service) CopyFile(ctx context.Context, sourcePath, destinationPath stri
 	sourceInfo, err := os.Stat(absSource)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return PathChangeResult{}, fmt.Errorf("source file does not exist")
+			return PathChangeResult{}, fmt.Errorf("%w: source file", ErrPathNotFound)
 		}
 		return PathChangeResult{}, err
 	}
@@ -147,7 +147,7 @@ func (s *Service) CopyFile(ctx context.Context, sourcePath, destinationPath stri
 		return PathChangeResult{}, fmt.Errorf("source and destination are the same")
 	}
 	if _, err := os.Stat(absDestination); err == nil {
-		return PathChangeResult{}, fmt.Errorf("target path already exists")
+		return PathChangeResult{}, ErrPathExists
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return PathChangeResult{}, err
 	}
@@ -223,7 +223,7 @@ func (s *Service) renameValidated(cleanOld, cleanNew string) (PathChangeResult, 
 		return PathChangeResult{}, err
 	}
 	if _, err := os.Stat(absNew); err == nil {
-		return PathChangeResult{}, fmt.Errorf("target path already exists")
+		return PathChangeResult{}, ErrPathExists
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return PathChangeResult{}, err
 	}

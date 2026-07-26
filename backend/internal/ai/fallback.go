@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"strings"
 )
 
 func isTimeoutError(err error) bool {
@@ -14,8 +13,7 @@ func isTimeoutError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
 		return true
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "timeout") ||
-		strings.Contains(strings.ToLower(err.Error()), "deadline exceeded")
+	return false
 }
 
 func isRecoverableFinalProviderError(err error) bool {
@@ -35,17 +33,9 @@ func isCheckpointRecoverableProviderError(err error) bool {
 	if isRecoverableFinalProviderError(err) {
 		return true
 	}
-	lower := strings.ToLower(err.Error())
-	markers := []string{
-		"empty model response",
-		"empty stream",
-		"empty provider",
-		"unexpected eof",
-	}
-	for _, marker := range markers {
-		if strings.Contains(lower, marker) {
-			return true
-		}
+	var protocolErr *ProviderProtocolError
+	if errors.As(err, &protocolErr) {
+		return protocolErr.Code == "empty_provider_response" || protocolErr.Code == "stream_interrupted"
 	}
 	return false
 }
@@ -54,7 +44,7 @@ func isContextCanceledError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, context.Canceled) || strings.Contains(strings.ToLower(err.Error()), "context canceled")
+	return errors.Is(err, context.Canceled)
 }
 
 func IsContextCanceledError(err error) bool {

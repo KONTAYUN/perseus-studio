@@ -222,7 +222,7 @@ func writeImportedFile(ctx context.Context, files *workspace.Service, targetPath
 			candidate = appendPathSuffix(targetPath, attempt)
 		}
 		if _, err := files.CreateBytes(ctx, candidate, content); err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "already exists") {
+			if errors.Is(err, workspace.ErrPathExists) {
 				continue
 			}
 			return "", err

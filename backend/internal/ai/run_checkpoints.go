@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 )
 
 func (s *Service) loadRunCheckpoint(ctx context.Context, opts RunOptions) (AgentRuntimeCheckpoint, bool) {
@@ -28,10 +27,10 @@ func (s *Service) saveRunCheckpoint(ctx context.Context, opts RunOptions, checkp
 	}
 	raw, err := json.Marshal(checkpoint)
 	if err != nil {
-		return fmt.Errorf("marshal run checkpoint: %w", err)
+		return newAgentRuntimeError(AgentRuntimePersistence, "failed to marshal run checkpoint", err)
 	}
 	if _, err := s.runs.SaveCheckpoint(ctx, opts.UserID, opts.RunID, string(raw)); err != nil {
-		return fmt.Errorf("save run checkpoint: %w", err)
+		return newAgentRuntimeError(AgentRuntimePersistence, "failed to save run checkpoint", err)
 	}
 	return nil
 }
@@ -41,7 +40,7 @@ func (s *Service) clearRunCheckpoints(ctx context.Context, opts RunOptions) erro
 		return nil
 	}
 	if err := s.runs.DeleteCheckpoints(ctx, opts.UserID, opts.RunID); err != nil {
-		return fmt.Errorf("delete run checkpoints: %w", err)
+		return newAgentRuntimeError(AgentRuntimePersistence, "failed to delete run checkpoints", err)
 	}
 	return nil
 }

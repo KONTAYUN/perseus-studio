@@ -11,7 +11,7 @@ import (
 	"webide-backend/internal/ai"
 )
 
-func (s *Server) parseConversationMessageRequest(r *http.Request) (string, string, string, []byte, []ai.AttachmentPayload, error) {
+func (s *Server) parseConversationMessageRequest(r *http.Request) (string, string, string, []byte, []ai.AttachmentPayload, []string, error) {
 	contentType := r.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		return s.parseMultipartConversationMessage(r)
@@ -19,48 +19,76 @@ func (s *Server) parseConversationMessageRequest(r *http.Request) (string, strin
 
 	var req createConversationMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return "", "", "", nil, nil, fmt.Errorf("invalid json body")
+		return "", "", "", nil, nil, nil, fmt.Errorf("invalid json body")
 	}
 	attachmentsJSON := []byte("[]")
 	if len(req.AttachmentsJSON) > 0 {
 		attachmentsJSON = req.AttachmentsJSON
 	}
-	return req.Content, req.ModelProviderID, req.ThinkingMode, attachmentsJSON, nil, nil
+	attachmentIDs := uniqueAttachmentIDs(req.AttachmentIDs)
+	payloads, imageMetadata, err := s.loadStagedChatAttachmentInputs(r, attachmentIDs)
+	if err != nil {
+		return "", "", "", nil, nil, nil, err
+	}
+	if len(imageMetadata) > 0 {
+		var metadata []chatAttachmentMetadata
+		_ = json.Unmarshal(attachmentsJSON, &metadata)
+		metadata = append(metadata, imageMetadata...)
+		attachmentsJSON, _ = json.Marshal(metadata)
+	}
+	return req.Content, req.ModelProviderID, req.ThinkingMode, attachmentsJSON, payloads, attachmentIDs, nil
 }
 
-func (s *Server) parseMultipartConversationMessage(r *http.Request) (string, string, string, []byte, []ai.AttachmentPayload, error) {
+func (s *Server) parseMultipartConversationMessage(r *http.Request) (string, string, string, []byte, []ai.AttachmentPayload, []string, error) {
 	if err := r.ParseMultipartForm(80 << 20); err != nil {
-		return "", "", "", nil, nil, fmt.Errorf("invalid multipart body")
+		return "", "", "", nil, nil, nil, fmt.Errorf("invalid multipart body")
 	}
 
 	var metadata []chatAttachmentMetadata
 	var payloads []ai.AttachmentPayload
 	totalTextChars := 0
+	persistentIDs := uniqueAttachmentIDs(append(append([]string{}, r.MultipartForm.Value["attachment_ids[]"]...), r.MultipartForm.Value["attachment_ids"]...))
+	storedPayloads, storedMetadata, err := s.loadStagedChatAttachmentInputs(r, persistentIDs)
+	if err != nil {
+		return "", "", "", nil, nil, nil, err
+	}
+	payloads = append(payloads, storedPayloads...)
+	metadata = append(metadata, storedMetadata...)
+	user := MustUserFromContext(r.Context())
 
-	attachmentIDs := append([]string{}, r.MultipartForm.Value["attachment_ids[]"]...)
-	attachmentIDs = append(attachmentIDs, r.MultipartForm.Value["attachment_ids"]...)
-	fileIndex := 0
 	for _, fieldName := range []string{"files[]", "files"} {
 		for _, header := range r.MultipartForm.File[fieldName] {
 			file, err := header.Open()
 			if err != nil {
-				return "", "", "", nil, nil, fmt.Errorf("failed to open attachment")
+				return "", "", "", nil, nil, nil, fmt.Errorf("failed to open attachment")
 			}
 			raw, readErr := io.ReadAll(io.LimitReader(file, 64<<20))
 			closeErr := file.Close()
 			if readErr != nil {
-				return "", "", "", nil, nil, fmt.Errorf("failed to read attachment")
+				return "", "", "", nil, nil, nil, fmt.Errorf("failed to read attachment")
 			}
 			if closeErr != nil {
-				return "", "", "", nil, nil, fmt.Errorf("failed to close attachment")
+				return "", "", "", nil, nil, nil, fmt.Errorf("failed to close attachment")
 			}
 
-			attachmentID := ""
-			if fileIndex < len(attachmentIDs) {
-				attachmentID = attachmentIDs[fileIndex]
+			mimeType := detectAttachmentMIME(header.Filename, raw)
+			if isSupportedImageMIME(mimeType) {
+				stored, persistErr := s.persistStagedChatImageBytes(r.Context(), user.UserID, header.Filename, raw)
+				if persistErr != nil {
+					return "", "", "", nil, nil, nil, persistErr
+				}
+				storedPayload, payloadErr := s.chatAttachmentPayload(stored, "")
+				if payloadErr != nil {
+					return "", "", "", nil, nil, nil, payloadErr
+				}
+				persistentIDs = append(persistentIDs, stored.ID)
+				payloads = append(payloads, storedPayload)
+				projected := chatAttachmentMetadataFromRecord(stored)
+				projected.Status = "attached"
+				metadata = append(metadata, projected)
+				continue
 			}
-			fileIndex++
-			payload, item := buildChatAttachment(attachmentID, header.Filename, header.Size, raw, &totalTextChars)
+			payload, item := buildChatAttachment("", header.Filename, header.Size, raw, &totalTextChars)
 			payloads = append(payloads, payload)
 			metadata = append(metadata, item)
 		}
@@ -68,16 +96,51 @@ func (s *Server) parseMultipartConversationMessage(r *http.Request) (string, str
 
 	referencePayloads, referenceMetadata, err := s.parseChatReferences(r)
 	if err != nil {
-		return "", "", "", nil, nil, err
+		return "", "", "", nil, nil, nil, err
 	}
 	payloads = append(payloads, referencePayloads...)
 	metadata = append(metadata, referenceMetadata...)
 
 	rawMetadata, err := json.Marshal(metadata)
 	if err != nil {
-		return "", "", "", nil, nil, fmt.Errorf("failed to encode attachment metadata")
+		return "", "", "", nil, nil, nil, fmt.Errorf("failed to encode attachment metadata")
 	}
-	return r.FormValue("content"), r.FormValue("model_provider_id"), r.FormValue("thinking_mode"), rawMetadata, payloads, nil
+	return r.FormValue("content"), r.FormValue("model_provider_id"), r.FormValue("thinking_mode"), rawMetadata, payloads, uniqueAttachmentIDs(persistentIDs), nil
+}
+
+func (s *Server) loadStagedChatAttachmentInputs(r *http.Request, attachmentIDs []string) ([]ai.AttachmentPayload, []chatAttachmentMetadata, error) {
+	user := MustUserFromContext(r.Context())
+	var payloads []ai.AttachmentPayload
+	var metadata []chatAttachmentMetadata
+	for _, attachmentID := range attachmentIDs {
+		item, err := s.conversations.GetChatAttachment(r.Context(), attachmentID)
+		if err != nil || item.UserID != user.UserID || item.Status != "staged" {
+			return nil, nil, fmt.Errorf("attachment is unavailable")
+		}
+		payload, err := s.chatAttachmentPayload(item, "")
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to load image attachment")
+		}
+		payloads = append(payloads, payload)
+		projected := chatAttachmentMetadataFromRecord(item)
+		projected.Status = "attached"
+		metadata = append(metadata, projected)
+	}
+	return payloads, metadata, nil
+}
+
+func uniqueAttachmentIDs(values []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 func (s *Server) parseChatReferences(r *http.Request) ([]ai.AttachmentPayload, []chatAttachmentMetadata, error) {
@@ -119,7 +182,11 @@ func (s *Server) parseChatReferences(r *http.Request) ([]ai.AttachmentPayload, [
 		metadata = append(metadata, item)
 	}
 
-	if panelsContext := parseEditorPanelsContext(r.FormValue("current_file_context_json")); panelsContext.Type == "editor_panels_context" && len(panelsContext.Panels) > 0 {
+	editorContextJSON := strings.TrimSpace(r.FormValue("editor_context_json"))
+	if editorContextJSON == "" {
+		editorContextJSON = r.FormValue("current_file_context_json")
+	}
+	if panelsContext := parseEditorPanelsContext(editorContextJSON); panelsContext.Type == "editor_panels_context" && len(panelsContext.Panels) > 0 {
 		cleanPanels := make([]ai.EditorPanelContext, 0, len(panelsContext.Panels))
 		for _, panel := range panelsContext.Panels {
 			if panel.ActiveFilePath != "" {
@@ -155,7 +222,7 @@ func (s *Server) parseChatReferences(r *http.Request) ([]ai.AttachmentPayload, [
 			Kind: "editor_panels_context",
 			Type: "editor_panels_context",
 		})
-	} else if current := parseCurrentFileContext(r.FormValue("current_file_context_json")); current.Path != "" {
+	} else if current := parseCurrentFileContext(editorContextJSON); current.Path != "" {
 		cleanPath, err := cleanWorkspaceReferencePath(current.Path)
 		if err != nil {
 			return nil, nil, err

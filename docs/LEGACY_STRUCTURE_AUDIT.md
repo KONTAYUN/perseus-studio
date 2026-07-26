@@ -26,7 +26,7 @@ These files are below the review threshold but should not absorb unrelated behav
 
 | File | Why Watch |
 |---|---|
-| `backend/internal/ai/provider_message_builder.go` | Provider message conversion is inherently branchy; split only if a provider-specific branch grows. |
+| `backend/internal/ai/context_assembler.go` | The single model-context entry owns token budgeting and old tool-result pruning; protocol serialization remains in `context_protocol.go`. |
 | `src/components/editor/richText/RichTextEditor.jsx` | Composition entry for Tiptap setup and synchronization; keep new behavior in existing hooks/helpers. |
 | `src/hooks/chatRunMessageState.js` | Run message placement and recovery rules are subtle; add tests before refactoring. |
 | `backend/internal/ai/tool_manifest.go` | Tool declaration table is large but central; avoid scattering manifest metadata unless generation becomes necessary. |

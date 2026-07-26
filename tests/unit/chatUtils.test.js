@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { completedActionItems, followupQuestionAttachment, formatToolLabel, latestLiveProgressItem, loadingBubbleText, loadingStatusDisplayText, loadingStatusReserveText, pendingFollowupQuestion, shouldReserveMessageFooter, visibleMessageAttachments } from '../../src/components/chat/chatUtils.js';
+import { completedActionItems, formatToolLabel, latestLiveProgressItem, loadingBubbleText, loadingStatusDisplayText, loadingStatusReserveText, pendingUserRequest, shouldReserveMessageFooter, userRequestAttachment, visibleMessageAttachments } from '../../src/components/chat/chatUtils.js';
 import { shouldReloadWorkspaceForToolEvents } from '../../src/hooks/ideUtils.js';
 
 test('visibleMessageAttachments hides editor context metadata', () => {
@@ -11,7 +11,7 @@ test('visibleMessageAttachments hides editor context metadata', () => {
       { type: 'current_file', name: 'current.md' },
       { kind: 'editor_panels_context', name: 'editor context' },
       { type: 'workspace_file', name: 'referenced.md' },
-      { tool_name: 'ask_followup_question', question: '要哪种语气？', status: 'success' },
+      { tool_name: 'request_user_input', question: '请粘贴日志', status: 'waiting_for_user' },
       { kind: 'text', name: 'uploaded.txt' },
     ],
   });
@@ -113,7 +113,7 @@ test('completedActionItems derives completed labels from successful tool attachm
       { tool_call_id: 'tc2', tool_name: 'read_workspace_text', status: 'success' },
       { tool_call_id: 'tc3', tool_name: 'apply_workspace_patch', status: 'success', status_kind: 'workspace_edit' },
       { tool_call_id: 'tc4', tool_name: 'run_workspace_command', status: 'failed' },
-      { tool_call_id: 'tc5', tool_name: 'ask_followup_question', status: 'success', question: '要哪种语气？' },
+      { tool_call_id: 'tc5', tool_name: 'request_user_choice', status: 'waiting_for_user', question: '要哪种语气？' },
     ],
   });
 
@@ -125,40 +125,46 @@ test('completedActionItems derives completed labels from successful tool attachm
   assert.equal(formatToolLabel({ tool_name: 'historical_write_tool', status_kind: 'workspace_edit' }), '已编辑文件');
 });
 
-test('followupQuestionAttachment extracts options without adding completed action chip', () => {
+test('userRequestAttachment keeps bounded choices without adding completed action chips', () => {
   const message = {
     role: 'assistant',
+    kind: 'user_choice_request',
     pending: false,
     attachments: [
       {
         tool_call_id: 'tc1',
-        tool_name: 'ask_followup_question',
-        status: 'success',
+        tool_name: 'request_user_choice',
+        status: 'waiting_for_user',
         question: '这篇文章要偏哪种语气？',
         options: ['正式', '轻松', '正式', ''],
-        allow_freeform: true,
       },
     ],
   };
 
-  assert.deepEqual(followupQuestionAttachment(message), {
+  assert.deepEqual(userRequestAttachment(message), {
     question: '这篇文章要偏哪种语气？',
     options: ['正式', '轻松'],
-    allowFreeform: true,
+    requestKind: 'choice',
+    toolName: 'request_user_choice',
+    status: 'waiting_for_user',
+    toolCallId: 'tc1',
+    runId: '',
+    answerMessageId: '',
   });
   assert.deepEqual(completedActionItems(message), []);
 });
 
-test('pendingFollowupQuestion returns only the latest unanswered assistant question', () => {
+test('pendingUserRequest returns only the latest unanswered assistant request', () => {
   const messages = [
     {
       id: 'a1',
       role: 'assistant',
+      kind: 'user_choice_request',
       pending: false,
       attachments: [
         {
-          tool_name: 'ask_followup_question',
-          status: 'success',
+          tool_name: 'request_user_choice',
+          status: 'waiting_for_user',
           question: '旧问题？',
           options: ['A', 'B'],
         },
@@ -167,36 +173,44 @@ test('pendingFollowupQuestion returns only the latest unanswered assistant quest
     { id: 'u1', role: 'user', content: '已经回答旧问题' },
     {
       id: 'a2',
+      runId: 'run-2',
       role: 'assistant',
+      kind: 'user_input_request',
       pending: false,
       created_at: '2026-05-16T00:00:00Z',
       attachments: [
         {
-          tool_name: 'ask_followup_question',
-          status: 'success',
+          tool_name: 'request_user_input',
+          tool_call_id: 'tc2',
+          status: 'waiting_for_user',
           question: '新问题？',
-          options: ['C', 'D'],
-          allow_freeform: false,
+          options: ['must not render'],
         },
       ],
     },
   ];
 
-  assert.deepEqual(pendingFollowupQuestion(messages), {
+  assert.deepEqual(pendingUserRequest(messages), {
     messageId: 'a2',
     createdAt: '2026-05-16T00:00:00Z',
     question: '新问题？',
-    options: ['C', 'D'],
-    allowFreeform: false,
+    options: [],
+    requestKind: 'input',
+    toolName: 'request_user_input',
+    status: 'waiting_for_user',
+    toolCallId: 'tc2',
+    runId: 'run-2',
+    answerMessageId: '',
   });
 });
 
-test('pendingFollowupQuestion clears once user answers after the assistant question', () => {
+test('pendingUserRequest clears once user answers after the assistant request', () => {
   assert.equal(
-    pendingFollowupQuestion([
+    pendingUserRequest([
       {
         id: 'a1',
         role: 'assistant',
+        kind: 'followup_question',
         pending: false,
         attachments: [
           {
@@ -211,6 +225,58 @@ test('pendingFollowupQuestion clears once user answers after the assistant quest
     ]),
     null
   );
+});
+
+test('answered legacy follow-up remains visible but is no longer pending', () => {
+  const message = {
+    id: 'a1',
+    runId: 'run-1',
+    role: 'assistant',
+    kind: 'followup_question',
+    pending: false,
+    attachments: [
+      {
+        tool_call_id: 'tc1',
+        tool_name: 'ask_followup_question',
+        status: 'answered',
+        question: 'Run this?\n\n```bash\nssh server\n```',
+        options: ['Run it'],
+        answer_message_id: 'u1',
+      },
+    ],
+  };
+
+  assert.deepEqual(userRequestAttachment(message), {
+    question: 'Run this?\n\n```bash\nssh server\n```',
+    options: ['Run it'],
+    requestKind: 'legacy_followup',
+    toolName: 'ask_followup_question',
+    status: 'answered',
+    toolCallId: 'tc1',
+    runId: 'run-1',
+    answerMessageId: 'u1',
+  });
+  assert.equal(pendingUserRequest([message]), null);
+});
+
+test('ordinary assistant messages never render stale follow-up attachments', () => {
+  const message = {
+    id: 'a2',
+    role: 'assistant',
+    kind: 'completion_result',
+    content: 'The server check is complete.',
+    attachments: [
+      {
+        tool_call_id: 'old-question',
+        tool_name: 'ask_followup_question',
+        status: 'answered',
+        question: 'Old question?',
+        options: ['Old option'],
+      },
+    ],
+  };
+
+  assert.equal(userRequestAttachment(message), null);
 });
 
 test('shouldReloadWorkspaceForToolEvents reloads for AI file writes', () => {

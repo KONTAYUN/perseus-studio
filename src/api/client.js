@@ -24,6 +24,7 @@ async function request(path, options = {}) {
       const error = new Error(message);
       error.status = response.status;
       error.payload = payload;
+      error.code = isJSON ? String(payload?.code || '') : '';
       if (isJSON && payload?.diagnostic_log_id) {
 		error.diagnosticLogId = payload.diagnostic_log_id;
 	  }
@@ -82,6 +83,16 @@ export function apiPost(path, body) {
 
 export function apiPostForm(path, formData) {
   return request(path, {
+    method: 'POST',
+    headers: {},
+    body: formData,
+  });
+}
+
+export function apiUploadChatAttachment(file) {
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  return request('/api/chat-attachments', {
     method: 'POST',
     headers: {},
     body: formData,
