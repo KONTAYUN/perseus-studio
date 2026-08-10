@@ -133,7 +133,7 @@ backend/
 ### User Authentication
 
 1. First user registers via `/api/auth/register` and is auto-promoted to `admin`
-2. Login via `/api/auth/login` creates an in-memory session; `perseus_session` cookie returned
+2. Login via `/api/auth/login` creates a SQLite-backed session; the `perseus_session` cookie survives service restarts until expiry or invalidation
 3. All subsequent API calls authenticated via session cookie middleware
 4. `/api/auth/me` returns current user info including role and registration-open status
 
@@ -147,9 +147,9 @@ backend/
 ### Agent Chat Run
 
 1. Frontend `useChatState` POSTs to `/api/conversations/{id}/messages` (multipart or JSON)
-2. `conversation_handlers.go` stores the user message, creates an `agent_run`, and returns the run id
-3. Frontend opens `/api/agent-runs/{id}/stream` with `EventSource`
-4. Backend calls `ai.Service.GenerateReply`, which runs an OpenAI/Anthropic agent loop
+2. `conversation_handlers.go` stores the user message, transactionally queues an `agent_run`, and returns the run id and queue position
+3. The persistent scheduler enforces global/per-user limits, claims the Run once, and invokes the single v3 Turn Engine
+4. Frontend opens `/api/agent-runs/{id}/stream` with a continuous event cursor and final-sequence barrier
 5. Provider streaming deltas emit `assistant_message_started`, `assistant_message_delta`, and `assistant_message_completed`
 6. Tool calls run through `tools_executor.go` and emit `tool_call_started`, `tool_call_completed`, and workspace change events
 7. Successful runs end with `run_completed`; failed/cancelled runs emit terminal run status events

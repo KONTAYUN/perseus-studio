@@ -67,7 +67,7 @@ function ChatImageThumbnail({ item, onOpen }) {
 
 function MediaPreviewDialog({ images, index, onIndexChange, onClose }) {
   const open = index >= 0 && index < images.length;
-  const { closeWithPresence, exiting, present } = useMotionPresence(open);
+  const { closeWithPresence, exiting, present } = useMotionPresence(open, { exitToken: '--motion-modal' });
   const latestRef = React.useRef(null);
   const [originalSize, setOriginalSize] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
@@ -101,7 +101,7 @@ function MediaPreviewDialog({ images, index, onIndexChange, onClose }) {
         if (event.target === event.currentTarget) requestClose();
       }}
     >
-      <div className={`media-preview-dialog ui-overlay-surface motion-modal flex h-[min(90vh,960px)] w-[min(94vw,1440px)] flex-col overflow-hidden border border-white/15 bg-black/80 ${exiting ? 'motion-presence-exit' : ''}`}>
+      <div className={`media-preview-dialog ui-overlay-surface motion-modal flex h-[min(90vh,960px)] w-[min(94vw,1440px)] flex-col overflow-hidden border border-white/15 bg-black/80 ${exiting ? 'motion-presence-exit motion-presence-exit-modal' : ''}`}>
         <div className="media-preview-toolbar">
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold text-white">{item.name || '图片'}</div>
@@ -130,7 +130,8 @@ function MediaPreviewDialog({ images, index, onIndexChange, onClose }) {
             <img
               src={item.content_url}
               alt={item.name || '聊天图片'}
-              className={originalSize ? 'media-preview-image-original' : 'media-preview-image-fit'}
+              key={item.id || item.content_url}
+              className={`${originalSize ? 'media-preview-image-original' : 'media-preview-image-fit'} motion-content-switch`}
               onError={() => setFailed(true)}
             />
           )}

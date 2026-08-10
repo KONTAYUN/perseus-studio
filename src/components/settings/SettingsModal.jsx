@@ -7,46 +7,42 @@ import UsageDashboard from './UsageDashboard';
 import ModelProviderSettings from './ModelProviderSettings';
 import SearchProviderSettings from './SearchProviderSettings';
 import SkillSettings from './SkillSettings';
-
-const MODAL_EXIT_DURATION_MS = 360;
+import useMotionPresence from '../../hooks/useMotionPresence';
 
 export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
-  const [hasEntered, setHasEntered] = React.useState(false);
-  const [isClosing, setIsClosing] = React.useState(false);
+  const [isOpen, setIsOpen] = React.useState(true);
   const [settingsView, setSettingsView] = React.useState('main');
+  const closeWithAnimation = React.useCallback(() => setIsOpen(false), []);
+  const { exiting, present } = useMotionPresence(isOpen, {
+    exitToken: '--motion-modal',
+    onExitComplete: onClose,
+  });
 
   React.useEffect(() => {
-    const frame = requestAnimationFrame(() => setHasEntered(true));
     const closeOnEscape = (event) => {
       if (event.key === 'Escape') closeWithAnimation();
     };
     document.addEventListener('keydown', closeOnEscape);
     return () => {
-      cancelAnimationFrame(frame);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, []);
+  }, [closeWithAnimation]);
 
-  const closeWithAnimation = () => {
-    setIsClosing(true);
-    window.setTimeout(onClose, MODAL_EXIT_DURATION_MS);
-  };
-
-  if (!isAdmin) return null;
+  if (!isAdmin || !present) return null;
 
   return (
     <div
       className={`modal-backdrop motion-fade-reveal fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-md dark:bg-black/60 ${
-        isClosing || !hasEntered ? 'opacity-0' : 'opacity-100'
+        exiting ? 'opacity-0' : 'animate-in fade-in opacity-100'
       }`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) closeWithAnimation();
       }}
     >
       <div
-        className={`settings-modal-card ui-overlay-surface motion-modal motion-modal-controlled flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden border border-white/40 bg-white/90 backdrop-blur-3xl dark:border-white/10 dark:bg-[#1C1C1E]/95 ${
-          isClosing || !hasEntered ? 'translate-y-3 scale-[0.975] opacity-0' : 'translate-y-0 scale-100 opacity-100'
+        className={`settings-modal-card ui-overlay-surface motion-modal flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden border border-white/40 bg-white/90 backdrop-blur-3xl dark:border-white/10 dark:bg-[#1C1C1E]/95 ${
+          exiting ? 'motion-presence-exit motion-presence-exit-modal' : ''
         }`}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 px-7 py-5 dark:border-gray-800">
@@ -66,7 +62,7 @@ export default function SettingsModal({ ide, dialog, onClose, currentUser }) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-7 custom-scrollbar">
-          <div key={settingsView} className="settings-view-enter space-y-6">
+          <div key={settingsView} className="settings-view-stagger space-y-6">
           {ide.settingsError && (
             <div className="settings-card rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
               {ide.settingsError}

@@ -7,6 +7,7 @@ const (
 	AgentRuntimeToolErrorLoop     AgentRuntimeErrorCode = "agent_tool_error_loop"
 	AgentRuntimePersistence       AgentRuntimeErrorCode = "local_run_persistence"
 	AgentRuntimeHistoryIntegrity  AgentRuntimeErrorCode = "history_integrity_error"
+	AgentRuntimeEventIntegrity    AgentRuntimeErrorCode = "event_integrity_error"
 )
 
 type AgentRuntimeError struct {
@@ -45,6 +46,8 @@ func newAgentRuntimeError(code AgentRuntimeErrorCode, message string, cause erro
 		category = "persistence"
 	case AgentRuntimeHistoryIntegrity:
 		category = "history"
+	case AgentRuntimeEventIntegrity:
+		category = "event_log"
 	case AgentRuntimeToolErrorLoop:
 		category = "tool_loop"
 	case AgentRuntimeProtocolViolation:

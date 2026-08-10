@@ -16,8 +16,8 @@ func summarizeAnthropicContext(messages []map[string]any, transcript *AgentTrans
 
 func summarizeProviderContext(protocol string, messages []map[string]any, transcript *AgentTranscript, actions []string, round int, profile providerRuntimeProfile) ProviderRequestSummary {
 	summary := ProviderRequestSummary{
-		KernelVersion:           agentKernelV2Version,
-		KernelMode:              agentKernelV2Version,
+		KernelVersion:           agentKernelVersion,
+		KernelMode:              agentKernelMode,
 		Round:                   round,
 		Protocol:                protocol,
 		ToolManifestDigest:      toolManifestDigest(),

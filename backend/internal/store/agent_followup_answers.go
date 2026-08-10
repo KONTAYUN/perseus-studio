@@ -14,12 +14,14 @@ type AgentFollowupAnswerInput struct {
 	AssistantMessageID, AssistantAttachmentsJSON                 string
 	TurnID, ToolResultPayloadJSON                                string
 	CheckpointJSON, MessageMetaJSON                              string
+	ResumeEvent                                                  AgentEventInput
 }
 
 type AgentFollowupAnswerResult struct {
-	Run            AgentRun `json:"run"`
-	UserMessage    Message  `json:"user_message"`
-	AlreadyApplied bool     `json:"already_applied"`
+	Run            AgentRun   `json:"run"`
+	UserMessage    Message    `json:"user_message"`
+	ResumeEvent    AgentEvent `json:"resume_event,omitempty"`
+	AlreadyApplied bool       `json:"already_applied"`
 }
 
 type AgentFollowupAnswerConflictError struct{ Message string }
@@ -137,13 +139,55 @@ func (s *AgentRunStore) AnswerFollowupQuestion(ctx context.Context, input AgentF
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_run_checkpoints (id, run_id, user_id, seq, state_json, created_at) VALUES (?, ?, ?, COALESCE((SELECT MAX(seq) + 1 FROM agent_run_checkpoints WHERE run_id = ?), 1), ?, ?)`, nextStoreID("cp", now), input.RunID, input.UserID, input.RunID, input.CheckpointJSON, now); err != nil {
 		return AgentFollowupAnswerResult{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, stage = 'queued', error_message = NULL, diagnostic_log_id = NULL, failure_json = NULL, started_at = NULL, completed_at = NULL, updated_at = ? WHERE id = ? AND user_id = ?`, AgentRunQueued, now, input.RunID, input.UserID); err != nil {
+	var resumeSeq int64
+	if err := tx.QueryRowContext(ctx, `UPDATE agent_runs SET status = ?, stage = 'queued', error_message = NULL, diagnostic_log_id = NULL, failure_json = NULL, started_at = NULL, completed_at = NULL, final_seq = 0, queued_at = ?, event_head_seq = event_head_seq + 1, updated_at = ? WHERE id = ? AND user_id = ? AND status = ? AND final_seq > 0 RETURNING event_head_seq`, AgentRunQueued, now, now, input.RunID, input.UserID, AgentRunWaiting).Scan(&resumeSeq); err != nil {
+		return AgentFollowupAnswerResult{}, err
+	}
+	resumeInput := input.ResumeEvent
+	resumeInput.RunID = input.RunID
+	resumeInput.UserID = input.UserID
+	resumeInput.ConversationID = conversationID
+	resumeInput.MessageID = input.AnswerMessageID
+	if strings.TrimSpace(resumeInput.Type) == "" {
+		resumeInput.Type = "user_response_answered"
+	}
+	if strings.TrimSpace(resumeInput.Level) == "" {
+		resumeInput.Level = "info"
+	}
+	if strings.TrimSpace(resumeInput.ID) == "" {
+		resumeInput.ID = fmt.Sprintf("evt_followup_resume_%s_%d", input.RunID, resumeSeq)
+	}
+	userMessage := Message{
+		ID: input.AnswerMessageID, UserID: input.UserID, ConversationID: conversationID,
+		Role: "user", Content: input.Answer, Status: "final", MetaJSON: input.MessageMetaJSON,
+		CreatedAt: now, UpdatedAt: sql.NullTime{Time: now, Valid: true},
+		Attachments: json.RawMessage("[]"), Meta: json.RawMessage(input.MessageMetaJSON),
+	}
+	payload, _ := resumeInput.Payload.(map[string]any)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["user_message"] = userMessage
+	rawResumePayload, err := json.Marshal(payload)
+	if err != nil {
+		return AgentFollowupAnswerResult{}, err
+	}
+	resumeEvent, err := scanAgentEvent(tx.QueryRowContext(ctx, `
+INSERT INTO agent_events (
+  id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+`, resumeInput.ID, resumeInput.RunID, resumeInput.UserID, resumeInput.ConversationID, resumeInput.MessageID,
+		resumeInput.TaskID, resumeInput.Type, strings.ToLower(resumeInput.Level), resumeSeq, string(rawResumePayload), now))
+	if err != nil {
 		return AgentFollowupAnswerResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return AgentFollowupAnswerResult{}, err
 	}
-	return s.followupAnswerResult(ctx, input.UserID, input.RunID, input.AnswerMessageID, false)
+	result, err := s.followupAnswerResult(ctx, input.UserID, input.RunID, input.AnswerMessageID, false)
+	result.ResumeEvent = resumeEvent
+	return result, err
 }
 
 func (s *AgentRunStore) followupAnswerResult(ctx context.Context, userID, runID, messageID string, already bool) (AgentFollowupAnswerResult, error) {

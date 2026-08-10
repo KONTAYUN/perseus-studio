@@ -87,7 +87,10 @@ func (s *Server) completeConversationRun(ctx context.Context, input conversation
 		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
 		return
 	}
-	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
+	if _, _, err := s.finalizeRunStrict(ctx, input.UserID, input.RunID, runStatus, runStage, store.UpdateAgentRunInput{
+		AssistantMessageID: assistantMessage.ID,
+		SetCompletedAt:     setCompletedAt,
+	}, store.AgentEventInput{
 		RunID:          input.RunID,
 		UserID:         input.UserID,
 		ConversationID: input.ConversationID,
@@ -99,15 +102,8 @@ func (s *Server) completeConversationRun(ctx context.Context, input conversation
 		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
 		return
 	}
-	if _, err := s.publishRunStrict(ctx, input.UserID, input.RunID, runStatus, runStage, store.UpdateAgentRunInput{
-		AssistantMessageID: assistantMessage.ID,
-		SetCompletedAt:     setCompletedAt,
-	}); err != nil {
-		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
-		return
-	}
 	if reply.TerminalState != ai.AgentTerminationWaitingForUser {
-		s.maybeGenerateConversationTitleAsync(input.UserID, input.UserRole, input.ConversationID, input.UserMessageID, assistantMessage.ID, input.ModelProviderID, input.Content, assistantMessage.Content, input.RunID)
+		s.maybeGenerateConversationTitleAsync(input.UserID, input.UserRole, input.ConversationID, input.UserMessageID, input.ModelProviderID, input.Content, assistantMessage.Content)
 	}
 }
 

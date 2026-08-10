@@ -9,18 +9,17 @@ import (
 )
 
 type providerTurnRequest struct {
-	ConversationID       string
-	MessageID            string
-	Provider             store.ModelProvider
-	Protocol             agentProtocol
-	Tools                []map[string]any
-	ToolChoice           providerToolChoice
-	DisableTools         bool
-	Snapshot             ContextSnapshot
-	PerformedMutation    bool
-	HasToolEvents        bool
-	ActionBoundaryActive bool
-	Opts                 RunOptions
+	ConversationID    string
+	MessageID         string
+	Provider          store.ModelProvider
+	Protocol          agentProtocol
+	Tools             []map[string]any
+	ToolChoice        providerToolChoice
+	DisableTools      bool
+	Snapshot          ContextSnapshot
+	PerformedMutation bool
+	HasToolEvents     bool
+	Opts              RunOptions
 }
 
 type providerToolChoiceMode string
@@ -134,16 +133,7 @@ func (s *Service) providerV2(protocol agentProtocol) providerAdapterV2 {
 }
 
 func providerTurnCanStreamAssistantText(req providerTurnRequest) bool {
-	if strings.TrimSpace(req.Opts.TaskID) != "" {
-		return false
-	}
-	if req.ActionBoundaryActive && strings.EqualFold(strings.TrimSpace(req.Snapshot.Summary.KernelMode), agentKernelCodexParity) {
-		return false
-	}
-	if req.ActionBoundaryActive && strings.EqualFold(strings.TrimSpace(req.Snapshot.Summary.KernelMode), agentKernelV3) {
-		return false
-	}
-	return true
+	return strings.TrimSpace(req.Opts.TaskID) == ""
 }
 
 func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary) {
@@ -241,7 +231,6 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"transcript_entries":                summary.TranscriptEntries,
 		"tool_result_count":                 summary.ToolResultCount,
 		"tool_loop_active":                  summary.ToolLoopActive,
-		"action_boundary_active":            summary.ActionBoundaryActive,
 		"estimated_chars":                   summary.EstimatedChars,
 		"estimated_tokens":                  summary.EstimatedTokens,
 		"context_window_tokens":             summary.ContextWindowTokens,

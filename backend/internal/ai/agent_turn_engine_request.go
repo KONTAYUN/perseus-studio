@@ -144,11 +144,7 @@ func (r *agentRuntime) buildTurnEngineProviderRequest(ctx context.Context, round
 		Snapshot:          r.lastContextSnapshot,
 		PerformedMutation: r.performedMutation,
 		HasToolEvents:     len(r.events) > 0,
-		// Tool-capable responses buffer assistant text until the provider has
-		// classified the completed item. A response with a tool call becomes
-		// progress; a response without one becomes the final assistant message.
-		ActionBoundaryActive: true,
-		Opts:                 r.opts,
+		Opts:              r.opts,
 	}, nil
 }
 
@@ -211,10 +207,6 @@ func (r *agentRuntime) annotateTurnEngineRequestSummary(manifest ModelActionMani
 	summary.ParallelToolBatches = r.parallelToolBatches
 	summary.ForcedTool = strings.TrimSpace(r.opts.ForceTool)
 	summary.ToolLoopActive = false
-	// Keep action-boundary buffering on for the whole turn-engine request.
-	// This prevents a tool preamble from being published as a chat message
-	// before the streamed response has been classified.
-	summary.ActionBoundaryActive = true
 	summary.AgentExecutionMode = "structured_tools"
 	summary.ActionSelectionState = ActionSelectionState{}
 	summary.LoopGuardState = AgentLoopGuard{}

@@ -13,8 +13,10 @@ import {
   Select,
 } from './SettingsUI';
 import { priceMicroToDisplay, providerLabel } from './usageFormatting';
+import useMotionPresence from '../../hooks/useMotionPresence';
 
 export default function UsagePriceSettingsPanel({
+  open = false,
   providers,
   prices,
   priceDraft,
@@ -26,9 +28,12 @@ export default function UsagePriceSettingsPanel({
   onEdit,
   onDelete,
 }) {
+  const { exiting, present } = useMotionPresence(open, { exitToken: '--motion-modal' });
+  if (!present) return null;
+
   const panel = (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm dark:bg-black/55">
-      <div className="settings-expand-enter settings-modal-card ui-overlay-surface flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden border border-white/40 bg-white/95 dark:border-white/10 dark:bg-[#1C1C1E]/95">
+    <div className={`motion-fade-reveal fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm dark:bg-black/55 ${exiting ? 'opacity-0' : 'opacity-100'}`}>
+      <div className={`settings-modal-card ui-overlay-surface motion-modal flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden border border-white/40 bg-white/95 dark:border-white/10 dark:bg-[#1C1C1E]/95 ${exiting ? 'motion-presence-exit motion-presence-exit-modal' : ''}`}>
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-white/10">
           <div>
             <div className="text-base font-bold text-gray-800 dark:text-gray-100">价格配置</div>

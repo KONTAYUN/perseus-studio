@@ -10,6 +10,7 @@ import {
   Table2,
 } from 'lucide-react';
 import { Checkbox, IconButton } from '../../ui';
+import useMotionPresence from '../../../hooks/useMotionPresence';
 import {
   getActiveLineHeight,
   getActiveParagraphSpacing,
@@ -54,10 +55,16 @@ export default function RichTextToolbar({
   visible = true,
 }) {
   const toolbarRef = React.useRef(null);
+  const lastPositionRef = React.useRef(position);
   const [isSpacingMenuOpen, setIsSpacingMenuOpen] = React.useState(false);
   const [isTableMenuOpen, setIsTableMenuOpen] = React.useState(false);
   const [activeSpacingMenu, setActiveSpacingMenu] = React.useState('');
   const [hoveredTableSize, setHoveredTableSize] = React.useState({ rows: 0, cols: 0 });
+  const { exiting: toolbarExiting, present: toolbarPresent } = useMotionPresence(visible, { exitToken: '--motion-fast' });
+  const spacingPresence = useMotionPresence(isSpacingMenuOpen, { exitToken: '--motion-fast' });
+  const tablePresence = useMotionPresence(isTableMenuOpen, { exitToken: '--motion-fast' });
+
+  if (position) lastPositionRef.current = position;
 
   React.useEffect(() => {
     if (!isSpacingMenuOpen) {
@@ -93,7 +100,9 @@ export default function RichTextToolbar({
     }
   }, [visible]);
 
-  if (!editor || !visible) return null;
+  if (!editor || !toolbarPresent) return null;
+
+  const resolvedPosition = position || lastPositionRef.current;
 
   const spacingGroups = SPACING_GROUPS.map((group) => ({
     ...group,
@@ -118,10 +127,10 @@ export default function RichTextToolbar({
           : 'rich-text-toolbar relative flex flex-wrap items-center gap-2 border-b border-gray-200/70 bg-white/92 px-4 py-2 dark:border-white/10 dark:bg-[#1f2023]'
       }
       style={
-        floating && position
+        floating && resolvedPosition
           ? {
-              left: position.left,
-              top: position.top,
+              left: resolvedPosition.left,
+              top: resolvedPosition.top,
             }
           : undefined
       }
@@ -130,7 +139,9 @@ export default function RichTextToolbar({
       <div
         className={
           floating
-            ? 'rich-text-toolbar-floating-surface flex flex-wrap items-center gap-2 px-3 py-2'
+            ? `rich-text-toolbar-floating-surface motion-popover motion-popover-bottom flex flex-wrap items-center gap-2 px-3 py-2 ${
+                toolbarExiting ? 'motion-popover-exit' : ''
+              }`
             : 'flex items-center gap-2'
         }
       >
@@ -174,9 +185,9 @@ export default function RichTextToolbar({
           >
             <SlidersHorizontal size={15} />
           </button>
-          {isSpacingMenuOpen && (
-            <div className="absolute left-0 top-full mt-2 flex items-start">
-              <div className="rich-text-submenu-panel rich-text-submenu-panel-surface flex w-[108px] flex-col gap-1 p-1">
+          {spacingPresence.present && (
+            <div className={`absolute left-0 top-full mt-2 flex items-start ${spacingPresence.exiting ? 'pointer-events-none' : ''}`}>
+              <div className={`rich-text-submenu-panel rich-text-submenu-panel-surface motion-popover motion-popover-bottom flex w-[108px] flex-col gap-1 p-1 ${spacingPresence.exiting ? 'motion-popover-exit' : ''}`}>
                 {spacingGroups.map((group) => (
                   <button
                     key={group.key}
@@ -195,7 +206,7 @@ export default function RichTextToolbar({
               </div>
 
               {activeSpacingGroup && (
-                <div className="rich-text-submenu-panel rich-text-submenu-panel-surface ml-2 flex w-[108px] flex-col gap-1 p-1">
+                <div className="rich-text-submenu-panel rich-text-submenu-panel-surface motion-content-switch ml-2 flex w-[108px] flex-col gap-1 p-1">
                   {activeSpacingGroup.options.map((option) => (
                     <button
                       key={`${activeSpacingGroup.key}-${option.value}`}
@@ -233,8 +244,8 @@ export default function RichTextToolbar({
           >
             <Table2 size={15} />
           </ToolbarButton>
-          {isTableMenuOpen && (
-            <div className="rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full mt-2 w-[244px] p-3">
+          {tablePresence.present && (
+            <div className={`rich-text-submenu-panel rich-text-submenu-panel-surface motion-popover motion-popover-bottom absolute left-0 top-full mt-2 w-[244px] p-3 ${tablePresence.exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
               <div className="space-y-3">
                 <div
                   className="table-size-picker"

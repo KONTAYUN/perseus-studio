@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { readMotionDuration } from './motionTokens';
 
 const EDITOR_PANEL_IDS = ['editor_1', 'editor_2', 'editor_3'];
 const MAX_TOTAL_PANELS = 5;
 const MAX_EDITOR_PANELS = 3;
 const DEFAULT_LAYOUT_WIDTHS = { fileTree: 300, chat: 500 };
-const PANEL_EXIT_GHOST_DURATION_MS = 360;
-
 function minWidthForPanelType(type) {
   if (type === 'chat') return 340;
   if (type === 'fileTree') return 220;
@@ -129,12 +128,13 @@ export default function useLayoutState({ userId = '' } = {}) {
   const queuePanelExitGhosts = (panelsToExit) => {
     const ghosts = panelsToExit.map(capturePanelExitGhost).filter(Boolean);
     if (ghosts.length === 0) return;
+    const exitDuration = readMotionDuration('--motion-modal');
     setExitingPanelGhosts((current) => [...current, ...ghosts].slice(-MAX_TOTAL_PANELS));
     ghosts.forEach((ghost) => {
       exitGhostTimeoutsRef.current[ghost.key] = window.setTimeout(() => {
         setExitingPanelGhosts((current) => current.filter((item) => item.key !== ghost.key));
         delete exitGhostTimeoutsRef.current[ghost.key];
-      }, PANEL_EXIT_GHOST_DURATION_MS);
+      }, exitDuration);
     });
   };
 

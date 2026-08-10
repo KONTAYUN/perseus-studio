@@ -2,18 +2,24 @@ import React from 'react';
 import { CornerDownRight, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { Button } from '../../ui';
 import { pendingRunSteerPreviewItems, RUN_STEER_STATUS } from '../../../hooks/chatSteerItems';
+import useMotionPresence from '../../../hooks/useMotionPresence';
 
 export default function RunSteerPreviewPanel({ items, onDelete, onQueueAfterRun, onRetry }) {
   const pendingItems = pendingRunSteerPreviewItems(items);
-  if (pendingItems.length === 0) return null;
-  const failedItems = pendingItems.filter((item) => item.status === RUN_STEER_STATUS.failed);
-  const waitingItems = pendingItems.filter((item) => item.status !== RUN_STEER_STATUS.failed);
+  const hasItems = pendingItems.length > 0;
+  const { exiting, present } = useMotionPresence(hasItems, { exitToken: '--motion-base' });
+  const lastItemsRef = React.useRef([]);
+  if (hasItems) lastItemsRef.current = pendingItems;
+  if (!present || lastItemsRef.current.length === 0) return null;
+  const visibleItems = hasItems ? pendingItems : lastItemsRef.current;
+  const failedItems = visibleItems.filter((item) => item.status === RUN_STEER_STATUS.failed);
+  const waitingItems = visibleItems.filter((item) => item.status !== RUN_STEER_STATUS.failed);
   return (
-    <div className="pending-run-message-panel motion-popover pointer-events-auto mb-3">
+    <div className={`pending-run-message-panel motion-card pointer-events-auto mb-3 ${exiting ? 'motion-presence-exit pointer-events-none' : ''}`}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-blue-500/80 dark:text-blue-200/80">
           <CornerDownRight size={13} />
-          <span>{previewHeading(pendingItems)}</span>
+          <span>{previewHeading(visibleItems)}</span>
           {waitingItems.length > 0 && (
             <span className="inline-flex gap-0.5">
               <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
@@ -23,7 +29,7 @@ export default function RunSteerPreviewPanel({ items, onDelete, onQueueAfterRun,
           )}
         </div>
         <div className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 text-gray-800 dark:text-gray-100 custom-scrollbar">
-          {pendingItems.map((item) => item.content).join('\n\n')}
+          {visibleItems.map((item) => item.content).join('\n\n')}
         </div>
         {failedItems.length > 0 && (
           <div className="mt-2 text-[11px] font-semibold text-amber-600 dark:text-amber-300">
@@ -67,7 +73,7 @@ export default function RunSteerPreviewPanel({ items, onDelete, onQueueAfterRun,
           className="pending-run-message-delete motion-button"
           onClick={(e) => {
             e.stopPropagation();
-            for (const item of pendingItems) {
+            for (const item of visibleItems) {
               onDelete?.(item.id || item.clientSteerId || item.steerId);
             }
           }}

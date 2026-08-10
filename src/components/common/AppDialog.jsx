@@ -48,7 +48,9 @@ export default function AppDialog({ dialog, onClose }) {
   const [value, setValue] = React.useState('');
   const inputRef = React.useRef(null);
   const latestDialogRef = React.useRef(null);
-  const { closeWithPresence, exiting, present } = useMotionPresence(Boolean(dialog));
+  const { closeWithPresence, exiting, present } = useMotionPresence(Boolean(dialog), {
+    exitToken: '--motion-modal',
+  });
 
   React.useEffect(() => {
     if (dialog) latestDialogRef.current = dialog;
@@ -102,7 +104,7 @@ export default function AppDialog({ dialog, onClose }) {
       <form
         onSubmit={submit}
         className={`ui-overlay-surface motion-modal w-full max-w-md border border-white/50 bg-white/95 p-5 backdrop-blur-3xl dark:border-white/10 dark:bg-[#252527]/95 ${
-          exiting ? 'motion-presence-exit' : ''
+          exiting ? 'motion-presence-exit motion-presence-exit-modal' : ''
         }`}
       >
         <div className="flex items-start gap-4">

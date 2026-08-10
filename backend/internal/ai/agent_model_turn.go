@@ -56,10 +56,6 @@ func (r *agentRuntime) tools() []map[string]any {
 	return openAIToolsForLoadedToolsets(r.loadedToolsets, includeLoader, r.opts.UserRole)
 }
 
-func (r *agentRuntime) actionBoundaryActive() bool {
-	return r != nil
-}
-
 func (r *agentRuntime) executionMode() AgentExecutionMode {
 	if r == nil {
 		return AgentExecutionModeChat

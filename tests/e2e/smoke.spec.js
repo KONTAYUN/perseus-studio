@@ -1,13 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-async function login(page) {
-  await page.goto('/');
-  await page.getByPlaceholder('用户名').fill(process.env.PERSEUS_E2E_USERNAME || 'admin');
-  await page.getByPlaceholder('密码').fill(process.env.PERSEUS_E2E_PASSWORD || 'admin');
-  await page.getByRole('button', { name: /进入|创建并进入|登录/ }).click();
-  await expect(page.getByText('Perseus Studio').first()).toBeVisible();
-  await expect(page.getByTestId('chat-send-button')).toBeVisible();
-}
+import { login } from './helpers.js';
 
 async function apiPost(page, path, body) {
   return page.evaluate(
@@ -89,7 +82,7 @@ test('main workspace smoke flow works', async ({ page }) => {
   await expect(page.getByTestId('editor-panel').first()).toBeVisible();
 
   await page.getByTestId('settings-button').click();
-  await expect(page.getByText('模型供应商')).toBeVisible();
+  await expect(page.getByTestId('model-name-input')).toBeVisible();
   await page.getByTestId('open-diagnostics-settings').scrollIntoViewIfNeeded();
   await page.getByTestId('open-diagnostics-settings').click();
   await expect(page.getByTestId('diagnostics-view')).toBeVisible();

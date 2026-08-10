@@ -35,13 +35,24 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			s.runBroker.DeleteLatestTopic(runID)
 		})
 	}()
-	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunRunning, "calling_model", store.UpdateAgentRunInput{SetStartedAt: true}); err != nil {
+	running, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunRunning, "calling_model", store.UpdateAgentRunInput{SetStartedAt: true})
+	if err != nil {
 		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, time.Now())
+		return
+	}
+	if running.Status != store.AgentRunRunning {
 		return
 	}
 	eventCtx := ctx
 	if ctx.Err() != nil {
 		eventCtx = context.Background()
+	}
+	queueWait := time.Duration(0)
+	if running.QueuedAt.Valid {
+		queueWait = time.Since(running.QueuedAt.Time)
+		if queueWait < 0 {
+			queueWait = 0
+		}
 	}
 	if _, err := s.appendRunEventStrict(eventCtx, store.AgentEventInput{
 		RunID:          runID,
@@ -50,7 +61,10 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		MessageID:      userMessageID,
 		Type:           "run_started",
 		Level:          "info",
-		Payload:        map[string]any{"message": "run started"},
+		Payload: map[string]any{
+			"message":       "run started",
+			"queue_wait_ms": queueWait.Milliseconds(),
+		},
 	}); err != nil {
 		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, time.Now())
 		return
@@ -296,7 +310,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		activeAssistantKind = ""
 		activeAssistantContent.Reset()
 	}
-	defer func() {
+	interruptActiveAssistantMessage := func() {
 		if activeAssistantMessageID == "" || activeAssistantKind != "assistant_commentary" {
 			return
 		}
@@ -326,7 +340,10 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			Level:          "warn",
 			Payload:        map[string]any{"assistant_message": item, "message_id": messageID, "segment_index": activeAssistantSegment},
 		})
-	}()
+		activeAssistantMessageID = ""
+		activeAssistantKind = ""
+		activeAssistantContent.Reset()
+	}
 
 	runOptions := func() ai.RunOptions {
 		return ai.RunOptions{
@@ -453,6 +470,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 	for {
 		items, err := s.conversations.ListMessages(ctx, userID, conversationID)
 		if err != nil {
+			interruptActiveAssistantMessage()
 			s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 			return
 		}
@@ -462,6 +480,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		}
 		var limited *ai.ProviderRateLimitError
 		if !errors.As(err, &limited) || limited == nil {
+			interruptActiveAssistantMessage()
 			s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 			return
 		}
@@ -503,11 +522,13 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			if !timer.Stop() {
 				<-timer.C
 			}
+			interruptActiveAssistantMessage()
 			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, ctx.Err(), runStartedAt)
 			return
 		case <-timer.C:
 		}
 		if err := getPersistenceErr(); err != nil {
+			interruptActiveAssistantMessage()
 			s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 			return
 		}
@@ -523,6 +544,13 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		safePublish("publish_run_calling_model_after_rate_limit", store.AgentRunRunning, "calling_model", store.UpdateAgentRunInput{})
 	}
 	if err := getPersistenceErr(); err != nil {
+		interruptActiveAssistantMessage()
+		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
+		return
+	}
+	finalizeActiveAssistantMessage("")
+	if err := getPersistenceErr(); err != nil {
+		interruptActiveAssistantMessage()
 		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}

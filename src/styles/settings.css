@@ -25,34 +25,34 @@
   animation: perseus-card-enter var(--motion-modal) var(--ease-motion) both;
 }
 
-.settings-section-appear,
-.settings-card {
+.settings-view-stagger > .settings-section-appear,
+.settings-view-stagger > .settings-card {
   animation: perseus-card-enter var(--motion-modal) var(--ease-motion) both;
 }
 
-.settings-view-enter > .settings-section-appear:nth-child(1),
-.settings-view-enter > .settings-card:nth-child(1) {
-  animation-delay: calc(var(--motion-fast) * 0.2);
+.settings-view-stagger > .settings-section-appear:nth-child(1),
+.settings-view-stagger > .settings-card:nth-child(1) {
+  animation-delay: calc(var(--motion-stagger-step) * 0);
 }
 
-.settings-view-enter > .settings-section-appear:nth-child(2),
-.settings-view-enter > .settings-card:nth-child(2) {
-  animation-delay: calc(var(--motion-fast) * 0.4);
+.settings-view-stagger > .settings-section-appear:nth-child(2),
+.settings-view-stagger > .settings-card:nth-child(2) {
+  animation-delay: min(var(--motion-stagger-max), calc(var(--motion-stagger-step) * 1));
 }
 
-.settings-view-enter > .settings-section-appear:nth-child(3),
-.settings-view-enter > .settings-card:nth-child(3) {
-  animation-delay: calc(var(--motion-fast) * 0.6);
+.settings-view-stagger > .settings-section-appear:nth-child(3),
+.settings-view-stagger > .settings-card:nth-child(3) {
+  animation-delay: min(var(--motion-stagger-max), calc(var(--motion-stagger-step) * 2));
 }
 
-.settings-view-enter > .settings-section-appear:nth-child(4),
-.settings-view-enter > .settings-card:nth-child(4) {
-  animation-delay: calc(var(--motion-fast) * 0.8);
+.settings-view-stagger > .settings-section-appear:nth-child(4),
+.settings-view-stagger > .settings-card:nth-child(4) {
+  animation-delay: min(var(--motion-stagger-max), calc(var(--motion-stagger-step) * 3));
 }
 
-.settings-view-enter > .settings-section-appear:nth-child(5),
-.settings-view-enter > .settings-card:nth-child(5) {
-  animation-delay: var(--motion-fast);
+.settings-view-stagger > .settings-section-appear:nth-child(5),
+.settings-view-stagger > .settings-card:nth-child(5) {
+  animation-delay: min(var(--motion-stagger-max), calc(var(--motion-stagger-step) * 4));
 }
 
 .settings-popover-enter {

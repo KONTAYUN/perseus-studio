@@ -105,6 +105,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
                     role="button"
                     tabIndex={0}
                     data-testid={`editor-tab-${tab.path}`}
+                    data-active={active ? 'true' : 'false'}
                     draggable
                     onDragStart={(e) => {
                       e.stopPropagation();
@@ -173,7 +174,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
                         editor.activateTab(tab.path);
                       }
                     }}
-                    className={`motion-chip editor-tab-item group/tab flex h-8 min-w-0 items-center gap-2 rounded-lg border px-2.5 text-sm ${
+                    className={`motion-chip motion-color editor-tab-item group/tab flex h-8 min-w-0 items-center gap-2 rounded-lg border px-2.5 text-sm ${
                       active
                         ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-100'
                         : 'border-gray-200 bg-white text-gray-600 hover:border-blue-200 dark:border-gray-700/60 dark:bg-[#1C1C1E] dark:text-gray-300'

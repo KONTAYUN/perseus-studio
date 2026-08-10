@@ -21,15 +21,19 @@ body {
 }
 
 :root {
-  --ease-apple: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-apple: var(--ease-out);
   --ease-apple-soft: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-motion: cubic-bezier(0.18, 0.86, 0.28, 1);
-  --ease-layout: cubic-bezier(0.16, 1, 0.28, 1);
-  --motion-fast: 180ms;
-  --motion-base: 260ms;
-  --motion-popover: 300ms;
-  --motion-modal: 360ms;
-  --motion-layout: 400ms;
+  --ease-motion: var(--ease-out);
+  --ease-layout: var(--ease-in-out);
+  --motion-fast: 140ms;
+  --motion-base: 180ms;
+  --motion-popover: 180ms;
+  --motion-modal: 240ms;
+  --motion-layout: 280ms;
+  --motion-stagger-step: 24ms;
+  --motion-stagger-max: 80ms;
   --radius-micro: 7px;
   --radius-control-sm: 10px;
   --radius-control: 12px;

@@ -64,3 +64,12 @@ test('the empty chat card keeps its frame without a nested backdrop layer', () =
   assert.doesNotMatch(emptyStateSource, /backdrop-blur/);
   assert.match(chatStylesSource, /\.empty-chat-card/);
 });
+
+test('structured run errors render after conversation messages', () => {
+  const messagesProjection = messagesSource.indexOf('ide.conversationMessages.map');
+  const errorProjection = messagesSource.indexOf('data-testid="chat-run-error"');
+
+  assert.ok(messagesProjection >= 0);
+  assert.ok(errorProjection > messagesProjection);
+  assert.match(messagesSource, /data-failure-class=\{ide\.resumableRun\?\.failureClass \|\| ''\}/);
+});

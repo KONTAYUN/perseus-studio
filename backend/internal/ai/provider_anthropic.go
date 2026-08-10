@@ -108,7 +108,7 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 			}
 		}
 		defer closeStream()
-		revealTextAfterAction := req.ActionBoundaryActive || normalizeProviderToolChoice(req.ToolChoice).requiresTool()
+		revealTextAfterAction := !req.DisableTools && len(req.Tools) > 0
 		var emitText func(string)
 		if req.Opts.Event != nil && providerTurnCanStreamAssistantText(req) {
 			emitText = func(text string) {
@@ -315,17 +315,16 @@ func (p anthropicProviderV2) retryStream(ctx context.Context, req *providerTurnR
 
 func (s *Service) callAnthropicAgentTurn(ctx context.Context, runtime *agentRuntime, round int) (agentModelTurn, error) {
 	return s.providerV2(agentProtocolAnthropic).Turn(ctx, providerTurnRequest{
-		ConversationID:       runtime.conversationID,
-		MessageID:            runtime.messageID,
-		Provider:             runtime.provider,
-		Protocol:             runtime.protocol,
-		Tools:                runtime.tools(),
-		ToolChoice:           runtime.toolChoice(),
-		Snapshot:             runtime.lastContextSnapshot,
-		PerformedMutation:    runtime.performedMutation,
-		HasToolEvents:        len(runtime.events) > 0,
-		ActionBoundaryActive: runtime.actionBoundaryActive(),
-		Opts:                 runtime.opts,
+		ConversationID:    runtime.conversationID,
+		MessageID:         runtime.messageID,
+		Provider:          runtime.provider,
+		Protocol:          runtime.protocol,
+		Tools:             runtime.tools(),
+		ToolChoice:        runtime.toolChoice(),
+		Snapshot:          runtime.lastContextSnapshot,
+		PerformedMutation: runtime.performedMutation,
+		HasToolEvents:     len(runtime.events) > 0,
+		Opts:              runtime.opts,
 	})
 }
 

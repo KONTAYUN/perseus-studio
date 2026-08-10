@@ -3439,12 +3439,11 @@ func TestGenerateReplyRecordsProvider400ToolRequestSummary(t *testing.T) {
 		t.Fatalf("request_summary should be JSON: %v\n%s", err, logs[0].RequestSummary)
 	}
 	expected := map[string]any{
-		"request_kind":           "chat_completions",
-		"stream":                 true,
-		"tool_choice":            "auto",
-		"failure_class":          string(ProviderFailureInvalidRequest),
-		"has_tools":              true,
-		"action_boundary_active": true,
+		"request_kind":  "chat_completions",
+		"stream":        true,
+		"tool_choice":   "auto",
+		"failure_class": string(ProviderFailureInvalidRequest),
+		"has_tools":     true,
 	}
 	for key, value := range expected {
 		if summary[key] != value {
@@ -3517,8 +3516,8 @@ func TestGenerateReplyProvider400DoesNotGuessRequiredToolChoice(t *testing.T) {
 	if bytes, _ := summary["payload_bytes"].(float64); bytes <= 0 {
 		t.Fatalf("expected payload_bytes in diagnostic summary: %#v", summary)
 	}
-	if summary["has_tools"] != true || summary["has_required_tool_choice"] == true || summary["action_boundary_active"] != true {
-		t.Fatalf("expected tool presence, provider-auto, and local action boundary diagnostics: %#v", summary)
+	if summary["has_tools"] != true || summary["has_required_tool_choice"] == true {
+		t.Fatalf("expected tool presence with provider-auto diagnostics: %#v", summary)
 	}
 	if summary["provider_host"] == "" || summary["model_id"] == "" {
 		t.Fatalf("expected provider host and model id in diagnostic summary: %#v", summary)

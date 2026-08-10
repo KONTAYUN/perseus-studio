@@ -1,14 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-const DEFAULT_EXIT_DURATION_MS = 260;
+import { readMotionDuration } from './motionTokens';
 
 export default function useMotionPresence(open, {
-  exitDuration = DEFAULT_EXIT_DURATION_MS,
+  exitDuration,
+  exitToken = '--motion-base',
   onExitComplete,
 } = {}) {
   const [present, setPresent] = useState(open);
   const [exiting, setExiting] = useState(false);
   const timeoutRef = useRef(null);
+  const onExitCompleteRef = useRef(onExitComplete);
+  const resolvedExitDuration = useMemo(
+    () => (Number.isFinite(exitDuration) ? exitDuration : readMotionDuration(exitToken)),
+    [exitDuration, exitToken]
+  );
+
+  useEffect(() => {
+    onExitCompleteRef.current = onExitComplete;
+  }, [onExitComplete]);
 
   const clearExitTimer = useCallback(() => {
     if (!timeoutRef.current) return;
@@ -20,8 +29,8 @@ export default function useMotionPresence(open, {
     setPresent(false);
     setExiting(false);
     afterExit?.();
-    onExitComplete?.();
-  }, [onExitComplete]);
+    onExitCompleteRef.current?.();
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -35,9 +44,9 @@ export default function useMotionPresence(open, {
     timeoutRef.current = window.setTimeout(() => {
       timeoutRef.current = null;
       finishExit();
-    }, exitDuration);
+    }, resolvedExitDuration);
     return clearExitTimer;
-  }, [clearExitTimer, exitDuration, finishExit, open, present]);
+  }, [clearExitTimer, finishExit, open, present, resolvedExitDuration]);
 
   useEffect(() => clearExitTimer, [clearExitTimer]);
 
@@ -51,8 +60,8 @@ export default function useMotionPresence(open, {
     timeoutRef.current = window.setTimeout(() => {
       timeoutRef.current = null;
       finishExit(close);
-    }, exitDuration);
-  }, [clearExitTimer, exitDuration, finishExit, present]);
+    }, resolvedExitDuration);
+  }, [clearExitTimer, finishExit, present, resolvedExitDuration]);
 
   return useMemo(() => ({
     closeWithPresence,

@@ -245,6 +245,7 @@ function LoginScreen({ username, password, error, notice, isLoggingIn, isRegiste
           <div className="mt-1 text-sm text-gray-400">{subtitle}</div>
         </div>
         <Input
+          data-testid="login-username"
           autoFocus
           type="text"
           value={username}
@@ -254,6 +255,7 @@ function LoginScreen({ username, password, error, notice, isLoggingIn, isRegiste
           autoComplete="username"
         />
         <Input
+          data-testid="login-password"
           type="password"
           value={password}
           onChange={(event) => onPasswordChange(event.target.value)}
@@ -264,6 +266,7 @@ function LoginScreen({ username, password, error, notice, isLoggingIn, isRegiste
         {notice && <div className="mt-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</div>}
         {error && <div className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</div>}
         <Button
+          data-testid="login-submit"
           type="submit"
           disabled={isLoggingIn || !username || !password}
           className="mt-5 h-10 w-full bg-blue-500 text-sm font-semibold text-white hover:bg-blue-600 disabled:bg-gray-700 disabled:text-gray-400"

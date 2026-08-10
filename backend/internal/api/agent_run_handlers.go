@@ -38,6 +38,11 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
+		if run.Status == store.AgentRunQueued {
+			if position, positionErr := s.runs.QueuePosition(r.Context(), user.UserID, run.ID); positionErr == nil {
+				run.QueuePosition = position
+			}
+		}
 		writeJSON(w, http.StatusOK, run)
 		return
 	}
@@ -70,8 +75,11 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 		run, event, err := s.resumeAgentRun(r.Context(), user.UserID, runID)
 		if err != nil {
 			var limited *ai.ProviderRateLimitError
+			var queueFull *store.AgentQueueFullError
 			if errors.As(err, &limited) {
 				writeAIError(w, http.StatusTooManyRequests, err)
+			} else if errors.As(err, &queueFull) {
+				writeCodedError(w, http.StatusTooManyRequests, "agent_queue_full", queueFull.Error())
 			} else {
 				writeAIError(w, http.StatusBadRequest, err)
 			}
@@ -86,8 +94,11 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 		result, err := s.answerAgentFollowupQuestion(r.Context(), user.UserID, runID, r.Body)
 		if err != nil {
 			var conflict *store.AgentFollowupAnswerConflictError
+			var queueFull *store.AgentQueueFullError
 			if errors.As(err, &conflict) {
 				writeError(w, http.StatusConflict, err.Error())
+			} else if errors.As(err, &queueFull) {
+				writeCodedError(w, http.StatusTooManyRequests, "agent_queue_full", queueFull.Error())
 			} else {
 				writeError(w, http.StatusBadRequest, err.Error())
 			}
@@ -264,24 +275,27 @@ func (s *Server) resumeAgentRun(ctx context.Context, userID, runID string) (stor
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
 	}
-	attachmentPayloads := s.payloadsFromStoredMessageAttachments(ctx, user.UserID, userMessage)
-	resumed, err := s.runs.ResumeRun(ctx, userID, runID)
-	if err != nil {
+	if err := s.ensureAgentQueueCapacity(ctx, userID); err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
 	}
-	event, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
-		RunID:          runID,
-		UserID:         userID,
-		ConversationID: run.ConversationID,
-		MessageID:      userMessage.ID,
-		Type:           "run_resumed",
-		Level:          "info",
-		Payload:        map[string]any{"message": "run resumed"},
+	resumed, event, err := s.runs.ResumeRunWithEvent(ctx, store.ResumeAgentRunInput{
+		RunID:  runID,
+		UserID: userID,
+		Event: store.AgentEventInput{
+			ID:             fmt.Sprintf("evt_resume_%s_%d", runID, run.EventHeadSeq+1),
+			ConversationID: run.ConversationID,
+			MessageID:      userMessage.ID,
+			Type:           "run_resumed",
+			Level:          "info",
+			Payload:        map[string]any{"message": "run resumed"},
+		},
 	})
 	if err != nil {
-		return store.AgentRun{}, store.AgentEvent{}, err
+		return store.AgentRun{}, store.AgentEvent{}, runLifecycleError(err)
 	}
-	go s.executeConversationRun(userID, user.Role, run.ConversationID, userMessage.ID, run.ModelProviderID, userMessage.Content, userMessage.AttachmentsJSON, attachmentPayloads, "", runID)
+	s.runBroker.Publish(runID, tasks.Event{Type: "event", Log: event})
+	s.runBroker.Publish(runID, tasks.Event{Type: "run", Task: resumed})
+	s.wakeAgentScheduler()
 	return resumed, event, nil
 }
 
@@ -306,21 +320,22 @@ func (s *Server) cancelAgentRun(ctx context.Context, userID, runID string, req c
 	}
 	source := normalizeCancelSource(req.Source)
 	reason := normalizeCancelReason(req.Reason)
-	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
+	finalRun, _, err := s.finalizeRunStrict(ctx, userID, runID, store.AgentRunCanceled, "canceled", store.UpdateAgentRunInput{SetCompletedAt: true}, store.AgentEventInput{
 		RunID:          runID,
 		UserID:         userID,
 		ConversationID: run.ConversationID,
-		Type:           "run_cancel_requested",
+		Type:           "run_canceled",
 		Level:          "warn",
 		Payload: map[string]any{
-			"message": "cancel requested",
+			"message": "run canceled",
 			"source":  source,
 			"reason":  reason,
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		return store.AgentRun{}, err
 	}
-	return s.publishRunStrict(ctx, userID, runID, store.AgentRunCanceled, "canceled", store.UpdateAgentRunInput{SetCompletedAt: true})
+	return finalRun, nil
 }
 
 func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, runID string) {
@@ -462,7 +477,7 @@ func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, ru
 			if err != nil || writeSSE(w, "run", run) != nil {
 				return
 			}
-			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+			if err := writeSSEHeartbeat(w); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -529,7 +544,38 @@ func (s *Server) appendRunEventStrict(ctx context.Context, input store.AgentEven
 	if err == nil {
 		s.runBroker.Publish(input.RunID, tasks.Event{Type: "event", Log: event})
 	}
-	return event, err
+	return event, runLifecycleError(err)
+}
+
+func (s *Server) finalizeRunStrict(ctx context.Context, userID, runID string, status store.AgentRunStatus, stage string, update store.UpdateAgentRunInput, event store.AgentEventInput) (store.AgentRun, store.AgentEvent, error) {
+	if strings.TrimSpace(event.ID) == "" {
+		current, err := s.runs.GetRun(ctx, userID, runID)
+		if err != nil {
+			return store.AgentRun{}, store.AgentEvent{}, err
+		}
+		event.ID = fmt.Sprintf("evt_terminal_%s_%d", runID, current.EventHeadSeq+1)
+	}
+	run, terminalEvent, err := s.runs.FinalizeRunWithEvent(ctx, store.FinalizeAgentRunInput{
+		RunID: runID, UserID: userID, Status: status, Stage: stage, Update: update, Event: event,
+	})
+	if err == nil {
+		s.runBroker.Publish(runID, tasks.Event{Type: "event", Log: terminalEvent})
+		s.runBroker.Publish(runID, tasks.Event{Type: "run", Task: run})
+	}
+	return run, terminalEvent, runLifecycleError(err)
+}
+
+func runLifecycleError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, store.ErrAgentEventIntegrity) || errors.Is(err, store.ErrAgentRunFinalized) {
+		return &ai.AgentRuntimeError{
+			Code: ai.AgentRuntimeEventIntegrity, Category: "event_log", Retryable: false,
+			Message: "agent event log integrity check failed", Cause: err,
+		}
+	}
+	return err
 }
 
 func (s *Server) registerRunCancel(runID string, cancel context.CancelFunc) {

@@ -1,7 +1,5 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
-
-const PANEL_LAYOUT_DURATION_MS = 400;
-const PANEL_LAYOUT_EASING = 'cubic-bezier(0.16, 1, 0.28, 1)';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { readMotionDuration, readMotionTimingFunction } from '../../../hooks/motionTokens';
 
 export function usePanelMotion({
   displayWidths,
@@ -13,6 +11,11 @@ export function usePanelMotion({
   setLayoutAnimationAction,
   visiblePanels,
 }) {
+  const panelLayoutDuration = useMemo(() => readMotionDuration('--motion-layout'), []);
+  const panelLayoutEasing = useMemo(
+    () => readMotionTimingFunction('--ease-layout', 'cubic-bezier(0.65, 0, 0.35, 1)'),
+    []
+  );
   const panelRectsRef = useRef({});
   const panelAnimationsRef = useRef({});
   const previousPanelIdsRef = useRef([]);
@@ -43,9 +46,9 @@ export function usePanelMotion({
     if (!layoutAnimationAction) return undefined;
     const timeoutId = window.setTimeout(() => {
       setLayoutAnimationAction?.(null);
-    }, PANEL_LAYOUT_DURATION_MS + 40);
+    }, panelLayoutDuration + 40);
     return () => window.clearTimeout(timeoutId);
-  }, [layoutAnimationAction, setLayoutAnimationAction]);
+  }, [layoutAnimationAction, panelLayoutDuration, setLayoutAnimationAction]);
 
   useLayoutEffect(() => {
     if (mainWidth <= 0 || typeof document === 'undefined') return;
@@ -104,8 +107,8 @@ export function usePanelMotion({
           },
         ],
         {
-          duration: PANEL_LAYOUT_DURATION_MS,
-          easing: PANEL_LAYOUT_EASING,
+          duration: panelLayoutDuration,
+          easing: panelLayoutEasing,
           fill: 'none',
         }
       );
@@ -119,7 +122,17 @@ export function usePanelMotion({
     panelRectsRef.current = nextRects;
     previousPanelIdsRef.current = currentPanelIds;
     hasMeasuredPanelsRef.current = true;
-  }, [displayWidths, draggingPanelId, isDraggingMode, isResizing, layoutAnimationAction, mainWidth, visiblePanels]);
+  }, [
+    displayWidths,
+    draggingPanelId,
+    isDraggingMode,
+    isResizing,
+    layoutAnimationAction,
+    mainWidth,
+    panelLayoutDuration,
+    panelLayoutEasing,
+    visiblePanels,
+  ]);
 
   const getPanelIntroState = (id) => {
     const forceIntro =
@@ -130,7 +143,7 @@ export function usePanelMotion({
       appearTimeoutsRef.current[id] = window.setTimeout(() => {
         appearingPanelIdsRef.current.delete(id);
         delete appearTimeoutsRef.current[id];
-      }, PANEL_LAYOUT_DURATION_MS + 40);
+      }, panelLayoutDuration + 40);
     }
     if (!appearedPanelIdsRef.current.has(id)) {
       appearedPanelIdsRef.current.add(id);
@@ -140,7 +153,7 @@ export function usePanelMotion({
         appearTimeoutsRef.current[id] = window.setTimeout(() => {
           appearingPanelIdsRef.current.delete(id);
           delete appearTimeoutsRef.current[id];
-        }, PANEL_LAYOUT_DURATION_MS + 40);
+        }, panelLayoutDuration + 40);
       }
     }
 

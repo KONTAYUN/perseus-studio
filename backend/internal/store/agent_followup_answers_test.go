@@ -47,8 +47,10 @@ func TestAnswerUserChoiceResumesSameRunAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runs.UpdateRun(ctx, "user-a", run.ID, UpdateAgentRunInput{
-		Status: AgentRunWaiting, Stage: "waiting_for_user", AssistantMessageID: assistantMessage.ID,
+	if _, _, err := runs.FinalizeRunWithEvent(ctx, FinalizeAgentRunInput{
+		RunID: run.ID, UserID: "user-a", Status: AgentRunWaiting, Stage: "waiting_for_user",
+		Update: UpdateAgentRunInput{AssistantMessageID: assistantMessage.ID},
+		Event:  AgentEventInput{Type: "user_question_requested", Level: "info", Payload: map[string]any{"tool_call_id": "call-followup"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +75,10 @@ func TestAnswerUserChoiceResumesSameRunAndIsIdempotent(t *testing.T) {
 		AssistantAttachmentsJSON: answeredAttachments, TurnID: "turn-followup",
 		ToolResultPayloadJSON: `{"tool_call_id":"call-followup","tool_name":"request_user_choice","content":"<user_message>\nYes\n</user_message>","status":"answered"}`,
 		CheckpointJSON:        `{"current_round":4}`, MessageMetaJSON: `{"kind":"user_response","run_id":"run-followup"}`,
+		ResumeEvent: AgentEventInput{
+			ID: "followup-resume-event", Type: "user_response_answered", Level: "info",
+			Payload: map[string]any{"tool_call_id": "call-followup", "answer_id": "answer-1"},
+		},
 	}
 	result, err := runs.AnswerFollowupQuestion(ctx, input)
 	if err != nil {
@@ -80,6 +86,16 @@ func TestAnswerUserChoiceResumesSameRunAndIsIdempotent(t *testing.T) {
 	}
 	if result.AlreadyApplied || result.Run.ID != run.ID || result.Run.Status != AgentRunQueued || result.UserMessage.Content != "Yes" {
 		t.Fatalf("unexpected answer result: %#v", result)
+	}
+	if result.Run.FinalSeq != 0 || result.ResumeEvent.ID != "followup-resume-event" || result.ResumeEvent.Seq != result.Run.EventHeadSeq {
+		t.Fatalf("follow-up resume must reopen the barrier and append one atomic event: %#v", result)
+	}
+	events, err := runs.ListEvents(ctx, "user-a", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[1].ID != result.ResumeEvent.ID {
+		t.Fatalf("follow-up answer event log is not atomic and ordered: %#v", events)
 	}
 	toolCall, err := conversations.GetToolCall(ctx, "user-a", "call-followup")
 	if err != nil || toolCall.Status != "success" || toolCall.ResultJSON == "" {

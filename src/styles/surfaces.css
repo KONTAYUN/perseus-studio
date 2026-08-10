@@ -5,8 +5,7 @@
   backdrop-filter: blur(24px) saturate(1.18);
   transition:
     border-color var(--motion-base) var(--ease-motion),
-    background-color var(--motion-base) var(--ease-motion),
-    box-shadow var(--motion-layout) var(--ease-layout);
+    background-color var(--motion-base) var(--ease-motion);
   box-shadow:
     var(--surface-shadow-panel),
     0 0 18px 1px rgb(59 130 246 / 0),
@@ -74,11 +73,8 @@
     0 0 14px 1px rgb(59 130 246 / 0),
     0 0 34px 7px rgb(37 99 235 / 0),
     inset 0 0 0 1px rgb(96 165 250 / 0);
-  will-change: opacity, border-color, box-shadow;
-  transition:
-    opacity var(--motion-layout) var(--ease-layout),
-    border-color var(--motion-layout) var(--ease-layout),
-    box-shadow var(--motion-layout) var(--ease-layout);
+  will-change: opacity;
+  transition: opacity var(--motion-layout) var(--ease-layout);
 }
 
 .panel-active-glow-fixed-on {

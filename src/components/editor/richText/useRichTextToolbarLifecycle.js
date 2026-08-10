@@ -61,31 +61,6 @@ export default function useRichTextToolbarLifecycle({
   });
 
   React.useEffect(() => {
-    if (!editor || !(blockToolbarState.triggerVisible || blockToolbarState.toolbarVisible)) {
-      return undefined;
-    }
-    let frame = 0;
-    let stopped = false;
-
-    const followLayout = () => {
-      if (stopped) return;
-      refreshBlockToolbarTrigger();
-      frame = requestAnimationFrame(followLayout);
-    };
-
-    frame = requestAnimationFrame(followLayout);
-    return () => {
-      stopped = true;
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [
-    blockToolbarState.toolbarVisible,
-    blockToolbarState.triggerVisible,
-    editor,
-    refreshBlockToolbarTrigger,
-  ]);
-
-  React.useEffect(() => {
     if (!editor) return undefined;
     const scroller = editor.view.dom.parentElement;
     if (!scroller) return undefined;

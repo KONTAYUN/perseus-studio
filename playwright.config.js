@@ -10,7 +10,8 @@ export default defineConfig({
   },
   fullyParallel: false,
   workers: 1,
-  reporter: [['list']],
+  outputDir: 'test-results',
+  reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
   use: {
     baseURL,
     trace: 'retain-on-failure',
@@ -22,7 +23,6 @@ export default defineConfig({
       name: 'chrome',
       use: {
         ...devices['Desktop Chrome'],
-        channel: 'chrome',
       },
     },
   ],

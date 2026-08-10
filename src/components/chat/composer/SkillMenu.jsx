@@ -1,11 +1,17 @@
 import React from 'react';
+import useMotionPresence from '../../../hooks/useMotionPresence';
 
 export default function SkillMenu({ isOpen, skills, inputValue, onChoose }) {
-  if (!isOpen || skills.length === 0) return null;
+  const hasMenu = isOpen && skills.length > 0;
+  const { exiting, present } = useMotionPresence(hasMenu, { exitToken: '--motion-fast' });
+  const lastSkillsRef = React.useRef([]);
+  if (skills.length > 0) lastSkillsRef.current = skills;
+  if (!present || lastSkillsRef.current.length === 0) return null;
+  const visibleSkills = hasMenu ? skills : lastSkillsRef.current;
 
   return (
-    <div className="composer-popover-surface motion-popover absolute bottom-[64px] left-2 z-30 max-h-56 w-[min(360px,calc(100%-24px))] overflow-auto border border-gray-200 bg-white p-2 dark:border-white/10 dark:bg-[#252527] custom-scrollbar">
-      {skills.map((skill) => (
+    <div className={`composer-popover-surface motion-popover motion-popover-top absolute bottom-[64px] left-2 z-30 max-h-56 w-[min(360px,calc(100%-24px))] overflow-auto border border-gray-200 bg-white p-2 dark:border-white/10 dark:bg-[#252527] custom-scrollbar ${exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
+      {visibleSkills.map((skill) => (
         <button
           key={skill.id}
           onClick={(e) => {

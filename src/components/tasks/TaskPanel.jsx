@@ -4,7 +4,9 @@ import useMotionPresence from '../../hooks/useMotionPresence';
 import { Badge, Button, IconButton } from '../ui';
 
 export default function TaskPanel({ tasks }) {
-  const { closeWithPresence, exiting, present } = useMotionPresence(tasks.isTaskPanelOpen);
+  const { closeWithPresence, exiting, present } = useMotionPresence(tasks.isTaskPanelOpen, {
+    exitToken: '--motion-modal',
+  });
   const closePanel = React.useCallback(() => {
     closeWithPresence(() => tasks.setIsTaskPanelOpen(false));
   }, [closeWithPresence, tasks]);
@@ -20,7 +22,7 @@ export default function TaskPanel({ tasks }) {
     >
       <aside
         className={`ui-overlay-surface motion-modal absolute right-4 top-16 bottom-4 flex w-[min(920px,calc(100vw-2rem))] flex-col overflow-hidden border border-gray-200 bg-white dark:border-white/10 dark:bg-[#1C1C1E] ${
-          exiting ? 'motion-presence-exit' : ''
+          exiting ? 'motion-presence-exit motion-presence-exit-modal' : ''
         }`}
         onClick={(e) => e.stopPropagation()}
       >

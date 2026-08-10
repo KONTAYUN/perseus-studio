@@ -1,0 +1,26 @@
+services:
+  webide:
+    environment:
+      SESSION_COOKIE_SECURE: "false"
+      AGENT_MAX_CONCURRENT_GLOBAL: "2"
+      AGENT_MAX_CONCURRENT_PER_USER: "1"
+      AUTH_LOGIN_RATE_PER_MINUTE: "1000"
+      AUTH_LOGIN_RATE_BURST: "1000"
+    volumes:
+      - perseus_e2e_data:/data
+    restart: "no"
+
+  provider-fixture:
+    image: node:20-alpine
+    profiles: ["e2e"]
+    command: ["node", "/fixture/openai-provider.mjs"]
+    volumes:
+      - ./tests/fixtures:/fixture:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9090/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+volumes:
+  perseus_e2e_data:

@@ -157,8 +157,12 @@ func TestAgentRunSteerRejectsCompletedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRun returned error: %v", err)
 	}
-	if _, err := runs.UpdateRun(t.Context(), user.ID, run.ID, store.UpdateAgentRunInput{Status: store.AgentRunSucceeded, Stage: "completed", SetCompletedAt: true}); err != nil {
-		t.Fatalf("UpdateRun returned error: %v", err)
+	if _, _, err := runs.FinalizeRunWithEvent(t.Context(), store.FinalizeAgentRunInput{
+		RunID: run.ID, UserID: user.ID, Status: store.AgentRunSucceeded, Stage: "completed",
+		Update: store.UpdateAgentRunInput{SetCompletedAt: true},
+		Event:  store.AgentEventInput{Type: "run_completed", Level: "info", Payload: map[string]any{"status": "completed"}},
+	}); err != nil {
+		t.Fatalf("FinalizeRunWithEvent returned error: %v", err)
 	}
 	server := &Server{
 		runs:      runs,
@@ -213,8 +217,10 @@ func TestAgentRunStreamReplaysThroughFinalSequenceBeforeClosing(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := runs.UpdateRun(t.Context(), user.ID, run.ID, store.UpdateAgentRunInput{
-		Status: store.AgentRunSucceeded, Stage: "completed", SetCompletedAt: true,
+	if _, _, err := runs.FinalizeRunWithEvent(t.Context(), store.FinalizeAgentRunInput{
+		RunID: run.ID, UserID: user.ID, Status: store.AgentRunSucceeded, Stage: "completed",
+		Update: store.UpdateAgentRunInput{SetCompletedAt: true},
+		Event:  store.AgentEventInput{Type: "run_completed", Level: "info", Payload: map[string]any{"status": "completed"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,8 +242,8 @@ func TestAgentRunStreamReplaysThroughFinalSequenceBeforeClosing(t *testing.T) {
 	}
 	if !strings.Contains(body, "event: stream_opened") ||
 		!strings.Contains(body, "event: replay_complete") ||
-		!strings.Contains(body, `"through_seq":3`) ||
-		!strings.Contains(body, `"final_seq":3`) {
+		!strings.Contains(body, `"through_seq":4`) ||
+		!strings.Contains(body, `"final_seq":4`) {
 		t.Fatalf("stream did not publish its replay and terminal barrier:\n%s", body)
 	}
 }

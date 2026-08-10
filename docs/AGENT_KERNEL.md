@@ -6,20 +6,13 @@ Perseus-native runner with mature-agent guardrails: bounded context, typed turn
 items, explicit tool progress, recoverable checkpoints, provider compatibility,
 and targeted file reads.
 
-## Runtime Switch
+## Runtime Boundary
 
-`PERSEUS_AGENT_KERNEL_MODE` controls the execution guard behavior:
-
-- `kernel_v3` is the default lightweight execution loop.
-- `codex_parity` is accepted only as a legacy alias and is normalized to
-  `kernel_v3`.
-- `kernel_v2_current` keeps the previous v2 streaming behavior for compatibility.
-- `kernel_v2` is accepted as an alias for `kernel_v2_current`.
-- `legacy` keeps the previous loop-guard target behavior and disables v2 read
-  progress tracking.
-
-The switch is intentionally coarse so a local deployment can roll back execution
-behavior without changing user data or workspace files.
+Production execution has one path: `kernel_v3` through `runTurnEngine`. Historical
+kernel mode values are accepted only while old rows are decoded and are normalized
+to `kernel_v3`; they never select another runtime. Legacy messages, questions and
+attachments are handled by read-only migration/projection code and cannot affect
+new tool selection, recovery or completion state.
 
 ## Canonical Turn Items And Ledgers
 
@@ -47,7 +40,7 @@ error cards.
 
 The kernel also records these internal ledgers on each run checkpoint:
 
-- `AgentKernelState`: kernel version/mode, read targets, and recent progress
+- `AgentKernelState`: kernel version, read targets, and recent progress
   events/items.
 - `ActionProgressLedger`: semantic progress counters and the last successful
   read-progress round.

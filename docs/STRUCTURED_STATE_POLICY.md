@@ -35,14 +35,17 @@ processed:
 - Exact executable, flag, and path policies after shell AST parsing.
 - Exact provider error codes and types received in structured fields.
 
-## Compatibility Exception
+## Compatibility Boundary
 
-`backend/internal/ai/legacy_provider_text_fallback.go` may classify a provider
-failure from text only when a third-party compatibility endpoint supplies no HTTP
-status, error code, or error type. The result must carry
-`classification_source=legacy_text_fallback`; it cannot authorize a mutation or a
-dangerous retry. Remove the fallback when supported compatibility providers all
-return structured errors.
+Provider-authored text is never used to classify retries, limits, execution
+state, or capabilities. A compatibility endpoint that supplies no structured
+HTTP status, error code, or error type is normalized to
+`provider_unknown_failure`; the original text is retained only in protected
+diagnostics.
+
+Legacy provider URL inspection is allowed only inside the idempotent database
+migration that materializes explicit `adapter_mode` and `auth_mode` fields. New
+requests read those persisted fields and never inspect the URL at runtime.
 
 ## Prohibited Patterns
 

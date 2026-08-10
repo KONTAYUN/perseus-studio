@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+var ErrAgentRunFinalized = errors.New("agent run is already finalized")
+var ErrAgentEventIntegrity = errors.New("agent event integrity error")
+
 func (s *AgentRunStore) AppendEvent(ctx context.Context, input AgentEventInput) (AgentEvent, error) {
 	now := time.Now().UTC()
 	level := strings.TrimSpace(strings.ToLower(input.Level))
@@ -45,7 +48,7 @@ FROM agent_events WHERE id = ?
 				existing.Level == level && existing.PayloadJSON == string(raw) {
 				return existing, nil
 			}
-			return AgentEvent{}, fmt.Errorf("agent event id %s was replayed with different content", id)
+			return AgentEvent{}, fmt.Errorf("%w: agent event id %s was replayed with different content", ErrAgentEventIntegrity, id)
 		}
 		if !errors.Is(lookupErr, sql.ErrNoRows) {
 			return AgentEvent{}, lookupErr
@@ -55,9 +58,12 @@ FROM agent_events WHERE id = ?
 	if err := tx.QueryRowContext(ctx, `
 UPDATE agent_runs
 SET event_head_seq = event_head_seq + 1, updated_at = ?
-WHERE id = ? AND user_id = ?
+WHERE id = ? AND user_id = ? AND final_seq = 0
 RETURNING event_head_seq
 `, now, input.RunID, input.UserID).Scan(&seq); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AgentEvent{}, ErrAgentRunFinalized
+		}
 		return AgentEvent{}, err
 	}
 	row := tx.QueryRowContext(ctx, `
@@ -76,6 +82,232 @@ RETURNING id, run_id, user_id, conversation_id, message_id, task_id, type, level
 		return AgentEvent{}, err
 	}
 	return item, nil
+}
+
+// FinalizeRunWithEvent appends the terminal event and seals the run at that
+// exact sequence in one transaction. A terminal state must never become
+// visible before its final durable event exists.
+func (s *AgentRunStore) FinalizeRunWithEvent(ctx context.Context, input FinalizeAgentRunInput) (AgentRun, AgentEvent, error) {
+	if !isTerminalAgentRunStatus(input.Status) {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("agent run status %q is not terminal", input.Status)
+	}
+	if strings.TrimSpace(input.RunID) == "" || strings.TrimSpace(input.UserID) == "" {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("terminal run id and user id are required")
+	}
+	eventInput := input.Event
+	if eventInput.RunID == "" {
+		eventInput.RunID = input.RunID
+	}
+	if eventInput.UserID == "" {
+		eventInput.UserID = input.UserID
+	}
+	if eventInput.RunID != input.RunID || eventInput.UserID != input.UserID {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("terminal event ownership does not match run")
+	}
+
+	now := time.Now().UTC()
+	level := strings.TrimSpace(strings.ToLower(eventInput.Level))
+	if level == "" {
+		level = "info"
+	}
+	eventType := strings.TrimSpace(eventInput.Type)
+	if eventType == "" {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("terminal event type is required")
+	}
+	raw, err := json.Marshal(eventInput.Payload)
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("encode terminal event payload: %w", err)
+	}
+	eventID := strings.TrimSpace(eventInput.ID)
+	if eventID == "" {
+		eventID = nextStoreID("evt", now)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	defer tx.Rollback()
+
+	if eventInput.ID != "" {
+		existing, lookupErr := scanAgentEvent(tx.QueryRowContext(ctx, `
+SELECT id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+FROM agent_events WHERE id = ?
+`, eventID))
+		if lookupErr == nil {
+			if existing.RunID != eventInput.RunID || existing.UserID != eventInput.UserID ||
+				existing.ConversationID != eventInput.ConversationID || existing.MessageID != eventInput.MessageID ||
+				existing.TaskID != eventInput.TaskID || existing.Type != eventType || existing.Level != level ||
+				existing.PayloadJSON != string(raw) {
+				return AgentRun{}, AgentEvent{}, fmt.Errorf("%w: agent event id %s was replayed with different content", ErrAgentEventIntegrity, eventID)
+			}
+			run, runErr := scanAgentRun(tx.QueryRowContext(ctx, `SELECT `+agentRunSelectColumns+`
+FROM agent_runs WHERE id = ? AND user_id = ?`, input.RunID, input.UserID))
+			if runErr != nil {
+				return AgentRun{}, AgentEvent{}, runErr
+			}
+			if run.Status != input.Status || run.FinalSeq != existing.Seq {
+				return AgentRun{}, AgentEvent{}, fmt.Errorf("%w: terminal event %s exists but run state is inconsistent", ErrAgentEventIntegrity, eventID)
+			}
+			return run, existing, nil
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return AgentRun{}, AgentEvent{}, lookupErr
+		}
+	}
+
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `
+UPDATE agent_runs
+SET event_head_seq = event_head_seq + 1, updated_at = ?
+WHERE id = ? AND user_id = ? AND final_seq = 0
+RETURNING event_head_seq
+`, now, input.RunID, input.UserID).Scan(&seq); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AgentRun{}, AgentEvent{}, ErrAgentRunFinalized
+		}
+		return AgentRun{}, AgentEvent{}, err
+	}
+	event, err := scanAgentEvent(tx.QueryRowContext(ctx, `
+INSERT INTO agent_events (
+  id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+`, eventID, eventInput.RunID, eventInput.UserID, eventInput.ConversationID, eventInput.MessageID,
+		eventInput.TaskID, eventType, level, seq, string(raw), now))
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+
+	update := input.Update
+	var startedAt any
+	var completedAt any
+	if update.SetStartedAt {
+		startedAt = now
+	}
+	if update.SetCompletedAt {
+		completedAt = now
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE agent_runs
+SET status = ?,
+    stage = ?,
+    error_message = COALESCE(?, error_message),
+    diagnostic_log_id = COALESCE(NULLIF(?, ''), diagnostic_log_id),
+    failure_json = COALESCE(?, failure_json),
+    user_message_id = COALESCE(NULLIF(?, ''), user_message_id),
+    assistant_message_id = COALESCE(NULLIF(?, ''), assistant_message_id),
+    started_at = COALESCE(?, started_at),
+    completed_at = COALESCE(?, completed_at),
+    final_seq = ?,
+    updated_at = ?
+WHERE id = ? AND user_id = ?
+`, input.Status, input.Stage, update.ErrorMessage, update.DiagnosticLogID, update.FailureJSON,
+		update.UserMessageID, update.AssistantMessageID, startedAt, completedAt, seq, now, input.RunID, input.UserID); err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, `SELECT `+agentRunSelectColumns+`
+FROM agent_runs WHERE id = ? AND user_id = ?`, input.RunID, input.UserID))
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	return run, event, nil
+}
+
+// ResumeRunWithEvent reopens a failed or canceled run and appends its resume
+// event in the same transaction. A queued run is therefore never observable
+// without the durable lifecycle item that reopened it.
+func (s *AgentRunStore) ResumeRunWithEvent(ctx context.Context, input ResumeAgentRunInput) (AgentRun, AgentEvent, error) {
+	if strings.TrimSpace(input.RunID) == "" || strings.TrimSpace(input.UserID) == "" {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("resume run id and user id are required")
+	}
+	eventInput := input.Event
+	if eventInput.RunID == "" {
+		eventInput.RunID = input.RunID
+	}
+	if eventInput.UserID == "" {
+		eventInput.UserID = input.UserID
+	}
+	if eventInput.RunID != input.RunID || eventInput.UserID != input.UserID {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("resume event ownership does not match run")
+	}
+	eventType := strings.TrimSpace(eventInput.Type)
+	if eventType == "" {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("resume event type is required")
+	}
+	level := strings.TrimSpace(strings.ToLower(eventInput.Level))
+	if level == "" {
+		level = "info"
+	}
+	raw, err := json.Marshal(eventInput.Payload)
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("encode resume event payload: %w", err)
+	}
+	now := time.Now().UTC()
+	eventID := strings.TrimSpace(eventInput.ID)
+	if eventID == "" {
+		eventID = nextStoreID("evt", now)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	defer tx.Rollback()
+	if eventInput.ID != "" {
+		existing, lookupErr := scanAgentEvent(tx.QueryRowContext(ctx, `
+SELECT id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+FROM agent_events WHERE id = ?
+`, eventID))
+		if lookupErr == nil {
+			if existing.RunID != eventInput.RunID || existing.UserID != eventInput.UserID ||
+				existing.ConversationID != eventInput.ConversationID || existing.MessageID != eventInput.MessageID ||
+				existing.TaskID != eventInput.TaskID || existing.Type != eventType || existing.Level != level ||
+				existing.PayloadJSON != string(raw) {
+				return AgentRun{}, AgentEvent{}, fmt.Errorf("%w: resume event id %s was replayed with different content", ErrAgentEventIntegrity, eventID)
+			}
+			run, runErr := scanAgentRun(tx.QueryRowContext(ctx, `SELECT `+agentRunSelectColumns+`
+FROM agent_runs WHERE id = ? AND user_id = ?`, input.RunID, input.UserID))
+			return run, existing, runErr
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return AgentRun{}, AgentEvent{}, lookupErr
+		}
+	}
+
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `
+UPDATE agent_runs
+SET status = ?, stage = ?, error_message = NULL, diagnostic_log_id = NULL,
+    failure_json = NULL, started_at = NULL, completed_at = NULL, final_seq = 0,
+    queued_at = ?, event_head_seq = event_head_seq + 1, updated_at = ?
+WHERE id = ? AND user_id = ? AND status IN (?, ?) AND final_seq > 0
+RETURNING event_head_seq
+`, AgentRunQueued, "queued", now, now, input.RunID, input.UserID, AgentRunFailed, AgentRunCanceled).Scan(&seq); err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	event, err := scanAgentEvent(tx.QueryRowContext(ctx, `
+INSERT INTO agent_events (
+  id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+`, eventID, eventInput.RunID, eventInput.UserID, eventInput.ConversationID, eventInput.MessageID,
+		eventInput.TaskID, eventType, level, seq, string(raw), now))
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, `SELECT `+agentRunSelectColumns+`
+FROM agent_runs WHERE id = ? AND user_id = ?`, input.RunID, input.UserID))
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	return run, event, nil
 }
 
 func (s *AgentRunStore) EventHeadSeq(ctx context.Context, userID, runID string) (int64, error) {

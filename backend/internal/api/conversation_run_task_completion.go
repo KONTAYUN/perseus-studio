@@ -75,7 +75,10 @@ func (s *Server) completeConversationRunWithTask(ctx context.Context, userID, us
 		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
 		return
 	}
-	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
+	if _, _, err := s.finalizeRunStrict(ctx, userID, runID, store.AgentRunDelegated, "delegated", store.UpdateAgentRunInput{
+		AssistantMessageID: assistantMessage.ID,
+		SetCompletedAt:     true,
+	}, store.AgentEventInput{
 		RunID:          runID,
 		UserID:         userID,
 		ConversationID: conversationID,
@@ -88,12 +91,5 @@ func (s *Server) completeConversationRunWithTask(ctx context.Context, userID, us
 		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
 		return
 	}
-	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunDelegated, "delegated", store.UpdateAgentRunInput{
-		AssistantMessageID: assistantMessage.ID,
-		SetCompletedAt:     true,
-	}); err != nil {
-		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
-		return
-	}
-	s.maybeGenerateConversationTitleAsync(userID, userRole, conversationID, userMessageID, assistantMessage.ID, modelProviderID, content, assistantMessage.Content, runID)
+	s.maybeGenerateConversationTitleAsync(userID, userRole, conversationID, userMessageID, modelProviderID, content, assistantMessage.Content)
 }

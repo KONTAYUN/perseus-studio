@@ -1,7 +1,6 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-
-const PANEL_GLOW_DURATION_MS = 400;
+import { readMotionDuration } from '../../../hooks/motionTokens';
 
 function readPanelGlowRect(panelId) {
   const element = document.getElementById(`panel-wrapper-${panelId}`);
@@ -49,6 +48,7 @@ export function usePanelActiveGlow({
   mainWidth,
   visiblePanels,
 }) {
+  const panelGlowDuration = useMemo(() => readMotionDuration('--motion-layout'), []);
   const activeGlowPanelRef = useRef('');
   const activeGlowLayersRef = useRef([]);
   const activeGlowLayerIdRef = useRef(0);
@@ -78,7 +78,7 @@ export function usePanelActiveGlow({
     const timeoutId = window.setTimeout(() => {
       setActiveGlowLayersValue((layers) => layers.filter((layer) => layer.visible));
       activeGlowScheduleRef.current.cleanupTimeouts = activeGlowScheduleRef.current.cleanupTimeouts.filter((id) => id !== timeoutId);
-    }, PANEL_GLOW_DURATION_MS + 40);
+    }, panelGlowDuration + 40);
     activeGlowScheduleRef.current.cleanupTimeouts.push(timeoutId);
   };
 
@@ -201,7 +201,7 @@ export function usePanelActiveGlow({
       window.removeEventListener('scroll', updateRect, true);
       observer.disconnect();
     };
-  }, [activePanel, dragType, draggingPanelId]);
+  }, [activePanel, dragType, draggingPanelId, panelGlowDuration]);
 
   useLayoutEffect(() => {
     syncActiveGlowRect();
@@ -249,7 +249,7 @@ export function usePanelActiveGlow({
       if (!startedAt) startedAt = timestamp;
       syncActiveGlowRect();
       const shouldKeepFollowing =
-        isDraggingMode || layoutAnimationAction || timestamp - startedAt < PANEL_GLOW_DURATION_MS + 80;
+        isDraggingMode || layoutAnimationAction || timestamp - startedAt < panelGlowDuration + 80;
       if (!stopped && shouldKeepFollowing) {
         frameId = window.requestAnimationFrame(follow);
       }
@@ -266,6 +266,7 @@ export function usePanelActiveGlow({
     isDraggingMode,
     layoutAnimationAction,
     mainWidth,
+    panelGlowDuration,
     visiblePanels,
   ]);
 

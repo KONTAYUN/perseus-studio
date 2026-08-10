@@ -1,5 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import useMotionPresence from '../../hooks/useMotionPresence';
 import { cn } from './cn';
 
 export function PopoverSurface({ children, className = '', ...props }) {
@@ -36,6 +37,7 @@ export function AnchoredPopover({
   zIndex = 430,
 }) {
   const popoverRef = React.useRef(null);
+  const { exiting, present } = useMotionPresence(open, { exitToken: '--motion-fast' });
   const position = useAnchoredPopoverPosition(anchorRef, popoverRef, {
     align,
     estimatedHeight,
@@ -58,16 +60,35 @@ export function AnchoredPopover({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose, open]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!present || typeof document === 'undefined') return null;
+
+  const resolvedPlacement = position.resolvedPlacement || placement;
+  const placementClass = `motion-popover-${resolvedPlacement}`;
+  const transformOrigin =
+    resolvedPlacement === 'right'
+      ? 'left center'
+      : resolvedPlacement === 'left'
+        ? 'right center'
+        : resolvedPlacement === 'top'
+          ? 'bottom center'
+          : 'top center';
 
   return createPortal(
     <>
-      {showBackdrop && <div className="fixed inset-0" style={{ zIndex: zIndex - 10 }} onClick={() => onClose?.()} />}
+      {showBackdrop && (
+        <div
+          className={cn('motion-popover-backdrop fixed inset-0', exiting && 'motion-popover-backdrop-exit')}
+          style={{ zIndex: zIndex - 10 }}
+          onClick={() => onClose?.()}
+        />
+      )}
       <div
         ref={popoverRef}
         data-testid={testId}
         className={cn(
           'motion-popover ui-popover-surface fixed overflow-hidden rounded-2xl border border-gray-100/90 bg-white/95 backdrop-blur-2xl dark:border-white/10 dark:bg-[#252527]/95',
+          placementClass,
+          exiting && 'motion-popover-exit',
           className
         )}
         style={{
@@ -76,6 +97,7 @@ export function AnchoredPopover({
           width: position.width,
           maxHeight: position.maxHeight,
           zIndex,
+          '--motion-popover-origin': transformOrigin,
         }}
         onClick={(event) => event.stopPropagation()}
       >
@@ -104,7 +126,19 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
     top: 64,
     width: preferredWidth,
     maxHeight,
+    resolvedPlacement: placement,
   });
+  const commitPosition = React.useCallback((nextPosition) => {
+    setPosition((current) => (
+      current.left === nextPosition.left &&
+      current.top === nextPosition.top &&
+      current.width === nextPosition.width &&
+      current.maxHeight === nextPosition.maxHeight &&
+      current.resolvedPlacement === nextPosition.resolvedPlacement
+        ? current
+        : nextPosition
+    ));
+  }, []);
 
   const updatePosition = React.useCallback(() => {
     const anchor = anchorRef?.current;
@@ -130,7 +164,13 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
       const centeredTop = anchorMiddle - placementHeight / 2;
       const top = Math.min(Math.max(centeredTop, margin), viewportHeight - placementHeight - margin);
 
-      setPosition({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight });
+      commitPosition({
+        left,
+        top,
+        width: resolvedWidth,
+        maxHeight: resolvedMaxHeight,
+        resolvedPlacement: openLeft ? 'left' : 'right',
+      });
       return;
     }
 
@@ -151,36 +191,44 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
       ? Math.max(margin, rect.top - gap - placementHeight)
       : Math.min(rect.bottom + gap, viewportHeight - placementHeight - margin);
 
-    setPosition({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight });
-  }, [align, anchorRef, estimatedHeight, gap, margin, matchAnchorWidth, maxHeight, minWidth, placement, popoverRef, preferredWidth]);
+    commitPosition({
+      left,
+      top,
+      width: resolvedWidth,
+      maxHeight: resolvedMaxHeight,
+      resolvedPlacement: opensAbove ? 'top' : 'bottom',
+    });
+  }, [align, anchorRef, commitPosition, estimatedHeight, gap, margin, matchAnchorWidth, maxHeight, minWidth, placement, popoverRef, preferredWidth]);
 
   React.useLayoutEffect(() => {
     if (!open) return undefined;
     updatePosition();
     let frameId = 0;
-    let startedAt = 0;
-    const followAnchor = (timestamp) => {
-      if (!startedAt) startedAt = timestamp;
-      updatePosition();
-      if (timestamp - startedAt < 700) {
-        frameId = window.requestAnimationFrame(followAnchor);
-      }
+    const schedulePositionUpdate = () => {
+      if (frameId) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0;
+        updatePosition();
+      });
     };
-    frameId = window.requestAnimationFrame(followAnchor);
+    frameId = window.requestAnimationFrame(() => {
+      frameId = 0;
+      updatePosition();
+    });
 
     const anchor = anchorRef?.current;
     const popover = popoverRef?.current;
-    const observer = typeof ResizeObserver !== 'undefined' && (anchor || popover) ? new ResizeObserver(updatePosition) : null;
+    const observer = typeof ResizeObserver !== 'undefined' && (anchor || popover) ? new ResizeObserver(schedulePositionUpdate) : null;
     if (anchor) observer?.observe(anchor);
     if (popover) observer?.observe(popover);
 
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', schedulePositionUpdate);
+    window.addEventListener('scroll', schedulePositionUpdate, true);
     return () => {
       if (frameId) window.cancelAnimationFrame(frameId);
       observer?.disconnect();
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', schedulePositionUpdate);
+      window.removeEventListener('scroll', schedulePositionUpdate, true);
     };
   }, [anchorRef, open, popoverRef, updatePosition]);
 

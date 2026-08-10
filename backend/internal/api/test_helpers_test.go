@@ -17,4 +17,7 @@ func attachTestSession(t *testing.T, server *Server, req *http.Request, token st
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 	req.AddCookie(&http.Cookie{Name: "perseus_session", Value: token})
+	if isUnsafeMethod(req.Method) && req.Header.Get("Origin") == "" {
+		req.Header.Set("Origin", "http://"+req.Host)
+	}
 }

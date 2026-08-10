@@ -106,7 +106,6 @@
   outline: none;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  transition: height var(--motion-base) var(--ease-motion);
 }
 
 .composer-textarea::-webkit-scrollbar {

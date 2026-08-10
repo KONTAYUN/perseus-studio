@@ -104,7 +104,6 @@ type ProviderRequestSummary struct {
 	TranscriptEntries              int                  `json:"transcript_entries"`
 	ToolResultCount                int                  `json:"tool_result_count"`
 	ToolLoopActive                 bool                 `json:"tool_loop_active"`
-	ActionBoundaryActive           bool                 `json:"action_boundary_active,omitempty"`
 	EstimatedChars                 int                  `json:"estimated_chars"`
 	EstimatedTokens                int                  `json:"estimated_tokens"`
 	ContextWindowTokens            int                  `json:"context_window_tokens"`

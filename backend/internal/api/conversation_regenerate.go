@@ -3,13 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
-	"webide-backend/internal/tasks"
 )
 
 func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Request, userID, conversationID string) {
@@ -56,11 +56,6 @@ func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	lastUser := messages[lastUserIndex]
-	history := append([]store.Message(nil), messages[:lastUserIndex+1]...)
-	if len(history) == 0 {
-		writeError(w, http.StatusBadRequest, "no user message to regenerate from")
-		return
-	}
 	conversation, err := s.conversations.GetConversation(r.Context(), userID, conversationID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -74,113 +69,56 @@ func (s *Server) handleRegenerateLastMessage(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "selected model is not available")
 		return
 	}
-	attachmentPayloads := s.payloadsFromStoredMessageAttachments(r.Context(), userID, lastUser)
-	segments := &assistantSegmentBuffer{}
+	if err := s.ensureAgentQueueCapacity(r.Context(), userID); err != nil {
+		var queueFull *store.AgentQueueFullError
+		if errors.As(err, &queueFull) {
+			writeCodedError(w, http.StatusTooManyRequests, "agent_queue_full", queueFull.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
 	if err := s.deleteConversationMessagesAfter(r.Context(), userID, conversationID, lastUser.ID); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	reply, err := s.ai.GenerateReply(r.Context(), conversationID, lastUser.ID, conversation.SelectedModelProviderID, history, attachmentPayloads, ai.RunOptions{
-		UserID:       userID,
-		UserRole:     user.Role,
-		ThinkingMode: req.ThinkingMode,
-		Event: func(eventType, level string, payload map[string]any) {
-			switch eventType {
-			case "model_delta":
-				segments.AppendDelta(eventPayloadString(payload, "text"))
-			case "model_message_completed":
-				segments.Flush(eventPayloadString(payload, "content"))
-			}
-		},
-		OnAssistantToolBoundary: func() {
-			segments.Flush("")
-		},
-	})
+	run, err := s.runs.CreateRunWithQueueLimits(r.Context(), store.CreateAgentRunInput{
+		UserID: userID, ConversationID: conversationID, UserMessageID: lastUser.ID,
+		ModelProviderID: conversation.SelectedModelProviderID, ThinkingMode: req.ThinkingMode,
+	}, s.cfg.AgentMaxQueuedGlobal, s.cfg.AgentMaxQueuedPerUser)
 	if err != nil {
-		writeAIError(w, http.StatusBadGateway, err)
+		var queueFull *store.AgentQueueFullError
+		if errors.As(err, &queueFull) {
+			writeCodedError(w, http.StatusTooManyRequests, "agent_queue_full", queueFull.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
-	segments.Flush("")
-	if len(segments.Items) == 0 && strings.TrimSpace(reply.Content) != "" {
-		segments.Items = append(segments.Items, strings.TrimSpace(reply.Content))
-	}
-	for index, content := range segments.Items {
-		if reply.BackgroundTask == nil && index == len(segments.Items)-1 {
-			break
-		}
-		if _, err := s.conversations.AppendMessage(r.Context(), userID, conversationID, "assistant", content, "[]"); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-
-	if reply.BackgroundTask != nil {
-		taskRequest := reply.BackgroundTask
-		payload, _ := json.Marshal(tasks.AIAgentPayload{
-			ConversationID:  conversationID,
-			UserMessageID:   lastUser.ID,
-			UserMessage:     strings.TrimSpace(lastUser.Content),
-			ModelProviderID: conversation.SelectedModelProviderID,
-			UserRole:        user.Role,
-			Attachments:     json.RawMessage(lastUser.AttachmentsJSON),
-			CreatedFromChat: true,
-			Goal:            taskRequest.Goal,
-			ExpectedOutputs: taskRequest.ExpectedOutputs,
-			SuggestedSteps:  taskRequest.SuggestedSteps,
-			DecisionReason:  "model called start_background_task",
-		})
-		task, err := s.store.CreateTask(r.Context(), store.CreateTaskInput{
-			UserID:      userID,
-			ID:          newTaskID(),
-			Type:        "ai_agent",
-			Title:       taskRequest.Title,
-			PayloadJSON: string(payload),
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		s.broker.Publish(task.ID, tasks.Event{Type: "task", Task: task})
-		cardAttachments, _ := json.Marshal([]map[string]any{{
-			"type":    "task",
-			"task_id": task.ID,
-			"title":   task.Title,
-			"status":  task.Status,
-		}})
-		assistantMessage, err := s.conversations.AppendMessage(r.Context(), userID, conversationID, "assistant", fmt.Sprintf("已创建后台任务：%s\n状态：%s\n可以在右上角任务面板查看详情。", task.Title, task.Status), string(cardAttachments))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		updatedConversation, _ := s.conversations.GetConversation(r.Context(), userID, conversationID)
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"conversation":      updatedConversation,
-			"assistant_message": assistantMessage,
-			"task":              task,
-			"execution_mode":    "background_task",
-		})
-		return
-	}
-
-	assistantAttachments := "[]"
-	if len(reply.PresentationEvents) > 0 {
-		rawToolEvents, _ := json.Marshal(reply.PresentationEvents)
-		assistantAttachments = string(rawToolEvents)
-	}
-	assistantContent := strings.TrimSpace(reply.Content)
-	if len(segments.Items) > 0 {
-		assistantContent = segments.Items[len(segments.Items)-1]
-	}
-	assistantMessage, err := s.conversations.AppendMessage(r.Context(), userID, conversationID, "assistant", assistantContent, assistantAttachments)
-	if err != nil {
+	if _, err := s.appendRunEventStrict(r.Context(), store.AgentEventInput{
+		RunID: run.ID, UserID: userID, ConversationID: conversationID, MessageID: lastUser.ID,
+		Type: "regeneration_requested", Level: "info", Payload: map[string]any{"message_id": lastUser.ID},
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if _, err := s.appendRunEventStrict(r.Context(), store.AgentEventInput{
+		RunID: run.ID, UserID: userID, ConversationID: conversationID, MessageID: lastUser.ID,
+		Type: "run_queued", Level: "info", Payload: map[string]any{"message": "run queued", "reason": "regenerate"},
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if position, positionErr := s.runs.QueuePosition(r.Context(), userID, run.ID); positionErr == nil {
+		run.QueuePosition = position
+	}
+	s.wakeAgentScheduler()
 	updatedConversation, _ := s.conversations.GetConversation(r.Context(), userID, conversationID)
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"conversation":      updatedConversation,
-		"assistant_message": assistantMessage,
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"conversation": updatedConversation,
+		"user_message": lastUser,
+		"run":          run,
 	})
 }
 

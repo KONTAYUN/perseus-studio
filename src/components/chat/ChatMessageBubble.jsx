@@ -24,6 +24,8 @@ function MessageBubble({ message, ide, canRegenerate, isActiveUserRequest = fals
       <div className={`flex min-w-0 max-w-[88%] flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
         {isSteerMessage && <SteerStatusLabel message={message} />}
         <div
+          data-testid={message.error ? 'chat-run-error' : undefined}
+          data-failure-class={message.error ? message.failureClass || '' : undefined}
           className={`message-bubble motion-message min-w-0 max-w-full overflow-hidden px-4 py-3 text-[14px] leading-relaxed ${
             message.role === 'user'
               ? 'message-bubble-user bg-blue-500 text-white'

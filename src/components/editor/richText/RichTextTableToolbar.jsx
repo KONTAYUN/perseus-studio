@@ -2,6 +2,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { Captions, ChevronDown, Columns3, Combine, Rows3, Trash2 } from 'lucide-react';
 import { Button, IconButton, Input } from '../../ui';
+import useMotionPresence from '../../../hooks/useMotionPresence';
 
 function TableToolbarButton({ active = false, children, ...props }) {
   return (
@@ -55,8 +56,15 @@ export default function RichTextTableToolbar({
   visible,
 }) {
   const rootRef = React.useRef(null);
+  const lastPositionRef = React.useRef(position);
+  const lastOpenMenuRef = React.useRef('');
   const [openMenu, setOpenMenu] = React.useState('');
   const [draftCaption, setDraftCaption] = React.useState(caption || '');
+  const toolbarPresence = useMotionPresence(visible, { exitToken: '--motion-fast' });
+  const menuPresence = useMotionPresence(Boolean(openMenu), { exitToken: '--motion-fast' });
+
+  if (position) lastPositionRef.current = position;
+  if (openMenu) lastOpenMenuRef.current = openMenu;
 
   React.useEffect(() => {
     if (!visible) setOpenMenu('');
@@ -78,7 +86,10 @@ export default function RichTextTableToolbar({
     return () => window.removeEventListener('mousedown', handlePointerDown);
   }, [openMenu]);
 
-  if (!editor || !visible || !position) return null;
+  if (!editor || !toolbarPresence.present || !lastPositionRef.current) return null;
+
+  const resolvedPosition = position || lastPositionRef.current;
+  const renderedMenu = openMenu || lastOpenMenuRef.current;
 
   const run = (commandName) => {
     const chain = editor.chain().focus();
@@ -100,12 +111,17 @@ export default function RichTextTableToolbar({
     <div
       className="rich-text-table-toolbar fixed"
       style={{
-        left: position.left,
-        top: position.top,
+        left: resolvedPosition.left,
+        top: resolvedPosition.top,
         transform: placement === 'below' ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
       }}
     >
-      <div ref={rootRef} className="rich-text-table-toolbar-surface flex items-center gap-1 px-2 py-1.5">
+      <div
+        ref={rootRef}
+        className={`rich-text-table-toolbar-surface motion-popover flex items-center gap-1 px-2 py-1.5 ${
+          toolbarPresence.exiting ? 'motion-popover-exit' : ''
+        }`}
+      >
         <div className="relative">
           <TableDropdown
             open={openMenu === 'column'}
@@ -114,15 +130,15 @@ export default function RichTextTableToolbar({
           >
             <Columns3 size={15} />
           </TableDropdown>
-          {openMenu === 'column' && (
-            <div className="rich-text-table-menu absolute left-0 top-full mt-2 min-w-[180px]">
+          {menuPresence.present && renderedMenu === 'column' && (
+            <div className={`rich-text-table-menu motion-popover motion-popover-bottom absolute left-0 top-full mt-2 min-w-[180px] ${menuPresence.exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
               {COLUMN_ACTIONS.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => run(item.command)}
-                  className="rich-text-table-menu-item"
+                  className="rich-text-table-menu-item motion-row"
                 >
                   {item.label}
                 </button>
@@ -139,15 +155,15 @@ export default function RichTextTableToolbar({
           >
             <Rows3 size={15} />
           </TableDropdown>
-          {openMenu === 'row' && (
-            <div className="rich-text-table-menu absolute left-0 top-full mt-2 min-w-[180px]">
+          {menuPresence.present && renderedMenu === 'row' && (
+            <div className={`rich-text-table-menu motion-popover motion-popover-bottom absolute left-0 top-full mt-2 min-w-[180px] ${menuPresence.exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
               {ROW_ACTIONS.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => run(item.command)}
-                  className="rich-text-table-menu-item"
+                  className="rich-text-table-menu-item motion-row"
                 >
                   {item.label}
                 </button>
@@ -164,15 +180,15 @@ export default function RichTextTableToolbar({
           >
             <Combine size={15} />
           </TableDropdown>
-          {openMenu === 'cell' && (
-            <div className="rich-text-table-menu absolute left-0 top-full mt-2 min-w-[180px]">
+          {menuPresence.present && renderedMenu === 'cell' && (
+            <div className={`rich-text-table-menu motion-popover motion-popover-bottom absolute left-0 top-full mt-2 min-w-[180px] ${menuPresence.exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
               {CELL_ACTIONS.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => run(item.command)}
-                  className="rich-text-table-menu-item"
+                  className="rich-text-table-menu-item motion-row"
                 >
                   {item.label}
                 </button>
@@ -190,8 +206,8 @@ export default function RichTextTableToolbar({
           >
             <Captions size={15} />
           </TableToolbarButton>
-          {openMenu === 'caption' && (
-            <div className="rich-text-table-menu absolute right-0 top-full mt-2 w-[320px] p-4">
+          {menuPresence.present && renderedMenu === 'caption' && (
+            <div className={`rich-text-table-menu motion-popover motion-popover-bottom absolute right-0 top-full mt-2 w-[320px] p-4 ${menuPresence.exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
               <div className="space-y-4">
                 <div className="space-y-1">
                   <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400">

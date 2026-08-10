@@ -10,15 +10,10 @@ import (
 )
 
 const (
-	agentKernelV2Version         = "perseus_agent_kernel_v3"
-	agentKernelV3                = "kernel_v3"
-	agentKernelLegacy            = "legacy"
-	agentKernelV2Current         = "kernel_v2_current"
-	agentKernelCodexParity       = "codex_parity"
-	agentKernelLegacyV2EnvAlias  = "kernel_v2"
-	agentKernelCurrentV2EnvAlias = "current_v2"
-	maxKernelProgressLog         = 40
-	maxKernelTurnItems           = 160
+	agentKernelVersion   = "perseus_agent_kernel_v3"
+	agentKernelMode      = "kernel_v3"
+	maxKernelProgressLog = 40
+	maxKernelTurnItems   = 160
 )
 
 type AgentKernelState struct {
@@ -82,20 +77,19 @@ type AgentTurnItem struct {
 
 func newAgentKernelState() AgentKernelState {
 	return AgentKernelState{
-		Version:     agentKernelV2Version,
-		Mode:        agentKernelV3,
+		Version:     agentKernelVersion,
+		Mode:        agentKernelMode,
 		ReadTargets: map[string]AgentReadTarget{},
 	}
 }
 
 func normalizeAgentKernelState(state AgentKernelState) AgentKernelState {
 	if strings.TrimSpace(state.Version) == "" {
-		state.Version = agentKernelV2Version
+		state.Version = agentKernelVersion
 	}
-	state.Mode = normalizeAgentKernelMode(state.Mode)
-	if strings.TrimSpace(state.Mode) == "" {
-		state.Mode = agentKernelV3
-	}
+	// Historical mode values remain readable, but every new run uses the sole
+	// production kernel. Compatibility metadata never selects execution code.
+	state.Mode = agentKernelMode
 	if state.ReadTargets == nil {
 		state.ReadTargets = map[string]AgentReadTarget{}
 	}
@@ -107,22 +101,6 @@ func (r *agentRuntime) ensureKernelState() {
 		return
 	}
 	r.kernel = normalizeAgentKernelState(r.kernel)
-}
-
-func (r *agentRuntime) kernelV2Active() bool {
-	return true
-}
-
-func (r *agentRuntime) codexParityKernelActive() bool {
-	return true
-}
-
-func (r *agentRuntime) kernelV3Active() bool {
-	return true
-}
-
-func normalizeAgentKernelMode(mode string) string {
-	return agentKernelV3
 }
 
 func (r *agentRuntime) recordKernelToolProgress(call agentToolCall, isError bool, event ToolEvent, result string) {
@@ -166,7 +144,7 @@ func (r *agentRuntime) recordKernelToolProgress(call agentToolCall, isError bool
 }
 
 func (r *agentRuntime) emitKernelTurnStarted() {
-	if r == nil || !r.kernelV2Active() {
+	if r == nil {
 		return
 	}
 	r.ensureKernelState()
@@ -183,7 +161,7 @@ func (r *agentRuntime) emitKernelTurnStarted() {
 }
 
 func (r *agentRuntime) appendKernelItem(item AgentTurnItem) {
-	if r == nil || !r.kernelV2Active() {
+	if r == nil {
 		return
 	}
 	r.ensureKernelState()

@@ -70,11 +70,56 @@
 }
 
 .motion-popover {
-  transform-origin: top center;
+  --motion-popover-enter-x: 0px;
+  --motion-popover-enter-y: -6px;
+  --motion-popover-exit-x: 0px;
+  --motion-popover-exit-y: -3px;
+  transform-origin: var(--motion-popover-origin, top center);
 }
 
 .motion-popover-right {
-  transform-origin: left top;
+  --motion-popover-enter-x: -6px;
+  --motion-popover-enter-y: 0px;
+  --motion-popover-exit-x: -3px;
+  --motion-popover-exit-y: 0px;
+  transform-origin: var(--motion-popover-origin, left center);
+}
+
+.motion-popover-left {
+  --motion-popover-enter-x: 6px;
+  --motion-popover-enter-y: 0px;
+  --motion-popover-exit-x: 3px;
+  --motion-popover-exit-y: 0px;
+  transform-origin: var(--motion-popover-origin, right center);
+}
+
+.motion-popover-top {
+  --motion-popover-enter-x: 0px;
+  --motion-popover-enter-y: 6px;
+  --motion-popover-exit-x: 0px;
+  --motion-popover-exit-y: 3px;
+  transform-origin: bottom center;
+}
+
+.motion-popover-bottom {
+  --motion-popover-enter-x: 0px;
+  --motion-popover-enter-y: -6px;
+  --motion-popover-exit-x: 0px;
+  --motion-popover-exit-y: -3px;
+  transform-origin: top center;
+}
+
+.motion-popover-exit {
+  animation: perseus-popover-exit var(--motion-fast) var(--ease-out) both;
+}
+
+.motion-popover-backdrop {
+  opacity: 1;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+.motion-popover-backdrop-exit {
+  opacity: 0;
 }
 
 .motion-modal {
@@ -93,7 +138,11 @@
 }
 
 .motion-presence-exit {
-  animation: perseus-presence-exit var(--motion-base) var(--ease-motion) both;
+  animation: perseus-presence-exit var(--motion-presence-exit-duration, var(--motion-base)) var(--ease-motion) both;
+}
+
+.motion-presence-exit-modal {
+  --motion-presence-exit-duration: var(--motion-modal);
 }
 
 .motion-card {
@@ -113,7 +162,6 @@
 }
 
 .motion-list-exit {
-  overflow: hidden;
   animation: perseus-list-exit var(--motion-base) var(--ease-motion) both;
 }
 
@@ -122,11 +170,26 @@
 }
 
 .motion-toast {
-  animation: perseus-toast-enter var(--motion-modal) var(--ease-layout) both;
+  opacity: 1;
+  transform: translateX(0) scale(1);
+  transition:
+    opacity var(--motion-modal) var(--ease-out),
+    transform var(--motion-modal) var(--ease-out);
 }
 
 .motion-toast-exit {
-  animation: perseus-toast-exit var(--motion-base) var(--ease-motion) both;
+  opacity: 0;
+  transform: translateX(-16px) scale(0.985);
+  transition:
+    opacity var(--motion-base) var(--ease-out),
+    transform var(--motion-base) var(--ease-out);
+}
+
+@starting-style {
+  .motion-toast {
+    opacity: 0;
+    transform: translateX(-22px) scale(0.985);
+  }
 }
 
 .motion-copy-confirm {
@@ -159,11 +222,14 @@
 }
 
 .motion-button:hover,
-.motion-button:active,
 .motion-button:disabled,
 .motion-button:disabled:hover,
 .motion-button:disabled:active {
   transform: none;
+}
+
+.motion-button:not(:disabled):active {
+  transform: scale(0.97);
 }
 
 .motion-soft-focus {
@@ -233,11 +299,22 @@
 @keyframes perseus-popover-enter {
   from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.98);
+    transform: translate3d(var(--motion-popover-enter-x), var(--motion-popover-enter-y), 0) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes perseus-popover-exit {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(var(--motion-popover-exit-x), var(--motion-popover-exit-y), 0) scale(0.985);
   }
 }
 
@@ -265,12 +342,10 @@
   from {
     opacity: 0.94;
     transform: translateY(0) scale(1);
-    filter: blur(0);
   }
   to {
     opacity: 0;
     transform: translateY(-8px) scale(0.985);
-    filter: blur(1.5px);
   }
 }
 
@@ -342,12 +417,10 @@
 
 @keyframes perseus-list-exit {
   from {
-    max-height: 72px;
     opacity: 1;
     transform: translateY(0) scale(1);
   }
   to {
-    max-height: 0;
     opacity: 0;
     transform: translateY(-4px) scale(0.992);
   }
@@ -361,28 +434,6 @@
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes perseus-toast-enter {
-  from {
-    opacity: 0;
-    transform: translateX(-22px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-}
-
-@keyframes perseus-toast-exit {
-  from {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(-16px) scale(0.985);
   }
 }
 
@@ -403,6 +454,10 @@
   *::before,
   *::after {
     scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
   }
 
   .animate-in,
@@ -410,8 +465,12 @@
   .motion-panel-enter,
   .motion-popover,
   .motion-popover-right,
+  .motion-popover-left,
+  .motion-popover-top,
+  .motion-popover-bottom,
   .motion-modal,
   .motion-presence-exit,
+  .motion-presence-exit-modal,
   .motion-card,
   .motion-message,
   .motion-chip,
@@ -433,6 +492,7 @@
   .motion-color,
   .motion-fade-reveal,
   .motion-rotate,
+  .motion-popover-backdrop,
   .ui-panel-surface,
   .panel-active-glow-fixed,
   .composer-shell {

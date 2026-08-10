@@ -458,6 +458,14 @@ Allowed long-class exceptions must be semantic named classes, centralized in the
 
 The composer slash-skill autocomplete is an allowed raw absolute popover in `src/components/chat/composer/SkillMenu.jsx` because it is anchored inside the typing surface and must not steal focus from the textarea while suggestions are visible.
 
+The rich-text editor has three intentional local submenu exceptions:
+
+- `src/components/editor/richText/RichTextSelectionToolbar.jsx` keeps font and color menus anchored to the transient selection toolbar so opening a menu does not disturb the editor selection or focus.
+- `src/components/editor/richText/RichTextTableToolbar.jsx` keeps table command menus anchored to the active table toolbar so commands remain attached to the current table context.
+- `src/components/editor/richText/RichTextToolbar.jsx` keeps spacing and insert-table menus inside the already-positioned toolbar; portaling these nested controls would make the editor toolbar lose its local focus/selection behavior.
+
+These are nested menus inside an already-positioned editor control, not standalone application popovers. They use the shared `motion-popover` timing and presence classes; new top-level menus must use `AnchoredPopover`.
+
 ## Change Process
 
 Before making UI changes:

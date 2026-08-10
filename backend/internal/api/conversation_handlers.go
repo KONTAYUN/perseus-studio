@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -250,6 +251,15 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 				return
 			}
 		}
+		if err := s.ensureAgentQueueCapacity(r.Context(), user.UserID); err != nil {
+			var queueErr *store.AgentQueueFullError
+			if errors.As(err, &queueErr) {
+				writeCodedError(w, http.StatusTooManyRequests, "agent_queue_full", queueErr.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
 
 		userMessage, err := s.conversations.AppendMessageWithAttachmentIDs(r.Context(), store.MessageInput{
 			UserID: user.UserID, ConversationID: conversationID, Role: "user",
@@ -265,13 +275,20 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		run, err := s.runs.CreateRun(r.Context(), store.CreateAgentRunInput{
+		run, err := s.runs.CreateRunWithQueueLimits(r.Context(), store.CreateAgentRunInput{
 			UserID:          user.UserID,
 			ConversationID:  conversationID,
 			UserMessageID:   userMessage.ID,
 			ModelProviderID: modelProviderID,
-		})
+			ThinkingMode:    thinkingMode,
+		}, s.cfg.AgentMaxQueuedGlobal, s.cfg.AgentMaxQueuedPerUser)
 		if err != nil {
+			_ = s.deleteConversationMessage(r.Context(), user.UserID, conversationID, userMessage.ID)
+			var queueErr *store.AgentQueueFullError
+			if errors.As(err, &queueErr) {
+				writeCodedError(w, http.StatusTooManyRequests, "agent_queue_full", queueErr.Error())
+				return
+			}
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -306,7 +323,10 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 		}
 
 		updatedConversation, _ := s.conversations.GetConversation(r.Context(), user.UserID, conversationID)
-		go s.executeConversationRun(user.UserID, user.Role, conversationID, userMessage.ID, modelProviderID, strings.TrimSpace(content), string(attachmentsJSON), attachmentPayloads, thinkingMode, run.ID)
+		if position, positionErr := s.runs.QueuePosition(r.Context(), user.UserID, run.ID); positionErr == nil {
+			run.QueuePosition = position
+		}
+		s.wakeAgentScheduler()
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"conversation": updatedConversation,
 			"user_message": userMessage,

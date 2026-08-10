@@ -17,6 +17,9 @@ func (s *Server) failConversationRun(ctx context.Context, userID, conversationID
 }
 
 func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conversationID, messageID, runID string, err error, startedAt time.Time) {
+	if current, getErr := s.runs.GetRun(context.Background(), userID, runID); getErr == nil && runIsTerminal(current.Status) {
+		return
+	}
 	message := ai.UserFacingErrorMessage(err)
 	if message == "" {
 		message = "执行失败"
@@ -76,7 +79,14 @@ func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conve
 	if !failure.ResetAt.IsZero() {
 		failurePayload["reset_at"] = failure.ResetAt
 	}
-	if _, err := s.appendRunEventStrict(eventCtx, store.AgentEventInput{
+	failureJSON, _ := json.Marshal(failure)
+	failureJSONString := string(failureJSON)
+	if _, _, err := s.finalizeRunStrict(eventCtx, userID, runID, status, stage, store.UpdateAgentRunInput{
+		ErrorMessage:    &message,
+		DiagnosticLogID: diagnosticID,
+		FailureJSON:     &failureJSONString,
+		SetCompletedAt:  true,
+	}, store.AgentEventInput{
 		RunID:          runID,
 		UserID:         userID,
 		ConversationID: conversationID,
@@ -85,17 +95,7 @@ func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conve
 		Level:          level,
 		Payload:        mergeFailureEventPayload(failurePayload, message, diagnosticID),
 	}); err != nil {
-		log.Printf("[agent_run] append failure event failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
-	}
-	failureJSON, _ := json.Marshal(failure)
-	failureJSONString := string(failureJSON)
-	if _, err := s.publishRunStrict(context.Background(), userID, runID, status, stage, store.UpdateAgentRunInput{
-		ErrorMessage:    &message,
-		DiagnosticLogID: diagnosticID,
-		FailureJSON:     &failureJSONString,
-		SetCompletedAt:  true,
-	}); err != nil {
-		log.Printf("[agent_run] publish failure state failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
+		log.Printf("[agent_run] finalize failure state failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
 	}
 }
 
@@ -129,7 +129,11 @@ func (s *Server) completeConversationRunWithBudgetExhaustion(ctx context.Context
 		payload["tool_calls"] = reply.Budget.ToolCalls
 		payload["max_tool_calls"] = reply.Budget.MaxToolCalls
 	}
-	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
+	_, _, err := s.finalizeRunStrict(ctx, userID, runID, store.AgentRunFailed, "budget_exhausted", store.UpdateAgentRunInput{
+		ErrorMessage:       &message,
+		AssistantMessageID: assistantMessage.ID,
+		SetCompletedAt:     true,
+	}, store.AgentEventInput{
 		RunID:          runID,
 		UserID:         userID,
 		ConversationID: conversationID,
@@ -137,13 +141,6 @@ func (s *Server) completeConversationRunWithBudgetExhaustion(ctx context.Context
 		Type:           "run_failed",
 		Level:          "warn",
 		Payload:        payload,
-	}); err != nil {
-		return err
-	}
-	_, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunFailed, "budget_exhausted", store.UpdateAgentRunInput{
-		ErrorMessage:       &message,
-		AssistantMessageID: assistantMessage.ID,
-		SetCompletedAt:     true,
 	})
 	return err
 }

@@ -14,7 +14,7 @@ type htmlMutationPreconditionTarget struct {
 }
 
 func (r *agentRuntime) validateHTMLNoteMutationPrecondition(ctx context.Context, call agentToolCall) error {
-	if r == nil || (!r.codexParityKernelActive() && !r.kernelV3Active()) || !isWorkspaceMutationTool(call.Name) {
+	if r == nil || !isWorkspaceMutationTool(call.Name) {
 		return nil
 	}
 	if call.Name == "edit_workspace_note_blocks" {

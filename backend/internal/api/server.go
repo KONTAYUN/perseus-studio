@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,22 +29,28 @@ type SessionInfo struct {
 }
 
 type Server struct {
-	store         *store.TaskStore
-	runs          *store.AgentRunStore
-	configs       *store.ConfigStore
-	conversations *store.ConversationStore
-	diagnostics   *store.DiagnosticStore
-	usage         *store.UsageStore
-	users         *store.UserStore
-	sessions      *store.SessionStore
-	broker        *tasks.Broker
-	runBroker     *tasks.Broker
-	factory       *usersvc.Factory
-	ai            *ai.Service
-	cfg           config.Config
-	mux           *http.ServeMux
-	runCancelMu   sync.Mutex
-	runCancels    map[string]*runCancelEntry
+	store                *store.TaskStore
+	runs                 *store.AgentRunStore
+	configs              *store.ConfigStore
+	conversations        *store.ConversationStore
+	diagnostics          *store.DiagnosticStore
+	usage                *store.UsageStore
+	users                *store.UserStore
+	sessions             *store.SessionStore
+	broker               *tasks.Broker
+	runBroker            *tasks.Broker
+	factory              *usersvc.Factory
+	ai                   *ai.Service
+	cfg                  config.Config
+	mux                  *http.ServeMux
+	runCancelMu          sync.Mutex
+	runCancels           map[string]*runCancelEntry
+	allowedOrigins       map[string]bool
+	trustedProxyNetworks []*net.IPNet
+	loginLimiter         *tokenBucketLimiter
+	registerLimiter      *fixedWindowLimiter
+	uploadLimiter        *fixedWindowLimiter
+	runScheduler         *agentRunScheduler
 }
 
 type runCancelEntry struct {
@@ -158,33 +165,54 @@ type chatAttachmentMetadata struct {
 }
 
 func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, configStore *store.ConfigStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, usageStore *store.UsageStore, userStore *store.UserStore, sessionStore *store.SessionStore, broker *tasks.Broker, runBroker *tasks.Broker, factory *usersvc.Factory, aiService *ai.Service, cfg config.Config) *Server {
-	s := &Server{
-		store:         taskStore,
-		runs:          runStore,
-		configs:       configStore,
-		conversations: conversationStore,
-		diagnostics:   diagnosticStore,
-		usage:         usageStore,
-		users:         userStore,
-		sessions:      sessionStore,
-		broker:        broker,
-		runBroker:     runBroker,
-		factory:       factory,
-		ai:            aiService,
-		cfg:           cfg,
-		mux:           http.NewServeMux(),
-		runCancels:    make(map[string]*runCancelEntry),
+	allowedOrigins := make(map[string]bool, len(cfg.CORSAllowedOrigins))
+	for _, origin := range cfg.CORSAllowedOrigins {
+		origin = strings.ToLower(strings.TrimSpace(origin))
+		if origin != "" {
+			allowedOrigins[origin] = true
+		}
 	}
+	trustedProxyNetworks := make([]*net.IPNet, 0, len(cfg.TrustedProxyCIDRs))
+	for _, raw := range cfg.TrustedProxyCIDRs {
+		_, network, err := net.ParseCIDR(strings.TrimSpace(raw))
+		if err == nil {
+			trustedProxyNetworks = append(trustedProxyNetworks, network)
+		}
+	}
+	s := &Server{
+		store:                taskStore,
+		runs:                 runStore,
+		configs:              configStore,
+		conversations:        conversationStore,
+		diagnostics:          diagnosticStore,
+		usage:                usageStore,
+		users:                userStore,
+		sessions:             sessionStore,
+		broker:               broker,
+		runBroker:            runBroker,
+		factory:              factory,
+		ai:                   aiService,
+		cfg:                  cfg,
+		mux:                  http.NewServeMux(),
+		runCancels:           make(map[string]*runCancelEntry),
+		allowedOrigins:       allowedOrigins,
+		trustedProxyNetworks: trustedProxyNetworks,
+		loginLimiter:         newTokenBucketLimiter(),
+		registerLimiter:      newFixedWindowLimiter(),
+		uploadLimiter:        newFixedWindowLimiter(),
+	}
+	s.runScheduler = newAgentRunScheduler(s, cfg.AgentMaxConcurrentGlobal, cfg.AgentMaxConcurrentPerUser)
 	s.register()
 	return s
 }
 
 func (s *Server) Routes() http.Handler {
-	return s.withCORS(s.withAuth(s.mux))
+	return s.withSecurityHeaders(s.withCORS(s.withAuth(s.withCSRFOrigin(s.withRequestBodyLimits(s.withJSONRequestTimeout(s.mux))))))
 }
 
 func (s *Server) register() {
 	s.mux.HandleFunc("/api/health", s.handleHealth)
+	s.mux.HandleFunc("/api/ready", s.handleReady)
 	s.mux.HandleFunc("/api/version", s.handleVersion)
 	s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("/api/auth/register", s.handleAuthRegister)
@@ -257,6 +285,26 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	if s.runs == nil || s.runs.Ping(r.Context()) != nil {
+		writeCodedError(w, http.StatusServiceUnavailable, "database_not_ready", "database is not ready")
+		return
+	}
+	if s.factory == nil || s.factory.Ready() != nil {
+		writeCodedError(w, http.StatusServiceUnavailable, "user_data_not_ready", "user data directory is not writable")
+		return
+	}
+	if s.runScheduler == nil || !s.runScheduler.Ready() {
+		writeCodedError(w, http.StatusServiceUnavailable, "agent_scheduler_not_ready", "agent run scheduler is not ready")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ready": true, "version": version.Version})
+}
+
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
@@ -302,15 +350,17 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
 		if origin != "" {
+			if !s.originAllowed(r, origin) {
+				writeCodedError(w, http.StatusForbidden, "cors_origin_rejected", "request origin is not allowed")
+				return
+			}
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -325,6 +375,7 @@ func writeSSE(w http.ResponseWriter, event string, payload any) error {
 }
 
 func writeSSEWithID(w http.ResponseWriter, event, id string, payload any) error {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(15 * time.Second))
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -338,6 +389,12 @@ func writeSSEWithID(w http.ResponseWriter, event, id string, payload any) error 
 		return err
 	}
 	_, err = fmt.Fprintf(w, "data: %s\n\n", raw)
+	return err
+}
+
+func writeSSEHeartbeat(w http.ResponseWriter) error {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(15 * time.Second))
+	_, err := fmt.Fprint(w, ": heartbeat\n\n")
 	return err
 }
 

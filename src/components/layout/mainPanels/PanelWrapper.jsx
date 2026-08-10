@@ -15,12 +15,13 @@ export default function PanelWrapper({
   showResizer,
 }) {
   const id = panel.id;
+  const isMoving = Boolean(ide.layoutAnimationAction) || isOpeningPanel || shouldIntro || ide.draggingPanelId === id;
 
   return (
     <div
       key={id}
       id={`panel-wrapper-${id}`}
-      className={`panel-wrapper relative flex h-full min-w-0 will-change-[transform,opacity] ${
+      className={`panel-wrapper relative flex h-full min-w-0 ${isMoving ? 'will-change-transform' : ''} ${
         isOpeningPanel || shouldIntro ? 'overflow-hidden' : 'overflow-visible'
       } ${
         isResizing ? '' : 'motion-layout'
@@ -58,7 +59,9 @@ export default function PanelWrapper({
         className={`h-full w-full min-w-0 ${
           shouldIntro ? 'motion-panel-enter' : ''
         }`}
-        style={shouldIntro ? { animationDelay: `${Math.min(80, index * 24)}ms` } : undefined}
+        style={shouldIntro ? {
+          animationDelay: `min(var(--motion-stagger-max), calc(var(--motion-stagger-step) * ${index}))`,
+        } : undefined}
       >
         {children}
       </div>

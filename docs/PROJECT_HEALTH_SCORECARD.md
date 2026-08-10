@@ -1,10 +1,33 @@
 # Perseus Studio Project Health Scorecard
 
-This scorecard records the current engineering-health standard and the evidence behind the score. The target is **9.5 / 10** by responsibility clarity, maintainability, and verified checks, not by average file length.
+This scorecard records verifiable engineering evidence. The release target is **9.0 / 10 or better**, but a score is not published unless the listed runtime gates have passed for the same revision.
 
 ## Current Score
 
-Overall: **9.6 / 10**
+Overall: **9.1 / 10 (local release evidence, 2026-08-10)**
+
+This score describes the current working tree. Remote CI and live-provider
+evaluation remain separate release evidence and cannot be inferred from local
+success.
+
+| Gate | Status | Evidence required |
+|---|---|---|
+| Single Agent runtime | proven | One `kernel_v3 + runTurnEngine` production path; legacy data is read-only migration input. |
+| Transactional terminal event | proven | Store/API concurrency and idempotency tests for `FinalizeRunWithEvent`. |
+| HTTP and container security | proven | CORS, CSRF, trusted proxy, body-limit and rate-limit tests; image runs as UID/GID 10001. |
+| Persistent multi-user scheduling | proven | Transactional queue limits, single-winner claim and fair-user scheduler tests. |
+| Browser Agent lifecycle | proven | 20 Docker Playwright scenarios passed: queue/commentary, replay, protocol failure, context overflow, 429, EOF, note edit/one history, user input/choice, image persistence, and workspace UI flows. |
+| Release image | proven | Normal `./data` image rebuilt and replaced on `127.0.0.1:8080`; health/readiness pass as UID/GID 10001; SQLite integrity check returns `ok`. |
+
+## Weighted Evidence
+
+| Area | Weight | Score | Evidence | Remaining risk |
+|---|---:|---:|---|---|
+| Agent architecture and maintainability | 2.0 | 1.8 | One `kernel_v3 + runTurnEngine` production path, canonical `ToolManifest`, typed item history, old runtime paths removed from execution. | Several intentionally broad orchestration files remain under responsibility review. |
+| Event, data, and recovery integrity | 2.0 | 1.9 | Transactional terminal event/barrier, contiguous SSE replay, idempotent resume/follow-up, restart recovery, 10,000-event and concurrent finalizer tests. | Single-instance SQLite is an explicit deployment boundary. |
+| HTTP, authentication, and operations | 2.0 | 1.8 | Same-origin default, CSRF/CORS tests, trusted proxy policy, rate limits, bounded bodies/timeouts, non-root image, readiness and Compose limits. | In-memory abuse limits reset on process restart by design. |
+| Product correctness and resilience | 2.0 | 1.7 | Browser coverage for Agent file handoff, no duplicate history, provider failures, attachments, input/choice recovery, and workspace behavior. | Differential preview still needs a throttled/paused-consumer browser case. |
+| Automated verification and delivery | 2.0 | 1.9 | Full Go suite, 157 frontend unit tests, UI/structure gates, production build, 20 Playwright cases, Docker CI job with artifacts. | Remote CI and optional live-provider eval have not run until changes are pushed. |
 
 ## Optimization Baseline
 
@@ -12,19 +35,19 @@ This project is optimized by runtime and maintenance impact, not by deleting lin
 
 | Area | Baseline | Optimization Direction |
 |---|---|---|
-| Frontend build | Before this pass, Vite emitted one main JS chunk: `assets/index-CqgydvHg.js` at **1,283.84 kB** minified / **387.27 kB** gzip, with the Rollup large chunk warning. After this pass, the main entry is **306.85 kB** / **90.20 kB** gzip, and the largest vendor chunks are **363.35 kB** editor, **361.82 kB** general vendor, and **141.99 kB** React. | Keep editor/main layout on the first screen, lazy-load low-frequency overlays, and use stable vendor chunks for React, Tiptap, icons, and general vendor code. |
+| Frontend build | Before this pass, Vite emitted one main JS chunk at **1,283.84 kB** minified / **387.27 kB** gzip. Current release verification emits a **348.48 kB** / **102.55 kB** entry, with **363.36 kB** editor, **367.66 kB** general vendor, and **141.99 kB** React chunks. | Keep editor/main layout on the first screen, lazy-load low-frequency overlays, and use stable vendor chunks for React, Tiptap, icons, and general vendor code. |
 | Test maintainability | Chat run stream tests repeated EventSource/window setup and `waitForAgentRunStream` boilerplate in each case. AI integration tests repeated request payload decode setup. | Move repeated test harness work into package-local/unit-test helpers while preserving every scenario assertion. |
 | Runtime rendering | Resize and active panel behavior already avoid React state updates on every drag frame. Chat Markdown, message bubbles, and code blocks already use memo boundaries. | Keep memo limited to proven repeated render boundaries; avoid broad memo wrappers that add complexity without reliable wins. |
 
-| Area | Score | Evidence | Remaining Risk |
-|---|---:|---|---|
-| Structure standard | 9.6 | `docs/STRUCTURE_STANDARDS.md` treats 450 lines as a review threshold, not a hard split rule. `npm run test:structure` requires a responsibility review entry for threshold crossings. | Future agents must not reintroduce mechanical line-count splits. |
-| Frontend boundaries | 9.6 | Rich text editor behavior is split by responsibility. File tree, chat messages, and rich text history now have smaller render entries with row/message/history helpers separated. | Keep new UI behavior in the extracted components instead of growing entry files again. |
-| CSS boundaries | 9.6 | `src/index.css` is an ordered entrypoint. Rich text styling is split into editor base, toolbar shell, block trigger, selection toolbar, table toolbar, format controls, menus, history, content, image, and table sections. Toast visuals are isolated in `src/styles/toast.css`; shared motion semantics stay in `src/styles/motion.css`. | Future toolbar work should stay in the matching control-family section. |
-| Backend import/export | 9.6 | DOCX import/export facades delegate to style types, extraction, Word XML, and zip helpers. File and note transfer handlers now split by route responsibility without changing API behavior. | Keep HTTP decoding in handlers and conversion/filesystem behavior in helpers/services. |
-| Agent kernel | 9.5 | `docs/AGENT_KERNEL_V2.md` records the v2 execution model: bounded context, targeted note reads, tool/result ledgers, checkpoint restore state, and the legacy rollback switch. | Future AI work should extend the kernel ledger/read-target model instead of adding ad hoc loop-guard exceptions. |
-| UI system | 9.5 | `docs/UI_DESIGN_SYSTEM.md` documents rich text editor control exceptions. `npm run test:ui` continues to block raw one-off buttons, shadows, radius drift, and broad motion. | Editor-specific controls must stay in named CSS classes, not long JSX class strings. |
-| Old-code audit | 9.5 | `docs/LEGACY_STRUCTURE_AUDIT.md` records the old-code review and decisions. Files over the 450-line review threshold are registered below with responsibility-based decisions. | Full package-wide Go tests depend on local Go or Docker availability; keep Docker fallback documented. |
+| Area | Status | Evidence | Remaining Risk |
+|---|---|---|---|
+| Structure standard | proven | `docs/STRUCTURE_STANDARDS.md` treats 450 lines as a review threshold, not a hard split rule. `npm run test:structure` requires a responsibility review entry for threshold crossings. | Future agents must not reintroduce mechanical line-count splits. |
+| Frontend boundaries | proven | Rich text editor behavior is split by responsibility. File tree, chat messages, and rich text history now have smaller render entries with row/message/history helpers separated. | Keep new UI behavior in the extracted components instead of growing entry files again. |
+| CSS boundaries | proven | `src/index.css` is an ordered entrypoint. Rich text styling is split into editor base, toolbar shell, block trigger, selection toolbar, table toolbar, format controls, menus, history, content, image, and table sections. Toast visuals are isolated in `src/styles/toast.css`; shared motion semantics stay in `src/styles/motion.css`. | Future toolbar work should stay in the matching control-family section. |
+| Backend import/export | proven | DOCX import/export facades delegate to style types, extraction, Word XML, and zip helpers. File and note transfer handlers now split by route responsibility without changing API behavior. | Keep HTTP decoding in handlers and conversion/filesystem behavior in helpers/services. |
+| Agent kernel | proven | `docs/AGENT_KERNEL.md` records the single v3 execution model: bounded context, targeted note reads, typed items, ledgers and checkpoint recovery. | New execution paths must not reintroduce runtime mode switches or text-derived state. |
+| UI system | proven | `docs/UI_DESIGN_SYSTEM.md` documents rich text editor control exceptions. `npm run test:ui` continues to block raw one-off buttons, shadows, radius drift, and broad motion. | Editor-specific controls must stay in named CSS classes, not long JSX class strings. |
+| Old-code audit | partial | `docs/LEGACY_STRUCTURE_AUDIT.md` records the old-code review and decisions. Files over the 450-line review threshold are registered below with responsibility-based decisions. | Re-run the audit whenever a legacy compatibility path is removed or promoted. |
 
 ## Responsibility Review Register
 
@@ -38,7 +61,7 @@ These production files cross the 450-line review threshold or sit near it. A thr
 | `backend/internal/ai/context_assembler.go` | The only model-context assembly entry: active item selection, token estimation, old tool-result pruning, diagnostics, and compaction decision. | Keep orchestration here; keep protocol-specific projection in `context_protocol.go` and semantic compaction in `context_item_compaction.go`. |
 | `backend/internal/ai/tool_manifest.go` | Canonical tool registry, provider/model visibility, transport and terminal-action metadata, model-facing action manifest, and tool diagnostic projection. | Keep one registry so visibility, execution protocol, recovery behavior, and diagnostics cannot drift across separate tables. If it grows again, split only by the real boundary between immutable registry data and manifest/diagnostic projection. |
 | `backend/internal/ai/tool_schemas_workspace.go` | OpenAI and Anthropic schema projection for the same workspace tool contract, including targeted HTML-note creation and block editing. | Keep both provider projections beside the canonical workspace schema so required fields and operation enums cannot drift. Split only if a provider gains genuinely different schema semantics, not because the file crosses a line threshold. |
-| `backend/internal/ai/agent_kernel_v2.go` | Agent kernel state, read-target identity, typed turn item recording, and progress ledger projection shared by the legacy/v2/v3 runtime switches. | Keep together for now because the state schema and target identity rules must stay in one place. If it grows again, split by real boundary: state normalization, item recording, and read-target key extraction. |
+| `backend/internal/ai/agent_kernel.go` | Current Agent kernel state, read-target identity, typed turn item recording, and progress-ledger projection for the single v3 runtime. | Keep together because state normalization and target identity must remain one contract. Split only by a proven boundary between state normalization, item recording and read-target extraction. |
 | `backend/internal/ai/agent_tool_loop.go` | Ordered handling of one model tool action: protocol validation, scope and write guards, strategy-ledger checks, execution, preview resolution, and result projection. | Keep the ordered action boundary together so early rejection and final execution cannot drift. Tool-specific parsing and execution remain in their dedicated files; extract only if a new independent lifecycle appears. |
 | `backend/internal/ai/tools_exec_note_edit.go` | Atomic HTML note block mutation executor: target resolution, text-segment replacement, structural operations, sanitizer application, document-version checks, and compact mutation results. | Keep the execution contract together because preflight, operation semantics, and one-write/one-history verification must evolve atomically. If it grows again, split only by a proven boundary between operation application and post-write validation; keep the tool contract in one reviewed entry. |
 | `backend/internal/ai/tools_exec_note_view.go` | HTML note index, section, block, and raw-view execution plus target coverage metadata and text-segment projection. | Keep the read-view contract together so index identity, raw coverage, block hashes, and section/batch payloads cannot drift. If it grows again, extract parser projection only after the read protocol remains a single tested boundary. |
@@ -90,4 +113,4 @@ If local Go is unavailable on Windows, use the Docker equivalent:
 docker run --rm -v "<repo>\\backend:/src/backend" -w /src/backend docker.m.daocloud.io/library/golang:1.25-bookworm go test ./...
 ```
 
-Before a release handoff, also run the Docker image build and check `/api/health`.
+Before a release handoff, also run `npm run test:e2e`, build the Docker image, and check both `/api/health` and `/api/ready`.

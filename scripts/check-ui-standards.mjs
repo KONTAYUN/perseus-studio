@@ -105,6 +105,18 @@ const rawAbsolutePopoverAllowlist = new Map([
     'src/components/ui/index.jsx',
     'Shared popover primitive owns fixed-position popover geometry.',
   ],
+  [
+    'src/components/editor/richText/RichTextSelectionToolbar.jsx',
+    'Selection formatting menus stay locally anchored to the transient selection toolbar so editor selection and focus are not disturbed by a portal.',
+  ],
+  [
+    'src/components/editor/richText/RichTextTableToolbar.jsx',
+    'Table command menus stay locally anchored to the transient table toolbar so the active table selection remains stable while commands are chosen.',
+  ],
+  [
+    'src/components/editor/richText/RichTextToolbar.jsx',
+    'Rich-text controls are nested menus inside the already-positioned editor toolbar; local anchoring keeps the editing surface and focus stable.',
+  ],
 ]);
 
 function walk(dir, output) {

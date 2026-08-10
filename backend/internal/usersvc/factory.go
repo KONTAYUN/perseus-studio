@@ -102,6 +102,22 @@ func (f *Factory) EnsureRoot() error {
 	return os.MkdirAll(f.userDataRoot, 0o755)
 }
 
+func (f *Factory) Ready() error {
+	if err := f.EnsureRoot(); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(f.userDataRoot, ".ready-*")
+	if err != nil {
+		return err
+	}
+	name := file.Name()
+	if closeErr := file.Close(); closeErr != nil {
+		_ = os.Remove(name)
+		return closeErr
+	}
+	return os.Remove(name)
+}
+
 func (f *Factory) RemoveUserData(userID string) error {
 	if userID == "" {
 		return fmt.Errorf("userID is required")

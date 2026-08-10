@@ -27,7 +27,7 @@ const (
 	ProviderFailureStreamInterrupted     ProviderFailureClass = "provider_stream_interrupted"
 	ProviderFailureOverloaded            ProviderFailureClass = "provider_overloaded"
 	ProviderFailureProtocol              ProviderFailureClass = "provider_protocol_error"
-	ProviderFailureUnknown               ProviderFailureClass = "provider_unknown_error"
+	ProviderFailureUnknown               ProviderFailureClass = "provider_unknown_failure"
 )
 
 type ProviderFailure struct {
@@ -174,11 +174,9 @@ func classifyProviderResponseFailure(err *ProviderResponseError) ProviderFailure
 		failure.Class = ProviderFailureUnknown
 	}
 	if failure.Code == "" && failure.Type == "" && err.StatusCode == 0 {
-		if legacy := legacyProviderTextFailure(err.Message, err.ResponseSnippet); legacy.Class != "" {
-			legacy.RequestID = err.RequestID
-			return legacy
-		}
-		failure.ClassificationSource = "unclassified_provider_response"
+		failure.Class = ProviderFailureUnknown
+		failure.Code = "provider_unknown_failure"
+		failure.ClassificationSource = "unstructured_provider_response"
 	}
 	return failure
 }

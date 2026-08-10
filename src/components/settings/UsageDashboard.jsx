@@ -204,20 +204,19 @@ export default function UsageDashboard({ dialog, onBack, currentUser, notify }) 
         <UsageEvents events={events} usersById={usersById} providers={providers} />
       )}
 
-      {showPriceSettings && (
-        <UsagePriceSettingsPanel
-          providers={providers}
-          prices={prices}
-          priceDraft={priceDraft}
-          editingPriceId={editingPriceId}
-          onClose={() => setShowPriceSettings(false)}
-          onSave={savePrice}
-          onReset={resetPriceForm}
-          onDraftChange={setPriceDraft}
-          onEdit={editPrice}
-          onDelete={deletePrice}
-        />
-      )}
+      <UsagePriceSettingsPanel
+        open={showPriceSettings}
+        providers={providers}
+        prices={prices}
+        priceDraft={priceDraft}
+        editingPriceId={editingPriceId}
+        onClose={() => setShowPriceSettings(false)}
+        onSave={savePrice}
+        onReset={resetPriceForm}
+        onDraftChange={setPriceDraft}
+        onEdit={editPrice}
+        onDelete={deletePrice}
+      />
     </SettingsSection>
   );
 }

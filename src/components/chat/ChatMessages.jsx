@@ -42,35 +42,8 @@ export default function ChatMessages({
         className={`${isMessageListEmpty ? 'h-full' : 'min-h-full'} w-full min-w-0 space-y-1 p-4`}
         style={{ paddingBottom: `${bottomInset}px` }}
       >
-        {ide.chatError && (
-          <div className="chat-error-card min-w-0 max-w-full overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-            {ide.chatError}
-            {ide.resumableRun?.runId && (
-              <div className="mt-3">
-                {resumeBlockedLabel && (
-                  <div className="mb-2 text-[11px] font-semibold text-red-300">
-                    {resumeBlockedLabel}
-                  </div>
-                )}
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    ide.continueAgentRun?.();
-                  }}
-                  disabled={ide.isChatSending || resumeBlocked}
-                >
-                  <RefreshCw size={13} />
-                  继续
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
         {ide.agentRecoveryNotice?.text && !ide.chatError && (
-          <div className="agent-recovery-card">
+          <div className="agent-recovery-card motion-card">
             <span className="inline-flex items-center gap-2">
               {(ide.agentRecoveryNotice.status === 'started' || ide.agentRecoveryNotice.status === 'retrying') && (
                 <RefreshCw size={14} className="animate-spin" />
@@ -100,6 +73,37 @@ export default function ChatMessages({
               isActiveUserRequest={activeUserRequest?.messageId === message.id}
             />
           ))
+        )}
+        {ide.chatError && (
+          <div
+            data-testid="chat-run-error"
+            data-failure-class={ide.resumableRun?.failureClass || ''}
+            className="chat-error-card motion-card min-w-0 max-w-full overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
+          >
+            {ide.chatError}
+            {ide.resumableRun?.runId && (
+              <div className="mt-3">
+                {resumeBlockedLabel && (
+                  <div className="mb-2 text-[11px] font-semibold text-red-300">
+                    {resumeBlockedLabel}
+                  </div>
+                )}
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ide.continueAgentRun?.();
+                  }}
+                  disabled={ide.isChatSending || resumeBlocked}
+                >
+                  <RefreshCw size={13} />
+                  继续
+                </Button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -42,17 +42,24 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
+	loginKey := s.clientIP(r) + "\x00" + strings.ToLower(strings.TrimSpace(req.Username))
+	if !s.allowLoginRate(w, loginKey) {
+		return
+	}
 	user, err := s.users.Authenticate(r.Context(), req.Username, req.Password)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	s.createSessionAndRespond(r.Context(), w, user)
+	s.createSessionAndRespond(r.Context(), w, r, user)
 }
 
 func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.allowRate(w, s.registerLimiter, s.clientIP(r), s.cfg.RegisterRatePerHour, time.Hour, "auth_rate_limited") {
 		return
 	}
 	count, err := s.users.CountUsers(r.Context())
@@ -104,7 +111,7 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	s.createSessionAndRespond(r.Context(), w, user)
+	s.createSessionAndRespond(r.Context(), w, r, user)
 }
 
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
@@ -151,11 +158,12 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   s.sessionCookieSecure(r),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 }
 
-func (s *Server) createSessionAndRespond(ctx context.Context, w http.ResponseWriter, user store.User) {
+func (s *Server) createSessionAndRespond(ctx context.Context, w http.ResponseWriter, r *http.Request, user store.User) {
 	token, err := randomSessionToken()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create session")
@@ -175,6 +183,7 @@ func (s *Server) createSessionAndRespond(ctx context.Context, w http.ResponseWri
 		Expires:  expires,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   s.sessionCookieSecure(r),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
@@ -184,6 +193,17 @@ func (s *Server) createSessionAndRespond(ctx context.Context, w http.ResponseWri
 			"role":     user.Role,
 		},
 	})
+}
+
+func (s *Server) sessionCookieSecure(r *http.Request) bool {
+	switch strings.ToLower(strings.TrimSpace(s.cfg.SessionCookieSecure)) {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return s.requestIsHTTPS(r)
+	}
 }
 
 func (s *Server) withAuth(next http.Handler) http.Handler {
@@ -208,6 +228,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 
 func (s *Server) isPublicAPI(path string) bool {
 	return path == "/api/health" ||
+		path == "/api/ready" ||
 		path == "/api/version" ||
 		path == "/api/auth/login" ||
 		path == "/api/auth/register" ||

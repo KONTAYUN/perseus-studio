@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -201,7 +200,7 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request, taskID
 			if !drain() {
 				return
 			}
-			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+			if err := writeSSEHeartbeat(w); err != nil {
 				return
 			}
 			flusher.Flush()

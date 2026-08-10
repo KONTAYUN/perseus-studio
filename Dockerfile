@@ -49,11 +49,16 @@ RUN apt-get update \
       pypdf \
     && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd --gid 10001 perseus \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin perseus
+
 WORKDIR /app
 COPY --from=backend-build /out/webide-backend /app/webide-backend
 COPY --from=frontend-build /src/dist /app/dist
 
-RUN mkdir -p /data/users
+RUN mkdir -p /data/users \
+    && chown -R 10001:10001 /data /app
 
 EXPOSE 8080
+USER 10001:10001
 CMD ["/app/webide-backend"]

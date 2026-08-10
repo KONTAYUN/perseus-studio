@@ -249,46 +249,24 @@ func TestAgentRunResumeClearsTerminalStateAndListsEventsAfterSeq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRun returned error: %v", err)
 	}
-	first, err := runs.AppendEvent(ctx, AgentEventInput{
-		RunID:          run.ID,
-		UserID:         "user-a",
-		ConversationID: "conv-a",
-		MessageID:      "msg-a",
-		Type:           "run_failed",
-		Level:          "error",
-		Payload:        map[string]any{"error": "boom"},
+	failedMessage := "boom"
+	_, first, err := runs.FinalizeRunWithEvent(ctx, FinalizeAgentRunInput{
+		RunID: run.ID, UserID: "user-a", Status: AgentRunFailed, Stage: "failed",
+		Update: UpdateAgentRunInput{ErrorMessage: &failedMessage, DiagnosticLogID: "diag-a", SetCompletedAt: true},
+		Event:  AgentEventInput{MessageID: "msg-a", Type: "run_failed", Level: "error", Payload: map[string]any{"error": "boom"}},
 	})
 	if err != nil {
-		t.Fatalf("AppendEvent returned error: %v", err)
+		t.Fatalf("FinalizeRunWithEvent returned error: %v", err)
 	}
-	failedMessage := "boom"
-	if _, err := runs.UpdateRun(ctx, "user-a", run.ID, UpdateAgentRunInput{
-		Status:          AgentRunFailed,
-		Stage:           "failed",
-		ErrorMessage:    &failedMessage,
-		DiagnosticLogID: "diag-a",
-		SetCompletedAt:  true,
-	}); err != nil {
-		t.Fatalf("UpdateRun returned error: %v", err)
-	}
-	resumed, err := runs.ResumeRun(ctx, "user-a", run.ID)
+	resumed, second, err := runs.ResumeRunWithEvent(ctx, ResumeAgentRunInput{
+		RunID: run.ID, UserID: "user-a",
+		Event: AgentEventInput{ID: "resume-event", ConversationID: "conv-a", MessageID: "msg-a", Type: "run_resumed", Level: "info", Payload: map[string]any{"message": "run resumed"}},
+	})
 	if err != nil {
-		t.Fatalf("ResumeRun returned error: %v", err)
+		t.Fatalf("ResumeRunWithEvent returned error: %v", err)
 	}
 	if resumed.Status != AgentRunQueued || resumed.ErrorMessage.Valid || resumed.DiagnosticLogID.Valid || resumed.CompletedAt.Valid {
 		t.Fatalf("unexpected resumed run: %#v", resumed)
-	}
-	second, err := runs.AppendEvent(ctx, AgentEventInput{
-		RunID:          run.ID,
-		UserID:         "user-a",
-		ConversationID: "conv-a",
-		MessageID:      "msg-a",
-		Type:           "run_resumed",
-		Level:          "info",
-		Payload:        map[string]any{"message": "run resumed"},
-	})
-	if err != nil {
-		t.Fatalf("AppendEvent returned error: %v", err)
 	}
 	items, err := runs.ListEventsAfter(ctx, "user-a", run.ID, first.Seq)
 	if err != nil {

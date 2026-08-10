@@ -3,6 +3,8 @@ import { History, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
 import { apiGet } from '../../../api/client';
 import { isNotePath } from '../../../hooks/noteTreeUtils.js';
 import { Button, IconButton } from '../../ui';
+import useMotionPresence from '../../../hooks/useMotionPresence';
+import { readMotionDuration } from '../../../hooks/motionTokens';
 import RichTextHistoryExportButton from './RichTextHistoryExportButton';
 import {
   decoratePreviewHtml,
@@ -16,9 +18,6 @@ import {
   sourceLabel,
 } from './richTextHistoryUtils';
 
-const HISTORY_EXIT_DURATION_MS = 360;
-const HISTORY_LIST_EXIT_DELAY_MS = 180;
-
 export default function RichTextHistoryPanel({
   dialog,
   onClearHistory,
@@ -27,8 +26,6 @@ export default function RichTextHistoryPanel({
   onRestoreVersion,
   open = false,
 }) {
-  const [hasEntered, setHasEntered] = React.useState(false);
-  const [isClosing, setIsClosing] = React.useState(false);
   const [items, setItems] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [selectedVersionId, setSelectedVersionId] = React.useState('');
@@ -37,28 +34,20 @@ export default function RichTextHistoryPanel({
   const [deletingId, setDeletingId] = React.useState('');
   const [clearingHistory, setClearingHistory] = React.useState(false);
   const selectedVersionIdRef = React.useRef('');
+  const { closeWithPresence, exiting, present } = useMotionPresence(open, { exitToken: '--motion-modal' });
+  const closeWithAnimation = React.useCallback(() => {
+    closeWithPresence(() => onClose?.());
+  }, [closeWithPresence, onClose]);
 
   React.useEffect(() => {
-    if (!open) return undefined;
-    setIsClosing(false);
-    const frame = requestAnimationFrame(() => setHasEntered(true));
     const closeOnEscape = (event) => {
       if (event.key === 'Escape') closeWithAnimation();
     };
     document.addEventListener('keydown', closeOnEscape);
     return () => {
-      cancelAnimationFrame(frame);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [open]);
-
-  const closeWithAnimation = () => {
-    setIsClosing(true);
-    window.setTimeout(() => {
-      setHasEntered(false);
-      onClose?.();
-    }, HISTORY_EXIT_DURATION_MS);
-  };
+  }, [closeWithAnimation]);
 
   React.useEffect(() => {
     selectedVersionIdRef.current = selectedVersionId;
@@ -116,7 +105,7 @@ export default function RichTextHistoryPanel({
     };
   }, [open, selectedVersionId]);
 
-  if (!open) return null;
+  if (!present) return null;
 
   const selectedItem = items.find((item) => item.id === selectedVersionId) || null;
   const groupedItems = groupHistoryItems(items);
@@ -137,7 +126,7 @@ export default function RichTextHistoryPanel({
     });
     if (!confirmed) return;
     setDeletingId(selectedItem.id);
-    await new Promise((resolve) => window.setTimeout(resolve, HISTORY_LIST_EXIT_DELAY_MS));
+    await new Promise((resolve) => window.setTimeout(resolve, readMotionDuration('--motion-base')));
     const ok = await onDeleteVersion?.(selectedItem.id);
     setDeletingId('');
     if (ok) {
@@ -156,7 +145,7 @@ export default function RichTextHistoryPanel({
     });
     if (!confirmed) return;
     setClearingHistory(true);
-    await new Promise((resolve) => window.setTimeout(resolve, HISTORY_LIST_EXIT_DELAY_MS));
+    await new Promise((resolve) => window.setTimeout(resolve, readMotionDuration('--motion-base')));
     const ok = await onClearHistory?.();
     setClearingHistory(false);
     if (ok) {
@@ -168,15 +157,15 @@ export default function RichTextHistoryPanel({
   return (
     <div
       className={`modal-backdrop rich-text-history-overlay rich-text-history-overlay-surface motion-fade-reveal fixed inset-0 z-[110] flex items-center justify-center p-4 ${
-        isClosing || !hasEntered ? 'opacity-0' : 'opacity-100'
+        exiting ? 'opacity-0' : 'animate-in fade-in opacity-100'
       }`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) closeWithAnimation();
       }}
     >
       <div
-        className={`rich-text-history-shell rich-text-history-shell-surface ui-overlay-surface motion-modal motion-modal-controlled flex h-[88vh] min-h-0 w-full max-w-6xl overflow-hidden border bg-white/90 backdrop-blur-3xl dark:bg-[#1C1C1E]/95 ${
-          isClosing || !hasEntered ? 'translate-y-3 scale-[0.975] opacity-0' : 'translate-y-0 scale-100 opacity-100'
+        className={`rich-text-history-shell rich-text-history-shell-surface ui-overlay-surface motion-modal flex h-[88vh] min-h-0 w-full max-w-6xl overflow-hidden border bg-white/90 backdrop-blur-3xl dark:bg-[#1C1C1E]/95 ${
+          exiting ? 'motion-presence-exit motion-presence-exit-modal' : ''
         }`}
       >
         <div className="rich-text-history-sidebar flex min-h-0 w-[clamp(220px,28%,340px)] min-w-[200px] max-w-[360px] flex-col border-r border-gray-200/80 dark:border-white/10">

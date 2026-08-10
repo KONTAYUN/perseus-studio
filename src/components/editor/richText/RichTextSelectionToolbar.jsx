@@ -14,6 +14,7 @@ import {
   Underline as UnderlineIcon,
 } from 'lucide-react';
 import { IconButton } from '../../ui';
+import useMotionPresence from '../../../hooks/useMotionPresence';
 import { FONT_SIZE_OPTIONS, getActiveFontSize } from './noteEditorExtensions';
 
 const TEXT_COLOR_PRESETS = [
@@ -65,9 +66,18 @@ export default function RichTextSelectionToolbar({
   onRequestClose,
 }) {
   const toolbarRef = React.useRef(null);
+  const lastPositionRef = React.useRef(position);
+  const lastRangeRef = React.useRef(range);
   const [isFontMenuOpen, setIsFontMenuOpen] = React.useState(false);
   const [isTextColorMenuOpen, setIsTextColorMenuOpen] = React.useState(false);
   const [isHighlightColorMenuOpen, setIsHighlightColorMenuOpen] = React.useState(false);
+  const toolbarPresence = useMotionPresence(visible, { exitToken: '--motion-fast' });
+  const fontMenuPresence = useMotionPresence(isFontMenuOpen, { exitToken: '--motion-fast' });
+  const textColorMenuPresence = useMotionPresence(isTextColorMenuOpen, { exitToken: '--motion-fast' });
+  const highlightColorMenuPresence = useMotionPresence(isHighlightColorMenuOpen, { exitToken: '--motion-fast' });
+
+  if (position) lastPositionRef.current = position;
+  if (range) lastRangeRef.current = range;
 
   React.useEffect(() => {
     setIsFontMenuOpen(false);
@@ -90,7 +100,10 @@ export default function RichTextSelectionToolbar({
     return () => window.removeEventListener('mousedown', handlePointerDown);
   }, [isFontMenuOpen, isHighlightColorMenuOpen, isTextColorMenuOpen, onRequestClose, visible]);
 
-  if (!editor || !visible || !position || !range) return null;
+  if (!editor || !toolbarPresence.present || !lastPositionRef.current || !lastRangeRef.current) return null;
+
+  const resolvedPosition = position || lastPositionRef.current;
+  const resolvedRange = range || lastRangeRef.current;
 
   const activeFontSize = getActiveFontSize(editor);
   const activeTextColor = editor.getAttributes('textStyle')?.color || '';
@@ -98,11 +111,11 @@ export default function RichTextSelectionToolbar({
   const isCurrentSelectionPinned =
     Array.isArray(pinnedSelections) &&
     pinnedSelections.some(
-      (selection) => selection.start_offset === range.from && selection.end_offset === range.to
+      (selection) => selection.start_offset === resolvedRange.from && selection.end_offset === resolvedRange.to
     );
 
   const applySelectionCommand = (runCommand) => {
-    const chain = editor.chain().focus().setTextSelection({ from: range.from, to: range.to });
+    const chain = editor.chain().focus().setTextSelection({ from: resolvedRange.from, to: resolvedRange.to });
     runCommand(chain).run();
   };
 
@@ -110,14 +123,16 @@ export default function RichTextSelectionToolbar({
     <div
       className="rich-text-selection-toolbar fixed"
       style={{
-        left: position.left,
-        top: position.top,
+        left: resolvedPosition.left,
+        top: resolvedPosition.top,
         transform: placement === 'below' ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
       }}
     >
       <div
         ref={toolbarRef}
-        className="rich-text-selection-toolbar-surface flex items-center gap-1 px-2 py-1.5"
+        className={`rich-text-selection-toolbar-surface motion-popover flex items-center gap-1 px-2 py-1.5 ${
+          toolbarPresence.exiting ? 'motion-popover-exit' : ''
+        }`}
       >
         <SelectionButton
           active={isCurrentSelectionPinned}
@@ -144,8 +159,8 @@ export default function RichTextSelectionToolbar({
           >
             <span className="text-[15px] font-bold leading-none">A</span>
           </button>
-          {isFontMenuOpen && (
-            <div className="rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full mt-2 min-w-[98px] p-1">
+          {fontMenuPresence.present && (
+            <div className={`rich-text-submenu-panel rich-text-submenu-panel-surface motion-popover motion-popover-bottom absolute left-0 top-full mt-2 min-w-[98px] p-1 ${fontMenuPresence.exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
               {FONT_SIZE_OPTIONS.map((value) => (
                 <button
                   key={value}
@@ -188,8 +203,8 @@ export default function RichTextSelectionToolbar({
               />
             </span>
           </button>
-          {isTextColorMenuOpen && (
-            <div className="rich-text-color-menu rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full mt-2 w-[188px] p-2">
+          {textColorMenuPresence.present && (
+            <div className={`rich-text-color-menu rich-text-submenu-panel rich-text-submenu-panel-surface motion-popover motion-popover-bottom absolute left-0 top-full mt-2 w-[188px] p-2 ${textColorMenuPresence.exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
               <button
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
@@ -256,8 +271,8 @@ export default function RichTextSelectionToolbar({
               <span className="rich-text-highlight-trigger-letter">A</span>
             </span>
           </button>
-          {isHighlightColorMenuOpen && (
-            <div className="rich-text-color-menu rich-text-submenu-panel rich-text-submenu-panel-surface absolute left-0 top-full mt-2 w-[188px] p-2">
+          {highlightColorMenuPresence.present && (
+            <div className={`rich-text-color-menu rich-text-submenu-panel rich-text-submenu-panel-surface motion-popover motion-popover-bottom absolute left-0 top-full mt-2 w-[188px] p-2 ${highlightColorMenuPresence.exiting ? 'motion-popover-exit pointer-events-none' : ''}`}>
               <button
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}

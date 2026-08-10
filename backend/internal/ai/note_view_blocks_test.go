@@ -254,7 +254,7 @@ func TestAgentKernelNoteViewBlocksCountAsDistinctProgress(t *testing.T) {
 	event := ToolEvent{ToolName: "read_workspace_note_view", Status: "success", Path: "Note.html"}
 	callOne := agentToolCall{Name: "read_workspace_note_view", ArgumentsJSON: `{"path":"Note.html","mode":"block","view":"raw","block_id":"b0001","doc_hash":"abc"}`}
 	callTwo := agentToolCall{Name: "read_workspace_note_view", ArgumentsJSON: `{"path":"Note.html","mode":"block","view":"raw","block_id":"b0002","doc_hash":"abc"}`}
-	if loopGuardActionKey(callOne, false, event, true) == loopGuardActionKey(callTwo, false, event, true) {
+	if loopGuardActionKey(callOne, false, event) == loopGuardActionKey(callTwo, false, event) {
 		t.Fatal("different note blocks must not share loop-guard action keys")
 	}
 
@@ -294,7 +294,7 @@ func TestAgentKernelTextRangesCountAsDistinctTargets(t *testing.T) {
 	event := ToolEvent{ToolName: "read_workspace_text", Status: "success", Path: "draft.txt"}
 	first := agentToolCall{Name: "read_workspace_text", ArgumentsJSON: `{"path":"draft.txt","start_line":1,"end_line":80}`}
 	second := agentToolCall{Name: "read_workspace_text", ArgumentsJSON: `{"path":"draft.txt","start_line":81,"end_line":160}`}
-	if loopGuardActionKey(first, false, event, true) == loopGuardActionKey(second, false, event, true) {
+	if loopGuardActionKey(first, false, event) == loopGuardActionKey(second, false, event) {
 		t.Fatal("different text ranges must not share loop-guard action keys")
 	}
 
@@ -330,7 +330,7 @@ func TestAgentRuntimeCheckpointPreservesKernelProgress(t *testing.T) {
 	checkpoint := runtime.checkpoint()
 	restored := &agentRuntime{}
 	restored.restoreCheckpoint(checkpoint)
-	if restored.kernel.Version != agentKernelV2Version || len(restored.kernel.ReadTargets) != 1 {
+	if restored.kernel.Version != agentKernelVersion || len(restored.kernel.ReadTargets) != 1 {
 		t.Fatalf("expected kernel state restored, got %#v", restored.kernel)
 	}
 	if restored.actionProgress.LastReadProgressRound != 3 || restored.loopGuard.RepeatedActionCount != 2 {

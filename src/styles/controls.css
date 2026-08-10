@@ -153,10 +153,6 @@
   transition: transform var(--motion-fast) var(--ease-motion);
 }
 
-.ui-icon-button:hover svg {
-  transform: scale(1.07);
-}
-
 .ui-icon-button:active svg {
   transform: scale(0.94);
 }
@@ -176,6 +172,12 @@
 
 .ui-button:not(:disabled):active svg {
   transform: scale(0.96);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ui-icon-button:hover svg {
+    transform: scale(1.07);
+  }
 }
 
 .ui-segmented-control {

@@ -7,6 +7,7 @@ import DropInsertionLine from './FileTreeDropInsertionLine';
 import NoteTreeExportButton from './FileTreeExportButton';
 import FileTreeLabel from './FileTreeLabel';
 import InlineRenameInput from './FileTreeInlineRenameInput';
+import useMotionPresence from '../../hooks/useMotionPresence';
 
 export default function FileTreeRow({ item, items, depth, ide }) {
     const indicator = ide.fileDropIndicator?.targetPath === item.path ? ide.fileDropIndicator : null;
@@ -17,6 +18,8 @@ export default function FileTreeRow({ item, items, depth, ide }) {
     const isActiveRow = ide.selectedPaths.has(item.path) || item.path === ide.currentFilePath;
     const isExitingRow = ide.exitingFilePaths?.has(item.path);
     const isRecentRow = ide.recentFileTreePaths?.has(item.path);
+    const hasOpenChildren = item.type === 'folder' && item.isOpen && Array.isArray(item.children);
+    const childrenPresence = useMotionPresence(hasOpenChildren, { exitToken: '--motion-base' });
     const actionCount = item.type === 'folder' ? 5 : isTextFile ? 3 : 2;
     const actionWidth = actionCount * 20 + Math.max(0, actionCount - 1) * 4 + 2;
 
@@ -170,7 +173,7 @@ export default function FileTreeRow({ item, items, depth, ide }) {
           paddingLeft: `${depth * 12 + 8}px`,
           '--file-tree-action-width': `${actionWidth}px`,
         }}
-        className={`file-tree-row motion-row motion-list-enter relative min-w-0 overflow-hidden py-1.5 pr-2 rounded-lg cursor-pointer group text-[13px]
+        className={`file-tree-row motion-row relative min-w-0 overflow-hidden py-1.5 pr-2 rounded-lg cursor-pointer group text-[13px]
             ${
               ide.fileDragOverId === item.id
                 ? 'bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-400'
@@ -323,8 +326,8 @@ export default function FileTreeRow({ item, items, depth, ide }) {
         </div>
       )}
 
-      {item.type === 'folder' && item.isOpen && item.children && (
-        <div className="settings-expand-enter w-full">
+      {childrenPresence.present && item.type === 'folder' && item.children && (
+        <div className={`file-tree-children motion-list-enter w-full ${childrenPresence.exiting ? 'motion-list-exit' : ''}`}>
           <FileTree items={item.children} depth={depth + 1} ide={ide} />
         </div>
       )}

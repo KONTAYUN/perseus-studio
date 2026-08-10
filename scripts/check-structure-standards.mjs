@@ -91,7 +91,6 @@ function checkForbiddenResidue(file) {
 function checkStructuredStatePolicy(file) {
   const source = fs.readFileSync(file, 'utf8');
   const relativePath = rel(file);
-  if (relativePath === 'backend/internal/ai/legacy_provider_text_fallback.go') return;
 
   const patterns = [
     [/\bstrings\.(?:Contains|HasPrefix)\(\s*(?:strings\.ToLower\(\s*)?err\.Error\(\)/g, 'errors must be classified by typed errors or stable codes, not error text'],

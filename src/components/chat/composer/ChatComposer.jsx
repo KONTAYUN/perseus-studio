@@ -5,6 +5,7 @@ import ComposerReferences from './ComposerReferences';
 import PendingRunMessagePanel from './PendingRunMessagePanel';
 import RunSteerPreviewPanel from './RunSteerPreviewPanel';
 import { pendingUserRequest } from '../chatUtils';
+import useMotionPresence from '../../../hooks/useMotionPresence';
 
 export default function ChatComposer({ ide, panelId = 'chat', composerRef, submitChatMessage }) {
   const attachmentInputRef = React.useRef(null);
@@ -75,28 +76,22 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
           e.target.value = '';
         }}
       />
-      {visiblePendingRunMessage && (
-        <PendingRunMessagePanel
-          message={visiblePendingRunMessage}
-          notice={visibleRunSteerNotice?.status === 'warn' || visibleRunSteerNotice?.status === 'error' ? visibleRunSteerNotice : null}
-          disabled={!isCurrentConversationSending}
-          onSteer={ide.sendPendingRunMessageAsSteer}
-          onDelete={ide.discardPendingRunMessage}
-        />
-      )}
-      {!visiblePendingRunMessage && (
-        <RunSteerPreviewPanel
-          items={visibleRunSteerItems}
-          onDelete={ide.discardRunSteerItem}
-          onQueueAfterRun={ide.queueRunSteerItemAfterRun}
-          onRetry={ide.retryRunSteerItem}
-        />
-      )}
-      {!visiblePendingRunMessage && (visibleRunSteerNotice?.status === 'warn' || visibleRunSteerNotice?.status === 'error') && visibleRunSteerNotice?.text && (
-        <div className="run-steer-notice-panel motion-popover pointer-events-auto mb-3">
-          {visibleRunSteerNotice.text}
-        </div>
-      )}
+      <PendingRunMessagePanel
+        message={visiblePendingRunMessage}
+        notice={visibleRunSteerNotice?.status === 'warn' || visibleRunSteerNotice?.status === 'error' ? visibleRunSteerNotice : null}
+        disabled={!isCurrentConversationSending}
+        onSteer={ide.sendPendingRunMessageAsSteer}
+        onDelete={ide.discardPendingRunMessage}
+      />
+      <RunSteerPreviewPanel
+        items={visiblePendingRunMessage ? [] : visibleRunSteerItems}
+        onDelete={ide.discardRunSteerItem}
+        onQueueAfterRun={ide.queueRunSteerItemAfterRun}
+        onRetry={ide.retryRunSteerItem}
+      />
+      <RunSteerNotice
+        notice={!visiblePendingRunMessage && (visibleRunSteerNotice?.status === 'warn' || visibleRunSteerNotice?.status === 'error') ? visibleRunSteerNotice : null}
+      />
       <div
         className={`composer-shell motion-soft-focus pointer-events-auto relative overflow-visible border bg-white/88 backdrop-blur-2xl dark:bg-[#171719]/92 ${ide.getInputGlowStyle()}`}
         onDragOver={handleDragOver}
@@ -128,6 +123,20 @@ export default function ChatComposer({ ide, panelId = 'chat', composerRef, submi
           isSendDisabled={isSendDisabled}
         />
       </div>
+    </div>
+  );
+}
+
+function RunSteerNotice({ notice }) {
+  const hasNotice = Boolean(notice?.text);
+  const { exiting, present } = useMotionPresence(hasNotice, { exitToken: '--motion-fast' });
+  const lastNoticeRef = React.useRef(null);
+  if (notice?.text) lastNoticeRef.current = notice;
+  if (!present || !lastNoticeRef.current?.text) return null;
+
+  return (
+    <div className={`run-steer-notice-panel motion-message pointer-events-auto mb-3 ${exiting ? 'motion-presence-exit pointer-events-none' : ''}`}>
+      {(hasNotice ? notice : lastNoticeRef.current).text}
     </div>
   );
 }

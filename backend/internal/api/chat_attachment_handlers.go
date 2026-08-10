@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (s *Server) handleChatAttachments(w http.ResponseWriter, r *http.Request) {
@@ -16,6 +17,9 @@ func (s *Server) handleChatAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := MustUserFromContext(r.Context())
+	if !s.allowRate(w, s.uploadLimiter, user.UserID, s.cfg.UploadRatePerMinute, time.Minute, "upload_rate_limited") {
+		return
+	}
 	if err := r.ParseMultipartForm(maxChatImageBytes + (1 << 20)); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid multipart body")
 		return

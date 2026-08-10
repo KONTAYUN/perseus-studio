@@ -35,10 +35,6 @@ func (s *Server) answerAgentFollowupQuestion(ctx context.Context, userID, runID 
 	if err != nil {
 		return nil, err
 	}
-	originalMessage, err := s.conversations.GetMessage(ctx, userID, nullableStringValue(run.UserMessageID))
-	if err != nil {
-		return nil, err
-	}
 	if existing, existingToolCallID, existingAnswer, ok, lookupErr := s.runs.ExistingFollowupAnswer(ctx, userID, runID, req.AnswerID); lookupErr != nil {
 		return nil, lookupErr
 	} else if ok {
@@ -69,6 +65,9 @@ func (s *Server) answerAgentFollowupQuestion(ctx context.Context, userID, runID 
 			return nil, err
 		}
 	}
+	if err := s.ensureAgentQueueCapacity(ctx, userID); err != nil {
+		return nil, err
+	}
 
 	stored, err := s.runs.AnswerFollowupQuestion(ctx, store.AgentFollowupAnswerInput{
 		UserID: userID, RunID: runID, ToolCallID: req.ToolCallID,
@@ -77,29 +76,27 @@ func (s *Server) answerAgentFollowupQuestion(ctx context.Context, userID, runID 
 		TurnID: preparation.TurnID, ToolResultPayloadJSON: preparation.ToolResultPayload,
 		CheckpointJSON:  string(checkpointJSON),
 		MessageMetaJSON: messageMetaJSON("user_response", 0, runID),
+		ResumeEvent: store.AgentEventInput{
+			ID:   fmt.Sprintf("evt_followup_resume_%s_%d", runID, run.EventHeadSeq+1),
+			Type: "user_response_answered", Level: "info",
+			Payload: map[string]any{
+				"tool_call_id": req.ToolCallID, "answer_id": req.AnswerID,
+				"tool_name": preparation.ToolName, "request_kind": userRequestKind(preparation.ToolName),
+				"answer_message_id": answerMessageID, "message": "user response received",
+			},
+		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, runLifecycleError(err)
 	}
 	if stored.AlreadyApplied {
 		return map[string]any{"run": stored.Run, "user_message": stored.UserMessage, "already_applied": true}, nil
 	}
-
-	event := s.appendRunEvent(ctx, store.AgentEventInput{
-		RunID: runID, UserID: userID, ConversationID: run.ConversationID,
-		MessageID: stored.UserMessage.ID, Type: "user_response_answered", Level: "info",
-		Payload: map[string]any{
-			"tool_call_id": req.ToolCallID, "answer_id": req.AnswerID,
-			"tool_name": preparation.ToolName, "request_kind": userRequestKind(preparation.ToolName),
-			"answer_message_id": stored.UserMessage.ID, "user_message": stored.UserMessage,
-			"message": "user response received",
-		},
-	})
+	event := stored.ResumeEvent
+	s.runBroker.Publish(runID, tasks.Event{Type: "event", Log: event})
 	s.runBroker.Publish(runID, tasks.Event{Type: "run", Task: stored.Run})
 
-	user := MustUserFromContext(ctx)
-	attachmentPayloads := s.payloadsFromStoredMessageAttachments(ctx, user.UserID, originalMessage)
-	go s.executeConversationRun(userID, user.Role, run.ConversationID, originalMessage.ID, run.ModelProviderID, originalMessage.Content, originalMessage.AttachmentsJSON, attachmentPayloads, "", runID)
+	s.wakeAgentScheduler()
 
 	var assistantMessage any
 	if assistantMessageID != "" {

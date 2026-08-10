@@ -123,36 +123,19 @@ func TestProviderHTTPClientUsesConservativeHTTP1Transport(t *testing.T) {
 	}
 }
 
-func TestProviderTurnCanStreamAssistantTextOnlyWhenPatchChannelInactive(t *testing.T) {
+func TestProviderTurnCanStreamAssistantTextOutsideBackgroundTasks(t *testing.T) {
 	if !providerTurnCanStreamAssistantText(providerTurnRequest{}) {
 		t.Fatal("plain chat should stream assistant text")
 	}
 	if providerTurnCanStreamAssistantText(providerTurnRequest{Opts: RunOptions{TaskID: "task_1"}}) {
 		t.Fatal("background task text should wait for complete-turn patch capture")
 	}
-	loaded := map[string]bool{"workspace": true}
-	if !providerTurnCanStreamAssistantText(providerTurnRequest{Tools: openAIToolsForLoadedToolsets(loaded, true)}) {
-		t.Fatal("workspace tool turns should stream ordinary text; patch blocks are filtered separately")
-	}
-	if providerTurnCanStreamAssistantText(providerTurnRequest{
-		ActionBoundaryActive: true,
-		Snapshot: ContextSnapshot{Summary: ProviderRequestSummary{
-			KernelMode: agentKernelCodexParity,
-		}},
-	}) {
-		t.Fatal("codex-parity action-boundary turns must keep intermediate text out of the main chat stream")
-	}
-	if !providerTurnCanStreamAssistantText(providerTurnRequest{
-		ActionBoundaryActive: true,
-		Snapshot: ContextSnapshot{Summary: ProviderRequestSummary{
-			KernelMode: agentKernelV2Current,
-		}},
-	}) {
-		t.Fatal("current v2 mode keeps the previous streaming behavior for compatibility")
+	if !providerTurnCanStreamAssistantText(providerTurnRequest{Tools: []map[string]any{{"type": "function"}}}) {
+		t.Fatal("foreground structured-tool turns should stream commentary after a tool is observed")
 	}
 }
 
-func TestActionBoundaryActiveBuffersTextUntilActionAppears(t *testing.T) {
+func TestToolGatedStreamBuffersTextUntilActionAppears(t *testing.T) {
 	var streamed strings.Builder
 	stream := "我会先查看。\n"
 	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(strings.Join([]string{
@@ -171,7 +154,7 @@ func TestActionBoundaryActiveBuffersTextUntilActionAppears(t *testing.T) {
 		t.Fatalf("expected turn content to keep candidate text for runtime correction, got %q", turn.Content)
 	}
 	if streamed.String() != "" || turn.PublicTextStreamed {
-		t.Fatalf("action-boundary text without an action must not stream, streamed=%q public=%q flag=%v", streamed.String(), turn.PublicStreamedContent, turn.PublicTextStreamed)
+		t.Fatalf("tool-gated text without an action must not stream, streamed=%q public=%q flag=%v", streamed.String(), turn.PublicStreamedContent, turn.PublicTextStreamed)
 	}
 }
 
@@ -2772,9 +2755,6 @@ func TestRuntimeToolChoiceRequiresCompletionActionAfterVerifiedTool(t *testing.T
 	if got := openAIProviderToolChoice(runtime.toolChoice()); got != "auto" {
 		t.Fatalf("expected OpenAI auto tool choice after verified tool, got %#v", got)
 	}
-	if !runtime.actionBoundaryActive() {
-		t.Fatal("expected local action boundary to stay active after verified tool")
-	}
 }
 
 func TestRuntimeToolChoiceRequiresToolsBeforeVerifiedTool(t *testing.T) {
@@ -2788,9 +2768,6 @@ func TestRuntimeToolChoiceRequiresToolsBeforeVerifiedTool(t *testing.T) {
 	anthropic := anthropicProviderToolChoice(runtime.toolChoice())
 	if anthropic["type"] != "auto" || anthropic["disable_parallel_tool_use"] != true {
 		t.Fatalf("expected Anthropic auto tool choice with serial tools, got %#v", anthropic)
-	}
-	if !runtime.actionBoundaryActive() {
-		t.Fatal("expected local action boundary before verified tool")
 	}
 }
 
@@ -2936,9 +2913,6 @@ func TestRuntimeForceToolOnlyBeforeFirstToolAttempt(t *testing.T) {
 	runtime.performedMutation = true
 	if choice := runtime.toolChoice(); choice.Mode != providerToolChoiceAuto {
 		t.Fatalf("expected provider-auto after verified forced tool result, got %#v", choice)
-	}
-	if !runtime.actionBoundaryActive() {
-		t.Fatal("expected local action boundary after forced tool attempt")
 	}
 }
 
@@ -3343,10 +3317,6 @@ const testUserID = "test-user-id"
 
 func newTestAIEnv(t *testing.T) *testAIEnv {
 	t.Helper()
-	// Historical integration fixtures exercise the explicit rollback path. New
-	// turn-engine behavior uses newTurnEngineTestAIEnv below.
-	t.Setenv("PERSEUS_AGENT_KERNEL_MODE", agentKernelLegacy)
-
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "test.db")
 	db, err := store.Open(dbPath)
@@ -3407,7 +3377,5 @@ func newTestAIEnv(t *testing.T) *testAIEnv {
 
 func newTurnEngineTestAIEnv(t *testing.T) *testAIEnv {
 	t.Helper()
-	env := newTestAIEnv(t)
-	t.Setenv("PERSEUS_AGENT_KERNEL_MODE", agentKernelV3)
-	return env
+	return newTestAIEnv(t)
 }

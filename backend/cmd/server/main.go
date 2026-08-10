@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -17,6 +21,7 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	cfg := config.Load()
 
 	db, err := store.Open(cfg.DatabasePath)
@@ -80,10 +85,37 @@ func main() {
 	if err := agentRunStore.Migrate(context.Background()); err != nil {
 		log.Fatalf("migrate agent run database: %v", err)
 	}
-	if count, err := agentRunStore.FailStaleRunningRuns(context.Background(), 2*time.Minute, "上次服务停止或本地状态保存中断，本轮已暂停，可点击继续本轮。"); err != nil {
-		log.Fatalf("recover stale agent runs: %v", err)
-	} else if count > 0 {
-		log.Printf("marked %d stale agent run(s) as recoverable failed", count)
+	runningRuns, err := agentRunStore.ListRunningRuns(context.Background(), 1000)
+	if err != nil {
+		log.Fatalf("list interrupted agent runs: %v", err)
+	}
+	for _, run := range runningRuns {
+		message := "上次服务停止时本轮仍在执行，已安全暂停，可点击继续本轮。"
+		failureJSON, _ := json.Marshal(map[string]any{
+			"failure_class":      "service_restart_interrupted",
+			"can_resume_now":     true,
+			"recommended_action": "continue",
+		})
+		failureJSONString := string(failureJSON)
+		messageID := ""
+		if run.UserMessageID.Valid {
+			messageID = run.UserMessageID.String
+		}
+		if _, _, finalizeErr := agentRunStore.FinalizeRunWithEvent(context.Background(), store.FinalizeAgentRunInput{
+			RunID: run.ID, UserID: run.UserID, Status: store.AgentRunFailed, Stage: "recoverable",
+			Update: store.UpdateAgentRunInput{ErrorMessage: &message, FailureJSON: &failureJSONString, SetCompletedAt: true},
+			Event: store.AgentEventInput{
+				ID:             fmt.Sprintf("evt_terminal_%s_%d", run.ID, run.EventHeadSeq+1),
+				ConversationID: run.ConversationID, MessageID: messageID,
+				Type: "run_failed", Level: "warn",
+				Payload: map[string]any{"failure_class": "service_restart_interrupted", "error": message, "can_resume_now": true},
+			},
+		}); finalizeErr != nil {
+			log.Fatalf("recover interrupted agent run %s: %v", run.ID, finalizeErr)
+		}
+	}
+	if len(runningRuns) > 0 {
+		log.Printf("marked %d interrupted agent run(s) as recoverable failed", len(runningRuns))
 	}
 	skillStore := store.NewSkillStore(db)
 	if err := skillStore.Migrate(context.Background()); err != nil {
@@ -116,9 +148,13 @@ func main() {
 
 	handler := api.NewServer(taskStore, agentRunStore, configStore, conversationStore, diagnosticStore, usageStore, userStore, sessionStore, broker, runBroker, factory, aiService, cfg)
 	handler.StartChatAttachmentCleanup(ctx)
+	handler.StartAgentRunScheduler(ctx)
 	server := &http.Server{
-		Addr:    cfg.ListenAddr,
-		Handler: handler.Routes(),
+		Addr:              cfg.ListenAddr,
+		Handler:           handler.Routes(),
+		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
+		IdleTimeout:       cfg.HTTPIdleTimeout,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	go func() {
