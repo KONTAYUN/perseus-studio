@@ -165,6 +165,18 @@ async function main() {
     (groups[item.run.status] ||= []).push(item);
     return groups;
   }, {});
+  const terminalFailures = submitted
+    .filter((item) => item.run.status !== 'succeeded')
+    .map((item) => ({
+      username: item.username,
+      run_id: item.runID,
+      status: item.run.status,
+      stage: item.run.stage || null,
+      failure_class: item.run.failure_class || null,
+      error_code: item.run.error_code || null,
+      error_message: item.run.error_message || null,
+      diagnostic_log_id: item.run.diagnostic_log_id || null,
+    }));
   const report = {
     generated_at: new Date().toISOString(),
     configuration: { user_count: userCount, runs_per_user: runsPerUser, total_runs: submitted.length, restart },
@@ -181,6 +193,7 @@ async function main() {
       sqlite_integrity: after.integrity,
       agent_event_payload_growth_bytes: (after.tables?.agent_events?.payload_bytes || 0) - (before.tables?.agent_events?.payload_bytes || 0),
       active_preview_rows: after.tables?.agent_edit_previews?.rows || 0,
+      terminal_failures: terminalFailures,
     },
   };
 
