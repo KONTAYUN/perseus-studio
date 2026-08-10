@@ -110,6 +110,15 @@ type ResumeAgentRunInput struct {
 	Event  AgentEventInput
 }
 
+// RequeueInterruptedAgentRunInput reopens a run that was still executing when
+// the service stopped. Unlike a user-initiated resume, this keeps the run's
+// checkpoint and does not create an intermediate terminal failure.
+type RequeueInterruptedAgentRunInput struct {
+	RunID  string
+	UserID string
+	Event  AgentEventInput
+}
+
 type AgentEventFilter struct {
 	Types []string
 	Limit int

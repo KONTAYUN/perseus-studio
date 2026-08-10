@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -90,32 +89,24 @@ func main() {
 		log.Fatalf("list interrupted agent runs: %v", err)
 	}
 	for _, run := range runningRuns {
-		message := "上次服务停止时本轮仍在执行，已安全暂停，可点击继续本轮。"
-		failureJSON, _ := json.Marshal(map[string]any{
-			"failure_class":      "service_restart_interrupted",
-			"can_resume_now":     true,
-			"recommended_action": "continue",
-		})
-		failureJSONString := string(failureJSON)
 		messageID := ""
 		if run.UserMessageID.Valid {
 			messageID = run.UserMessageID.String
 		}
-		if _, _, finalizeErr := agentRunStore.FinalizeRunWithEvent(context.Background(), store.FinalizeAgentRunInput{
-			RunID: run.ID, UserID: run.UserID, Status: store.AgentRunFailed, Stage: "recoverable",
-			Update: store.UpdateAgentRunInput{ErrorMessage: &message, FailureJSON: &failureJSONString, SetCompletedAt: true},
+		if _, _, requeueErr := agentRunStore.RequeueInterruptedRunWithEvent(context.Background(), store.RequeueInterruptedAgentRunInput{
+			RunID: run.ID, UserID: run.UserID,
 			Event: store.AgentEventInput{
-				ID:             fmt.Sprintf("evt_terminal_%s_%d", run.ID, run.EventHeadSeq+1),
+				ID:             fmt.Sprintf("evt_requeue_%s_%d", run.ID, run.EventHeadSeq+1),
 				ConversationID: run.ConversationID, MessageID: messageID,
-				Type: "run_failed", Level: "warn",
-				Payload: map[string]any{"failure_class": "service_restart_interrupted", "error": message, "can_resume_now": true},
+				Type: "run_requeued_after_restart", Level: "info",
+				Payload: map[string]any{"reason": "service_restart", "resume_mode": "checkpoint"},
 			},
-		}); finalizeErr != nil {
-			log.Fatalf("recover interrupted agent run %s: %v", run.ID, finalizeErr)
+		}); requeueErr != nil {
+			log.Fatalf("requeue interrupted agent run %s: %v", run.ID, requeueErr)
 		}
 	}
 	if len(runningRuns) > 0 {
-		log.Printf("marked %d interrupted agent run(s) as recoverable failed", len(runningRuns))
+		log.Printf("requeued %d interrupted agent run(s) from checkpoint", len(runningRuns))
 	}
 	skillStore := store.NewSkillStore(db)
 	if err := skillStore.Migrate(context.Background()); err != nil {

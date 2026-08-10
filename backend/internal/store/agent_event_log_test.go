@@ -292,3 +292,50 @@ func TestRunningRunRecoveryPreservesTerminalEventBarrier(t *testing.T) {
 		t.Fatalf("recovered run remained active: %#v", remaining)
 	}
 }
+
+func TestRunningRunRecoveryRequeuesFromCheckpointAtomically(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "running-requeue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	runs := NewAgentRunStore(db)
+	if err := runs.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.CreateRun(ctx, CreateAgentRunInput{
+		UserID: "user-a", ConversationID: "conv-a", ModelProviderID: "model-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := runs.ClaimQueuedRun(ctx, "user-a", run.ID)
+	if err != nil || !ok {
+		t.Fatalf("claim queued run: ok=%v err=%v", ok, err)
+	}
+	requeued, event, err := runs.RequeueInterruptedRunWithEvent(ctx, RequeueInterruptedAgentRunInput{
+		RunID: run.ID, UserID: "user-a",
+		Event: AgentEventInput{
+			ID: "restart-requeue", RunID: run.ID, UserID: "user-a",
+			ConversationID: "conv-a", Type: "run_requeued_after_restart", Level: "info",
+			Payload: map[string]any{"reason": "service_restart", "resume_mode": "checkpoint"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued.Status != AgentRunQueued || requeued.FinalSeq != 0 || event.Seq != requeued.EventHeadSeq {
+		t.Fatalf("unexpected requeued run: run=%#v event=%#v claimed=%#v", requeued, event, claimed)
+	}
+	if _, replay, err := runs.RequeueInterruptedRunWithEvent(ctx, RequeueInterruptedAgentRunInput{
+		RunID: run.ID, UserID: "user-a",
+		Event: AgentEventInput{
+			ID: "restart-requeue", RunID: run.ID, UserID: "user-a",
+			ConversationID: "conv-a", Type: "run_requeued_after_restart", Level: "info",
+			Payload: map[string]any{"reason": "service_restart", "resume_mode": "checkpoint"},
+		},
+	}); err != nil || replay.ID != event.ID || replay.Seq != event.Seq {
+		t.Fatalf("requeue event was not idempotent: replay=%#v err=%v", replay, err)
+	}
+}

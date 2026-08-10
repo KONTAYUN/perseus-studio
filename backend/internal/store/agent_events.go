@@ -310,6 +310,101 @@ FROM agent_runs WHERE id = ? AND user_id = ?`, input.RunID, input.UserID))
 	return run, event, nil
 }
 
+// RequeueInterruptedRunWithEvent moves an in-flight run back to the durable
+// scheduler after a service restart. The lifecycle event and status transition
+// are committed together, so a restarted process cannot expose a queued run
+// without recording why it was requeued.
+func (s *AgentRunStore) RequeueInterruptedRunWithEvent(ctx context.Context, input RequeueInterruptedAgentRunInput) (AgentRun, AgentEvent, error) {
+	if strings.TrimSpace(input.RunID) == "" || strings.TrimSpace(input.UserID) == "" {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("requeue run id and user id are required")
+	}
+	eventInput := input.Event
+	if eventInput.RunID == "" {
+		eventInput.RunID = input.RunID
+	}
+	if eventInput.UserID == "" {
+		eventInput.UserID = input.UserID
+	}
+	if eventInput.RunID != input.RunID || eventInput.UserID != input.UserID {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("requeue event ownership does not match run")
+	}
+	eventType := strings.TrimSpace(eventInput.Type)
+	if eventType == "" {
+		eventType = "run_requeued_after_restart"
+	}
+	level := strings.TrimSpace(strings.ToLower(eventInput.Level))
+	if level == "" {
+		level = "info"
+	}
+	raw, err := json.Marshal(eventInput.Payload)
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, fmt.Errorf("encode requeue event payload: %w", err)
+	}
+	now := time.Now().UTC()
+	eventID := strings.TrimSpace(eventInput.ID)
+	if eventID == "" {
+		eventID = nextStoreID("evt", now)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	defer tx.Rollback()
+
+	if eventInput.ID != "" {
+		existing, lookupErr := scanAgentEvent(tx.QueryRowContext(ctx, `
+SELECT id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+FROM agent_events WHERE id = ?
+`, eventID))
+		if lookupErr == nil {
+			if existing.RunID != eventInput.RunID || existing.UserID != eventInput.UserID ||
+				existing.ConversationID != eventInput.ConversationID || existing.MessageID != eventInput.MessageID ||
+				existing.TaskID != eventInput.TaskID || existing.Type != eventType || existing.Level != level ||
+				existing.PayloadJSON != string(raw) {
+				return AgentRun{}, AgentEvent{}, fmt.Errorf("%w: requeue event id %s was replayed with different content", ErrAgentEventIntegrity, eventID)
+			}
+			run, runErr := scanAgentRun(tx.QueryRowContext(ctx, `SELECT `+agentRunSelectColumns+`
+FROM agent_runs WHERE id = ? AND user_id = ?`, input.RunID, input.UserID))
+			return run, existing, runErr
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return AgentRun{}, AgentEvent{}, lookupErr
+		}
+	}
+
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `
+UPDATE agent_runs
+SET status = ?, stage = ?, error_message = NULL, diagnostic_log_id = NULL,
+    failure_json = NULL, started_at = NULL, completed_at = NULL,
+    queued_at = ?, event_head_seq = event_head_seq + 1, updated_at = ?
+WHERE id = ? AND user_id = ? AND status = ? AND final_seq = 0
+RETURNING event_head_seq
+`, AgentRunQueued, "queued", now, now, input.RunID, input.UserID, AgentRunRunning).Scan(&seq); err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	event, err := scanAgentEvent(tx.QueryRowContext(ctx, `
+INSERT INTO agent_events (
+  id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+`, eventID, eventInput.RunID, eventInput.UserID, eventInput.ConversationID, eventInput.MessageID,
+		eventInput.TaskID, eventType, level, seq, string(raw), now))
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, `SELECT `+agentRunSelectColumns+`
+FROM agent_runs WHERE id = ? AND user_id = ?`, input.RunID, input.UserID))
+	if err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AgentRun{}, AgentEvent{}, err
+	}
+	return run, event, nil
+}
+
 func (s *AgentRunStore) EventHeadSeq(ctx context.Context, userID, runID string) (int64, error) {
 	var seq int64
 	err := s.db.QueryRowContext(ctx, `
