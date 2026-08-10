@@ -66,6 +66,11 @@ const evidence = {
   load,
   soak,
   provider_live: gate?.provider_live || (process.env.PERSEUS_LIVE_PROVIDER_BASE_URL ? 'configured' : 'unverified'),
+  maintenance_before: maintenance?.before || null,
+  maintenance_after: maintenance?.after || null,
+  archive_manifest: maintenance?.archive_manifest || null,
+  vacuum_result: maintenance?.vacuum_result || null,
+  rollback_verified: maintenance?.rollback_verified || null,
   maintenance: maintenance || {
     full_integrity: sqlite?.integrity === 'ok',
     status: 'not_recorded',
