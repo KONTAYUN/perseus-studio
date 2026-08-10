@@ -10,12 +10,19 @@ const reports = [];
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 let cycle = 0;
 
+function runNpm(args) {
+  const windowsCommand = process.platform === 'win32';
+  const program = windowsCommand ? (process.env.ComSpec || 'cmd.exe') : npmCommand;
+  const commandArgs = windowsCommand ? ['/d', '/c', npmCommand, ...args] : args;
+  return spawnSync(program, commandArgs, { stdio: 'inherit', env: process.env });
+}
+
 await fs.mkdir(outputDir, { recursive: true });
 while (Date.now() < deadline) {
   cycle += 1;
   if (cycle === 1) {
-    const faultResult = spawnSync(npmCommand, ['run', 'test:e2e:faults'], { stdio: 'inherit', env: process.env });
-    if (faultResult.status !== 0) process.exit(faultResult.status || 1);
+    const faultResult = runNpm(['run', 'test:e2e:faults']);
+    if (faultResult.error || faultResult.status !== 0) process.exit(faultResult.status || 1);
   }
   const reportPath = path.join(outputDir, `cycle-${String(cycle).padStart(3, '0')}.json`);
   const args = ['scripts/agent-load.mjs', ...(cycle % 5 === 0 ? ['--restart'] : [])];
