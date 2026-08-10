@@ -12,9 +12,27 @@ let cycle = 0;
 
 function runProcess(program, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(program, args, options);
+    const child = spawn(program, args, {
+      ...options,
+      // Soak runs many child processes. Keep their output bounded and off the
+      // terminal; otherwise a long Windows run can exhaust the console host.
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    const appendTail = (current, chunk) => {
+      const next = current + chunk.toString();
+      return next.length > 8192 ? next.slice(-8192) : next;
+    };
+    child.stdout.on('data', (chunk) => { stdout = appendTail(stdout, chunk); });
+    child.stderr.on('data', (chunk) => { stderr = appendTail(stderr, chunk); });
     child.once('error', reject);
-    child.once('close', (code, signal) => resolve({ status: code ?? 1, signal }));
+    child.once('close', (code, signal) => resolve({
+      status: code ?? 1,
+      signal,
+      stdout,
+      stderr,
+    }));
   });
 }
 
@@ -22,7 +40,7 @@ function runNpm(args) {
   const windowsCommand = process.platform === 'win32';
   const program = windowsCommand ? (process.env.ComSpec || 'cmd.exe') : npmCommand;
   const commandArgs = windowsCommand ? ['/d', '/c', npmCommand, ...args] : args;
-  return runProcess(program, commandArgs, { stdio: 'inherit', env: process.env });
+  return runProcess(program, commandArgs, { env: process.env });
 }
 
 await fs.rm(outputDir, { recursive: true, force: true });
@@ -44,7 +62,10 @@ while (Date.now() < deadline) {
       PERSEUS_LOAD_REPORT: reportPath,
     },
   });
-  if (result.status !== 0) process.exit(result.status || 1);
+  if (result.status !== 0) {
+    process.stderr.write(`soak cycle ${cycle} failed\n${result.stderr || result.stdout}\n`);
+    process.exit(result.status || 1);
+  }
   reports.push(JSON.parse(await fs.readFile(reportPath, 'utf8')));
 }
 
