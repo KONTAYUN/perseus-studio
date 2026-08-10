@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
@@ -10,23 +10,31 @@ const reports = [];
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 let cycle = 0;
 
+function runProcess(program, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(program, args, options);
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({ status: code ?? 1, signal }));
+  });
+}
+
 function runNpm(args) {
   const windowsCommand = process.platform === 'win32';
   const program = windowsCommand ? (process.env.ComSpec || 'cmd.exe') : npmCommand;
   const commandArgs = windowsCommand ? ['/d', '/c', npmCommand, ...args] : args;
-  return spawnSync(program, commandArgs, { stdio: 'inherit', env: process.env });
+  return runProcess(program, commandArgs, { stdio: 'inherit', env: process.env });
 }
 
 await fs.mkdir(outputDir, { recursive: true });
 while (Date.now() < deadline) {
   cycle += 1;
   if (cycle === 1) {
-    const faultResult = runNpm(['run', 'test:e2e:faults']);
+    const faultResult = await runNpm(['run', 'test:e2e:faults']);
     if (faultResult.error || faultResult.status !== 0) process.exit(faultResult.status || 1);
   }
   const reportPath = path.join(outputDir, `cycle-${String(cycle).padStart(3, '0')}.json`);
   const args = ['scripts/agent-load.mjs', ...(cycle % 5 === 0 ? ['--restart'] : [])];
-  const result = spawnSync(process.execPath, args, {
+  const result = await runProcess(process.execPath, args, {
     stdio: 'inherit',
     env: {
       ...process.env,

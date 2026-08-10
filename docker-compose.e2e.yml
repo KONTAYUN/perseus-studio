@@ -1,6 +1,8 @@
 services:
   webide:
     environment:
+      PERSEUS_ADMIN_USERNAME: "admin"
+      PERSEUS_ADMIN_PASSWORD: "password"
       SESSION_COOKIE_SECURE: "false"
       AGENT_MAX_CONCURRENT_GLOBAL: "4"
       AGENT_MAX_CONCURRENT_PER_USER: "2"
