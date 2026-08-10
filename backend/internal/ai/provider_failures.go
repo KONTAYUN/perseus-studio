@@ -150,15 +150,15 @@ func classifyProviderResponseFailure(err *ProviderResponseError) ProviderFailure
 	switch {
 	case err.StatusCode == 429:
 		failure.Class = ProviderFailureRateLimited
-	case isQuotaErrorCode(failure.Code):
+	case isQuotaErrorCode(failure.Code) || isQuotaErrorCode(failure.Type):
 		failure.Class = ProviderFailureQuotaExhausted
-	case isContextLimitErrorCode(failure.Code):
+	case isContextLimitErrorCode(failure.Code) || isContextLimitErrorCode(failure.Type):
 		failure.Class = ProviderFailureContextExceeded
 	case err.StatusCode == 401 || err.StatusCode == 403:
 		failure.Class = ProviderFailureAuthentication
-	case isModelUnavailableErrorCode(failure.Code):
+	case isModelUnavailableErrorCode(failure.Code) || isModelUnavailableErrorCode(failure.Type):
 		failure.Class = ProviderFailureModelUnavailable
-	case isCapabilityErrorCode(failure.Code):
+	case isCapabilityErrorCode(failure.Code) || isCapabilityErrorCode(failure.Type):
 		failure.Class = ProviderFailureCapabilityUnsupported
 	case err.StatusCode == 404:
 		failure.Class = ProviderFailureModelUnavailable

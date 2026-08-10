@@ -303,6 +303,10 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		}
 		emitToolLifecycleEvent(opts, "tool_call_completed", "info", eventPayload)
 		if shouldEmitWorkspaceFileChanged(name, event) {
+			if opts.BeforeAuthoritativeFileChange != nil {
+				opts.BeforeAuthoritativeFileChange(event)
+				event.AuthoritativePrepared = true
+			}
 			mutationID := event.MutationID
 			emitToolLifecycleEvent(opts, "workspace_file_changed", "info", map[string]any{
 				"type":                  "workspace_file_changed",

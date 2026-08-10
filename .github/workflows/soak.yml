@@ -1,0 +1,53 @@
+name: Nightly Soak
+
+on:
+  schedule:
+    - cron: "20 18 * * *"
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: Soak duration in minutes
+        required: false
+        default: "30"
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Start production image and deterministic provider
+        run: docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e up -d --build --wait
+      - name: Run soak with restart and network fault cycles
+        run: PERSEUS_SOAK_DURATION_MS=$((SOAK_MINUTES * 60000)) npm run test:soak
+        env:
+          SOAK_MINUTES: ${{ inputs.duration_minutes || '30' }}
+      - name: Collect release evidence
+        if: always()
+        run: npm run test:release-evidence
+      - name: Capture service logs
+        if: always()
+        run: |
+          mkdir -p soak-artifacts
+          docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e logs --no-color > soak-artifacts/containers.log
+      - name: Upload soak evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perseus-soak-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            test-results/
+            soak-artifacts/
+      - name: Stop stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e down -v

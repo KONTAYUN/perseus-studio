@@ -19,7 +19,8 @@ RUN go mod download
 COPY backend ./
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags "-X webide-backend/internal/version.Version=${APP_VERSION} -X webide-backend/internal/version.Commit=${APP_COMMIT} -X webide-backend/internal/version.BuiltAt=${APP_BUILT_AT}" \
-    -o /out/webide-backend ./cmd/server
+    -o /out/webide-backend ./cmd/server \
+    && CGO_ENABLED=0 GOOS=linux go build -o /out/perseus-maintain ./cmd/perseus-maintain
 
 FROM ${IMAGE_REGISTRY}/library/debian:bookworm-slim AS runtime
 ENV BACKEND_ADDR=:8080 \
@@ -54,6 +55,7 @@ RUN groupadd --gid 10001 perseus \
 
 WORKDIR /app
 COPY --from=backend-build /out/webide-backend /app/webide-backend
+COPY --from=backend-build /out/perseus-maintain /usr/local/bin/perseus-maintain
 COPY --from=frontend-build /src/dist /app/dist
 
 RUN mkdir -p /data/users \

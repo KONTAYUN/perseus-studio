@@ -100,6 +100,24 @@ func Open(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+func OpenReadOnly(path string) (*sql.DB, error) {
+	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
 func LastDBRuntimeInfo() DBRuntimeInfo {
 	lastDBRuntimeInfoMu.RLock()
 	defer lastDBRuntimeInfoMu.RUnlock()

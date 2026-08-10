@@ -69,6 +69,38 @@ func TestEditPreviewManagerPublishesSafeCreatePreviewWithoutWriting(t *testing.T
 	}
 }
 
+func TestAttachEditPreviewManagerConnectsProviderArgumentDeltas(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	providerDeltaCalls := 0
+	var eventTypes []string
+	opts := RunOptions{
+		UserID: testUserID,
+		RunID:  "run-provider-preview",
+		OnToolCallArgumentsDelta: func(ToolCallArgumentsDelta) {
+			providerDeltaCalls++
+		},
+		TransientEvent: func(eventType, _ string, _ map[string]any) {
+			eventTypes = append(eventTypes, eventType)
+		},
+	}
+	runtime := &agentRuntime{opts: opts}
+	attachEditPreviewManager(ctx, runtime, env.service, opts)
+	runtime.opts.OnToolCallArgumentsDelta(ToolCallArgumentsDelta{
+		Index:         0,
+		ToolCallID:    "call-provider-create",
+		ToolName:      "create_workspace_note",
+		ArgumentsJSON: `{"path":"provider-draft.html","html":"<p>streamed preview</p>"}`,
+	})
+
+	if providerDeltaCalls != 1 {
+		t.Fatalf("previous provider argument hook calls = %d, want 1", providerDeltaCalls)
+	}
+	if len(eventTypes) != 1 || eventTypes[0] != "workspace_edit_preview_started" {
+		t.Fatalf("provider argument delta did not reach preview manager: %#v", eventTypes)
+	}
+}
+
 func TestEditPreviewManagerRevertsActivePreview(t *testing.T) {
 	env := newTestAIEnv(t)
 	var eventTypes []string

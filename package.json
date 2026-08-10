@@ -11,7 +11,13 @@
     "test:structure": "node scripts/check-structure-standards.mjs",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:e2e": "playwright test",
-    "test:e2e:local": "docker compose up -d --build --force-recreate && playwright test"
+    "test:e2e:local": "docker compose --profile e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --force-recreate && playwright test",
+    "test:e2e:faults": "playwright test tests/e2e/agent-faults.spec.js",
+    "test:provider-matrix": "playwright test tests/e2e/provider-matrix.spec.js",
+    "test:provider-live": "playwright test tests/e2e/provider-live.spec.js",
+    "test:load": "node scripts/agent-load.mjs",
+    "test:soak": "node scripts/agent-soak.mjs",
+    "test:release-evidence": "node scripts/collect-release-evidence.mjs"
   },
   "dependencies": {
     "@tiptap/extension-color": "^2.26.1",

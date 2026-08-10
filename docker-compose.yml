@@ -33,7 +33,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
-      - ./data:/data
+      - ${PERSEUS_DATA_PATH:-./data}:/data
     restart: unless-stopped
     stop_grace_period: 20s
     pids_limit: ${PIDS_LIMIT:-256}
@@ -50,3 +50,19 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  data-permissions-check:
+    image: ${IMAGE_REGISTRY:-docker.io}/library/debian:bookworm-slim
+    profiles: ["maintenance"]
+    user: "10001:10001"
+    volumes:
+      - ${PERSEUS_DATA_PATH:-./data}:/data
+    command: ["sh", "-ceu", "test -r /data && test -w /data; if [ -e /data/app.db ]; then test -r /data/app.db && test -w /data/app.db; fi; if [ -e /data/users ]; then test -d /data/users && test -w /data/users; fi"]
+
+  data-permissions-fix:
+    image: ${IMAGE_REGISTRY:-docker.io}/library/debian:bookworm-slim
+    profiles: ["maintenance"]
+    user: "0:0"
+    volumes:
+      - ${PERSEUS_DATA_PATH:-./data}:/data
+    command: ["sh", "-ceu", "chown -R 10001:10001 /data"]

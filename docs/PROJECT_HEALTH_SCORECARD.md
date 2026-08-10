@@ -4,30 +4,34 @@ This scorecard records verifiable engineering evidence. The release target is **
 
 ## Current Score
 
-Overall: **9.1 / 10 (local release evidence, 2026-08-10)**
+Baseline at commit `e45afc5`: **8.6 / 10**.
 
-This score describes the current working tree. Remote CI and live-provider
-evaluation remain separate release evidence and cannot be inferred from local
-success.
+Current candidate: **9.2 / 10 (local deterministic evidence, 2026-08-10)**.
+
+The candidate score describes the current working tree on top of `e45afc5`.
+Remote CI, the scheduled 30-minute soak, and live-provider evaluation remain
+separate release evidence and cannot be inferred from local success. The score
+must be attached to a commit and rerun by CI before it is a published release
+score.
 
 | Gate | Status | Evidence required |
 |---|---|---|
 | Single Agent runtime | proven | One `kernel_v3 + runTurnEngine` production path; legacy data is read-only migration input. |
 | Transactional terminal event | proven | Store/API concurrency and idempotency tests for `FinalizeRunWithEvent`. |
 | HTTP and container security | proven | CORS, CSRF, trusted proxy, body-limit and rate-limit tests; image runs as UID/GID 10001. |
-| Persistent multi-user scheduling | proven | Transactional queue limits, single-winner claim and fair-user scheduler tests. |
-| Browser Agent lifecycle | proven | 20 Docker Playwright scenarios passed: queue/commentary, replay, protocol failure, context overflow, 429, EOF, note edit/one history, user input/choice, image persistence, and workspace UI flows. |
-| Release image | proven | Normal `./data` image rebuilt and replaced on `127.0.0.1:8080`; health/readiness pass as UID/GID 10001; SQLite integrity check returns `ok`. |
+| Persistent multi-user scheduling | proven | Unit tests plus two Docker load runs. The primary run completed 100/100 Runs for 20 users with provider peak concurrency 4; the restart run completed 10/10 without duplicate mutation. |
+| Browser Agent lifecycle | proven | 46 Docker Playwright scenarios passed and one optional live-provider case skipped. Coverage includes offline preview recovery, slow multi-image persistence, three provider stream protocols, queue/commentary, replay, 429, EOF, note edit/one history, user input/choice, and workspace UI. |
+| Release image | proven | The tested image reports health/readiness 200, runs as UID/GID 10001, and reports SQLite `integrity_check=ok`. Normal-data replacement is verified separately at the end of local rollout. |
 
 ## Weighted Evidence
 
 | Area | Weight | Score | Evidence | Remaining risk |
 |---|---:|---:|---|---|
 | Agent architecture and maintainability | 2.0 | 1.8 | One `kernel_v3 + runTurnEngine` production path, canonical `ToolManifest`, typed item history, old runtime paths removed from execution. | Several intentionally broad orchestration files remain under responsibility review. |
-| Event, data, and recovery integrity | 2.0 | 1.9 | Transactional terminal event/barrier, contiguous SSE replay, idempotent resume/follow-up, restart recovery, 10,000-event and concurrent finalizer tests. | Single-instance SQLite is an explicit deployment boundary. |
-| HTTP, authentication, and operations | 2.0 | 1.8 | Same-origin default, CSRF/CORS tests, trusted proxy policy, rate limits, bounded bodies/timeouts, non-root image, readiness and Compose limits. | In-memory abuse limits reset on process restart by design. |
-| Product correctness and resilience | 2.0 | 1.7 | Browser coverage for Agent file handoff, no duplicate history, provider failures, attachments, input/choice recovery, and workspace behavior. | Differential preview still needs a throttled/paused-consumer browser case. |
-| Automated verification and delivery | 2.0 | 1.9 | Full Go suite, 157 frontend unit tests, UI/structure gates, production build, 20 Playwright cases, Docker CI job with artifacts. | Remote CI and optional live-provider eval have not run until changes are pushed. |
+| Event, data, and recovery integrity | 2.0 | 1.9 | Transactional terminal event/barrier, shared durable Run/Task tailer, contiguous SSE replay, offline preview recovery, restart recovery, 10,000-event and concurrent finalizer tests. | Single-instance SQLite is an explicit deployment boundary. |
+| HTTP, authentication, and operations | 2.0 | 1.8 | Same-origin default, CSRF/CORS tests, trusted proxy policy, rate limits, bounded bodies/timeouts, non-root image, readiness, explicit permission repair, inspect/archive/vacuum tools, and Compose limits. | In-memory abuse limits reset on process restart by design; archive application is intentionally an operator action. |
+| Product correctness and resilience | 2.0 | 1.9 | Browser fault injection proves preview reconnect, final authoritative handoff, reading-anchor retention, no duplicate history, slow multi-image persistence, and protocol-equivalent provider behavior. | Real third-party gateways can still deviate from their declared protocol. |
+| Automated verification and delivery | 2.0 | 1.8 | Full Go suite, 157 frontend unit tests, UI/structure gates, production build, 46 passing Playwright cases, 100-Run load gate, release evidence JSON, and nightly soak workflow. | Remote CI, the scheduled soak, and optional live-provider eval have not run for this working tree. |
 
 ## Optimization Baseline
 

@@ -223,6 +223,13 @@ func TestProviderFailureClassClassifiesTPMRateLimit(t *testing.T) {
 	}
 }
 
+func TestProviderFailureClassUsesAnthropicStructuredRequestTooLargeType(t *testing.T) {
+	err := &ProviderResponseError{StatusCode: 413, ErrorType: "request_too_large"}
+	if got := providerFailureClass(err, ProviderRequestSummary{}); got != string(ProviderFailureContextExceeded) {
+		t.Fatalf("expected structured context failure, got %q", got)
+	}
+}
+
 func TestWorkspacePromptDirectsHTMLTruncationToBlockReads(t *testing.T) {
 	for _, want := range []string{"mode=index", "mode=block", "mode=section", "do not tell the user the file was not returned"} {
 		if !strings.Contains(workspaceToolSystemPrompt, want) {

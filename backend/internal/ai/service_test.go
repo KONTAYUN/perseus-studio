@@ -1283,6 +1283,45 @@ func TestExecuteAndRecordToolWorkspaceMutationMarksTypedChangeEvent(t *testing.T
 	}
 }
 
+func TestExecuteAndRecordToolCompletesPreviewBeforeAuthoritativeFileChange(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	if _, err := env.files.CreateFile(ctx, "ordered-change.md", "before\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+
+	patch := "*** Begin Patch\n" +
+		"*** Update File: ordered-change.md\n" +
+		"@@\n" +
+		"-before\n" +
+		"+after\n" +
+		"*** End Patch"
+	order := make([]string, 0, 2)
+	_, _, err := env.service.executeAndRecordTool(ctx, "conv-order", "msg-order", "apply_workspace_patch", mustJSON(map[string]any{
+		"patch":     patch,
+		"transport": "structured_tool",
+	}), "", RunOptions{
+		UserID: testUserID,
+		BeforeAuthoritativeFileChange: func(event ToolEvent) {
+			if event.Type != "workspace_file_changed" {
+				t.Fatalf("preview completion received non-authoritative event: %#v", event)
+			}
+			order = append(order, "preview_completed")
+		},
+		Event: func(eventType, level string, payload map[string]any) {
+			if eventType == "workspace_file_changed" {
+				order = append(order, eventType)
+			}
+		},
+	}, runtimeProfileForProvider(store.ModelProvider{}))
+	if err != nil {
+		t.Fatalf("executeAndRecordTool returned execution error: %v", err)
+	}
+	if got := strings.Join(order, ","); got != "preview_completed,workspace_file_changed" {
+		t.Fatalf("authoritative lifecycle order = %q, want preview_completed,workspace_file_changed", got)
+	}
+}
+
 func TestExecuteAndRecordToolApplyWorkspacePatchParseFailureKeepsLocationPayload(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()

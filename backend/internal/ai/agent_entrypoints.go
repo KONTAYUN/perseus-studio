@@ -33,7 +33,7 @@ func (s *Service) runOpenAIAgent(ctx context.Context, conversationID, messageID 
 		kernel:           kernel,
 		contextItems:     contextItems,
 	}
-	runtime.editPreviews = newEditPreviewManager(s, opts)
+	attachEditPreviewManager(ctx, runtime, s, opts)
 	if checkpoint, ok := s.loadRunCheckpoint(ctx, opts); ok {
 		runtime.restoreCheckpoint(checkpoint)
 	}
@@ -68,12 +68,27 @@ func (s *Service) runAnthropicAgent(ctx context.Context, conversationID, message
 		kernel:           kernel,
 		contextItems:     contextItems,
 	}
-	runtime.editPreviews = newEditPreviewManager(s, opts)
+	attachEditPreviewManager(ctx, runtime, s, opts)
 	if checkpoint, ok := s.loadRunCheckpoint(ctx, opts); ok {
 		runtime.restoreCheckpoint(checkpoint)
 	}
 	runtime.beginPresentationSegment()
 	return runtime.runTurnEngine(ctx)
+}
+
+func attachEditPreviewManager(ctx context.Context, runtime *agentRuntime, service *Service, opts RunOptions) {
+	manager := newEditPreviewManager(service, opts)
+	runtime.editPreviews = manager
+	previousDeltaHandler := runtime.opts.OnToolCallArgumentsDelta
+	runtime.opts.OnToolCallArgumentsDelta = func(delta ToolCallArgumentsDelta) {
+		if previousDeltaHandler != nil {
+			previousDeltaHandler(delta)
+		}
+		manager.handle(ctx, delta, false)
+	}
+	runtime.opts.BeforeAuthoritativeFileChange = func(event ToolEvent) {
+		manager.complete(event.ToolCallID, event)
+	}
 }
 
 func validateAgentProviderCapabilities(provider store.ModelProvider, attachments []AttachmentPayload) error {

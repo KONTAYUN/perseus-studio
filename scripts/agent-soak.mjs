@@ -1,0 +1,43 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import process from 'node:process';
+
+const durationMs = Number(process.env.PERSEUS_SOAK_DURATION_MS || 30 * 60 * 1000);
+const outputDir = process.env.PERSEUS_SOAK_OUTPUT || 'test-results/soak';
+const deadline = Date.now() + durationMs;
+const reports = [];
+let cycle = 0;
+
+await fs.mkdir(outputDir, { recursive: true });
+while (Date.now() < deadline) {
+  cycle += 1;
+  const reportPath = path.join(outputDir, `cycle-${String(cycle).padStart(3, '0')}.json`);
+  const args = ['scripts/agent-load.mjs', ...(cycle % 5 === 0 ? ['--restart'] : [])];
+  const result = spawnSync(process.execPath, args, {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      PERSEUS_LOAD_USERS: process.env.PERSEUS_SOAK_USERS || '5',
+      PERSEUS_LOAD_RUNS_PER_USER: process.env.PERSEUS_SOAK_RUNS_PER_USER || '2',
+      PERSEUS_LOAD_REPORT: reportPath,
+    },
+  });
+  if (result.status !== 0) process.exit(result.status || 1);
+  reports.push(JSON.parse(await fs.readFile(reportPath, 'utf8')));
+}
+
+const summary = {
+  generated_at: new Date().toISOString(),
+  duration_ms: durationMs,
+  cycles: reports.length,
+  total_runs: reports.reduce((sum, report) => sum + report.configuration.total_runs, 0),
+  restart_cycles: reports.filter((report) => report.configuration.restart).length,
+  max_api_health_ms_p95: Math.max(...reports.map((report) => report.results.api_health_ms_p95), 0),
+  max_peak_rss_bytes: Math.max(...reports.map((report) => report.results.peak_rss_bytes), 0),
+  database_growth_bytes: reports.reduce((sum, report) => sum + report.results.database_growth_bytes, 0),
+  failures: reports.flatMap((report) => report.failures || []),
+};
+await fs.writeFile(path.join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+if (summary.failures.length) process.exitCode = 1;

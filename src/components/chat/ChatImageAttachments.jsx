@@ -119,7 +119,7 @@ function MediaPreviewDialog({ images, index, onIndexChange, onClose }) {
           <a href={item.download_url} download={item.name} className="ui-icon-button ui-icon-button-default ui-icon-button-md text-white" title="下载原图">
             <Download size={17} />
           </a>
-          <IconButton onClick={requestClose} title="关闭" className="text-white">
+          <IconButton data-testid="media-preview-close" onClick={requestClose} title="关闭" className="text-white">
             <X size={18} />
           </IconButton>
         </div>

@@ -11,7 +11,11 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   outputDir: 'test-results',
-  reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
+  reporter: [
+    ['list'],
+    ['html', { outputFolder: 'playwright-report', open: 'never' }],
+    ['json', { outputFile: 'test-results/playwright-results.json' }],
+  ],
   use: {
     baseURL,
     trace: 'retain-on-failure',

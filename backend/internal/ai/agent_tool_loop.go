@@ -251,7 +251,9 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	previewResolved = true
 	if r.editPreviews != nil {
 		if event.Status == "success" {
-			r.editPreviews.complete(call.ID, event)
+			if !event.AuthoritativePrepared {
+				r.editPreviews.complete(call.ID, event)
+			}
 		} else {
 			r.editPreviews.revert(call.ID, firstNonEmpty(string(event.ErrorCode), "tool_failed"))
 		}

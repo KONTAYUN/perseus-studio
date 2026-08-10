@@ -76,6 +76,7 @@ export default function ConversationMenu({ ide, onRenameConversation, variant = 
                 ide.conversations.map((conversation) => (
                   <div
                     key={conversation.id}
+                    data-testid={`conversation-row-${conversation.id}`}
                     role="button"
                     tabIndex={0}
                     onClick={(e) => {

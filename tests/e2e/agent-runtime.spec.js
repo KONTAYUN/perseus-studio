@@ -131,6 +131,9 @@ test('chat image persists across the Agent request, preview dialog, and reload',
   await page.getByTestId('chat-input').fill('[fixture:normal] Inspect the attached image.');
   await page.getByTestId('chat-send-button').click();
   await expect(page.getByText('E2E normal completed.', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const conversations = await apiGet(page, '/api/conversations');
+  const conversationID = conversations.items?.[0]?.id;
+  expect(conversationID).toBeTruthy();
 
   const thumbnail = page.getByRole('img', { name: 'fixture.png' }).first();
   await expect(thumbnail).toBeVisible();
@@ -140,6 +143,6 @@ test('chat image persists across the Agent request, preview dialog, and reload',
 
   await page.reload();
   await expect(page.getByTestId('chat-input')).toBeVisible();
-  await page.getByText('Recovered normal request', { exact: true }).first().click();
+  await page.getByTestId(`conversation-row-${conversationID}`).click();
   await expect(page.getByRole('img', { name: 'fixture.png' }).first()).toBeVisible();
 });

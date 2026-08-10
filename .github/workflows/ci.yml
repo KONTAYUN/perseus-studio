@@ -52,6 +52,24 @@ jobs:
         env:
           PERSEUS_E2E_USERNAME: admin
           PERSEUS_E2E_PASSWORD: password
+      - name: Run deterministic multi-user load gate
+        run: npm run test:load
+      - name: Verify explicit non-root data migration
+        run: |
+          mkdir -p permission-fixture/users
+          printf 'preserve-me' > permission-fixture/sentinel.txt
+          before=$(sha256sum permission-fixture/sentinel.txt | cut -d' ' -f1)
+          if PERSEUS_DATA_PATH="$PWD/permission-fixture" docker compose --profile maintenance run --rm data-permissions-check; then
+            echo "expected the root-owned fixture to fail the UID 10001 preflight" >&2
+            exit 1
+          fi
+          PERSEUS_DATA_PATH="$PWD/permission-fixture" docker compose --profile maintenance run --rm data-permissions-fix
+          PERSEUS_DATA_PATH="$PWD/permission-fixture" docker compose --profile maintenance run --rm data-permissions-check
+          after=$(sha256sum permission-fixture/sentinel.txt | cut -d' ' -f1)
+          test "$before" = "$after"
+      - name: Collect release evidence
+        if: always()
+        run: npm run test:release-evidence
       - name: Capture service logs
         if: always()
         run: |

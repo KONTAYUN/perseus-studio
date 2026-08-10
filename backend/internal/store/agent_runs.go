@@ -234,6 +234,9 @@ CREATE TABLE IF NOT EXISTS agent_data_migrations (
 	if err := AddColumnIfNotExists(ctx, s.db, "agent_runs", "queued_at", "DATETIME"); err != nil {
 		return err
 	}
+	if err := AddColumnIfNotExists(ctx, s.db, "agent_events", "archived_at", "DATETIME"); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE agent_runs SET queued_at = created_at WHERE status = ? AND queued_at IS NULL`, AgentRunQueued); err != nil {
 		return err
 	}

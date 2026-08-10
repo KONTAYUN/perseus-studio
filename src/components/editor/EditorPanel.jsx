@@ -272,6 +272,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
             <div
               className={`ai-edit-preview-status ${activePreview.conflict ? 'is-conflict' : ''}`}
               data-testid="ai-edit-preview-status"
+              data-preview-status={activePreview.status || 'unknown'}
             >
               {activePreview.conflict
                 ? 'AI 预览与未保存内容冲突，当前保留你的编辑'

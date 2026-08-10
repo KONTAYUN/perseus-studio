@@ -40,10 +40,15 @@ export default function useRichTextDocumentSync({
     if (!editor) return;
     const nextHtml = html || '';
     const fileChanged = filePath !== lastFilePathRef.current;
-    if (!fileChanged && nextHtml === lastRenderedHtmlRef.current) return;
+    const reconciling = aiPreview?.status === 'reconciling';
+    if (!fileChanged && nextHtml === lastRenderedHtmlRef.current) {
+      if (reconciling && aiPreview?.preview_id) {
+        onAIEditReconciled?.(aiPreview.preview_id);
+      }
+      return;
+    }
     lastFilePathRef.current = filePath;
     lastRenderedHtmlRef.current = nextHtml;
-    const reconciling = aiPreview?.status === 'reconciling';
     const previewActive = !!aiPreview && !aiPreview.conflict && !reconciling;
     if (!previewActive) {
       lastCommittedHtmlRef.current = nextHtml;

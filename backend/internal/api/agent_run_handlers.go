@@ -354,36 +354,8 @@ func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, ru
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	cursor := streamCursor(r)
-	if cursor > run.EventHeadSeq {
-		cursor = 0
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	if writeSSE(w, "stream_opened", map[string]any{
-		"run": run, "event_head_seq": run.EventHeadSeq, "final_seq": run.FinalSeq,
-	}) != nil {
-		return
-	}
 	previewRevisions := map[string]int{}
-	drain := func() bool {
-		events, listErr := s.runs.ListEventsAfter(r.Context(), user.UserID, runID, cursor)
-		if listErr != nil {
-			return false
-		}
-		for _, item := range events {
-			if item.Seq != cursor+1 || writeSSEWithID(w, "event", strconv.FormatInt(item.Seq, 10), item) != nil {
-				return false
-			}
-			cursor = item.Seq
-		}
-		return true
-	}
-	sendPreviewSnapshots := func() bool {
+	sendPreviewSnapshots := func() error {
 		snapshots := s.runBroker.Latest(runID)
 		sentFromMemory := false
 		for _, snapshot := range snapshots {
@@ -404,17 +376,17 @@ func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, ru
 				continue
 			}
 			if writeSSE(w, "preview", event) != nil {
-				return false
+				return fmt.Errorf("write preview snapshot")
 			}
 			previewRevisions[previewID] = revision
 			sentFromMemory = true
 		}
 		if sentFromMemory {
-			return true
+			return nil
 		}
 		previews, listErr := s.runs.ListEditPreviews(r.Context(), user.UserID, runID)
 		if listErr != nil {
-			return false
+			return listErr
 		}
 		for _, preview := range previews {
 			if preview.Revision <= previewRevisions[preview.PreviewID] {
@@ -427,69 +399,35 @@ func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, ru
 				Level: "info", PayloadJSON: preview.SnapshotJSON, CreatedAt: preview.UpdatedAt,
 			}
 			if writeSSE(w, "preview", event) != nil {
-				return false
+				return fmt.Errorf("write persisted preview snapshot")
 			}
 			previewRevisions[preview.PreviewID] = preview.Revision
 		}
-		return true
+		return nil
 	}
-	if !drain() || !sendPreviewSnapshots() {
-		return
+	tailer := durableStreamTailer{
+		ctx: r.Context(), w: w, flusher: flusher, wakeups: eventsCh, cursor: streamCursor(r),
+		statePayloadKey: "run", stateEventName: "run", sendTransient: sendPreviewSnapshots,
+		loadState: func(ctx context.Context) (durableStreamState, error) {
+			current, loadErr := s.runs.GetRun(ctx, user.UserID, runID)
+			if loadErr != nil {
+				return durableStreamState{}, loadErr
+			}
+			return durableStreamState{Payload: current, EventHeadSeq: current.EventHeadSeq, FinalSeq: current.FinalSeq, Terminal: runIsTerminal(current.Status)}, nil
+		},
+		listAfter: func(ctx context.Context, after int64) ([]durableStreamRecord, error) {
+			events, listErr := s.runs.ListEventsAfter(ctx, user.UserID, runID, after)
+			if listErr != nil {
+				return nil, listErr
+			}
+			records := make([]durableStreamRecord, 0, len(events))
+			for _, item := range events {
+				records = append(records, durableStreamRecord{Seq: item.Seq, EventName: "event", Payload: item})
+			}
+			return records, nil
+		},
 	}
-	run, err = s.runs.GetRun(r.Context(), user.UserID, runID)
-	if err != nil {
-		return
-	}
-	if writeSSE(w, "run", run) != nil ||
-		writeSSE(w, "replay_complete", map[string]any{"through_seq": cursor, "final_seq": run.FinalSeq}) != nil {
-		return
-	}
-	flusher.Flush()
-	if runIsTerminal(run.Status) && cursor >= run.FinalSeq {
-		return
-	}
-
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-eventsCh:
-			if !drain() || !sendPreviewSnapshots() {
-				return
-			}
-			run, err = s.runs.GetRun(r.Context(), user.UserID, runID)
-			if err != nil || writeSSE(w, "run", run) != nil ||
-				writeSSE(w, "replay_complete", map[string]any{"through_seq": cursor, "final_seq": run.FinalSeq}) != nil {
-				return
-			}
-			flusher.Flush()
-			if runIsTerminal(run.Status) && cursor >= run.FinalSeq {
-				return
-			}
-		case <-heartbeat.C:
-			if !drain() {
-				return
-			}
-			run, err = s.runs.GetRun(r.Context(), user.UserID, runID)
-			if err != nil || writeSSE(w, "run", run) != nil {
-				return
-			}
-			if err := writeSSEHeartbeat(w); err != nil {
-				return
-			}
-			flusher.Flush()
-			if runIsTerminal(run.Status) && cursor >= run.FinalSeq {
-				if writeSSE(w, "replay_complete", map[string]any{"through_seq": cursor, "final_seq": run.FinalSeq}) != nil {
-					return
-				}
-				flusher.Flush()
-				return
-			}
-		}
-	}
+	_ = tailer.serve(durableStreamState{Payload: run, EventHeadSeq: run.EventHeadSeq, FinalSeq: run.FinalSeq, Terminal: runIsTerminal(run.Status)})
 }
 
 func streamCursor(r *http.Request) int64 {
