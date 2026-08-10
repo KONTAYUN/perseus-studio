@@ -28,12 +28,15 @@ const hasExecutable = (program) => {
 const run = async (name, program, args, options = {}) => {
   const startedAt = new Date().toISOString();
   const env = { ...process.env, ...(options.env || {}) };
-  const result = spawnSync(program, args, {
+  const windowsCommand = process.platform === 'win32' && program.toLowerCase().endsWith('.cmd');
+  const spawnProgram = windowsCommand ? (process.env.ComSpec || 'cmd.exe') : program;
+  const spawnArgs = windowsCommand ? ['/d', '/c', program, ...args] : args;
+  const result = spawnSync(spawnProgram, spawnArgs, {
     cwd: options.cwd || process.cwd(),
     env,
     stdio: 'inherit',
   });
-  const status = result.status ?? 1;
+  const status = result.error ? 1 : (result.status ?? 1);
   const item = {
     name,
     status: status === 0 ? 'passed' : 'failed',
@@ -41,6 +44,7 @@ const run = async (name, program, args, options = {}) => {
     started_at: startedAt,
     completed_at: new Date().toISOString(),
   };
+  if (result.error) item.error = result.error.message;
   if (status !== 0 && !options.continueOnFailure) throw Object.assign(new Error(`${name} failed with exit code ${status}`), { gateItem: item });
   return item;
 };
