@@ -25,6 +25,7 @@ function runNpm(args) {
   return runProcess(program, commandArgs, { stdio: 'inherit', env: process.env });
 }
 
+await fs.rm(outputDir, { recursive: true, force: true });
 await fs.mkdir(outputDir, { recursive: true });
 while (Date.now() < deadline) {
   cycle += 1;
@@ -38,8 +39,8 @@ while (Date.now() < deadline) {
     stdio: 'inherit',
     env: {
       ...process.env,
-      PERSEUS_LOAD_USERS: process.env.PERSEUS_SOAK_USERS || '5',
-      PERSEUS_LOAD_RUNS_PER_USER: process.env.PERSEUS_SOAK_RUNS_PER_USER || '2',
+      PERSEUS_LOAD_USERS: process.env.PERSEUS_SOAK_USERS || '20',
+      PERSEUS_LOAD_RUNS_PER_USER: process.env.PERSEUS_SOAK_RUNS_PER_USER || '5',
       PERSEUS_LOAD_REPORT: reportPath,
     },
   });
