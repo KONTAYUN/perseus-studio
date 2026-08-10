@@ -56,6 +56,12 @@ function compose(...args) {
   });
 }
 
+function restartWebide() {
+  const containerID = compose('ps', '-q', 'webide').trim();
+  if (!containerID) throw new Error('cannot restart webide: container id is unavailable');
+  execFileSync('docker', ['restart', containerID], { encoding: 'utf8', stdio: 'inherit' });
+}
+
 function containerInspect() {
   return JSON.parse(compose('exec', '-T', 'webide', 'perseus-maintain', 'inspect'));
 }
@@ -131,7 +137,7 @@ async function main() {
 
   if (restart) {
     await sleep(700);
-    compose('restart', 'webide');
+    restartWebide();
     await waitReady();
   }
 
