@@ -6,13 +6,13 @@ This scorecard records verifiable engineering evidence. The release target is **
 
 Baseline at commit `e45afc5`: **8.6 / 10**.
 
-Current candidate: **9.2 / 10 (local deterministic evidence, 2026-08-10)**.
+Current evidence-backed score: **9.1 / 10 at commit `48ea8ad`**.
 
-The candidate score describes the current working tree on top of `e45afc5`.
-Remote CI, the scheduled 30-minute soak, and live-provider evaluation remain
-separate release evidence and cannot be inferred from local success. The score
-must be attached to a commit and rerun by CI before it is a published release
-score.
+The score is based on the local release gate, 30-minute soak, provider matrix,
+Docker identity/readiness, and the production database maintenance run recorded
+on 2026-08-11. Live third-party provider evaluation remains `unverified` because
+no real provider credentials were configured; this is an explicit residual risk,
+not an inferred pass.
 
 | Gate | Status | Evidence required |
 |---|---|---|
@@ -21,7 +21,7 @@ score.
 | HTTP and container security | proven | CORS, CSRF, trusted proxy, body-limit and rate-limit tests; image runs as UID/GID 10001. |
 | Persistent multi-user scheduling | proven | Unit tests plus two Docker load runs. The primary run completed 100/100 Runs for 20 users with provider peak concurrency 4; the restart run completed 10/10 without duplicate mutation. |
 | Browser Agent lifecycle | proven | 46 Docker Playwright scenarios passed and one optional live-provider case skipped. Coverage includes offline preview recovery, slow multi-image persistence, three provider stream protocols, queue/commentary, replay, 429, EOF, note edit/one history, user input/choice, and workspace UI. |
-| Release image | proven | The tested image reports health/readiness 200, runs as UID/GID 10001, and reports SQLite `integrity_check=ok`. Normal-data replacement is verified separately at the end of local rollout. |
+| Release image | proven | The tested image reports health/readiness 200, runs as UID/GID 10001, and reports SQLite `integrity_check=ok`. The normal 8080 data replacement was then verified after backup, archive, and VACUUM. |
 
 ## Weighted Evidence
 
@@ -31,7 +31,17 @@ score.
 | Event, data, and recovery integrity | 2.0 | 1.9 | Transactional terminal event/barrier, shared durable Run/Task tailer, contiguous SSE replay, offline preview recovery, restart recovery, 10,000-event and concurrent finalizer tests. | Single-instance SQLite is an explicit deployment boundary. |
 | HTTP, authentication, and operations | 2.0 | 1.8 | Same-origin default, CSRF/CORS tests, trusted proxy policy, rate limits, bounded bodies/timeouts, non-root image, readiness, explicit permission repair, inspect/archive/vacuum tools, and Compose limits. | In-memory abuse limits reset on process restart by design; archive application is intentionally an operator action. |
 | Product correctness and resilience | 2.0 | 1.9 | Browser fault injection proves preview reconnect, final authoritative handoff, reading-anchor retention, no duplicate history, slow multi-image persistence, and protocol-equivalent provider behavior. | Real third-party gateways can still deviate from their declared protocol. |
-| Automated verification and delivery | 2.0 | 1.8 | Full Go suite, 157 frontend unit tests, UI/structure gates, production build, 46 passing Playwright cases, 100-Run load gate, release evidence JSON, and nightly soak workflow. | Remote CI, the scheduled soak, and optional live-provider eval have not run for this working tree. |
+| Automated verification and delivery | 2.0 | 1.7 | Full Go suite, 157 frontend unit tests, UI/structure gates, production build, 46 passing Playwright cases, 100-Run load gate, 30-minute/7,400-Run soak, release evidence JSON, and nightly soak workflow. | Remote CI and optional live-provider eval remain unverified for this local release. |
+
+## Release Evidence
+
+- Release gate: passed; the exact tested commit is recorded in `test-results/release-evidence.json` and must match the current release candidate.
+- Soak: 30 minutes, 74 cycles, 7,400 Runs, no failures, no SQLite busy errors, maximum API health p95 29.603 ms, maximum RSS 56,455,332 bytes.
+- Production database: full integrity `ok` before and after maintenance; `541,679,616` bytes before VACUUM and `477,544,448` bytes after, reclaiming `64,135,168` bytes.
+- Production backup: `/data/backups/app-before-maintenance-20260811-030339.db`, SHA-256 `c712a5799d6aac8562bc2ee8fe6c103584561c965a2be491ebbf10b5d75377ac`.
+- Archive: 90-day archive applied with zero eligible records; archive manifest was written and verified.
+- Protected data counts matched the verified backup: users, sessions, conversations, messages, Turn Items, tool calls, file history, chat attachments, message attachments, and trash items.
+- Provider live test: `unverified` because no real provider environment was configured.
 
 ## Optimization Baseline
 
