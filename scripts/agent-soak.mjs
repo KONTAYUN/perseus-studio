@@ -49,7 +49,10 @@ while (Date.now() < deadline) {
   cycle += 1;
   if (cycle === 1) {
     const faultResult = await runNpm(['run', 'test:e2e:faults']);
-    if (faultResult.error || faultResult.status !== 0) process.exit(faultResult.status || 1);
+    if (faultResult.error || faultResult.status !== 0) {
+      process.stderr.write(`initial fault checks failed\n${faultResult.stderr || faultResult.stdout}\n`);
+      process.exit(faultResult.status || 1);
+    }
   }
   const reportPath = path.join(outputDir, `cycle-${String(cycle).padStart(3, '0')}.json`);
   const args = ['scripts/agent-load.mjs', ...(cycle % 5 === 0 ? ['--restart'] : [])];
