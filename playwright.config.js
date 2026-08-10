@@ -14,7 +14,7 @@ export default defineConfig({
   reporter: [
     ['list'],
     ['html', { outputFolder: 'playwright-report', open: 'never' }],
-    ['json', { outputFile: 'test-results/playwright-results.json' }],
+    ['json', { outputFile: process.env.PERSEUS_PLAYWRIGHT_JSON_OUTPUT || 'test-results/playwright-results.json' }],
   ],
   use: {
     baseURL,

@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 type TableStat struct {
@@ -28,8 +30,24 @@ type InspectReport struct {
 	PageCount     int64                `json:"page_count"`
 	PageSize      int64                `json:"page_size"`
 	FreePages     int64                `json:"free_pages"`
+	IntegrityMode string               `json:"integrity_mode"`
 	Integrity     string               `json:"integrity"`
 	Tables        map[string]TableStat `json:"tables"`
+}
+
+type InspectOptions struct {
+	FullIntegrity bool
+}
+
+type BackupReport struct {
+	SourcePath   string    `json:"source_path"`
+	BackupPath   string    `json:"backup_path"`
+	ManifestPath string    `json:"manifest_path"`
+	SourceBytes  int64     `json:"source_bytes"`
+	BackupBytes  int64     `json:"backup_bytes"`
+	SHA256       string    `json:"sha256"`
+	Integrity    string    `json:"integrity"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type ArchiveManifest struct {
@@ -50,6 +68,10 @@ type ArchiveOptions struct {
 }
 
 func Inspect(ctx context.Context, db *sql.DB, dbPath string) (InspectReport, error) {
+	return InspectWithOptions(ctx, db, dbPath, InspectOptions{FullIntegrity: true})
+}
+
+func InspectWithOptions(ctx context.Context, db *sql.DB, dbPath string, options InspectOptions) (InspectReport, error) {
 	report := InspectReport{DatabasePath: dbPath, Tables: map[string]TableStat{}}
 	if info, err := os.Stat(dbPath); err == nil {
 		report.DatabaseBytes = info.Size()
@@ -63,7 +85,13 @@ func Inspect(ctx context.Context, db *sql.DB, dbPath string) (InspectReport, err
 			return InspectReport{}, err
 		}
 	}
-	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&report.Integrity); err != nil {
+	integrityQuery := "PRAGMA quick_check"
+	report.IntegrityMode = "quick"
+	if options.FullIntegrity {
+		integrityQuery = "PRAGMA integrity_check"
+		report.IntegrityMode = "full"
+	}
+	if err := db.QueryRowContext(ctx, integrityQuery).Scan(&report.Integrity); err != nil {
 		return InspectReport{}, err
 	}
 	queries := map[string]string{
@@ -86,6 +114,62 @@ func Inspect(ctx context.Context, db *sql.DB, dbPath string) (InspectReport, err
 			return InspectReport{}, err
 		}
 		report.Tables[table] = stat
+	}
+	return report, nil
+}
+
+// Backup creates a consistent offline SQLite backup using SQLite itself. It is
+// intentionally separate from raw file copying so a WAL/journal cannot be
+// captured halfway through a transaction.
+func Backup(ctx context.Context, db *sql.DB, sourcePath, outputPath string) (BackupReport, error) {
+	sourcePath = filepath.Clean(sourcePath)
+	outputPath = filepath.Clean(outputPath)
+	if sourcePath == outputPath {
+		return BackupReport{}, fmt.Errorf("backup output must differ from source")
+	}
+	if strings.TrimSpace(outputPath) == "" {
+		return BackupReport{}, fmt.Errorf("backup output is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return BackupReport{}, err
+	}
+	var integrity string
+	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil {
+		return BackupReport{}, err
+	}
+	if integrity != "ok" {
+		return BackupReport{}, fmt.Errorf("integrity check failed before backup: %s", integrity)
+	}
+	_ = os.Remove(outputPath)
+	if _, err := db.ExecContext(ctx, "VACUUM INTO "+sqliteStringLiteral(outputPath)); err != nil {
+		return BackupReport{}, err
+	}
+	checksum, err := fileSHA256(outputPath)
+	if err != nil {
+		return BackupReport{}, err
+	}
+	backupDB, err := sql.Open("sqlite", "file:"+filepath.ToSlash(outputPath)+"?mode=ro")
+	if err != nil {
+		return BackupReport{}, err
+	}
+	defer backupDB.Close()
+	var backupIntegrity string
+	if err := backupDB.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&backupIntegrity); err != nil {
+		return BackupReport{}, err
+	}
+	if backupIntegrity != "ok" {
+		return BackupReport{}, fmt.Errorf("integrity check failed for backup: %s", backupIntegrity)
+	}
+	sourceBytes, _ := fileSize(sourcePath)
+	backupBytes, _ := fileSize(outputPath)
+	report := BackupReport{
+		SourcePath: sourcePath, BackupPath: outputPath,
+		ManifestPath: outputPath + ".manifest.json",
+		SourceBytes:  sourceBytes, BackupBytes: backupBytes,
+		SHA256: checksum, Integrity: backupIntegrity, CreatedAt: time.Now().UTC(),
+	}
+	if err := writeJSONManifest(report.ManifestPath, report); err != nil {
+		return BackupReport{}, err
 	}
 	return report, nil
 }
@@ -166,7 +250,6 @@ func Vacuum(ctx context.Context, db *sql.DB) error {
 func archiveCandidateCounts(ctx context.Context, db *sql.DB, before time.Time) (map[string]int, error) {
 	queries := map[string]string{
 		"agent_events":        `SELECT COUNT(*) FROM agent_events e JOIN agent_runs r ON r.id=e.run_id WHERE r.status IN ('succeeded','failed','canceled','delegated') AND r.completed_at < ? AND e.archived_at IS NULL`,
-		"diagnostic_logs":     `SELECT COUNT(*) FROM diagnostic_logs WHERE created_at < ?`,
 		"agent_edit_previews": `SELECT COUNT(*) FROM agent_edit_previews p JOIN agent_runs r ON r.id=p.run_id WHERE r.status IN ('succeeded','failed','canceled','delegated') AND r.completed_at < ?`,
 	}
 	counts := map[string]int{}
@@ -176,6 +259,18 @@ func archiveCandidateCounts(ctx context.Context, db *sql.DB, before time.Time) (
 			return nil, err
 		}
 		counts[name] = count
+	}
+	counts["diagnostic_logs"] = 0
+	hasTasks, err := tableExists(ctx, db, "tasks")
+	if err != nil {
+		return nil, err
+	}
+	if hasTasks {
+		var diagnosticCount int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM diagnostic_logs d JOIN tasks t ON t.id=d.task_id WHERE d.task_id <> '' AND t.status IN ('done','failed','canceled') AND t.finished_at < ?`, before.UTC()).Scan(&diagnosticCount); err != nil {
+			return nil, err
+		}
+		counts["diagnostic_logs"] = diagnosticCount
 	}
 	return counts, nil
 }
@@ -237,25 +332,31 @@ func writeArchive(ctx context.Context, db *sql.DB, before time.Time, path string
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	rows, err = db.QueryContext(ctx, `SELECT id,user_id,conversation_id,message_id,task_id,stage,level,http_status,error_message,response_snippet,request_summary,created_at FROM diagnostic_logs WHERE created_at < ? ORDER BY created_at,id`, before.UTC())
+	hasTasks, err := tableExists(ctx, db, "tasks")
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var id, userID, conversationID, messageID, taskID, stage, level, errorMessage, snippet, summary string
-		var status int
-		var created time.Time
-		if err := rows.Scan(&id, &userID, &conversationID, &messageID, &taskID, &stage, &level, &status, &errorMessage, &snippet, &summary, &created); err != nil {
-			rows.Close()
+	if hasTasks {
+		rows, err = db.QueryContext(ctx, `SELECT d.id,d.user_id,d.conversation_id,d.message_id,d.task_id,d.stage,d.level,d.http_status,d.error_message,d.response_snippet,d.request_summary,d.created_at FROM diagnostic_logs d JOIN tasks t ON t.id=d.task_id WHERE d.task_id <> '' AND t.status IN ('done','failed','canceled') AND t.finished_at < ? ORDER BY d.created_at,d.id`, before.UTC())
+		if err != nil {
 			return err
 		}
-		if err := encode(map[string]any{"kind": "diagnostic_log", "id": id, "user_id": userID, "conversation_id": conversationID, "message_id": messageID, "task_id": taskID, "stage": stage, "level": level, "http_status": status, "error_message": errorMessage, "response_snippet": snippet, "request_summary": summary, "created_at": created}); err != nil {
-			rows.Close()
+		for rows.Next() {
+			var id, userID, conversationID, messageID, taskID, stage, level, errorMessage, snippet, summary string
+			var status int
+			var created time.Time
+			if err := rows.Scan(&id, &userID, &conversationID, &messageID, &taskID, &stage, &level, &status, &errorMessage, &snippet, &summary, &created); err != nil {
+				rows.Close()
+				return err
+			}
+			if err := encode(map[string]any{"kind": "diagnostic_log", "id": id, "user_id": userID, "conversation_id": conversationID, "message_id": messageID, "task_id": taskID, "stage": stage, "level": level, "http_status": status, "error_message": errorMessage, "response_snippet": snippet, "request_summary": summary, "created_at": created}); err != nil {
+				rows.Close()
+				return err
+			}
+		}
+		if err := rows.Close(); err != nil {
 			return err
 		}
-	}
-	if err := rows.Close(); err != nil {
-		return err
 	}
 	if err := writer.Flush(); err != nil {
 		return err
@@ -267,6 +368,10 @@ func writeArchive(ctx context.Context, db *sql.DB, before time.Time, path string
 }
 
 func compactArchivedData(ctx context.Context, db *sql.DB, before time.Time, archiveName, checksum string) error {
+	hasTasks, err := tableExists(ctx, db, "tasks")
+	if err != nil {
+		return err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -276,8 +381,10 @@ func compactArchivedData(ctx context.Context, db *sql.DB, before time.Time, arch
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_events SET payload_json=?, archived_at=? WHERE id IN (SELECT e.id FROM agent_events e JOIN agent_runs r ON r.id=e.run_id WHERE r.status IN ('succeeded','failed','canceled','delegated') AND r.completed_at < ? AND e.archived_at IS NULL)`, string(refRaw), time.Now().UTC(), before.UTC()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM diagnostic_logs WHERE created_at < ?`, before.UTC()); err != nil {
-		return err
+	if hasTasks {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM diagnostic_logs WHERE id IN (SELECT d.id FROM diagnostic_logs d JOIN tasks t ON t.id=d.task_id WHERE d.task_id <> '' AND t.status IN ('done','failed','canceled') AND t.finished_at < ?)`, before.UTC()); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_edit_previews WHERE preview_id IN (SELECT p.preview_id FROM agent_edit_previews p JOIN agent_runs r ON r.id=p.run_id WHERE r.status IN ('succeeded','failed','canceled','delegated') AND r.completed_at < ?)`, before.UTC()); err != nil {
 		return err
@@ -296,6 +403,30 @@ func fileSHA256(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func fileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+func sqliteStringLiteral(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func writeJSONManifest(path string, value any) error {
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func ParseAge(value string) (time.Duration, error) {

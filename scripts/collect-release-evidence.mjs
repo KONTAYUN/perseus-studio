@@ -18,6 +18,8 @@ const readJSON = async (file) => {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return null; }
 };
 
+const gitStatus = command('git', ['status', '--short']);
+
 const fetchJSON = async (pathname) => {
   try {
     const response = await fetch(`${baseURL}${pathname}`);
@@ -28,19 +30,23 @@ const fetchJSON = async (pathname) => {
 };
 
 const composeArgs = ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.e2e.yml'];
-const inspectRaw = command('docker', [...composeArgs, 'exec', '-T', 'webide', 'perseus-maintain', 'inspect']);
+const inspectRaw = command('docker', [...composeArgs, 'exec', '-T', 'webide', 'perseus-maintain', 'inspect', '--full-integrity']);
 let sqlite = inspectRaw;
 if (typeof inspectRaw === 'string') {
   try { sqlite = JSON.parse(inspectRaw); } catch {}
 }
 
-const playwright = await readJSON('test-results/playwright-results.json');
+const gate = await readJSON('test-results/release-gate.json');
+const soak = await readJSON('test-results/soak/summary.json');
+const playwright = await readJSON('test-results/playwright-e2e.json') || await readJSON('test-results/playwright-results.json');
 const load = await readJSON('test-results/load-report.json');
 const evidence = {
   schema_version: 1,
   generated_at: new Date().toISOString(),
   commit: command('git', ['rev-parse', 'HEAD']),
-  worktree: command('git', ['status', '--short']),
+  git_clean: typeof gitStatus === 'string' && gitStatus === '',
+  worktree: gitStatus,
+  release_gate: gate,
   health: await fetchJSON('/api/health'),
   readiness: await fetchJSON('/api/ready'),
   container_identity: command('docker', [...composeArgs, 'exec', '-T', 'webide', 'id']),
@@ -55,6 +61,11 @@ const evidence = {
     skipped: playwright.stats?.skipped,
   } : null,
   load,
+  soak,
+  provider_live: gate?.provider_live || (process.env.PERSEUS_LIVE_PROVIDER_BASE_URL ? 'configured' : 'unverified'),
+  maintenance: {
+    full_integrity: sqlite?.integrity === 'ok',
+  },
 };
 
 await fs.mkdir(path.dirname(output), { recursive: true });

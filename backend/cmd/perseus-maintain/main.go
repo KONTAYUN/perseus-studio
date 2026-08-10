@@ -15,7 +15,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fatalf("usage: perseus-maintain inspect|archive|vacuum")
+		fatalf("usage: perseus-maintain inspect|backup|archive|vacuum")
 	}
 	dbPath := os.Getenv("BACKEND_DB_PATH")
 	if dbPath == "" {
@@ -25,9 +25,27 @@ func main() {
 
 	switch os.Args[1] {
 	case "inspect":
+		flags := flag.NewFlagSet("inspect", flag.ExitOnError)
+		quick := flags.Bool("quick", false, "run PRAGMA quick_check (the default)")
+		fullIntegrity := flags.Bool("full-integrity", false, "run the full PRAGMA integrity_check")
+		_ = flags.Parse(os.Args[2:])
+		if *quick && *fullIntegrity {
+			fatalf("inspect accepts either --quick or --full-integrity, not both")
+		}
 		db := openDatabase(ctx, dbPath, true, false)
 		defer db.Close()
-		report, err := maintenance.Inspect(ctx, db, dbPath)
+		report, err := maintenance.InspectWithOptions(ctx, db, dbPath, maintenance.InspectOptions{FullIntegrity: *fullIntegrity})
+		writeResult(report, err)
+	case "backup":
+		flags := flag.NewFlagSet("backup", flag.ExitOnError)
+		output := flags.String("output", "", "consistent SQLite backup path")
+		_ = flags.Parse(os.Args[2:])
+		if *output == "" {
+			*output = fmt.Sprintf("perseus-backup-%s.db", time.Now().UTC().Format("20060102T150405Z"))
+		}
+		db := openDatabase(ctx, dbPath, false, false)
+		defer db.Close()
+		report, err := maintenance.Backup(ctx, db, dbPath, *output)
 		writeResult(report, err)
 	case "archive":
 		flags := flag.NewFlagSet("archive", flag.ExitOnError)

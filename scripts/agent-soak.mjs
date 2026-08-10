@@ -7,11 +7,16 @@ const durationMs = Number(process.env.PERSEUS_SOAK_DURATION_MS || 30 * 60 * 1000
 const outputDir = process.env.PERSEUS_SOAK_OUTPUT || 'test-results/soak';
 const deadline = Date.now() + durationMs;
 const reports = [];
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 let cycle = 0;
 
 await fs.mkdir(outputDir, { recursive: true });
 while (Date.now() < deadline) {
   cycle += 1;
+  if (cycle === 1) {
+    const faultResult = spawnSync(npmCommand, ['run', 'test:e2e:faults'], { stdio: 'inherit', env: process.env });
+    if (faultResult.status !== 0) process.exit(faultResult.status || 1);
+  }
   const reportPath = path.join(outputDir, `cycle-${String(cycle).padStart(3, '0')}.json`);
   const args = ['scripts/agent-load.mjs', ...(cycle % 5 === 0 ? ['--restart'] : [])];
   const result = spawnSync(process.execPath, args, {
@@ -36,6 +41,9 @@ const summary = {
   max_api_health_ms_p95: Math.max(...reports.map((report) => report.results.api_health_ms_p95), 0),
   max_peak_rss_bytes: Math.max(...reports.map((report) => report.results.peak_rss_bytes), 0),
   database_growth_bytes: reports.reduce((sum, report) => sum + report.results.database_growth_bytes, 0),
+  max_database_growth_per_run_bytes: Math.max(...reports.map((report) => report.results.database_growth_per_run_bytes), 0),
+  max_provider_peak_concurrency: Math.max(...reports.map((report) => report.results.provider_peak_concurrency), 0),
+  max_active_preview_rows: Math.max(...reports.map((report) => report.results.active_preview_rows), 0),
   failures: reports.flatMap((report) => report.failures || []),
 };
 await fs.writeFile(path.join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);

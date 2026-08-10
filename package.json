@@ -17,7 +17,8 @@
     "test:provider-live": "playwright test tests/e2e/provider-live.spec.js",
     "test:load": "node scripts/agent-load.mjs",
     "test:soak": "node scripts/agent-soak.mjs",
-    "test:release-evidence": "node scripts/collect-release-evidence.mjs"
+    "test:release-evidence": "node scripts/collect-release-evidence.mjs",
+    "test:release-gate": "node scripts/release-gate.mjs"
   },
   "dependencies": {
     "@tiptap/extension-color": "^2.26.1",

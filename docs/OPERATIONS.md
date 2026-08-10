@@ -25,11 +25,29 @@ service never elevates itself or changes ownership automatically.
 Run inspection inside the production container:
 
 ```bash
-docker compose exec webide perseus-maintain inspect
+docker compose exec webide perseus-maintain inspect --quick
 ```
 
 The JSON report includes integrity status, database size, free pages, row counts,
 and payload bytes for high-volume tables.
+
+Use the full check explicitly during a maintenance window or release verification:
+
+```bash
+docker compose exec webide perseus-maintain inspect --full-integrity
+```
+
+## Consistent database backup
+
+Back up the database while the service is stopped. The command uses SQLite's
+own backup mechanism and writes a SHA-256 manifest; do not copy `app.db` from a
+live service.
+
+```bash
+docker compose stop webide
+docker compose run --rm --no-deps webide perseus-maintain backup \
+  --output /data/backups/app-before-maintenance.db
+```
 
 ## Archiving run telemetry
 
@@ -74,6 +92,13 @@ npm run test:e2e:faults
 npm run test:provider-matrix
 npm run test:load
 npm run test:release-evidence
+```
+
+The complete local release gate also runs the full backend/frontend checks,
+browser tests, provider matrix, load test, and the 30-minute soak:
+
+```bash
+npm run test:release-gate
 ```
 
 Nightly soak defaults to 30 minutes and periodically restarts the service:
