@@ -7,35 +7,41 @@ import (
 )
 
 type providerRuntimeProfile struct {
-	Name                    string
-	ModelID                 string
-	AdapterMode             string
-	SupportsTools           string
-	SupportsVision          string
-	CapabilitySource        string
-	ContextWindowTokens     int
-	ContextWindowSource     string
-	AutoCompactEnabled      bool
-	CompactThresholdPercent int
-	CompactReservedTokens   int
-	PruneToolOutputsEnabled bool
+	Name                      string
+	ModelID                   string
+	AdapterMode               string
+	SupportsTools             string
+	SupportsParallelToolCalls string
+	ParallelCapabilitySource  string
+	ToolArgumentStreamMode    string
+	SupportsVision            string
+	CapabilitySource          string
+	ContextWindowTokens       int
+	ContextWindowSource       string
+	AutoCompactEnabled        bool
+	CompactThresholdPercent   int
+	CompactReservedTokens     int
+	PruneToolOutputsEnabled   bool
 }
 
 func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProfile {
 	windowTokens, windowSource := providerContextWindowProfile(provider)
 	profile := providerRuntimeProfile{
-		Name:                    "token_budget",
-		ModelID:                 provider.ModelID,
-		AdapterMode:             provider.AdapterMode,
-		SupportsTools:           provider.SupportsTools,
-		SupportsVision:          provider.SupportsVision,
-		CapabilitySource:        provider.CapabilitySource,
-		ContextWindowTokens:     windowTokens,
-		ContextWindowSource:     windowSource,
-		AutoCompactEnabled:      provider.AutoCompactEnabled,
-		CompactThresholdPercent: provider.AutoCompactThresholdPercent,
-		CompactReservedTokens:   provider.CompactReservedTokens,
-		PruneToolOutputsEnabled: provider.PruneToolOutputsEnabled,
+		Name:                      "token_budget",
+		ModelID:                   provider.ModelID,
+		AdapterMode:               provider.AdapterMode,
+		SupportsTools:             provider.SupportsTools,
+		SupportsParallelToolCalls: provider.SupportsParallelToolCalls,
+		ParallelCapabilitySource:  provider.ParallelCapabilitySource,
+		ToolArgumentStreamMode:    provider.ToolArgumentStreamMode,
+		SupportsVision:            provider.SupportsVision,
+		CapabilitySource:          provider.CapabilitySource,
+		ContextWindowTokens:       windowTokens,
+		ContextWindowSource:       windowSource,
+		AutoCompactEnabled:        provider.AutoCompactEnabled,
+		CompactThresholdPercent:   provider.AutoCompactThresholdPercent,
+		CompactReservedTokens:     provider.CompactReservedTokens,
+		PruneToolOutputsEnabled:   provider.PruneToolOutputsEnabled,
 	}
 	if profile.CompactThresholdPercent == 0 {
 		profile.CompactThresholdPercent = 80
@@ -47,6 +53,14 @@ func runtimeProfileForProvider(provider store.ModelProvider) providerRuntimeProf
 		profile.CompactReservedTokens = defaultCompactReservedTokens(profile.ContextWindowTokens)
 	}
 	return profile
+}
+
+func normalizedToolArgumentStreamMode(provider store.ModelProvider) string {
+	switch strings.ToLower(strings.TrimSpace(provider.ToolArgumentStreamMode)) {
+	case "delta", "snapshot":
+		return strings.ToLower(strings.TrimSpace(provider.ToolArgumentStreamMode))
+	}
+	return "delta"
 }
 
 const defaultContextWindowTokens = 128000

@@ -75,6 +75,19 @@ func (s *Server) completeConversationRunWithTask(ctx context.Context, userID, us
 		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
 		return
 	}
+	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
+		RunID:          runID,
+		UserID:         userID,
+		ConversationID: conversationID,
+		MessageID:      assistantMessage.ID,
+		TaskID:         task.ID,
+		Type:           "run_delegated",
+		Level:          "info",
+		Payload:        map[string]any{"message": "run delegated", "task_id": task.ID},
+	}); err != nil {
+		s.failConversationRun(context.Background(), userID, conversationID, userMessageID, runID, err)
+		return
+	}
 	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunDelegated, "delegated", store.UpdateAgentRunInput{
 		AssistantMessageID: assistantMessage.ID,
 		SetCompletedAt:     true,

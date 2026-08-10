@@ -34,6 +34,10 @@ func openAIWorkspaceToolByName(name string) map[string]any {
 		return openAIFunctionTool(name, "Read an HTML note as a model-friendly view. Use mode=index to locate blocks/sections before exact HTML work; then mode=block or mode=section with view=raw. Prefer structure/text/format for ordinary content understanding.", workspaceNoteViewParams())
 	case "read_workspace_files":
 		return openAIFunctionTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. .html notes are returned as note indexes, not line-range text.", workspaceReadFilesParams())
+	case "edit_workspace_note_blocks":
+		return openAIFunctionTool(name, "Atomically edit an existing HTML note. Use the smallest operation in this order: replace_text, replace_inner_html, single-block replace_html, then delete_block_range for contiguous removal. Use the full document_version from read_workspace_note_view. The batch is sanitized, verified, and written as one history version.", workspaceNoteBlockEditParams())
+	case "create_workspace_note":
+		return openAIFunctionTool(name, "Create a new .html note from an HTML fragment. The target must not exist and the backend sanitizes the fragment.", workspaceNoteCreateParams())
 	case "manage_workspace_path":
 		return openAIFunctionTool(name, "Perform a validated workspace path operation: mkdir, rename, move, copy, or trash. Use copy for deterministic file duplication without asking the model to rewrite whole files.", workspaceManageParams())
 	case "organize_workspace_matches":
@@ -59,6 +63,10 @@ func anthropicWorkspaceToolByName(name string) map[string]any {
 		return anthropicTool(name, "Read an HTML note as a model-friendly view. Use mode=index to locate blocks/sections before exact HTML work; then mode=block or mode=section with view=raw. Prefer structure/text/format for ordinary content understanding.", workspaceNoteViewParams())
 	case "read_workspace_files":
 		return anthropicTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. .html notes are returned as note indexes, not line-range text.", workspaceReadFilesParams())
+	case "edit_workspace_note_blocks":
+		return anthropicTool(name, "Atomically edit an existing HTML note. Use the smallest operation in this order: replace_text, replace_inner_html, single-block replace_html, then delete_block_range for contiguous removal. Use the full document_version from read_workspace_note_view. The batch is sanitized, verified, and written as one history version.", workspaceNoteBlockEditParams())
+	case "create_workspace_note":
+		return anthropicTool(name, "Create a new .html note from an HTML fragment. The target must not exist and the backend sanitizes the fragment.", workspaceNoteCreateParams())
 	case "manage_workspace_path":
 		return anthropicTool(name, "Perform a validated workspace path operation: mkdir, rename, move, copy, or trash. Use copy for deterministic file duplication without asking the model to rewrite whole files.", workspaceManageParams())
 	case "organize_workspace_matches":
@@ -84,6 +92,10 @@ func workspaceToolInputSchemaByName(name string) map[string]any {
 		return workspaceNoteViewParams()
 	case "read_workspace_files":
 		return workspaceReadFilesParams()
+	case "edit_workspace_note_blocks":
+		return workspaceNoteBlockEditParams()
+	case "create_workspace_note":
+		return workspaceNoteCreateParams()
 	case "manage_workspace_path":
 		return workspaceManageParams()
 	case "organize_workspace_matches":
@@ -202,13 +214,29 @@ func workspaceNoteViewParams() map[string]any {
 				"type":        "string",
 				"description": "Required when mode=block. Use a block_id returned by mode=index.",
 			},
+			"block_ids": map[string]any{
+				"type":        "array",
+				"maxItems":    20,
+				"items":       map[string]any{"type": "string"},
+				"description": "Optional batch of block ids for mode=block. Use this instead of multiple independent calls when several blocks are needed.",
+			},
 			"section_id": map[string]any{
 				"type":        "string",
 				"description": "Required when mode=section. Use a section_id returned by mode=index.",
 			},
+			"section_ids": map[string]any{
+				"type":        "array",
+				"maxItems":    20,
+				"items":       map[string]any{"type": "string"},
+				"description": "Optional batch of section ids for mode=section.",
+			},
 			"doc_hash": map[string]any{
 				"type":        "string",
-				"description": "Optional doc_hash from mode=index. If the note changed, stale ids are rejected and the note must be indexed again.",
+				"description": "Legacy version field retained for old runs. Prefer document_version.",
+			},
+			"document_version": map[string]any{
+				"type":        "string",
+				"description": "Full document_version from mode=index. If the note changed, stale ids are rejected and the note must be indexed again.",
 			},
 			"start_block": map[string]any{
 				"type":        "integer",
@@ -243,6 +271,51 @@ func workspaceReadFilesParams() map[string]any {
 	}
 }
 
+func workspaceNoteBlockEditParams() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"path", "edits"},
+		"properties": map[string]any{
+			"path":             map[string]any{"type": "string", "description": "Workspace-relative existing .html note path."},
+			"doc_hash":         map[string]any{"type": "string", "description": "Legacy version field retained for old runs."},
+			"document_version": map[string]any{"type": "string", "description": "Current full document_version returned by read_workspace_note_view."},
+			"edits": map[string]any{
+				"type":        "array",
+				"minItems":    1,
+				"description": "Atomic block edits. Every block_id may appear only once.",
+				"items": map[string]any{
+					"type":     "object",
+					"required": []string{"block_id", "operation"},
+					"properties": map[string]any{
+						"block_id":   map[string]any{"type": "string", "description": "Block id from the current note index."},
+						"segment_id": map[string]any{"type": "string", "description": "Optional segment_id from a raw block read. Use it to constrain replace_text to one HTML text node."},
+						"operation": map[string]any{
+							"type": "string",
+							"enum": []string{"replace_text", "replace_inner_html", "replace_html", "insert_before", "insert_after", "delete", "delete_block_range"},
+						},
+						"end_block_id":     map[string]any{"type": "string", "description": "Required for delete_block_range. Inclusive final block id from the same document version."},
+						"html":             map[string]any{"type": "string", "description": "Required for replace_inner_html, replace_html, insert_before, and insert_after. Must be an HTML fragment."},
+						"find":             map[string]any{"type": "string", "description": "Required for replace_text. Exact text to find inside one text node of the selected block; cross-node phrases require replace_inner_html."},
+						"replace":          map[string]any{"type": "string", "description": "Replacement text for replace_text. May be empty."},
+						"expected_matches": map[string]any{"type": "integer", "minimum": 1, "description": "Exact number of text-node matches required for replace_text. Defaults to 1."},
+					},
+				},
+			},
+		},
+	}
+}
+
+func workspaceNoteCreateParams() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"path", "html"},
+		"properties": map[string]any{
+			"path": map[string]any{"type": "string", "description": "Workspace-relative new .html note path. Existing files are never overwritten."},
+			"html": map[string]any{"type": "string", "description": "HTML fragment to store as the note body."},
+		},
+	}
+}
+
 func workspaceEditParams() map[string]any {
 	return map[string]any{
 		"type":     "object",
@@ -263,7 +336,7 @@ func workspacePatchParams() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Text patch beginning with *** Begin Patch and ending with *** End Patch. New model turns should output patch blocks directly in assistant text so the backend can capture and verify them.",
+				"description": "Complete patch beginning with *** Begin Patch and ending with *** End Patch. Pass it only as this structured tool argument; never emit it as ordinary assistant text.",
 			},
 		},
 	}
@@ -301,7 +374,7 @@ func workspaceSaveParams() map[string]any {
 			"path": map[string]any{"type": "string", "description": "Workspace-relative file path."},
 			"content": map[string]any{
 				"type":        "string",
-				"description": "Compatibility content for historical save calls. New model turns should edit files with a *** Begin Patch text patch.",
+				"description": "Compatibility content for historical save calls. New model turns should use apply_workspace_patch for ordinary text files or edit_workspace_note_blocks for HTML notes.",
 			},
 			"mode": map[string]any{
 				"type":        "string",
@@ -320,7 +393,7 @@ func workspaceChunkWriteParams() map[string]any {
 			"path": map[string]any{"type": "string", "description": "Workspace-relative text file path."},
 			"content": map[string]any{
 				"type":        "string",
-				"description": "Text to append for compatibility with existing chunked runs. Prefer a *** Begin Patch text patch for new edits.",
+				"description": "Text to append for compatibility with existing chunked runs. Prefer the structured apply_workspace_patch tool for new ordinary text edits.",
 			},
 			"chunk_index": map[string]any{
 				"type":        "integer",

@@ -4,21 +4,32 @@ export default function useEditorTabAutoSave({
   autoSaveTimerRef,
   currentFileContent,
   currentFilePath,
-  externalFileConflict,
-  isDirty,
-  isDirtyRef,
-  isEditorLoading,
+    externalFileConflict,
+    isDirty,
+    isDirtyRef,
+    isEditorLoading,
+    isAuthoritativeSyncing,
   isSavingFile,
   isTextFile,
   saveFileContent,
-  savedFileContent,
+  userRevision,
+  savedUserRevision,
 }) {
   useEffect(() => {
     if (autoSaveTimerRef.current) {
       window.clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
     }
-    if (!currentFilePath || !isTextFile || !isDirty || externalFileConflict || isEditorLoading || isSavingFile) {
+    if (
+      !currentFilePath ||
+      !isTextFile ||
+      !isDirty ||
+      userRevision <= savedUserRevision ||
+      externalFileConflict ||
+      isEditorLoading ||
+      isAuthoritativeSyncing ||
+      isSavingFile
+    ) {
       return undefined;
     }
     autoSaveTimerRef.current = window.setTimeout(() => {
@@ -31,7 +42,7 @@ export default function useEditorTabAutoSave({
         autoSaveTimerRef.current = null;
       }
     };
-  }, [currentFilePath, currentFileContent, savedFileContent, isTextFile, isDirty, externalFileConflict, isEditorLoading, isSavingFile]);
+  }, [currentFilePath, currentFileContent, userRevision, savedUserRevision, isTextFile, isDirty, externalFileConflict, isEditorLoading, isAuthoritativeSyncing, isSavingFile]);
 
   useEffect(() => {
     const onBeforeUnload = (event) => {

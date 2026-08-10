@@ -77,8 +77,8 @@ func TestTurnEngineRejectsPlainTextAndCompletesThroughExplicitAction(t *testing.
 	if !protocolRetrySeen {
 		t.Fatal("expected a protocol retry event for the rejected plain response")
 	}
-	if got := streamed.String(); got != "" {
-		t.Fatalf("rejected process text must not reach the main message stream, got %q", got)
+	if got := streamed.String(); got != "I will inspect first." {
+		t.Fatalf("only tool-associated commentary should reach the message stream, got %q", got)
 	}
 	if firstRequestSummary == nil {
 		t.Fatal("expected model_request_summary event")
@@ -102,6 +102,9 @@ func TestTurnEngineRejectsPlainTextAndCompletesThroughExplicitAction(t *testing.
 	}
 	if got, _ := firstRequestSummary["prompt_policy_version"].(string); got != agentActionPolicyVersion {
 		t.Fatalf("first request summary prompt_policy_version=%q, want %q", got, agentActionPolicyVersion)
+	}
+	if got, _ := firstRequestSummary["cumulative_estimated_input_tokens"].(int); got <= 0 {
+		t.Fatalf("first request summary must report cumulative input tokens: %#v", firstRequestSummary)
 	}
 	items, err := env.conversations.ListAgentTurnItems(ctx, testUserID, conversation.ID)
 	if err != nil {

@@ -7,36 +7,40 @@ import (
 )
 
 type ModelProvider struct {
-	ID                          string          `json:"id"`
-	UserID                      string          `json:"user_id"`
-	Name                        string          `json:"name"`
-	Visibility                  string          `json:"visibility"`
-	Protocol                    string          `json:"protocol"`
-	AdapterMode                 string          `json:"adapter_mode"`
-	AuthMode                    string          `json:"auth_mode"`
-	SupportsTools               string          `json:"supports_tools"`
-	SupportsVision              string          `json:"supports_vision"`
-	CapabilitySource            string          `json:"capability_source"`
-	BaseURL                     string          `json:"base_url"`
-	APIKey                      string          `json:"-"`
-	MaskedKey                   string          `json:"masked_key"`
-	ModelID                     string          `json:"model_id"`
-	Enabled                     bool            `json:"enabled"`
-	IsDefault                   bool            `json:"is_default"`
-	ReasoningCapability         string          `json:"reasoning_capability"`
-	ReasoningCapabilitySource   string          `json:"reasoning_capability_source,omitempty"`
-	ReasoningProfileLevels      string          `json:"reasoning_profile_levels,omitempty"`
-	ReasoningSupport            string          `json:"reasoning_support"`
-	ThinkingProfile             ThinkingProfile `json:"thinking_profile"`
-	ContextWindowTokens         int             `json:"context_window_tokens"`
-	ContextWindowSource         string          `json:"context_window_source,omitempty"`
-	AutoCompactEnabled          bool            `json:"auto_compact_enabled"`
-	AutoCompactThresholdPercent int             `json:"auto_compact_threshold_percent"`
-	CompactReservedTokens       int             `json:"compact_reserved_tokens"`
-	PruneToolOutputsEnabled     bool            `json:"prune_tool_outputs_enabled"`
-	NativePatchToolEnabled      bool            `json:"-"`
-	CreatedAt                   time.Time       `json:"created_at"`
-	UpdatedAt                   time.Time       `json:"updated_at"`
+	ID                           string          `json:"id"`
+	UserID                       string          `json:"user_id"`
+	Name                         string          `json:"name"`
+	Visibility                   string          `json:"visibility"`
+	Protocol                     string          `json:"protocol"`
+	AdapterMode                  string          `json:"adapter_mode"`
+	AuthMode                     string          `json:"auth_mode"`
+	SupportsTools                string          `json:"supports_tools"`
+	SupportsParallelToolCalls    string          `json:"supports_parallel_tool_calls"`
+	ParallelCapabilitySource     string          `json:"parallel_capability_source"`
+	ToolArgumentStreamMode       string          `json:"tool_argument_stream_mode"`
+	ToolArgumentStreamModeSource string          `json:"stream_mode_source"`
+	SupportsVision               string          `json:"supports_vision"`
+	CapabilitySource             string          `json:"capability_source"`
+	BaseURL                      string          `json:"base_url"`
+	APIKey                       string          `json:"-"`
+	MaskedKey                    string          `json:"masked_key"`
+	ModelID                      string          `json:"model_id"`
+	Enabled                      bool            `json:"enabled"`
+	IsDefault                    bool            `json:"is_default"`
+	ReasoningCapability          string          `json:"reasoning_capability"`
+	ReasoningCapabilitySource    string          `json:"reasoning_capability_source,omitempty"`
+	ReasoningProfileLevels       string          `json:"reasoning_profile_levels,omitempty"`
+	ReasoningSupport             string          `json:"reasoning_support"`
+	ThinkingProfile              ThinkingProfile `json:"thinking_profile"`
+	ContextWindowTokens          int             `json:"context_window_tokens"`
+	ContextWindowSource          string          `json:"context_window_source,omitempty"`
+	AutoCompactEnabled           bool            `json:"auto_compact_enabled"`
+	AutoCompactThresholdPercent  int             `json:"auto_compact_threshold_percent"`
+	CompactReservedTokens        int             `json:"compact_reserved_tokens"`
+	PruneToolOutputsEnabled      bool            `json:"prune_tool_outputs_enabled"`
+	NativePatchToolEnabled       bool            `json:"-"`
+	CreatedAt                    time.Time       `json:"created_at"`
+	UpdatedAt                    time.Time       `json:"updated_at"`
 }
 
 type SearchProvider struct {
@@ -53,28 +57,32 @@ type SearchProvider struct {
 }
 
 type ModelProviderInput struct {
-	Name                        string `json:"name"`
-	Visibility                  string `json:"visibility"`
-	Protocol                    string `json:"protocol"`
-	AdapterMode                 string `json:"adapter_mode"`
-	AuthMode                    string `json:"auth_mode"`
-	SupportsTools               string `json:"supports_tools"`
-	SupportsVision              string `json:"supports_vision"`
-	CapabilitySource            string `json:"capability_source"`
-	BaseURL                     string `json:"base_url"`
-	APIKey                      string `json:"api_key"`
-	ModelID                     string `json:"model_id"`
-	Enabled                     bool   `json:"enabled"`
-	IsDefault                   bool   `json:"is_default"`
-	ReasoningCapability         string `json:"reasoning_capability"`
-	ReasoningCapabilitySource   string `json:"reasoning_capability_source"`
-	ReasoningProfileLevels      string `json:"reasoning_profile_levels"`
-	ContextWindowTokens         int    `json:"context_window_tokens"`
-	AutoCompactEnabled          *bool  `json:"auto_compact_enabled"`
-	AutoCompactThresholdPercent int    `json:"auto_compact_threshold_percent"`
-	CompactReservedTokens       int    `json:"compact_reserved_tokens"`
-	PruneToolOutputsEnabled     *bool  `json:"prune_tool_outputs_enabled"`
-	NativePatchToolEnabled      *bool  `json:"-"`
+	Name                         string `json:"name"`
+	Visibility                   string `json:"visibility"`
+	Protocol                     string `json:"protocol"`
+	AdapterMode                  string `json:"adapter_mode"`
+	AuthMode                     string `json:"auth_mode"`
+	SupportsTools                string `json:"supports_tools"`
+	SupportsParallelToolCalls    string `json:"supports_parallel_tool_calls"`
+	ParallelCapabilitySource     string `json:"parallel_capability_source"`
+	ToolArgumentStreamMode       string `json:"tool_argument_stream_mode"`
+	ToolArgumentStreamModeSource string `json:"stream_mode_source"`
+	SupportsVision               string `json:"supports_vision"`
+	CapabilitySource             string `json:"capability_source"`
+	BaseURL                      string `json:"base_url"`
+	APIKey                       string `json:"api_key"`
+	ModelID                      string `json:"model_id"`
+	Enabled                      bool   `json:"enabled"`
+	IsDefault                    bool   `json:"is_default"`
+	ReasoningCapability          string `json:"reasoning_capability"`
+	ReasoningCapabilitySource    string `json:"reasoning_capability_source"`
+	ReasoningProfileLevels       string `json:"reasoning_profile_levels"`
+	ContextWindowTokens          int    `json:"context_window_tokens"`
+	AutoCompactEnabled           *bool  `json:"auto_compact_enabled"`
+	AutoCompactThresholdPercent  int    `json:"auto_compact_threshold_percent"`
+	CompactReservedTokens        int    `json:"compact_reserved_tokens"`
+	PruneToolOutputsEnabled      *bool  `json:"prune_tool_outputs_enabled"`
+	NativePatchToolEnabled       *bool  `json:"-"`
 }
 
 type SearchProviderInput struct {
@@ -147,6 +155,10 @@ CREATE TABLE IF NOT EXISTS search_providers (
 		{"adapter_mode", "TEXT NOT NULL DEFAULT ''"},
 		{"auth_mode", "TEXT NOT NULL DEFAULT ''"},
 		{"supports_tools", "TEXT NOT NULL DEFAULT 'unknown'"},
+		{"supports_parallel_tool_calls", "TEXT NOT NULL DEFAULT 'unknown'"},
+		{"parallel_capability_source", "TEXT NOT NULL DEFAULT 'default'"},
+		{"tool_argument_stream_mode", "TEXT NOT NULL DEFAULT 'delta'"},
+		{"stream_mode_source", "TEXT NOT NULL DEFAULT 'legacy_migration'"},
 		{"supports_vision", "TEXT NOT NULL DEFAULT 'unknown'"},
 		{"capability_source", "TEXT NOT NULL DEFAULT ''"},
 	}
@@ -168,6 +180,14 @@ SET adapter_mode = CASE
     END,
     capability_source = 'legacy_migration'
 WHERE adapter_mode = '' OR auth_mode = ''
+`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE model_providers
+SET tool_argument_stream_mode = 'delta',
+    stream_mode_source = 'legacy_migration'
+WHERE lower(trim(tool_argument_stream_mode)) IN ('', 'auto')
 `); err != nil {
 		return err
 	}

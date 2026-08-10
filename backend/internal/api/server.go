@@ -63,8 +63,11 @@ type searchFilesRequest struct {
 }
 
 type writeFileRequest struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path                string `json:"path"`
+	Content             string `json:"content"`
+	BaseDocumentVersion string `json:"base_document_version"`
+	UserRevision        int64  `json:"user_revision"`
+	SaveRequestID       string `json:"save_request_id"`
 }
 
 type renameRequest struct {
@@ -317,10 +320,25 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	})
 }
 
-func writeSSE(w http.ResponseWriter, event string, payload any) {
-	raw, _ := json.Marshal(payload)
-	fmt.Fprintf(w, "event: %s\n", event)
-	fmt.Fprintf(w, "data: %s\n\n", raw)
+func writeSSE(w http.ResponseWriter, event string, payload any) error {
+	return writeSSEWithID(w, event, "", payload)
+}
+
+func writeSSEWithID(w http.ResponseWriter, event, id string, payload any) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if id != "" {
+		if _, err := fmt.Fprintf(w, "id: %s\n", id); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "data: %s\n\n", raw)
+	return err
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

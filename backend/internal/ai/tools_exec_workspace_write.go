@@ -25,7 +25,7 @@ func (s *Service) execSaveWorkspaceFile(ctx context.Context, userID, argumentsJS
 		return "", "", "正在编辑文件...", "", fmt.Errorf("invalid tool arguments")
 	}
 	if len([]rune(args.Content)) > recommendedWorkspaceChunkChars {
-		return "", "", "正在编辑文件...", args.Path, fmt.Errorf("invalid tool arguments: compatibility save content exceeds %d characters; submit the file change as a *** Begin Patch text patch", recommendedWorkspaceChunkChars)
+		return "", "", "正在编辑文件...", args.Path, fmt.Errorf("invalid tool arguments: compatibility save content exceeds %d characters; use apply_workspace_patch or the appropriate structured note editor", recommendedWorkspaceChunkChars)
 	}
 	switch strings.ToLower(strings.TrimSpace(args.Mode)) {
 	case "create":

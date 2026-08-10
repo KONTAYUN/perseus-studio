@@ -147,7 +147,7 @@ func (s *Service) execReadWorkspaceFile(ctx context.Context, userID, argumentsJS
 		"start_line":       result.StartLine,
 		"end_line":         result.EndLine,
 		"total_lines":      result.TotalLines,
-		"next_hint":        "Use a *** Begin Patch text patch for any file content change.",
+		"next_hint":        "Use apply_workspace_patch for ordinary text changes or edit_workspace_note_blocks for HTML note changes.",
 	})
 	return mustJSON(payload), summary, label, result.Path, nil
 }
@@ -285,7 +285,7 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		"limited_by_count": limitedByCount,
 		"start_line":       args.StartLine,
 		"end_line":         args.EndLine,
-		"next_hint":        "Use read_workspace_note_view mode=block/section for .html notes. Use a *** Begin Patch text patch for file content changes.",
+		"next_hint":        "Use read_workspace_note_view mode=block/section and edit_workspace_note_blocks for .html notes. Use apply_workspace_patch for ordinary text files.",
 	})
 	summary := fmt.Sprintf("read %d workspace file(s), indexed %d html note(s), %d failed", len(items), len(noteIndexes), len(failed))
 	return mustJSON(payload), summary, "正在批量读取文件...", strings.Join(readPaths, ","), nil

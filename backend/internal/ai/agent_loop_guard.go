@@ -98,9 +98,18 @@ func (r *agentRuntime) loopGuardTriggered() (LoopGuardObservation, bool, bool) {
 		Message:            "The workflow is repeating without a verified workspace change. Use the required edit action now, or stop with an honest failure if the edit cannot be performed.",
 	}
 	if state.RequiresWorkspaceMutation && !state.HasVerifiedMutation {
-		observation.RequiredNextAction = "apply_workspace_patch"
+		observation.RequiredNextAction = requiredWorkspaceEditTool(state.TargetPaths)
 	}
 	return observation, true, stop
+}
+
+func requiredWorkspaceEditTool(paths []string) string {
+	for _, path := range paths {
+		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".html") {
+			return "edit_workspace_note_blocks"
+		}
+	}
+	return "apply_workspace_patch"
 }
 
 func (r *agentRuntime) appendLoopGuardObservation(ctxLabel string) bool {

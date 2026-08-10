@@ -38,6 +38,7 @@ type ContextAssembly struct {
 func (ContextAssembler) Assemble(input ContextAssemblerInput) ContextAssembly {
 	active, boundary := activeAgentContextItems(input.Items)
 	active = repairAgentToolPairs(active)
+	active, demotedPayloads, demotedBytes := demoteConsumedTransportPayloads(active)
 	workingSet := contextWorkingSet(input.Items)
 	workingSet = contextWorkingSetWithAvailability(workingSet, active)
 	workingSetText := contextWorkingSetText(workingSet)
@@ -90,6 +91,8 @@ func (ContextAssembler) Assemble(input ContextAssemblerInput) ContextAssembly {
 	summary.ContextWatermarkPercent = contextWatermarkPercent(tokens, input.Profile.ContextWindowTokens)
 	summary.CompactionThresholdTokens = threshold
 	summary.ToolResultsPruned = pruned
+	summary.ConsumedPayloadsDemoted = demotedPayloads
+	summary.ConsumedPayloadBytesRemoved = demotedBytes
 	summary.CompactionBoundarySeq = boundary
 	summary.RetainedTurns = countContextTurns(active)
 	summary.EditorContextPaths = contextEditorPaths(active)
@@ -97,7 +100,7 @@ func (ContextAssembler) Assemble(input ContextAssemblerInput) ContextAssembly {
 	summary.ContextWindowSource = input.Profile.ContextWindowSource
 	summary.PayloadBeforeBytes = estimatedContextPayloadBytes(snapshot)
 	summary.PayloadAfterBytes = summary.PayloadBeforeBytes
-	summary.PayloadCompactionApplied = pruned > 0
+	summary.PayloadCompactionApplied = pruned > 0 || demotedPayloads > 0
 	summary.ProviderContextCompacted = boundary > 0
 	summary.ContextAssemblyStrategy = "turn_items_token_budget"
 

@@ -34,6 +34,7 @@ export async function waitForAgentRunStream({
   userMessageId = '',
   loadConversations,
   onAssistantToolEvents,
+  onAssistantPreviewEvent,
   onTasksChanged,
   runId,
   selectedModel,
@@ -76,9 +77,13 @@ export async function waitForAgentRunStream({
   let sawAssistantCompletion = false;
   let loadingTimer = null;
   let lastEventSeq = Number(afterSeq) || 0;
+  let highestQueuedSeq = lastEventSeq;
   let reconnectAttempts = 0;
+  let reconnectScheduled = false;
+  let replayComplete = false;
+  let pendingTerminalRun = null;
+  let finalSeq = 0;
   let eventChain = Promise.resolve();
-  const queuedEventSeqs = new Set();
   const closeSource = () => {
     if (source) {
       source.close();
@@ -201,15 +206,26 @@ export async function waitForAgentRunStream({
 
   const handleRun = async (run) => {
     if (!run) return;
-    if (run.status === 'succeeded' || run.status === 'waiting_for_user' || run.status === 'delegated') {
-      await finish();
-    } else if (run.status === 'failed' || run.status === 'canceled') {
+    finalSeq = Math.max(finalSeq, Number(run.final_seq) || 0);
+    if (['succeeded', 'waiting_for_user', 'delegated', 'failed', 'canceled'].includes(run.status)) {
+      pendingTerminalRun = run;
+      if (run.final_seq === undefined) replayComplete = true;
+    }
+  };
+
+  const finishIfTerminalReady = async () => {
+    if (!pendingTerminalRun || !replayComplete || lastEventSeq < finalSeq) return false;
+    const run = pendingTerminalRun;
+    pendingTerminalRun = null;
+    if (run.status === 'failed' || run.status === 'canceled') {
       await refreshFromLatestAssistantMessage();
       await fail(run.error_message || '执行失败', run.diagnostic_log_id, {
         stage: run.stage || '',
         ...chatFailureMetadata(run),
       });
     }
+    await finish();
+    return true;
   };
 
   const handleEvent = async (item) => {
@@ -284,9 +300,9 @@ export async function waitForAgentRunStream({
           }),
         })
       );
-    } else if (item?.type === 'assistant_message_started') {
+    } else if (item?.type === 'assistant_message_started' || item?.type === 'assistant_commentary_started') {
       setVisibleConversationMessages((current) => mergeAssistantMessageStarted(current, thinkingId, payload.assistant_message, { runId }));
-    } else if (item?.type === 'assistant_message_delta') {
+    } else if (item?.type === 'assistant_message_delta' || item?.type === 'assistant_commentary_delta') {
       const messageId = payload.message_id;
       const delta = payload.delta || '';
       if (messageId && delta) {
@@ -307,6 +323,12 @@ export async function waitForAgentRunStream({
       if (messageId) {
         setVisibleConversationMessages((current) => current.filter((messageItem) => messageItem.id !== messageId));
       }
+    } else if (item?.type === 'assistant_commentary_interrupted' && payload.assistant_message) {
+      setVisibleConversationMessages((current) =>
+        mergeAssistantMessageCompleted(current, thinkingId, payload.assistant_message, { runId })
+      );
+    } else if (item?.type?.startsWith('workspace_edit_preview_')) {
+      await onAssistantPreviewEvent?.({ ...payload, type: item.type });
     } else if (item?.type === 'tool_call_completed') {
       if (isUserRequestToolName(payload.tool_name)) {
         applyUserRequest(payload);
@@ -320,10 +342,10 @@ export async function waitForAgentRunStream({
       ensureThinkingShell();
     } else if (item?.type === 'user_input_requested' || item?.type === 'user_choice_requested' || item?.type === 'user_question_requested') {
       applyUserRequest(payload);
-    } else if (message && !['assistant_message_completed', 'assistant_message_presentation_updated', 'run_completed', 'model_delta'].includes(item?.type)) {
+    } else if (message && !['assistant_message_completed', 'assistant_commentary_completed', 'assistant_message_presentation_updated', 'run_completed', 'model_delta'].includes(item?.type)) {
       appendProgress(item?.type, payload, message);
     }
-    if (item?.type === 'assistant_message_completed') {
+    if (item?.type === 'assistant_message_completed' || item?.type === 'assistant_commentary_completed') {
       sawAssistantCompletion = true;
       if (payload.assistant_message) {
         setVisibleConversationMessages((current) => mergeAssistantMessageCompleted(current, thinkingId, payload.assistant_message, { runId }));
@@ -345,12 +367,14 @@ export async function waitForAgentRunStream({
         await onAssistantToolEvents?.([toolEventFromPayload(payload, item.type)]);
       }
     } else if (item?.type === 'run_failed') {
-      await refreshFromLatestAssistantMessage();
-      await fail(payload.error || '执行失败', payload.diagnostic_log_id, {
+      pendingTerminalRun = {
+        status: 'failed',
+        error_message: payload.error || '执行失败',
+        diagnostic_log_id: payload.diagnostic_log_id || '',
         stage: payload.stage || '',
-        incompleteReason: payload.incomplete_reason || '',
+        incomplete_reason: payload.incomplete_reason || '',
         ...chatFailureMetadata(payload),
-      });
+      };
     } else if (item?.type === 'conversation_title_updated') {
       if (payload.conversation) {
         setConversations?.((current) =>
@@ -372,9 +396,20 @@ export async function waitForAgentRunStream({
   const pollUntilDone = async () => {
     fallbackStarted = true;
     for (let attempt = 0; attempt < 120 && !settled; attempt += 1) {
-      const run = await apiGet(`/api/agent-runs/${encodeURIComponent(runId)}`);
-      await handleRun(run);
-      if (settled) return;
+      const data = await apiGet(
+        `/api/agent-runs/${encodeURIComponent(runId)}/events?after_seq=${encodeURIComponent(lastEventSeq)}`
+      );
+      for (const item of data.items || []) {
+        const seq = Number(item?.seq) || 0;
+        if (seq <= lastEventSeq) continue;
+        if (seq !== lastEventSeq + 1) break;
+        await handleEvent(item);
+        lastEventSeq = seq;
+        highestQueuedSeq = seq;
+      }
+      await handleRun(data.run);
+      replayComplete = true;
+      if (await finishIfTerminalReady()) return;
       await wait(2000);
     }
     throw new Error('执行仍在进行，但事件流连接中断，请刷新会话查看结果');
@@ -395,6 +430,9 @@ export async function waitForAgentRunStream({
   await new Promise((resolve, reject) => {
     const openStream = () => {
       if (settled) return;
+      reconnectScheduled = false;
+      replayComplete = false;
+      highestQueuedSeq = lastEventSeq;
       const resumeSeq = lastEventSeq > 0 ? lastEventSeq : Number(afterSeq) || 0;
       const streamPath = `${API_BASE_URL}/api/agent-runs/${encodeURIComponent(runId)}/stream${
         resumeSeq ? `?after_seq=${encodeURIComponent(resumeSeq)}` : ''
@@ -417,30 +455,68 @@ export async function waitForAgentRunStream({
       source.addEventListener('run', (event) => {
         runQueued(async () => {
           await handleRun(JSON.parse(event.data));
-          if (settled) resolve();
+          if (await finishIfTerminalReady()) resolve();
+        }, reject);
+      });
+      source.addEventListener('stream_opened', (event) => {
+        const payload = JSON.parse(event.data);
+        runQueued(async () => {
+          finalSeq = Math.max(finalSeq, Number(payload.final_seq) || 0);
+          await handleRun(payload.run);
+        }, reject);
+      });
+      source.addEventListener('replay_complete', (event) => {
+        const payload = JSON.parse(event.data);
+        runQueued(async () => {
+          finalSeq = Math.max(finalSeq, Number(payload.final_seq) || 0);
+          replayComplete = Number(payload.through_seq) <= lastEventSeq;
+          if (await finishIfTerminalReady()) resolve();
         }, reject);
       });
       source.addEventListener('event', (event) => {
         const item = JSON.parse(event.data);
         if (item?.seq) {
-          if (item.seq <= lastEventSeq || queuedEventSeqs.has(item.seq)) return;
-          queuedEventSeqs.add(item.seq);
+          const seq = Number(item.seq);
+          if (seq <= lastEventSeq || seq <= highestQueuedSeq) return;
+          if (seq !== highestQueuedSeq + 1) {
+            closeSource();
+            highestQueuedSeq = lastEventSeq;
+            if (!reconnectScheduled) {
+              reconnectScheduled = true;
+              eventChain.finally(() => scheduleDelay(openStream, 50));
+            }
+            return;
+          }
+          highestQueuedSeq = seq;
         }
         runQueued(async () => {
           await handleEvent(item);
           reconnectAttempts = 0;
           if (item?.seq) {
-            lastEventSeq = Math.max(lastEventSeq, item.seq);
-            queuedEventSeqs.delete(item.seq);
+            lastEventSeq = Number(item.seq);
           }
-          if (settled) resolve();
+          if (await finishIfTerminalReady()) resolve();
+        }, reject);
+      });
+      source.addEventListener('preview', (event) => {
+        const item = JSON.parse(event.data);
+        runQueued(async () => {
+          const payload = item?.payload || {};
+          const applied = await onAssistantPreviewEvent?.({ ...payload, type: item.type });
+          if (applied === false) {
+            const state = await apiGet(`/api/agent-runs/${encodeURIComponent(runId)}/previews`);
+            for (const preview of state.items || []) {
+              await onAssistantPreviewEvent?.(preview);
+            }
+          }
         }, reject);
       });
       source.onerror = () => {
         closeSource();
-        if (settled || fallbackStarted) return;
+        if (settled || fallbackStarted || reconnectScheduled) return;
         if (reconnectAttempts < 3) {
           reconnectAttempts += 1;
+          reconnectScheduled = true;
           scheduleDelay(openStream, Math.min(500 * reconnectAttempts, 1500));
           return;
         }

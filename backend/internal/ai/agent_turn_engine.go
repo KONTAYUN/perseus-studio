@@ -15,7 +15,8 @@ Turn protocol override for this run:
 - If the user must make a bounded decision with two or three mutually exclusive options, call request_user_choice.
 - Otherwise call the next tool needed to make progress.
 - The start_background_task tool may end the foreground turn after its request has been validated and recorded.
-- Use apply_workspace_patch for file-content changes. Assistant text never executes file changes.
+- Use edit_workspace_note_blocks for existing HTML notes and create_workspace_note for new HTML notes.
+- Use apply_workspace_patch for non-HTML file-content changes. Assistant text never executes file changes.
 - A terminal tool must be the only tool call in its response.
 - Tool results are recorded before the next model step. Do not claim external work without a successful tool result.
 `
@@ -96,6 +97,12 @@ func (r *agentRuntime) runTurnEngine(ctx context.Context) (Reply, error) {
 		}
 
 		r.invalidTurns = 0
+		responseKind := ModelResponseDispatcher{}.Classify(turn).Kind
+		if turnEngineCallsCanPublishCommentary(turn.ToolCalls) {
+			r.commitAssistantActionPreamble(turn, responseKind)
+		} else if strings.TrimSpace(turn.Content) != "" && r.opts.OnAssistantCurrentMessageDiscarded != nil {
+			r.opts.OnAssistantCurrentMessageDiscarded("terminal_or_wait_action_owns_presentation")
+		}
 		r.appendAssistantTurn(turn)
 		if request, completed, err := r.executeTurnEngineToolCalls(ctx, turn.ToolCalls, &repeats); err != nil {
 			return Reply{}, err
@@ -114,6 +121,22 @@ func (r *agentRuntime) runTurnEngine(ctx context.Context) (Reply, error) {
 			return Reply{Content: content, RunEvents: runEvents, PresentationEvents: presentationEvents, TerminalState: r.terminalState}, nil
 		}
 	}
+}
+
+func turnEngineCallsCanPublishCommentary(calls []agentToolCall) bool {
+	if len(calls) == 0 {
+		return false
+	}
+	for _, call := range calls {
+		name := strings.TrimSpace(call.Name)
+		if name == "start_background_task" || isUserRequestTool(name) {
+			return false
+		}
+		if entry, ok := toolManifestEntry(name); ok && entry.Terminal {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *agentRuntime) failProtocolTerminalState() error {

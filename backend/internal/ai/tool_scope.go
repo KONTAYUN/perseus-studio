@@ -102,6 +102,8 @@ func scopedToolCandidatePaths(toolName, argumentsJSON string) ([]string, bool) {
 var selectedScopeToolExtractors = map[string]func(string) ([]string, bool){
 	"read_workspace_text":        extractSinglePathScopeTarget,
 	"read_workspace_note_view":   extractSinglePathScopeTarget,
+	"edit_workspace_note_blocks": extractSinglePathScopeTarget,
+	"create_workspace_note":      extractSinglePathScopeTarget,
 	"apply_workspace_patch":      extractPatchScopeTargets,
 	"edit_workspace_text":        extractSinglePathScopeTarget,
 	"replace_workspace_lines":    extractSinglePathScopeTarget,

@@ -32,6 +32,8 @@ type AgentRun struct {
 	ErrorMessage       sql.NullString `json:"-"`
 	DiagnosticLogID    sql.NullString `json:"-"`
 	FailureJSON        sql.NullString `json:"-"`
+	EventHeadSeq       int64          `json:"event_head_seq"`
+	FinalSeq           int64          `json:"final_seq"`
 	CreatedAt          time.Time      `json:"created_at"`
 	StartedAt          sql.NullTime   `json:"-"`
 	CompletedAt        sql.NullTime   `json:"-"`
@@ -73,6 +75,7 @@ type UpdateAgentRunInput struct {
 }
 
 type AgentEventInput struct {
+	ID             string
 	RunID          string
 	UserID         string
 	ConversationID string
@@ -153,11 +156,43 @@ CREATE TABLE IF NOT EXISTS agent_followup_answers (
   UNIQUE(user_id, run_id, tool_call_id),
   FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS agent_edit_previews (
+  preview_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  tool_call_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  base_hash TEXT NOT NULL DEFAULT '',
+  revision INTEGER NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  updated_at DATETIME NOT NULL,
+  FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS agent_data_migrations (
+  name TEXT PRIMARY KEY,
+  details_json TEXT NOT NULL DEFAULT '{}',
+  completed_at DATETIME NOT NULL
+);
 `
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
 		return err
 	}
 	if err := AddColumnIfNotExists(ctx, s.db, "agent_runs", "failure_json", "TEXT"); err != nil {
+		return err
+	}
+	if err := AddColumnIfNotExists(ctx, s.db, "agent_runs", "event_head_seq", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := AddColumnIfNotExists(ctx, s.db, "agent_runs", "final_seq", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE agent_runs
+SET event_head_seq = COALESCE((SELECT MAX(seq) FROM agent_events WHERE run_id = agent_runs.id), 0)
+WHERE event_head_seq = 0
+`); err != nil {
 		return err
 	}
 	indexes := `
@@ -169,8 +204,20 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_user_created ON agent_events(user_id
 CREATE INDEX IF NOT EXISTS idx_agent_events_conversation_type ON agent_events(user_id, conversation_id, type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_run_checkpoints_run_seq ON agent_run_checkpoints(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_agent_followup_answers_run ON agent_followup_answers(user_id, run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_edit_previews_run ON agent_edit_previews(user_id, run_id, updated_at);
 `
-	_, err := s.db.ExecContext(ctx, indexes)
+	if _, err := s.db.ExecContext(ctx, indexes); err != nil {
+		return err
+	}
+	if err := s.cleanupLegacyPreviewEvents(ctx); err != nil {
+		return err
+	}
+	if err := s.normalizeAgentEventSequences(ctx); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_events_run_seq_unique ON agent_events(run_id, seq)
+`)
 	return err
 }
 
@@ -194,7 +241,8 @@ INSERT INTO agent_runs (
 func (s *AgentRunStore) GetRun(ctx context.Context, userID, id string) (AgentRun, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_provider_id,
-	   status, stage, error_message, diagnostic_log_id, failure_json, created_at, started_at, completed_at, updated_at
+	   status, stage, error_message, diagnostic_log_id, failure_json, event_head_seq, final_seq,
+	   created_at, started_at, completed_at, updated_at
 FROM agent_runs
 WHERE id = ? AND user_id = ?
 `, id, userID)
@@ -204,7 +252,8 @@ WHERE id = ? AND user_id = ?
 func (s *AgentRunStore) LatestConversationRun(ctx context.Context, userID, conversationID string) (AgentRun, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_provider_id,
-	   status, stage, error_message, diagnostic_log_id, failure_json, created_at, started_at, completed_at, updated_at
+	   status, stage, error_message, diagnostic_log_id, failure_json, event_head_seq, final_seq,
+	   created_at, started_at, completed_at, updated_at
 FROM agent_runs
 WHERE user_id = ? AND conversation_id = ?
 ORDER BY created_at DESC, id DESC
@@ -234,9 +283,15 @@ SET status = COALESCE(NULLIF(?, ''), status),
     assistant_message_id = COALESCE(NULLIF(?, ''), assistant_message_id),
     started_at = COALESCE(?, started_at),
     completed_at = COALESCE(?, completed_at),
+    final_seq = CASE
+      WHEN ? IN (?, ?, ?, ?, ?) THEN event_head_seq
+      ELSE final_seq
+    END,
     updated_at = ?
 WHERE id = ? AND user_id = ?
-`, input.Status, input.Stage, input.ErrorMessage, input.DiagnosticLogID, input.FailureJSON, input.UserMessageID, input.AssistantMessageID, startedAt, completedAt, now, id, userID)
+`, input.Status, input.Stage, input.ErrorMessage, input.DiagnosticLogID, input.FailureJSON, input.UserMessageID, input.AssistantMessageID,
+		startedAt, completedAt, input.Status, AgentRunSucceeded, AgentRunWaiting, AgentRunDelegated, AgentRunFailed, AgentRunCanceled,
+		now, id, userID)
 	if err != nil {
 		return AgentRun{}, err
 	}
@@ -254,6 +309,7 @@ SET status = ?,
 	 failure_json = NULL,
     started_at = NULL,
     completed_at = NULL,
+    final_seq = 0,
     updated_at = ?
 WHERE id = ? AND user_id = ? AND status IN (?, ?)
 `, AgentRunQueued, "queued", now, id, userID, AgentRunFailed, AgentRunCanceled)
@@ -302,6 +358,8 @@ func scanAgentRun(s scanner) (AgentRun, error) {
 		&item.ErrorMessage,
 		&item.DiagnosticLogID,
 		&item.FailureJSON,
+		&item.EventHeadSeq,
+		&item.FinalSeq,
 		&item.CreatedAt,
 		&item.StartedAt,
 		&item.CompletedAt,
@@ -350,10 +408,12 @@ func (r AgentRun) MarshalJSON() ([]byte, error) {
 		ErrorMessage       *string        `json:"error_message"`
 		DiagnosticLogID    *string        `json:"diagnostic_log_id"`
 		failureDTO
-		CreatedAt   time.Time  `json:"created_at"`
-		StartedAt   *time.Time `json:"started_at"`
-		CompletedAt *time.Time `json:"completed_at"`
-		UpdatedAt   time.Time  `json:"updated_at"`
+		CreatedAt    time.Time  `json:"created_at"`
+		StartedAt    *time.Time `json:"started_at"`
+		CompletedAt  *time.Time `json:"completed_at"`
+		UpdatedAt    time.Time  `json:"updated_at"`
+		EventHeadSeq int64      `json:"event_head_seq"`
+		FinalSeq     int64      `json:"final_seq"`
 	}
 	failure := failureDTO{}
 	if r.FailureJSON.Valid && strings.TrimSpace(r.FailureJSON.String) != "" {
@@ -381,6 +441,8 @@ func (r AgentRun) MarshalJSON() ([]byte, error) {
 		ErrorMessage:       nullableString(r.ErrorMessage),
 		DiagnosticLogID:    nullableString(r.DiagnosticLogID),
 		failureDTO:         failure,
+		EventHeadSeq:       r.EventHeadSeq,
+		FinalSeq:           r.FinalSeq,
 		CreatedAt:          r.CreatedAt,
 		StartedAt:          nullableTime(r.StartedAt),
 		CompletedAt:        nullableTime(r.CompletedAt),

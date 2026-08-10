@@ -9,6 +9,64 @@ import {
   startRunStreamForTest,
 } from './chatRunStreamTestUtils.js';
 
+test('waitForAgentRunStream forwards structured workspace edit preview events in order', async () => {
+  const restoreGlobals = installRunStreamTestGlobals();
+  try {
+    let messages = [pendingRunShellMessage('run-preview')];
+    const previews = [];
+    const runPromise = startRunStreamForTest({
+      conversationID: 'conv-preview',
+      runId: 'run-preview',
+      getMessages: () => messages,
+      setMessages: (next) => {
+        messages = next;
+      },
+      onAssistantPreviewEvent: async (event) => previews.push(event),
+    });
+    const source = MockEventSource.instances[0];
+    source.emit('event', {
+      seq: 1,
+      type: 'workspace_edit_preview_started',
+      payload: { preview_id: 'p1', path: 'draft.html', revision: 1, content: '<p>A</p>' },
+    });
+    source.emit('event', {
+      seq: 2,
+      type: 'workspace_edit_preview_updated',
+      payload: { preview_id: 'p1', path: 'draft.html', revision: 2, content: '<p>AB</p>' },
+    });
+    source.emit('event', {
+      seq: 3,
+      type: 'workspace_edit_preview_reverted',
+      payload: { preview_id: 'p1', path: 'draft.html', revision: 3, status: 'reverted' },
+    });
+    source.emit('event', {
+      seq: 4,
+      type: 'assistant_message_completed',
+      payload: {
+        assistant_message: {
+          id: 'a-preview',
+          role: 'assistant',
+          content: 'done',
+          conversation_id: 'conv-preview',
+        },
+      },
+    });
+    source.emit('run', { id: 'run-preview', status: 'succeeded' });
+    await runPromise;
+
+    assert.deepEqual(
+      previews.map((item) => [item.type, item.revision]),
+      [
+        ['workspace_edit_preview_started', 1],
+        ['workspace_edit_preview_updated', 2],
+        ['workspace_edit_preview_reverted', 3],
+      ]
+    );
+  } finally {
+    restoreGlobals();
+  }
+});
+
 test('waitForAgentRunStream resumes event stream from the last applied seq', async () => {
   const restoreGlobals = installRunStreamTestGlobals();
   try {
@@ -75,6 +133,76 @@ test('waitForAgentRunStream resumes event stream from the last applied seq', asy
     await runPromise;
 
     assert.equal(messages.find((item) => item.id === 'a1')?.content, 'hello world');
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test('waitForAgentRunStream reconnects from the last contiguous event and waits for final_seq', async () => {
+  const restoreGlobals = installRunStreamTestGlobals();
+  try {
+    let messages = [pendingRunShellMessage('run-gap')];
+    let settled = false;
+    const runPromise = startRunStreamForTest({
+      conversationID: 'conv-gap',
+      runId: 'run-gap',
+      getMessages: () => messages,
+      setMessages: (next) => {
+        messages = next;
+      },
+    }).then(() => {
+      settled = true;
+    });
+
+    const first = MockEventSource.instances[0];
+    first.emit('event', {
+      seq: 1,
+      type: 'assistant_message_started',
+      payload: {
+        assistant_message: {
+          id: 'a-gap',
+          role: 'assistant',
+          status: 'streaming',
+          content: '',
+          conversation_id: 'conv-gap',
+        },
+      },
+    });
+    first.emit('event', {
+      seq: 3,
+      type: 'assistant_message_delta',
+      payload: { message_id: 'a-gap', delta: 'missing' },
+    });
+    await flushRunStreamMicrotasks();
+
+    assert.equal(MockEventSource.instances.length, 2);
+    assert.match(MockEventSource.instances[1].url, /after_seq=1/);
+
+    const second = MockEventSource.instances[1];
+    second.emit('event', {
+      seq: 2,
+      type: 'assistant_message_delta',
+      payload: { message_id: 'a-gap', delta: 'complete' },
+    });
+    second.emit('event', {
+      seq: 3,
+      type: 'assistant_message_completed',
+      payload: {
+        assistant_message: {
+          id: 'a-gap',
+          role: 'assistant',
+          content: 'complete',
+          conversation_id: 'conv-gap',
+        },
+      },
+    });
+    second.emit('run', { id: 'run-gap', status: 'succeeded', final_seq: 3 });
+    await flushRunStreamMicrotasks();
+    assert.equal(settled, false);
+
+    second.emit('replay_complete', { through_seq: 3, final_seq: 3 });
+    await runPromise;
+    assert.equal(messages.find((item) => item.id === 'a-gap')?.content, 'complete');
   } finally {
     restoreGlobals();
   }

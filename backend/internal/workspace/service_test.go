@@ -94,6 +94,24 @@ func TestHTMLWritesAreSanitizedBeforeSave(t *testing.T) {
 	}
 }
 
+func TestHTMLSemanticSerializerDifferencesDoNotCreateHistory(t *testing.T) {
+	ctx := context.Background()
+	files := newTestService(t)
+	if _, err := files.CreateFile(ctx, "Note.html", `<p title="A &amp; B"><br></p>`); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	if _, err := files.WriteFile(ctx, "Note.html", `<p title='A &amp; B'><br/></p>`, "write"); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	versions, err := files.ListFileVersions(ctx, "", 30)
+	if err != nil {
+		t.Fatalf("ListFileVersions returned error: %v", err)
+	}
+	if len(versions) != 0 {
+		t.Fatalf("semantic no-op must not create history: %#v", versions)
+	}
+}
+
 func TestReorderPathMovesAcrossFolders(t *testing.T) {
 	ctx := context.Background()
 	files := newTestService(t)

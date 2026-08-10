@@ -87,13 +87,6 @@ func (s *Server) completeConversationRun(ctx context.Context, input conversation
 		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
 		return
 	}
-	if _, err := s.publishRunStrict(ctx, input.UserID, input.RunID, runStatus, runStage, store.UpdateAgentRunInput{
-		AssistantMessageID: assistantMessage.ID,
-		SetCompletedAt:     setCompletedAt,
-	}); err != nil {
-		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
-		return
-	}
 	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
 		RunID:          input.RunID,
 		UserID:         input.UserID,
@@ -102,6 +95,13 @@ func (s *Server) completeConversationRun(ctx context.Context, input conversation
 		Type:           map[bool]string{true: "run_waiting_for_user", false: "run_completed"}[reply.TerminalState == ai.AgentTerminationWaitingForUser],
 		Level:          "info",
 		Payload:        map[string]any{"message": "run completed", "terminal_state": terminalState},
+	}); err != nil {
+		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
+		return
+	}
+	if _, err := s.publishRunStrict(ctx, input.UserID, input.RunID, runStatus, runStage, store.UpdateAgentRunInput{
+		AssistantMessageID: assistantMessage.ID,
+		SetCompletedAt:     setCompletedAt,
 	}); err != nil {
 		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
 		return

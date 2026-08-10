@@ -30,10 +30,11 @@ type openAIStreamChunk struct {
 }
 
 type openAIStreamToolBuilder struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments strings.Builder
+	ID                string
+	Type              string
+	Name              string
+	Arguments         strings.Builder
+	ArgumentAssembler toolArgumentStreamAssembler
 }
 
 type partialStreamTurnError struct {
@@ -73,8 +74,48 @@ type streamDeltaEmitter struct {
 }
 
 type providerStreamParseOptions struct {
-	EmitText            func(string)
-	RevealTextAfterTool bool
+	EmitText               func(string)
+	RevealTextAfterTool    bool
+	EmitToolArguments      func(ToolCallArgumentsDelta)
+	ToolArgumentStreamMode string
+}
+
+type toolArgumentStreamAssembler struct {
+	mode    string
+	current string
+}
+
+func (a *toolArgumentStreamAssembler) append(chunk string) (string, string, bool, error) {
+	if chunk == "" {
+		return a.current, "empty", false, nil
+	}
+	mode := strings.ToLower(strings.TrimSpace(a.mode))
+	if mode == "" {
+		mode = "delta"
+	}
+	if mode != "delta" && mode != "snapshot" {
+		return "", "", false, &ProviderProtocolError{
+			Code:  string(ToolErrorProviderArgumentStream),
+			Cause: fmt.Errorf("tool argument stream mode must be explicitly delta or snapshot"),
+		}
+	}
+	if chunk == a.current && mode == "snapshot" {
+		return a.current, "replay", true, nil
+	}
+	if a.current == "" {
+		a.current = chunk
+		return a.current, "initial", false, nil
+	}
+	if mode == "delta" {
+		a.current += chunk
+		return a.current, "delta", false, nil
+	}
+	if mode == "snapshot" {
+		a.current = chunk
+		return a.current, "snapshot", false, nil
+	}
+	a.current = chunk
+	return a.current, "snapshot", false, nil
 }
 
 type toolGatedStreamDeltaEmitter struct {
@@ -176,6 +217,10 @@ func (e *toolGatedStreamDeltaEmitter) Flush() {
 }
 
 func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOptions) (agentModelTurn, error) {
+	streamMode := strings.ToLower(strings.TrimSpace(opts.ToolArgumentStreamMode))
+	if streamMode == "" {
+		streamMode = "delta"
+	}
 	var content strings.Builder
 	deltas := newToolGatedStreamDeltaEmitter(opts)
 	visibleText := newProviderVisibleTextFilter()
@@ -218,7 +263,7 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 				deltas.MarkToolObserved()
 				builder := toolBuilders[item.Index]
 				if builder == nil {
-					builder = &openAIStreamToolBuilder{}
+					builder = &openAIStreamToolBuilder{ArgumentAssembler: toolArgumentStreamAssembler{mode: streamMode}}
 					toolBuilders[item.Index] = builder
 				}
 				if item.ID != "" {
@@ -230,8 +275,22 @@ func parseOpenAIStreamWithOptions(body io.Reader, opts providerStreamParseOption
 				if item.Function.Name != "" {
 					builder.Name += item.Function.Name
 				}
-				if item.Function.Arguments != "" {
-					builder.Arguments.WriteString(item.Function.Arguments)
+				assembled, relation, replayed, assembleErr := builder.ArgumentAssembler.append(item.Function.Arguments)
+				if assembleErr != nil {
+					return assembleErr
+				}
+				builder.Arguments.Reset()
+				builder.Arguments.WriteString(assembled)
+				if opts.EmitToolArguments != nil {
+					opts.EmitToolArguments(ToolCallArgumentsDelta{
+						Index:         item.Index,
+						ToolCallID:    builder.ID,
+						ToolName:      builder.Name,
+						ArgumentsJSON: builder.Arguments.String(),
+						StreamMode:    streamMode,
+						Relation:      relation,
+						Replayed:      replayed,
+					})
 				}
 			}
 		}

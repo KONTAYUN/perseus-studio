@@ -22,14 +22,15 @@ func taskPlanParams() map[string]any {
 	}
 	return map[string]any{
 		"type":     "object",
-		"required": []string{"goal", "current_step", "next_steps"},
+		"required": []string{"goal", "status"},
 		"properties": map[string]any{
 			"goal":             map[string]any{"type": "string", "description": "The user's durable task goal."},
+			"status":           map[string]any{"type": "string", "enum": []string{"in_progress", "completed"}, "description": "Use completed only after every planned step is verified; completed plans must have no current_step, next_steps, or missing_info."},
 			"local_targets":    stringList("Workspace files or folders involved in the task."),
 			"external_targets": stringList("External servers, services, websites, or environments involved in the task."),
 			"completed_steps":  stringList("Steps verified as completed."),
-			"current_step":     map[string]any{"type": "string", "description": "The single step currently being worked on."},
-			"next_steps":       stringList("Concrete next steps in order."),
+			"current_step":     map[string]any{"type": "string", "description": "The single step currently being worked on. Leave empty only when status is completed."},
+			"next_steps":       stringList("Concrete next steps in order. Leave empty only when status is completed."),
 			"verified_facts":   stringList("Facts supported by user evidence or successful tool results."),
 			"missing_info":     stringList("Information still needed to continue."),
 		},

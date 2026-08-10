@@ -48,7 +48,10 @@ func (r *agentRuntime) commitAssistantContent(turn agentModelTurn) {
 		return
 	}
 	if !turn.PublicTextStreamed {
-		emitToolLifecycleEvent(r.opts, "model_delta", "info", map[string]any{"text": turn.Content})
+		emitToolLifecycleEvent(r.opts, "model_delta", "info", map[string]any{
+			"text":         turn.Content,
+			"message_kind": "assistant_commentary",
+		})
 		r.ensureActiveAssistantMessage(turn.Content)
 		r.appendActiveAssistantDelta(turn.Content)
 		return
@@ -63,14 +66,16 @@ func (r *agentRuntime) commitAssistantActionPreamble(turn agentModelTurn, kind M
 	if strings.TrimSpace(turn.Content) == "" {
 		return
 	}
-	if kind == ModelResponseTerminalAction || kind == ModelResponseJSONToolCall {
-		emitToolLifecycleEvent(r.opts, "assistant_action_preamble_held", "info", map[string]any{
-			"kind":  string(kind),
-			"chars": len([]rune(turn.Content)),
-		})
+	if kind == ModelResponseTerminalAction {
+		if r.opts.OnAssistantCurrentMessageDiscarded != nil {
+			r.opts.OnAssistantCurrentMessageDiscarded("terminal_action_owns_final_content")
+		}
 		return
 	}
 	r.commitAssistantContent(turn)
+	if kind == ModelResponseJSONToolCall && r.opts.OnAssistantToolBoundary != nil {
+		r.opts.OnAssistantToolBoundary()
+	}
 }
 
 func (r *agentRuntime) shouldFinalizeActionPreamble(turn agentModelTurn, kind ModelResponseKind) bool {
@@ -162,13 +167,22 @@ func (r *agentRuntime) recordTypedToolError(toolName, argumentsJSON string, err 
 		RecommendedAction: typed.RecommendedAction,
 	}
 	r.recordConditionSatisfiedFromToolError(toolName, argumentsJSON, err)
-	r.consecutiveToolErrors++
-	key := repeatedToolErrorKey(toolName, argumentsJSON, string(typed.Code))
-	if key != "" && key == r.repeatedToolErrorKey {
-		r.repeatedToolErrorCount++
+	countsTowardExecutionStreak := typed.Phase == "execution" || typed.Phase == "verification"
+	if countsTowardExecutionStreak {
+		r.consecutiveToolErrors++
+		r.recordStrategyFailure(toolName, argumentsJSON, typed)
+		key := repeatedToolErrorKey(toolName, argumentsJSON, string(typed.Code))
+		if key != "" && key == r.repeatedToolErrorKey {
+			r.repeatedToolErrorCount++
+		} else {
+			r.repeatedToolErrorKey = key
+			r.repeatedToolErrorCount = 1
+		}
 	} else {
-		r.repeatedToolErrorKey = key
-		r.repeatedToolErrorCount = 1
+		// A read/validation prerequisite is a recoverable phase boundary. It
+		// must not consume the mutation execution failure budget.
+		r.repeatedToolErrorKey = ""
+		r.repeatedToolErrorCount = 0
 	}
 	if r.consecutiveToolErrors >= agentMaxConsecutiveToolErrs {
 		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": "too many consecutive tool errors"})

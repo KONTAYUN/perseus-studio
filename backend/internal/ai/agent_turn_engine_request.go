@@ -4,19 +4,30 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"webide-backend/internal/store"
 )
 
 func (r *agentRuntime) callModelForTurnEngine(ctx context.Context, round int) (agentModelTurn, error) {
 	emitToolLifecycleEvent(r.opts, "model_message_started", "info", map[string]any{"round": round + 1})
 	logTask(r.opts, "info", fmt.Sprintf("calling model round %d", round+1))
 	originalAttemptHook := r.opts.OnProviderAttempt
+	originalToolArgumentsHook := r.opts.OnToolCallArgumentsDelta
 	r.opts.OnProviderAttempt = func() {
 		r.providerAttempts++
 		if originalAttemptHook != nil {
 			originalAttemptHook()
 		}
 	}
-	defer func() { r.opts.OnProviderAttempt = originalAttemptHook }()
+	r.opts.OnToolCallArgumentsDelta = func(delta ToolCallArgumentsDelta) {
+		if originalToolArgumentsHook != nil {
+			originalToolArgumentsHook(delta)
+		}
+	}
+	defer func() {
+		r.opts.OnProviderAttempt = originalAttemptHook
+		r.opts.OnToolCallArgumentsDelta = originalToolArgumentsHook
+	}()
 	if err := r.applyPendingSteers(ctx, round); err != nil {
 		return agentModelTurn{}, err
 	}
@@ -48,6 +59,7 @@ func (r *agentRuntime) callModelForTurnEngine(ctx context.Context, round int) (a
 		if r.checkpointResumeAttempts >= agentMaxCheckpointResumes() && isCheckpointRecoverableProviderError(err) {
 			err = r.checkpointRecoveryFailedError(ctx, err)
 		}
+		r.editPreviews.revertAll("provider_error")
 		return turn, err
 	}
 }
@@ -119,6 +131,7 @@ func (r *agentRuntime) buildTurnEngineProviderRequest(ctx context.Context, round
 	if visibleTokens > assembly.ThresholdTokens {
 		return providerTurnRequest{}, &ContextWindowError{EstimatedTokens: visibleTokens, BudgetTokens: assembly.ThresholdTokens, Stage: "protocol_serialization"}
 	}
+	r.cumulativeInputTokens += visibleTokens
 	r.annotateTurnEngineRequestSummary(manifest, tools, toolChoice)
 	emitProviderRequestSummary(r.opts, r.lastContextSnapshot.Summary)
 	return providerTurnRequest{
@@ -189,11 +202,13 @@ func (r *agentRuntime) annotateTurnEngineRequestSummary(manifest ModelActionMani
 	summary.RequiresTool = toolChoice.requiresTool()
 	summary.HasRequiredToolChoice = toolChoice.requiresTool()
 	if summary.HasTools {
-		summary.ParallelToolCalls = boolPtr(false)
+		summary.ParallelToolCalls = boolPtr(r.profile.SupportsParallelToolCalls == store.ModelCapabilitySupported)
 	}
 	summary.ModelActionManifestDigest = modelActionManifestDigest(manifest)
 	summary.ModelTerminalActions = modelTerminalActionNames(manifest)
 	summary.ProviderRoundCount = r.currentRound
+	summary.CumulativeEstimatedInputTokens = r.cumulativeInputTokens
+	summary.ParallelToolBatches = r.parallelToolBatches
 	summary.ForcedTool = strings.TrimSpace(r.opts.ForceTool)
 	summary.ToolLoopActive = false
 	// Keep action-boundary buffering on for the whole turn-engine request.
@@ -236,7 +251,7 @@ func (r *agentRuntime) turnEngineActionManifest() ModelActionManifest {
 	manifest.NextActionRules = []string{
 		"Every response must select a structured tool action. Tool results are returned before the next model step.",
 		"Plain assistant text cannot end an agent turn. Use attempt_completion when done, request_user_input for user-only open input, request_user_choice for a bounded user decision, or another tool to continue.",
-		"Use apply_workspace_patch for file-content changes. Assistant text is presentation only and never executes edits.",
+		"Use edit_workspace_note_blocks for existing HTML notes, create_workspace_note for new HTML notes, and apply_workspace_patch for other text files. Assistant text is presentation only and never executes edits.",
 		"Terminal actions must be the only tool call in their response.",
 	}
 	return manifest

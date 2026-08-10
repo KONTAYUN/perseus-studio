@@ -121,15 +121,83 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		events, err := s.runs.ListEventsFiltered(r.Context(), user.UserID, runID, store.AgentEventFilter{
-			Types: strings.Split(r.URL.Query().Get("types"), ","),
-			Limit: queryInt(r, "limit", 200),
-		})
+		afterSeq := streamCursor(r)
+		var events []store.AgentEvent
+		var err error
+		if afterSeq > 0 || strings.TrimSpace(r.URL.Query().Get("after_seq")) != "" {
+			events, err = s.runs.ListEventsAfter(r.Context(), user.UserID, runID, afterSeq)
+		} else {
+			events, err = s.runs.ListEventsFiltered(r.Context(), user.UserID, runID, store.AgentEventFilter{
+				Types: strings.Split(r.URL.Query().Get("types"), ","),
+				Limit: queryInt(r, "limit", 200),
+			})
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": events})
+		run, runErr := s.runs.GetRun(r.Context(), user.UserID, runID)
+		if runErr != nil {
+			writeError(w, http.StatusInternalServerError, runErr.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": events, "run": run})
+	case "previews":
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		previews, err := s.runs.ListEditPreviews(r.Context(), user.UserID, runID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		requestedPreviewID := strings.TrimSpace(r.URL.Query().Get("preview_id"))
+		items := make([]map[string]any, 0, len(previews))
+		for _, preview := range previews {
+			if requestedPreviewID != "" && preview.PreviewID != requestedPreviewID {
+				continue
+			}
+			var payload map[string]any
+			if json.Unmarshal([]byte(preview.SnapshotJSON), &payload) != nil {
+				continue
+			}
+			payload["type"] = "workspace_edit_preview_updated"
+			items = append(items, payload)
+		}
+		for _, event := range s.runBroker.Latest(runID) {
+			if event.Type != "preview_snapshot" {
+				continue
+			}
+			stored, ok := event.Log.(store.AgentEvent)
+			if !ok {
+				continue
+			}
+			var payload map[string]any
+			if json.Unmarshal([]byte(stored.PayloadJSON), &payload) != nil {
+				continue
+			}
+			payload["type"] = stored.Type
+			previewID := eventPayloadString(payload, "preview_id")
+			if requestedPreviewID != "" && previewID != requestedPreviewID {
+				continue
+			}
+			revision := eventPayloadInt(payload, "revision")
+			replaced := false
+			for index := range items {
+				if eventPayloadString(items[index], "preview_id") == previewID {
+					if eventPayloadInt(items[index], "revision") < revision {
+						items[index] = payload
+					}
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				items = append(items, payload)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items})
 	case "stream":
 		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
@@ -263,21 +331,17 @@ func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, ru
 		return
 	}
 
+	eventsCh, unsubscribe := s.runBroker.Subscribe(runID)
+	defer unsubscribe()
+
 	run, err := s.runs.GetRun(r.Context(), user.UserID, runID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	afterSeq := int64(0)
-	if raw := strings.TrimSpace(r.URL.Query().Get("after_seq")); raw != "" {
-		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil && parsed > 0 {
-			afterSeq = parsed
-		}
-	}
-	events, err := s.runs.ListEventsAfter(r.Context(), user.UserID, runID, afterSeq)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	cursor := streamCursor(r)
+	if cursor > run.EventHeadSeq {
+		cursor = 0
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -285,14 +349,90 @@ func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, ru
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	writeSSE(w, "run", run)
-	for _, item := range events {
-		writeSSE(w, "event", item)
+	if writeSSE(w, "stream_opened", map[string]any{
+		"run": run, "event_head_seq": run.EventHeadSeq, "final_seq": run.FinalSeq,
+	}) != nil {
+		return
+	}
+	previewRevisions := map[string]int{}
+	drain := func() bool {
+		events, listErr := s.runs.ListEventsAfter(r.Context(), user.UserID, runID, cursor)
+		if listErr != nil {
+			return false
+		}
+		for _, item := range events {
+			if item.Seq != cursor+1 || writeSSEWithID(w, "event", strconv.FormatInt(item.Seq, 10), item) != nil {
+				return false
+			}
+			cursor = item.Seq
+		}
+		return true
+	}
+	sendPreviewSnapshots := func() bool {
+		snapshots := s.runBroker.Latest(runID)
+		sentFromMemory := false
+		for _, snapshot := range snapshots {
+			if snapshot.Type != "preview_snapshot" {
+				continue
+			}
+			event, ok := snapshot.Log.(store.AgentEvent)
+			if !ok {
+				continue
+			}
+			var payload map[string]any
+			if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil {
+				continue
+			}
+			previewID := eventPayloadString(payload, "preview_id")
+			revision := eventPayloadInt(payload, "revision")
+			if previewID == "" || revision <= previewRevisions[previewID] {
+				continue
+			}
+			if writeSSE(w, "preview", event) != nil {
+				return false
+			}
+			previewRevisions[previewID] = revision
+			sentFromMemory = true
+		}
+		if sentFromMemory {
+			return true
+		}
+		previews, listErr := s.runs.ListEditPreviews(r.Context(), user.UserID, runID)
+		if listErr != nil {
+			return false
+		}
+		for _, preview := range previews {
+			if preview.Revision <= previewRevisions[preview.PreviewID] {
+				continue
+			}
+			event := store.AgentEvent{
+				ID:    fmt.Sprintf("preview_snapshot_%s_%d", preview.PreviewID, preview.Revision),
+				RunID: preview.RunID, UserID: preview.UserID, ConversationID: run.ConversationID,
+				MessageID: nullableStringValue(run.UserMessageID), Type: "workspace_edit_preview_updated",
+				Level: "info", PayloadJSON: preview.SnapshotJSON, CreatedAt: preview.UpdatedAt,
+			}
+			if writeSSE(w, "preview", event) != nil {
+				return false
+			}
+			previewRevisions[preview.PreviewID] = preview.Revision
+		}
+		return true
+	}
+	if !drain() || !sendPreviewSnapshots() {
+		return
+	}
+	run, err = s.runs.GetRun(r.Context(), user.UserID, runID)
+	if err != nil {
+		return
+	}
+	if writeSSE(w, "run", run) != nil ||
+		writeSSE(w, "replay_complete", map[string]any{"through_seq": cursor, "final_seq": run.FinalSeq}) != nil {
+		return
 	}
 	flusher.Flush()
-
-	eventsCh, unsubscribe := s.runBroker.Subscribe(runID)
-	defer unsubscribe()
+	if runIsTerminal(run.Status) && cursor >= run.FinalSeq {
+		return
+	}
 
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
@@ -301,18 +441,60 @@ func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, ru
 		select {
 		case <-r.Context().Done():
 			return
-		case event := <-eventsCh:
-			switch event.Type {
-			case "run":
-				writeSSE(w, "run", event.Task)
-			case "event":
-				writeSSE(w, "event", event.Log)
+		case <-eventsCh:
+			if !drain() || !sendPreviewSnapshots() {
+				return
+			}
+			run, err = s.runs.GetRun(r.Context(), user.UserID, runID)
+			if err != nil || writeSSE(w, "run", run) != nil ||
+				writeSSE(w, "replay_complete", map[string]any{"through_seq": cursor, "final_seq": run.FinalSeq}) != nil {
+				return
 			}
 			flusher.Flush()
+			if runIsTerminal(run.Status) && cursor >= run.FinalSeq {
+				return
+			}
 		case <-heartbeat.C:
-			fmt.Fprint(w, ": heartbeat\n\n")
+			if !drain() {
+				return
+			}
+			run, err = s.runs.GetRun(r.Context(), user.UserID, runID)
+			if err != nil || writeSSE(w, "run", run) != nil {
+				return
+			}
+			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
+			if runIsTerminal(run.Status) && cursor >= run.FinalSeq {
+				if writeSSE(w, "replay_complete", map[string]any{"through_seq": cursor, "final_seq": run.FinalSeq}) != nil {
+					return
+				}
+				flusher.Flush()
+				return
+			}
 		}
+	}
+}
+
+func streamCursor(r *http.Request) int64 {
+	raw := strings.TrimSpace(r.URL.Query().Get("after_seq"))
+	if raw == "" {
+		raw = strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return parsed
+}
+
+func runIsTerminal(status store.AgentRunStatus) bool {
+	switch status {
+	case store.AgentRunSucceeded, store.AgentRunWaiting, store.AgentRunDelegated, store.AgentRunFailed, store.AgentRunCanceled:
+		return true
+	default:
+		return false
 	}
 }
 

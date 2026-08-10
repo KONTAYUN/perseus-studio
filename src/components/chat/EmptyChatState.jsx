@@ -7,8 +7,11 @@ export default function EmptyChatState({ ide }) {
   const recentConversations = ide.conversations.slice(0, 4);
 
   return (
-    <div className="flex h-full items-center justify-center px-2 pb-28">
-      <div className="empty-chat-card w-full max-w-md rounded-3xl border border-gray-100 bg-white/72 p-5 text-center backdrop-blur-xl dark:border-white/10 dark:bg-[#252527]/72">
+    <div className="flex h-full w-full min-w-0 items-center justify-center px-2 pb-28">
+      <div
+        data-testid="empty-chat-state"
+        className="empty-chat-card w-full min-w-0 max-w-md rounded-3xl border border-gray-100 bg-white/72 p-5 text-center dark:border-white/10 dark:bg-[#252527]/72"
+      >
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-500 dark:bg-blue-500/15 dark:text-blue-300">
           <MessageSquare size={22} />
         </div>

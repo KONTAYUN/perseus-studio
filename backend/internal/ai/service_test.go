@@ -356,13 +356,61 @@ func TestToolEventLabelsUseCompletedVoice(t *testing.T) {
 		t.Fatalf("expected choice request label, got %q", label)
 	}
 
-	runtime := &agentRuntime{}
-	_, event := runtime.alreadyAppliedToolResult(agentToolCall{ID: "call_1", Name: "save_workspace_file"}, ToolEvent{
-		ToolName: "save_workspace_file",
-		Status:   "success",
-	})
-	if event.Label != "已编辑文件" {
-		t.Fatalf("expected repeated mutation to use completed label, got %q", event.Label)
+}
+
+func TestExecuteAndRecordToolIdempotencyIsScopedToToolCallID(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	arguments := `{"action":"mkdir","path":"idempotent-dir"}`
+	operationHash := mutationOperationHash("manage_workspace_path", arguments)
+
+	firstOpts := RunOptions{UserID: testUserID, RunID: "run-idempotency", CurrentToolCallID: "call-1"}
+	firstResult, firstEvent, err := env.service.executeAndRecordTool(
+		ctx, "conv-idempotency", "message-idempotency", "manage_workspace_path",
+		arguments, operationHash, firstOpts, runtimeProfileForProvider(store.ModelProvider{}),
+	)
+	if err != nil || firstEvent.Status != "success" {
+		t.Fatalf("first execution failed: event=%#v err=%v result=%s", firstEvent, err, firstResult)
+	}
+
+	replayedResult, replayedEvent, err := env.service.executeAndRecordTool(
+		ctx, "conv-idempotency", "message-idempotency", "manage_workspace_path",
+		arguments, operationHash, firstOpts, runtimeProfileForProvider(store.ModelProvider{}),
+	)
+	if err != nil || replayedEvent.Status != "success" || replayedResult != firstResult {
+		t.Fatalf("same call replay was not idempotent: event=%#v err=%v result=%s", replayedEvent, err, replayedResult)
+	}
+
+	_, integrityEvent, err := env.service.executeAndRecordTool(
+		ctx, "conv-idempotency", "message-idempotency", "manage_workspace_path",
+		`{"action":"mkdir","path":"different-dir"}`,
+		mutationOperationHash("manage_workspace_path", `{"action":"mkdir","path":"different-dir"}`),
+		firstOpts,
+		runtimeProfileForProvider(store.ModelProvider{}),
+	)
+	if err == nil || normalizeToolError(err).Code != ToolErrorCallIntegrity || integrityEvent.ErrorCode != ToolErrorCallIntegrity {
+		t.Fatalf("same call ID with different arguments must fail integrity checks: event=%#v err=%v", integrityEvent, err)
+	}
+
+	secondOpts := firstOpts
+	secondOpts.CurrentToolCallID = "call-2"
+	_, secondEvent, err := env.service.executeAndRecordTool(
+		ctx, "conv-idempotency", "message-idempotency", "manage_workspace_path",
+		arguments, operationHash, secondOpts, runtimeProfileForProvider(store.ModelProvider{}),
+	)
+	if err != nil || secondEvent.Status != "failed" || secondEvent.ErrorCode != ToolErrorPathExists {
+		t.Fatalf("new call ID must recheck current state: event=%#v err=%v", secondEvent, err)
+	}
+
+	crossRunArguments := `{"action":"mkdir","path":"idempotent-second-run"}`
+	crossRunResult, crossRunEvent, err := env.service.executeAndRecordTool(
+		ctx, "conv-idempotency", "message-idempotency-2", "manage_workspace_path",
+		crossRunArguments, mutationOperationHash("manage_workspace_path", crossRunArguments),
+		RunOptions{UserID: testUserID, RunID: "run-idempotency-2", CurrentToolCallID: "call-1"},
+		runtimeProfileForProvider(store.ModelProvider{}),
+	)
+	if err != nil || crossRunEvent.Status != "success" {
+		t.Fatalf("the same provider call id in a different run must execute independently: err=%v event=%#v result=%s", err, crossRunEvent, crossRunResult)
 	}
 }
 
@@ -1175,7 +1223,7 @@ func TestExecuteAndRecordToolApplyWorkspacePatchFailureKeepsStructuredPayload(t 
 		t.Fatalf("unexpected structured patch failure payload: %#v", payload)
 	}
 	hint, _ := payload["recovery_hint"].(string)
-	if !strings.Contains(hint, "patch was captured") || !strings.Contains(hint, "*** Begin Patch") {
+	if !strings.Contains(hint, "apply_workspace_patch") || !strings.Contains(hint, "structured arguments") {
 		t.Fatalf("unexpected recovery hint: %q", hint)
 	}
 	var resultJSON string
@@ -1197,9 +1245,14 @@ func TestExecuteAndRecordToolApplyWorkspacePatchFailureKeepsStructuredPayload(t 
 func TestExecuteAndRecordToolWorkspaceMutationMarksTypedChangeEvent(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
+	if _, err := env.files.CreateFile(ctx, "typed-change.md", "before\n"); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
 
 	patch := "*** Begin Patch\n" +
-		"*** Add File: typed-change.md\n" +
+		"*** Update File: typed-change.md\n" +
+		"@@\n" +
+		"-before\n" +
 		"+hello\n" +
 		"*** End Patch"
 	var changedPayload map[string]any
@@ -1228,6 +1281,22 @@ func TestExecuteAndRecordToolWorkspaceMutationMarksTypedChangeEvent(t *testing.T
 	}
 	if changedPayload["type"] != "workspace_file_changed" || changedPayload["operation"] != "patch" || !containsPathValueAny(changedPayload["changed_paths"], "typed-change.md") {
 		t.Fatalf("unexpected workspace_file_changed payload: %#v", changedPayload)
+	}
+	if changedPayload["origin"] != "agent" || changedPayload["authoritative"] != true {
+		t.Fatalf("workspace change must be authoritative agent state: %#v", changedPayload)
+	}
+	if strings.TrimSpace(fmt.Sprint(changedPayload["mutation_id"])) == "" {
+		t.Fatalf("workspace change must include mutation_id: %#v", changedPayload)
+	}
+	if strings.TrimSpace(fmt.Sprint(changedPayload["hash"])) == "" || strings.TrimSpace(fmt.Sprint(changedPayload["version_id"])) == "" {
+		t.Fatalf("workspace change must include authoritative hash and version: %#v", changedPayload)
+	}
+	versions, err := env.files.ListFileVersions(ctx, "typed-change.md", 10)
+	if err != nil {
+		t.Fatalf("ListFileVersions returned error: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("one agent mutation must create exactly one history node, got %d", len(versions))
 	}
 }
 
@@ -1565,7 +1634,7 @@ func TestAgentRuntimeFinalizeRejectsMissingChunkState(t *testing.T) {
 	}
 }
 
-func TestAgentRuntimeHTMLPatchRequiresCurrentRawRead(t *testing.T) {
+func TestAgentRuntimeHTMLPatchRedirectsToBlockEdit(t *testing.T) {
 	service, _, _, files := newTestAIService(t)
 	ctx := context.Background()
 	if _, err := files.CreateFile(ctx, "Note.html", "<h1>Title</h1>\n<p>old text</p>\n"); err != nil {
@@ -1585,8 +1654,8 @@ func TestAgentRuntimeHTMLPatchRequiresCurrentRawRead(t *testing.T) {
 		Name:          "apply_workspace_patch",
 		ArgumentsJSON: mustJSON(map[string]any{"patch": patch}),
 	})
-	if !isError || !strings.Contains(content, "html note mutation rejected") || !strings.Contains(content, "view=raw") {
-		t.Fatalf("expected raw-read guard rejection, content=%s isError=%v", content, isError)
+	if !isError || !strings.Contains(content, string(ToolErrorHTMLBlockRequired)) || !strings.Contains(content, "edit_workspace_note_blocks") {
+		t.Fatalf("expected block-edit redirect, content=%s isError=%v", content, isError)
 	}
 	read, err := files.ReadFile("Note.html")
 	if err != nil || !strings.Contains(read.Content, "old text") {
@@ -1618,12 +1687,20 @@ func TestAgentRuntimeHTMLPatchRequiresCurrentRawRead(t *testing.T) {
 	}
 
 	content, isError = runTestAgentToolCall(t, runtime, agentToolCall{
-		ID:            "patch_after_raw",
-		Name:          "apply_workspace_patch",
-		ArgumentsJSON: mustJSON(map[string]any{"patch": patch}),
+		ID:   "block_edit_after_raw",
+		Name: "edit_workspace_note_blocks",
+		ArgumentsJSON: mustJSON(map[string]any{
+			"path":     "Note.html",
+			"doc_hash": docHash,
+			"edits": []map[string]any{{
+				"block_id":  blockID,
+				"operation": "replace_html",
+				"html":      `<p>new text</p>`,
+			}},
+		}),
 	})
-	if isError || !strings.Contains(content, `"tool_name":"apply_workspace_patch"`) {
-		t.Fatalf("expected patch after raw read to succeed, content=%s isError=%v", content, isError)
+	if isError || !strings.Contains(content, `"tool_name":"edit_workspace_note_blocks"`) {
+		t.Fatalf("expected block edit after raw read to succeed, content=%s isError=%v", content, isError)
 	}
 	read, err = files.ReadFile("Note.html")
 	if err != nil || !strings.Contains(read.Content, "new text") {
@@ -1664,19 +1741,21 @@ func TestAgentRuntimeHTMLPatchRejectsStaleRawRead(t *testing.T) {
 	if _, err := files.WriteExistingTextFile(ctx, "Note.html", "<p>changed elsewhere</p>\n", "test_external_change"); err != nil {
 		t.Fatalf("WriteExistingTextFile returned error: %v", err)
 	}
-	patch := "*** Begin Patch\n" +
-		"*** Update File: Note.html\n" +
-		"@@\n" +
-		"-<p>changed elsewhere</p>\n" +
-		"+<p>new text</p>\n" +
-		"*** End Patch"
 	content, isError := runTestAgentToolCall(t, runtime, agentToolCall{
-		ID:            "patch_stale_raw",
-		Name:          "apply_workspace_patch",
-		ArgumentsJSON: mustJSON(map[string]any{"patch": patch}),
+		ID:   "block_edit_stale_raw",
+		Name: "edit_workspace_note_blocks",
+		ArgumentsJSON: mustJSON(map[string]any{
+			"path":     "Note.html",
+			"doc_hash": docHash,
+			"edits": []map[string]any{{
+				"block_id":  blockID,
+				"operation": "replace_html",
+				"html":      `<p>new text</p>`,
+			}},
+		}),
 	})
-	if !isError || !strings.Contains(content, "current doc_hash") {
-		t.Fatalf("expected stale raw read rejection, content=%s isError=%v", content, isError)
+	if !isError || !strings.Contains(content, string(ToolErrorStaleDocument)) {
+		t.Fatalf("expected stale doc_hash rejection, content=%s isError=%v", content, isError)
 	}
 }
 
@@ -2429,7 +2508,7 @@ func TestExecuteToolSaveWorkspaceFileRejectsOversizedContent(t *testing.T) {
 	})
 
 	_, _, _, _, err := service.executeTool(context.Background(), "save_workspace_file", raw, RunOptions{UserID: testUserID})
-	if err == nil || !strings.Contains(err.Error(), "*** Begin Patch") {
+	if err == nil || !strings.Contains(err.Error(), "apply_workspace_patch") {
 		t.Fatalf("expected oversized content execution guard, got %v", err)
 	}
 }

@@ -130,6 +130,7 @@ export default function useIdeState(options = {}) {
   const chat = useChatState({
     buildCurrentFileContext: editorState.buildCurrentFileContext,
     onAssistantToolEvents: refreshWorkspaceAfterAssistantTools,
+    onAssistantPreviewEvent: editorState.applyAIEditPreview,
     onTasksChanged: options.onTasksChanged,
     selectedModel: settings.selectedModel,
     setSelectedModelId: settings.setSelectedModelId,

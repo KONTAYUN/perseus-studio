@@ -39,7 +39,7 @@ export default function ChatMessages({
     >
       <div
         ref={messagesContentRef}
-        className={`${isMessageListEmpty ? 'h-full' : 'min-h-full'} space-y-1 p-4`}
+        className={`${isMessageListEmpty ? 'h-full' : 'min-h-full'} w-full min-w-0 space-y-1 p-4`}
         style={{ paddingBottom: `${bottomInset}px` }}
       >
         {ide.chatError && (
@@ -84,7 +84,7 @@ export default function ChatMessages({
           <EmptyChatState ide={ide} />
         ) : ide.conversationMessages.length === 0 ? (
           <div className="flex h-full min-h-[240px] items-center justify-center">
-            <div className="empty-chat-card max-w-sm rounded-3xl border border-gray-100 bg-white/70 px-5 py-4 text-center text-sm leading-7 text-gray-500 dark:border-white/10 dark:bg-[#2C2C2E]/70 dark:text-gray-400">
+            <div className="empty-chat-card min-w-0 max-w-sm rounded-3xl border border-gray-100 bg-white/70 px-5 py-4 text-center text-sm leading-7 text-gray-500 dark:border-white/10 dark:bg-[#2C2C2E]/70 dark:text-gray-400">
               {ide.selectedModel
                 ? `使用 ${ide.selectedModel.name} 开始这轮新对话。`
                 : '当前还没有可用模型，请先在设置页添加并启用模型。'}

@@ -79,6 +79,24 @@ type AgentLoopGuard struct {
 	LastProgressFingerprint string `json:"last_progress_fingerprint,omitempty"`
 }
 
+type StrategyFailure struct {
+	ToolName          string        `json:"tool_name"`
+	Target            string        `json:"target,omitempty"`
+	OperationHash     string        `json:"operation_hash"`
+	ErrorCode         ToolErrorCode `json:"error_code"`
+	TargetStateHash   string        `json:"target_state_hash,omitempty"`
+	Count             int           `json:"count"`
+	LastRound         int           `json:"last_round"`
+	PlanRevision      int           `json:"plan_revision"`
+	RecommendedAction string        `json:"recommended_action,omitempty"`
+}
+
+type StrategyLedger struct {
+	Failures                        map[string]StrategyFailure `json:"failures,omitempty"`
+	MutationFailuresWithoutProgress int                        `json:"mutation_failures_without_progress,omitempty"`
+	PlanRevision                    int                        `json:"plan_revision,omitempty"`
+}
+
 type LoopGuardObservation struct {
 	Status             string   `json:"status"`
 	ReasonCode         string   `json:"reason_code"`
@@ -124,12 +142,17 @@ type agentRuntime struct {
 	activeAssistantMessageID  string
 	activeAssistantSegment    int
 	providerAttempts          int
+	cumulativeInputTokens     int
+	parallelToolBatches       int
 	actionProgress            ActionProgressLedger
 	loopGuard                 AgentLoopGuard
 	kernel                    AgentKernelState
 	contextItems              []store.AgentTurnItem
 	contextPersistenceErr     error
 	pendingTaskPlan           *taskPlanUpdate
+	activeTaskPlan            *taskPlanUpdate
+	strategyLedger            StrategyLedger
+	editPreviews              *editPreviewManager
 }
 
 type runtimeToolFailure struct {
@@ -144,18 +167,18 @@ type runtimeToolFailure struct {
 }
 
 type agentModelTurn struct {
-	Content                  string
-	FinishReason             string
-	ProviderResponseID       string
-	StreamLastEventID        string
-	StreamDuplicateEvents    int
-	ToolCalls                []agentToolCall
-	OpenAIMessage            openAIMessage
-	AnthropicRaw             []map[string]any
-	Streamed                 bool
-	PublicTextStreamed       bool
-	PublicStreamedContent    string
-	Usage                    ProviderUsage
+	Content               string
+	FinishReason          string
+	ProviderResponseID    string
+	StreamLastEventID     string
+	StreamDuplicateEvents int
+	ToolCalls             []agentToolCall
+	OpenAIMessage         openAIMessage
+	AnthropicRaw          []map[string]any
+	Streamed              bool
+	PublicTextStreamed    bool
+	PublicStreamedContent string
+	Usage                 ProviderUsage
 }
 
 type agentToolCall struct {
@@ -189,6 +212,7 @@ type userRequestAttempt struct {
 
 type taskPlanUpdate struct {
 	Goal            string   `json:"goal"`
+	Status          string   `json:"status"`
 	LocalTargets    []string `json:"local_targets"`
 	ExternalTargets []string `json:"external_targets"`
 	CompletedSteps  []string `json:"completed_steps"`

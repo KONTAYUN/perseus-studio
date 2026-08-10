@@ -40,6 +40,26 @@
   overscroll-behavior: contain;
 }
 
+.editor-textarea[data-ai-preview='true'] {
+  box-shadow: inset 3px 0 0 rgb(59 130 246 / 0.55);
+  background: rgb(59 130 246 / 0.035);
+}
+
+.ai-edit-preview-status {
+  flex: none;
+  border-bottom: 1px solid rgb(147 197 253 / 0.2);
+  background: rgb(59 130 246 / 0.08);
+  padding: 8px 20px;
+  color: rgb(191 219 254);
+  font-size: 12px;
+}
+
+.ai-edit-preview-status.is-conflict {
+  border-bottom-color: rgb(252 211 77 / 0.3);
+  background: rgb(245 158 11 / 0.1);
+  color: rgb(253 230 138);
+}
+
 @container (max-width: 520px) {
   .editor-tab-item {
     flex-basis: min(152px, calc(100% - 4px));

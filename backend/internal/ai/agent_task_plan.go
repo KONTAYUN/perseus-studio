@@ -11,10 +11,19 @@ func (r *agentRuntime) handleTaskPlanUpdate(toolCallID, argumentsJSON string) (s
 		return r.toolErrorJSON("update_task_plan", "invalid update_task_plan arguments: "+err.Error()), true
 	}
 	update = normalizeTaskPlanUpdate(update)
-	if update.Goal == "" || update.CurrentStep == "" || len(update.NextSteps) == 0 {
-		return r.toolErrorJSON("update_task_plan", "goal, current_step, and at least one next_steps entry are required"), true
+	if update.Goal == "" {
+		return r.toolErrorJSON("update_task_plan", "goal is required"), true
+	}
+	if update.Status != "completed" && update.CurrentStep == "" {
+		return r.toolErrorJSON("update_task_plan", "current_step is required while the plan is active"), true
+	}
+	if update.Status == "completed" && (update.CurrentStep != "" || len(update.NextSteps) > 0 || len(update.MissingInfo) > 0) {
+		return r.toolErrorJSON("update_task_plan", "a completed plan cannot have a current step, next steps, or missing information"), true
 	}
 	r.pendingTaskPlan = &update
+	r.activeTaskPlan = &update
+	r.strategyLedger.PlanRevision++
+	r.strategyLedger.MutationFailuresWithoutProgress = 0
 	emitToolLifecycleEvent(r.opts, "task_plan_updated", "info", map[string]any{
 		"tool_call_id": toolCallID,
 		"goal":         update.Goal, "local_targets": update.LocalTargets,
@@ -48,6 +57,13 @@ func (r *agentRuntime) persistPendingTaskPlan(toolCallID string) {
 
 func normalizeTaskPlanUpdate(update taskPlanUpdate) taskPlanUpdate {
 	update.Goal = truncatePlainRunes(strings.TrimSpace(update.Goal), 1200)
+	update.Status = strings.ToLower(strings.TrimSpace(update.Status))
+	if update.Status == "" {
+		update.Status = "in_progress"
+	}
+	if update.Status != "in_progress" && update.Status != "completed" {
+		update.Status = "in_progress"
+	}
 	update.CurrentStep = truncatePlainRunes(strings.TrimSpace(update.CurrentStep), 600)
 	update.LocalTargets = normalizeTaskPlanList(update.LocalTargets, 24, 500)
 	update.ExternalTargets = normalizeTaskPlanList(update.ExternalTargets, 24, 500)

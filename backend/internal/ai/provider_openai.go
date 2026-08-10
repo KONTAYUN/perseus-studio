@@ -22,6 +22,7 @@ type openAIProviderV2 struct {
 func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (agentModelTurn, error) {
 	toolNames := openAIToolNames(req.Tools)
 	toolsEnabled := !req.DisableTools && len(req.Tools) > 0
+	parallelTools := req.Provider.SupportsParallelToolCalls == store.ModelCapabilitySupported
 	req.Snapshot.Summary.RequestKind = "chat_completions"
 	req.Snapshot.Summary.Stream = boolPtr(true)
 	req.Snapshot.Summary.ToolChoice = "none"
@@ -33,7 +34,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		req.Snapshot.Summary.RequiresTool = normalizeProviderToolChoice(req.ToolChoice).requiresTool()
 		req.Snapshot.Summary.ToolsCount = len(toolNames)
 		req.Snapshot.Summary.ToolNames = toolNames
-		req.Snapshot.Summary.ParallelToolCalls = boolPtr(false)
+		req.Snapshot.Summary.ParallelToolCalls = boolPtr(parallelTools)
 	}
 	payload := map[string]any{
 		"model":    req.Provider.ModelID,
@@ -48,7 +49,7 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 	if toolsEnabled {
 		payload["tools"] = req.Tools
 		payload["tool_choice"] = openAIProviderToolChoice(req.ToolChoice)
-		payload["parallel_tool_calls"] = false
+		payload["parallel_tool_calls"] = parallelTools
 	}
 	annotatePayloadDiagnostics(&req.Snapshot.Summary, payload, req.Tools, req.Provider, reasoningPolicy)
 	log.Printf("[ai] request conversation=%s provider=%s protocol=%s base_url=%s model=%s tools_count=%d tools=%s tool_choice=%v round=%d",
@@ -96,20 +97,27 @@ func (p openAIProviderV2) Turn(ctx context.Context, req providerTurnRequest) (ag
 		var emitText func(string)
 		if req.Opts.Event != nil && providerTurnCanStreamAssistantText(req) {
 			emitText = func(text string) {
-				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
+				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{
+					"text":         text,
+					"message_kind": "assistant_commentary",
+				})
 			}
 		}
 		turn, err := parseOpenAIStreamWithOptions(streamBody, providerStreamParseOptions{
-			EmitText:            emitText,
-			RevealTextAfterTool: revealTextAfterAction,
+			EmitText:               emitText,
+			RevealTextAfterTool:    revealTextAfterAction,
+			EmitToolArguments:      req.Opts.OnToolCallArgumentsDelta,
+			ToolArgumentStreamMode: normalizedToolArgumentStreamMode(req.Provider),
 		})
 		if err != nil {
 			if _, partial := partialTurnFromStreamError(err); !partial && !providerStreamTurnHasStarted(turn) && shouldRetryProviderStreamError(ctx, err) {
 				closeStream()
 				var terminal bool
 				turn, terminal, err = p.retryStream(ctx, &req, payload, endpoint, providerStreamParseOptions{
-					EmitText:            emitText,
-					RevealTextAfterTool: revealTextAfterAction,
+					EmitText:               emitText,
+					RevealTextAfterTool:    revealTextAfterAction,
+					EmitToolArguments:      req.Opts.OnToolCallArgumentsDelta,
+					ToolArgumentStreamMode: normalizedToolArgumentStreamMode(req.Provider),
 				}, err)
 				if terminal {
 					return turn, err

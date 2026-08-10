@@ -26,7 +26,8 @@ func (r *agentRuntime) handleTurnEngineActionSetMistake(ctx context.Context, tur
 
 	feedback := `[AUTOMATED AGENT PROTOCOL FEEDBACK]
 The previous response selected an invalid combination of actions.
-- File edits must use apply_workspace_patch.
+- Existing HTML notes must use edit_workspace_note_blocks after reading the current index and target blocks.
+- New HTML notes must use create_workspace_note. Other text-file edits use apply_workspace_patch.
 - Terminal, user-wait, and background-delegation tools must be the only tool call in their response.
 - Otherwise continue with one or more non-terminal structured tools.
 Do not repeat the invalid action set.`

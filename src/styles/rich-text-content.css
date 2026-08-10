@@ -16,6 +16,27 @@
   color: rgb(31 41 55);
 }
 
+.rich-text-editor-content[data-ai-preview='true'] {
+  box-shadow: inset 3px 0 0 rgb(59 130 246 / 0.55);
+  background: rgb(59 130 246 / 0.035);
+}
+
+.rich-text-editor-content[data-ai-preview-delete='true'] {
+  opacity: 0.68;
+  box-shadow: inset 3px 0 0 rgb(239 68 68 / 0.55);
+}
+
+.rich-text-editor-content [data-ai-preview-change] {
+  background: rgb(59 130 246 / 0.09);
+  box-shadow: inset 3px 0 0 rgb(59 130 246 / 0.62);
+}
+
+.rich-text-editor-content [data-ai-preview-change='delete'] {
+  opacity: 0.58;
+  background: rgb(239 68 68 / 0.08);
+  box-shadow: inset 3px 0 0 rgb(239 68 68 / 0.55);
+}
+
 .rich-text-editor-host,
 .rich-text-editor-host > div {
   height: 100%;

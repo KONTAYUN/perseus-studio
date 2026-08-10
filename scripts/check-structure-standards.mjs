@@ -103,6 +103,8 @@ function checkStructuredStatePolicy(file) {
     [/\bModelResponseTextPatchAction\b/g, 'model text must never be classified as a workspace action'],
     [/\bnewProviderPatchFilteredEmitter\b/g, 'stream text must not be intercepted as an executable patch'],
     [/\bextractWorkspacePatchBlock\b/g, 'workspace patches must come from apply_workspace_patch arguments, not assistant text'],
+    [/\bmake\(chan\s+(?:tasks\.)?Event\s*,\s*\d+/g, 'durable events must not travel through a bounded in-memory payload queue'],
+    [/\blastEventSeq\s*=\s*Math\.max\(/g, 'event cursors must advance contiguously after successful handling, not jump to the maximum seen sequence'],
   ];
   for (const [pattern, message] of patterns) {
     for (const match of source.matchAll(pattern)) {

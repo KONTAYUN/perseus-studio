@@ -34,6 +34,25 @@ func eventPayloadString(payload map[string]any, key string) string {
 	return fmt.Sprint(value)
 }
 
+func eventPayloadInt(payload map[string]any, key string) int {
+	if payload == nil {
+		return 0
+	}
+	switch value := payload[key].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		parsed, _ := value.Int64()
+		return int(parsed)
+	default:
+		return 0
+	}
+}
+
 type assistantSegmentBuffer struct {
 	current strings.Builder
 	Items   []string

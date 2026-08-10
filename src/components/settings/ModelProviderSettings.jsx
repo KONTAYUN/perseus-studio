@@ -41,6 +41,10 @@ const emptyModel = applyContextPreset({
   adapter_mode: 'openai_compatible',
   auth_mode: 'bearer',
   supports_tools: 'unknown',
+  supports_parallel_tool_calls: 'unknown',
+  parallel_capability_source: 'user',
+  tool_argument_stream_mode: 'delta',
+  stream_mode_source: 'protocol_default',
   supports_vision: 'unknown',
   capability_source: 'user',
   base_url: '',
@@ -89,6 +93,10 @@ export default function ModelProviderSettings({ ide }) {
       adapter_mode: item.adapter_mode || (item.protocol === 'anthropic' ? 'anthropic_native' : 'openai_compatible'),
       auth_mode: item.auth_mode || (item.protocol === 'anthropic' ? 'x_api_key' : 'bearer'),
       supports_tools: item.supports_tools || 'unknown',
+      supports_parallel_tool_calls: item.supports_parallel_tool_calls || 'unknown',
+      parallel_capability_source: item.parallel_capability_source || 'user',
+      tool_argument_stream_mode: item.tool_argument_stream_mode || 'delta',
+      stream_mode_source: item.stream_mode_source || 'protocol_default',
       supports_vision: item.supports_vision || 'unknown',
       capability_source: item.capability_source || 'user',
       base_url: item.base_url,
@@ -245,8 +253,25 @@ export default function ModelProviderSettings({ ide }) {
               <option value="private">私密（仅管理员）</option>
               <option value="public">公开（所有用户）</option>
             </Select>
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
+           </Field>
+           <Field label="Tool argument stream mode">
+             <Select
+               value={draft.tool_argument_stream_mode || 'delta'}
+               disabled={draft.protocol === 'anthropic' && draft.adapter_mode === 'anthropic_native'}
+               onChange={(e) => setDraft({
+                 ...draft,
+                 tool_argument_stream_mode: e.target.value,
+                 stream_mode_source: 'user_configured',
+               })}
+             >
+               <option value="delta">Delta (protocol chunks)</option>
+               <option value="snapshot">Snapshot (complete cumulative payload)</option>
+             </Select>
+             <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+               Official adapters use Delta. Select Snapshot only for a compatible gateway documented to send cumulative payloads.
+             </div>
+           </Field>
+           <div className="grid grid-cols-2 gap-3">
             <Field label="协议">
               <Select
                 value={draft.protocol}
@@ -257,6 +282,8 @@ export default function ModelProviderSettings({ ide }) {
                     protocol,
                     adapter_mode: protocol === 'anthropic' ? 'anthropic_native' : 'openai_compatible',
                     auth_mode: protocol === 'anthropic' ? 'x_api_key' : 'bearer',
+                    tool_argument_stream_mode: 'delta',
+                    stream_mode_source: 'protocol_default',
                   });
                 }}
               >
@@ -274,6 +301,20 @@ export default function ModelProviderSettings({ ide }) {
               />
             </Field>
           </div>
+          <Field label="并行工具调用">
+            <Select
+              value={draft.supports_parallel_tool_calls || 'unknown'}
+              onChange={(e) => setDraft({
+                ...draft,
+                supports_parallel_tool_calls: e.target.value,
+                parallel_capability_source: 'user',
+              })}
+            >
+              <option value="unknown">未知（关闭）</option>
+              <option value="supported">支持</option>
+              <option value="unsupported">不支持</option>
+            </Select>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="适配模式">
               <Select value={draft.adapter_mode} onChange={(e) => setDraft({ ...draft, adapter_mode: e.target.value })}>

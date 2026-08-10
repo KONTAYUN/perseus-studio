@@ -14,7 +14,7 @@ func prepareToolTurnForExecution(turn agentModelTurn) (agentModelTurn, int) {
 	turn.Content = conciseToolPreamble(turn.Content)
 	turn.OpenAIMessage.Content = turn.Content
 	turn.AnthropicRaw = conciseAnthropicRaw(turn.AnthropicRaw, turn.Content)
-	return keepFirstToolCall(turn)
+	return turn, 0
 }
 
 func conciseToolPreamble(content string) string {
@@ -69,32 +69,6 @@ func firstSentenceWithin(content string, maxRunes int) string {
 	return ""
 }
 
-func keepFirstToolCall(turn agentModelTurn) (agentModelTurn, int) {
-	if len(turn.ToolCalls) <= 1 {
-		return turn, 0
-	}
-	first := turn.ToolCalls[0]
-	skipped := len(turn.ToolCalls) - 1
-	turn.ToolCalls = []agentToolCall{first}
-	if len(turn.OpenAIMessage.ToolCalls) > 1 {
-		turn.OpenAIMessage.ToolCalls = firstOpenAIToolCall(turn.OpenAIMessage.ToolCalls, first)
-	}
-	turn.AnthropicRaw = firstAnthropicToolUse(turn.AnthropicRaw, first)
-	return turn, skipped
-}
-
-func firstOpenAIToolCall(items []openAIToolCall, first agentToolCall) []openAIToolCall {
-	for _, item := range items {
-		if item.ID == first.ID || item.Function.Name == first.Name {
-			return []openAIToolCall{item}
-		}
-	}
-	if len(items) > 0 {
-		return []openAIToolCall{items[0]}
-	}
-	return nil
-}
-
 func conciseAnthropicRaw(items []map[string]any, preamble string) []map[string]any {
 	if len(items) == 0 {
 		return nil
@@ -108,37 +82,6 @@ func conciseAnthropicRaw(items []map[string]any, preamble string) []map[string]a
 			continue
 		}
 		next = append(next, item)
-	}
-	return next
-}
-
-func firstAnthropicToolUse(items []map[string]any, first agentToolCall) []map[string]any {
-	if len(items) == 0 {
-		return nil
-	}
-	next := make([]map[string]any, 0, len(items))
-	keptTool := false
-	for _, item := range items {
-		if item["type"] != "tool_use" {
-			next = append(next, item)
-			continue
-		}
-		if keptTool {
-			continue
-		}
-		if item["id"] == first.ID || item["name"] == first.Name {
-			next = append(next, item)
-			keptTool = true
-		}
-	}
-	if keptTool {
-		return next
-	}
-	for _, item := range items {
-		if item["type"] == "tool_use" {
-			next = append(next, item)
-			return next
-		}
 	}
 	return next
 }

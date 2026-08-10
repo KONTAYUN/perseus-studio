@@ -8,15 +8,15 @@ import (
 )
 
 type anthropicStreamBlock struct {
-	ID               string
-	Type             string
-	Name             string
-	Input            map[string]any
-	Text             strings.Builder
-	Thinking         strings.Builder
-	Signature        string
-	Data             string
-	PartialJSON      strings.Builder
+	ID          string
+	Type        string
+	Name        string
+	Input       map[string]any
+	Text        strings.Builder
+	Thinking    strings.Builder
+	Signature   string
+	Data        string
+	PartialJSON strings.Builder
 }
 
 func parseAnthropicStream(body io.Reader, emitText func(string)) (agentModelTurn, error) {
@@ -81,6 +81,14 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 			block.Data, _ = blockRaw["data"].(string)
 			if block.Type == "tool_use" {
 				deltas.MarkToolObserved()
+				if opts.EmitToolArguments != nil {
+					opts.EmitToolArguments(ToolCallArgumentsDelta{
+						Index:         index,
+						ToolCallID:    block.ID,
+						ToolName:      block.Name,
+						ArgumentsJSON: partialAnthropicToolArguments(block),
+					})
+				}
 			}
 			if text, _ := blockRaw["text"].(string); text != "" {
 				visible := appendProviderVisibleText(&content, deltas, visibleText, text)
@@ -106,6 +114,14 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 			case "input_json_delta":
 				partial, _ := delta["partial_json"].(string)
 				block.PartialJSON.WriteString(partial)
+				if opts.EmitToolArguments != nil {
+					opts.EmitToolArguments(ToolCallArgumentsDelta{
+						Index:         index,
+						ToolCallID:    block.ID,
+						ToolName:      block.Name,
+						ArgumentsJSON: partialAnthropicToolArguments(block),
+					})
+				}
 			case "thinking_delta":
 				thinking, _ := delta["thinking"].(string)
 				if thinking != "" {
@@ -157,6 +173,20 @@ func parseAnthropicStreamWithOptions(body io.Reader, opts providerStreamParseOpt
 	turn.StreamLastEventID = lastEventID
 	turn.StreamDuplicateEvents = duplicateEvents
 	return turn, nil
+}
+
+func partialAnthropicToolArguments(block *anthropicStreamBlock) string {
+	if block == nil {
+		return ""
+	}
+	if partial := block.PartialJSON.String(); partial != "" {
+		return partial
+	}
+	if block.Input != nil {
+		raw, _ := json.Marshal(block.Input)
+		return string(raw)
+	}
+	return ""
 }
 
 func buildAnthropicStreamTurn(content string, finishReason string, blocks map[int]*anthropicStreamBlock) agentModelTurn {

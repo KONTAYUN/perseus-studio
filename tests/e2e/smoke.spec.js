@@ -100,7 +100,7 @@ test('main workspace smoke flow works', async ({ page }) => {
 test('workspace file can be created through API and opened from file tree', async ({ page }) => {
   const stamp = Date.now();
   const folderPath = `e2e-${stamp}`;
-  const filePath = `${folderPath}/open-me.txt`;
+  const filePath = `${folderPath}/open-me.html`;
   const fileContent = `hello from e2e ${stamp}`;
 
   await login(page);
@@ -119,7 +119,7 @@ test('workspace file can be created through API and opened from file tree', asyn
     await row.click();
 
     await expect(page.getByTestId(`editor-tab-${filePath}`)).toBeVisible();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue(fileContent);
+    await expect(page.locator('.rich-text-editor-content')).toContainText(fileContent);
 
     await page.getByTestId('settings-button').click();
     await expect(page.getByTestId('model-name-input')).toBeVisible();
@@ -133,9 +133,9 @@ test('editor tabs can be reordered by dragging within the tab strip', async ({ p
   await page.setViewportSize({ width: 1440, height: 820 });
   const stamp = Date.now();
   const folderPath = `tab-reorder-e2e-${stamp}`;
-  const fileA = `${folderPath}/a.txt`;
-  const fileB = `${folderPath}/b.txt`;
-  const fileC = `${folderPath}/c.txt`;
+  const fileA = `${folderPath}/a.html`;
+  const fileB = `${folderPath}/b.html`;
+  const fileC = `${folderPath}/c.html`;
   const files = [fileA, fileB, fileC];
 
   await login(page);
@@ -156,14 +156,13 @@ test('editor tabs can be reordered by dragging within the tab strip', async ({ p
     }
     await page.getByTestId('layout-2').click();
 
-    const sourceBox = await page.getByTestId(`editor-tab-${fileC}`).boundingBox();
-    const targetBox = await page.getByTestId(`editor-tab-${fileA}`).boundingBox();
-    if (!sourceBox || !targetBox) throw new Error('missing tab bounds for reorder');
-
-    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(targetBox.x + 4, targetBox.y + targetBox.height / 2, { steps: 12 });
-    await page.mouse.up();
+    const sourceTab = page.getByTestId(`editor-tab-${fileC}`);
+    const targetTab = page.getByTestId(`editor-tab-${fileA}`);
+    const targetBox = await targetTab.boundingBox();
+    if (!targetBox) throw new Error('missing target tab bounds for reorder');
+    await sourceTab.dragTo(targetTab, {
+      targetPosition: { x: 2, y: targetBox.height / 2 },
+    });
 
     const orderedTabs = await page
       .locator('.editor-tab-item')
@@ -183,7 +182,7 @@ test('editor tabs can be reordered by dragging within the tab strip', async ({ p
 test('trash panel shows deleted items and cleanup controls', async ({ page }) => {
   const stamp = Date.now();
   const folderPath = `trash-e2e-${stamp}`;
-  const fileName = `restore-${stamp}.txt`;
+  const fileName = `restore-${stamp}.html`;
   const filePath = `${folderPath}/${fileName}`;
   let trashPath = '';
 
@@ -243,9 +242,9 @@ test('trash panel shows deleted items and cleanup controls', async ({ page }) =>
 test('row delete action respects multi-selection', async ({ page }) => {
   const stamp = Date.now();
   const folderPath = `multi-delete-e2e-${stamp}`;
-  const fileA = `${folderPath}/a.txt`;
-  const fileB = `${folderPath}/b.txt`;
-  const fileC = `${folderPath}/c.txt`;
+  const fileA = `${folderPath}/a.html`;
+  const fileB = `${folderPath}/b.html`;
+  const fileC = `${folderPath}/c.html`;
 
   await login(page);
 
@@ -291,9 +290,9 @@ test('file tree supports manual drag ordering and self-drop hint', async ({ page
   const folderPath = `sort-e2e-${stamp}`;
   const folderA = `${folderPath}/folder-a`;
   const folderChild = `${folderA}/child`;
-  const fileA = `${folderPath}/a.txt`;
-  const fileB = `${folderPath}/b.txt`;
-  const fileC = `${folderPath}/c.txt`;
+  const fileA = `${folderPath}/a.html`;
+  const fileB = `${folderPath}/b.html`;
+  const fileC = `${folderPath}/c.html`;
 
   await login(page);
 
@@ -324,7 +323,7 @@ test('file tree supports manual drag ordering and self-drop hint', async ({ page
     const orderedPaths = await page
       .locator('[data-file-path]')
       .evaluateAll((elements, prefix) => elements.map((element) => element.dataset.filePath).filter((path) => path?.startsWith(`${prefix}/`)), folderPath);
-    expect(orderedPaths.filter((path) => path.endsWith('.txt')).slice(0, 3)).toEqual([fileA, fileC, fileB]);
+    expect(orderedPaths.filter((path) => path.endsWith('.html')).slice(0, 3)).toEqual([fileA, fileC, fileB]);
 
     await page.getByTestId(`toggle-folder-${folderA}`).click();
     const folderRow = page.getByTestId(`file-row-${folderA}`);

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -11,7 +12,15 @@ import (
 
 	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
+	"webide-backend/internal/tasks"
 )
+
+func assistantPresentationEventType(kind, phase string) string {
+	if strings.TrimSpace(kind) == "assistant_commentary" {
+		return "assistant_commentary_" + phase
+	}
+	return "assistant_message_" + phase
+}
 
 func (s *Server) executeConversationRun(userID, userRole, conversationID, userMessageID, modelProviderID, content, attachmentsJSON string, attachmentPayloads []ai.AttachmentPayload, thinkingMode, runID string) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -19,6 +28,12 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 	defer func() {
 		cancel()
 		s.unregisterRunCancel(runID)
+		time.AfterFunc(10*time.Minute, func() {
+			if err := s.runs.DeleteRunEditPreviews(context.Background(), userID, runID); err != nil {
+				log.Printf("[agent_run] failed to clear expired edit previews run=%s error=%v", runID, err)
+			}
+			s.runBroker.DeleteLatestTopic(runID)
+		})
 	}()
 	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunRunning, "calling_model", store.UpdateAgentRunInput{SetStartedAt: true}); err != nil {
 		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, time.Now())
@@ -112,16 +127,20 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 
 	var activeAssistantMessageID string
 	var activeAssistantSegment int
+	var activeAssistantKind string
 	var activeAssistantContent strings.Builder
 	var latestAssistantMessage store.Message
 	var lastFinalizedAssistantContent string
 
-	startActiveAssistantMessage := func() {
+	startActiveAssistantMessage := func(kind string) {
 		if getPersistenceErr() != nil {
 			return
 		}
 		if activeAssistantMessageID != "" {
 			return
+		}
+		if kind == "" {
+			kind = "assistant_segment"
 		}
 		activeAssistantSegment++
 		item, createErr := s.conversations.CreateMessageDraft(ctx, store.MessageDraftInput{
@@ -132,7 +151,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			AttachmentsJSON: "[]",
 			Status:          "streaming",
 			SegmentIndex:    activeAssistantSegment,
-			MetaJSON:        messageMetaJSON("assistant_segment", activeAssistantSegment, runID),
+			MetaJSON:        messageMetaJSON(kind, activeAssistantSegment, runID),
 		})
 		if createErr != nil {
 			log.Printf("[ai] assistant message started failed conversation=%s run=%s error=%v", conversationID, runID, createErr)
@@ -140,6 +159,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			return
 		}
 		activeAssistantMessageID = item.ID
+		activeAssistantKind = kind
 		activeAssistantContent.Reset()
 		log.Printf("[ai] assistant message started conversation=%s run=%s message=%s segment=%d", conversationID, runID, item.ID, activeAssistantSegment)
 		safeAppendEvent("append_assistant_message_started_event", ctx, store.AgentEventInput{
@@ -147,7 +167,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			UserID:         userID,
 			ConversationID: conversationID,
 			MessageID:      item.ID,
-			Type:           "assistant_message_started",
+			Type:           assistantPresentationEventType(kind, "started"),
 			Level:          "info",
 			Payload: map[string]any{
 				"assistant_message": item,
@@ -163,7 +183,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		if delta == "" {
 			return
 		}
-		startActiveAssistantMessage()
+		startActiveAssistantMessage(activeAssistantKind)
 		if activeAssistantMessageID == "" {
 			return
 		}
@@ -180,7 +200,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			UserID:         userID,
 			ConversationID: conversationID,
 			MessageID:      item.ID,
-			Type:           "assistant_message_delta",
+			Type:           assistantPresentationEventType(activeAssistantKind, "delta"),
 			Level:          "info",
 			Payload: map[string]any{
 				"message_id": item.ID,
@@ -227,6 +247,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			},
 		})
 		activeAssistantMessageID = ""
+		activeAssistantKind = ""
 		activeAssistantContent.Reset()
 	}
 
@@ -246,7 +267,11 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			discardActiveAssistantMessage("empty_assistant_segment")
 			return
 		}
-		item, finalizeErr := s.conversations.FinalizeMessage(ctx, userID, activeAssistantMessageID, finalContent, messageMetaJSON("assistant_segment", activeAssistantSegment, runID))
+		kind := activeAssistantKind
+		if kind == "" {
+			kind = "assistant_segment"
+		}
+		item, finalizeErr := s.conversations.FinalizeMessage(ctx, userID, activeAssistantMessageID, finalContent, messageMetaJSON(kind, activeAssistantSegment, runID))
 		if finalizeErr != nil {
 			log.Printf("[ai] assistant message completed failed conversation=%s run=%s message=%s error=%v", conversationID, runID, activeAssistantMessageID, finalizeErr)
 			recordPersistenceErr("assistant_message_finalize_failed", finalizeErr)
@@ -260,7 +285,7 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			UserID:         userID,
 			ConversationID: conversationID,
 			MessageID:      item.ID,
-			Type:           "assistant_message_completed",
+			Type:           assistantPresentationEventType(kind, "completed"),
 			Level:          "info",
 			Payload: map[string]any{
 				"assistant_message": item,
@@ -268,8 +293,40 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			},
 		})
 		activeAssistantMessageID = ""
+		activeAssistantKind = ""
 		activeAssistantContent.Reset()
 	}
+	defer func() {
+		if activeAssistantMessageID == "" || activeAssistantKind != "assistant_commentary" {
+			return
+		}
+		messageID := activeAssistantMessageID
+		content := strings.TrimSpace(activeAssistantContent.String())
+		if content == "" {
+			return
+		}
+		eventCtx := context.Background()
+		item, err := s.conversations.PatchMessageMeta(
+			eventCtx,
+			userID,
+			messageID,
+			messageMetaJSON("assistant_commentary", activeAssistantSegment, runID),
+			"interrupted",
+		)
+		if err != nil {
+			log.Printf("[ai] assistant commentary interrupt failed conversation=%s run=%s message=%s error=%v", conversationID, runID, messageID, err)
+			return
+		}
+		_, _ = s.appendRunEventStrict(eventCtx, store.AgentEventInput{
+			RunID:          runID,
+			UserID:         userID,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Type:           "assistant_commentary_interrupted",
+			Level:          "warn",
+			Payload:        map[string]any{"assistant_message": item, "message_id": messageID, "segment_index": activeAssistantSegment},
+		})
+	}()
 
 	runOptions := func() ai.RunOptions {
 		return ai.RunOptions{
@@ -280,6 +337,9 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			Log:          logEvent,
 			Event: func(eventType, level string, payload map[string]any) {
 				if eventType == "model_delta" {
+					if eventPayloadString(payload, "message_kind") == "assistant_commentary" && activeAssistantMessageID == "" {
+						activeAssistantKind = "assistant_commentary"
+					}
 					appendActiveAssistantDeltaChunks(eventPayloadString(payload, "text"))
 				} else if eventType == "model_message_completed" {
 					finalContent := eventPayloadString(payload, "content")
@@ -316,8 +376,70 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 					Payload:        payload,
 				})
 			},
+			TransientEvent: func(eventType, level string, payload map[string]any) {
+				raw, err := json.Marshal(payload)
+				if err != nil {
+					log.Printf("[agent_run] transient event encode failed run=%s type=%s error=%v", runID, eventType, err)
+					return
+				}
+				previewID := eventPayloadString(payload, "preview_id")
+				revision := eventPayloadInt(payload, "revision")
+				s.runBroker.PublishLatest(runID, "delta:"+previewID, tasks.Event{Type: "preview", Log: store.AgentEvent{
+					ID:             fmt.Sprintf("transient_%s_%d", previewID, revision),
+					RunID:          runID,
+					UserID:         userID,
+					ConversationID: conversationID,
+					MessageID:      userMessageID,
+					Type:           eventType,
+					Level:          level,
+					PayloadJSON:    string(raw),
+					CreatedAt:      time.Now().UTC(),
+				}})
+			},
+			EditPreviewLatest: func(eventType, level string, payload map[string]any) {
+				raw, err := json.Marshal(payload)
+				if err != nil {
+					log.Printf("[agent_run] latest preview encode failed run=%s type=%s error=%v", runID, eventType, err)
+					return
+				}
+				previewID := eventPayloadString(payload, "preview_id")
+				revision := eventPayloadInt(payload, "revision")
+				s.runBroker.PublishLatest(runID, "snapshot:"+previewID, tasks.Event{Type: "preview_snapshot", Log: store.AgentEvent{
+					ID:             fmt.Sprintf("preview_snapshot_%s_%d", previewID, revision),
+					RunID:          runID,
+					UserID:         userID,
+					ConversationID: conversationID,
+					MessageID:      userMessageID,
+					Type:           eventType,
+					Level:          level,
+					PayloadJSON:    string(raw),
+					CreatedAt:      time.Now().UTC(),
+				}})
+			},
+			EditPreviewCheckpoint: func(checkpointCtx context.Context, eventType string, payload map[string]any) error {
+				previewID := eventPayloadString(payload, "preview_id")
+				if previewID == "" {
+					return fmt.Errorf("edit preview checkpoint is missing preview_id")
+				}
+				if eventType == "workspace_edit_preview_completed" || eventType == "workspace_edit_preview_reverted" {
+					return s.runs.DeleteEditPreview(checkpointCtx, userID, previewID)
+				}
+				raw, err := json.Marshal(payload)
+				if err != nil {
+					return err
+				}
+				return s.runs.UpsertEditPreview(checkpointCtx, store.AgentEditPreviewInput{
+					PreviewID: previewID, RunID: runID, UserID: userID,
+					ToolCallID: eventPayloadString(payload, "tool_call_id"),
+					Path:       eventPayloadString(payload, "path"), BaseHash: eventPayloadString(payload, "base_hash"),
+					Revision: eventPayloadInt(payload, "revision"), SnapshotJSON: string(raw),
+				})
+			},
 			OnAssistantToolBoundary: func() {
 				finalizeActiveAssistantMessage("")
+			},
+			OnAssistantCurrentMessageDiscarded: func(reason string) {
+				discardActiveAssistantMessage(reason)
 			},
 			OnAssistantMessageDiscarded: func(messageID string, reason string, segmentIndex int) {
 				if activeAssistantMessageID != "" && activeAssistantMessageID == messageID {

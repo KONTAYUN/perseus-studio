@@ -14,6 +14,8 @@ import TaskItem from '@tiptap/extension-task-item';
 import { BlockSpacing, FontSize, PinnedSelection } from './noteEditorExtensions';
 import NoteImage from './richTextImageExtension';
 import NoteTable from './richTextTableExtension';
+import { RichTextTransactionOrigin } from './richTextTransactionOrigin';
+import { RichTextBlockMapping } from './richTextBlockMapping';
 
 export function createRichTextEditorExtensions() {
   return [
@@ -24,6 +26,8 @@ export function createRichTextEditorExtensions() {
     FontSize,
     BlockSpacing,
     PinnedSelection,
+    RichTextTransactionOrigin,
+    RichTextBlockMapping,
     Color,
     TaskList,
     TaskItem.configure({ nested: true }),

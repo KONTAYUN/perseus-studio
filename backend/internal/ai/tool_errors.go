@@ -13,26 +13,35 @@ import (
 type ToolErrorCode string
 
 const (
-	ToolErrorInvalidArguments      ToolErrorCode = "tool_invalid_arguments"
-	ToolErrorUnsupportedFileType   ToolErrorCode = "workspace_unsupported_file_type"
-	ToolErrorTextMatchMissing      ToolErrorCode = "workspace_text_match_not_found"
-	ToolErrorTextMatchAmbiguous    ToolErrorCode = "workspace_text_match_ambiguous"
-	ToolErrorPatchApplyFailed      ToolErrorCode = "workspace_patch_apply_failed"
-	ToolErrorLineRangeInvalid      ToolErrorCode = "workspace_line_range_invalid"
-	ToolErrorPathExists            ToolErrorCode = "workspace_path_already_exists"
-	ToolErrorBatchReadFailed       ToolErrorCode = "workspace_batch_read_all_failed"
-	ToolErrorPathNotFound          ToolErrorCode = "workspace_path_not_found"
-	ToolErrorPathPolicy            ToolErrorCode = "workspace_path_policy"
-	ToolErrorSearchNotConfigured   ToolErrorCode = "search_provider_not_configured"
-	ToolErrorWebExtractUnavailable ToolErrorCode = "web_extract_unavailable"
-	ToolErrorSkillUnavailable      ToolErrorCode = "skill_unavailable"
-	ToolErrorSkillArchiveInvalid   ToolErrorCode = "skill_install_invalid_archive"
-	ToolErrorCommandRejected       ToolErrorCode = "command_safety_policy"
-	ToolErrorCommandTimedOut       ToolErrorCode = "command_timed_out"
-	ToolErrorCommandFailed         ToolErrorCode = "command_execution_failed"
-	ToolErrorVerificationFailed    ToolErrorCode = "tool_verification_failed"
-	ToolErrorLocalPersistence      ToolErrorCode = "tool_local_persistence_failed"
-	ToolErrorExecutionFailed       ToolErrorCode = "tool_execution_failed"
+	ToolErrorInvalidArguments        ToolErrorCode = "tool_invalid_arguments"
+	ToolErrorUnsupportedFileType     ToolErrorCode = "workspace_unsupported_file_type"
+	ToolErrorTextMatchMissing        ToolErrorCode = "workspace_text_match_not_found"
+	ToolErrorTextMatchAmbiguous      ToolErrorCode = "workspace_text_match_ambiguous"
+	ToolErrorPatchApplyFailed        ToolErrorCode = "workspace_patch_apply_failed"
+	ToolErrorHTMLBlockRequired       ToolErrorCode = "html_block_edit_required"
+	ToolErrorStaleDocument           ToolErrorCode = "workspace_note_stale_document"
+	ToolErrorLineRangeInvalid        ToolErrorCode = "workspace_line_range_invalid"
+	ToolErrorPathExists              ToolErrorCode = "workspace_path_already_exists"
+	ToolErrorBatchReadFailed         ToolErrorCode = "workspace_batch_read_all_failed"
+	ToolErrorPathNotFound            ToolErrorCode = "workspace_path_not_found"
+	ToolErrorPathPolicy              ToolErrorCode = "workspace_path_policy"
+	ToolErrorSearchNotConfigured     ToolErrorCode = "search_provider_not_configured"
+	ToolErrorWebExtractUnavailable   ToolErrorCode = "web_extract_unavailable"
+	ToolErrorSkillUnavailable        ToolErrorCode = "skill_unavailable"
+	ToolErrorSkillArchiveInvalid     ToolErrorCode = "skill_install_invalid_archive"
+	ToolErrorCommandRejected         ToolErrorCode = "command_safety_policy"
+	ToolErrorCommandTimedOut         ToolErrorCode = "command_timed_out"
+	ToolErrorCommandFailed           ToolErrorCode = "command_execution_failed"
+	ToolErrorVerificationFailed      ToolErrorCode = "tool_verification_failed"
+	ToolErrorNoteEditObservation     ToolErrorCode = "note_edit_observation_required"
+	ToolErrorDocumentVersionRequired ToolErrorCode = "note_document_version_required"
+	ToolErrorNoteBlockTooLarge       ToolErrorCode = "note_block_too_large"
+	ToolErrorTextSpansMultipleNodes  ToolErrorCode = "text_spans_multiple_nodes"
+	ToolErrorProviderArgumentStream  ToolErrorCode = "provider_tool_argument_stream_conflict"
+	ToolErrorRepeatedStrategy        ToolErrorCode = "tool_repeated_failed_strategy"
+	ToolErrorLocalPersistence        ToolErrorCode = "tool_local_persistence_failed"
+	ToolErrorCallIntegrity           ToolErrorCode = "tool_call_integrity_error"
+	ToolErrorExecutionFailed         ToolErrorCode = "tool_execution_failed"
 )
 
 type ToolError struct {
@@ -42,6 +51,7 @@ type ToolError struct {
 	Target            string
 	Details           map[string]any
 	RecommendedAction string
+	Phase             string
 	Cause             error
 	Message           string
 }
@@ -73,6 +83,7 @@ func newToolError(code ToolErrorCode, message string, cause error) *ToolError {
 		Category:          meta.Category,
 		Retryable:         meta.Retryable,
 		RecommendedAction: meta.RecommendedAction,
+		Phase:             toolErrorPhaseForCode(code),
 		Cause:             cause,
 		Message:           message,
 	}
@@ -123,6 +134,17 @@ type toolErrorMetadata struct {
 	RecommendedAction string
 }
 
+func toolErrorPhaseForCode(code ToolErrorCode) string {
+	switch code {
+	case ToolErrorProviderArgumentStream, ToolErrorInvalidArguments, ToolErrorCallIntegrity:
+		return "protocol"
+	case ToolErrorNoteEditObservation, ToolErrorDocumentVersionRequired, ToolErrorNoteBlockTooLarge, ToolErrorStaleDocument, ToolErrorTextSpansMultipleNodes:
+		return "preflight"
+	default:
+		return "execution"
+	}
+}
+
 func toolErrorMetadataForCode(code ToolErrorCode) toolErrorMetadata {
 	switch code {
 	case ToolErrorInvalidArguments:
@@ -131,6 +153,10 @@ func toolErrorMetadataForCode(code ToolErrorCode) toolErrorMetadata {
 		return toolErrorMetadata{"workspace_read", false, "Use a supported text or note view, or ask the user for a supported export."}
 	case ToolErrorTextMatchMissing, ToolErrorTextMatchAmbiguous, ToolErrorPatchApplyFailed, ToolErrorLineRangeInvalid:
 		return toolErrorMetadata{"workspace_edit", true, "Read the current target again, then submit a corrected patch against the current content."}
+	case ToolErrorHTMLBlockRequired:
+		return toolErrorMetadata{"workspace_edit", true, "Read the HTML note index and target blocks, then use edit_workspace_note_blocks."}
+	case ToolErrorStaleDocument:
+		return toolErrorMetadata{"workspace_edit", true, "Read the current HTML note index again and retry with the new document_version and block_id values."}
 	case ToolErrorPathExists:
 		return toolErrorMetadata{"workspace_path", true, "Inspect the existing path and choose a non-conflicting action."}
 	case ToolErrorBatchReadFailed, ToolErrorPathNotFound:
@@ -149,6 +175,18 @@ func toolErrorMetadataForCode(code ToolErrorCode) toolErrorMetadata {
 		return toolErrorMetadata{"command", true, "Inspect the structured exit status and output, then adjust the command if it remains safe."}
 	case ToolErrorVerificationFailed:
 		return toolErrorMetadata{"verification", true, "Inspect the workspace state and retry the mutation only after resolving the verification mismatch."}
+	case ToolErrorNoteEditObservation:
+		return toolErrorMetadata{"workspace_edit_preflight", true, "Read every target block or a section covering the complete edit range with the current document_version, then retry the edit."}
+	case ToolErrorDocumentVersionRequired:
+		return toolErrorMetadata{"workspace_edit_preflight", true, "Read the current note index, then provide the complete document_version for the exact block or section read."}
+	case ToolErrorNoteBlockTooLarge:
+		return toolErrorMetadata{"workspace_read", true, "Read smaller raw blocks from the note index; a complete raw block read is required before an exact edit."}
+	case ToolErrorTextSpansMultipleNodes:
+		return toolErrorMetadata{"workspace_edit_preflight", true, "Read the target block raw HTML and use replace_inner_html so the desired formatting across inline nodes is explicit."}
+	case ToolErrorProviderArgumentStream:
+		return toolErrorMetadata{"provider_protocol", false, "Do not execute this tool call. Retry only after the provider emits a consistent tool-argument stream."}
+	case ToolErrorRepeatedStrategy:
+		return toolErrorMetadata{"strategy", true, "Do not repeat the failed action. Use the recommended alternative or update the task plan before trying a new strategy."}
 	case ToolErrorLocalPersistence:
 		return toolErrorMetadata{"persistence", false, "Pause the run and repair local persistence before continuing."}
 	default:
@@ -165,6 +203,7 @@ func toolErrorSummary(err error) map[string]any {
 		"code":               typed.Code,
 		"category":           typed.Category,
 		"retryable":          typed.Retryable,
+		"phase":              firstNonEmpty(typed.Phase, toolErrorPhaseForCode(typed.Code)),
 		"recommended_action": typed.RecommendedAction,
 	}
 	if typed.Target != "" {
@@ -186,6 +225,7 @@ func toolErrorJSONPayload(toolName string, err error) string {
 		"error_code":         typed.Code,
 		"error_category":     typed.Category,
 		"retryable":          typed.Retryable,
+		"phase":              firstNonEmpty(typed.Phase, toolErrorPhaseForCode(typed.Code)),
 		"tool_name":          toolName,
 		"recommended_action": typed.RecommendedAction,
 	}
@@ -207,6 +247,7 @@ func toolErrorFromEvent(event ToolEvent) error {
 		Category:          event.ErrorCategory,
 		Retryable:         event.Retryable,
 		RecommendedAction: event.RecommendedAction,
+		Phase:             firstNonEmpty(event.ErrorPhase, toolErrorPhaseForCode(event.ErrorCode)),
 		Message:           event.Error,
 		Target:            event.TargetSummary,
 	}

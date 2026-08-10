@@ -7,7 +7,18 @@ import RichTextEditor from './richText/RichTextEditor.jsx';
 export default function EditorPanel({ ide, editor, panelId }) {
   const tabsStripRef = useRef(null);
   const [tabDropIndicator, setTabDropIndicator] = useState(null);
-  const isCurrentNote = isNotePath(editor.currentFilePath);
+  const effectiveFilePath = editor.aiPreview?.path || editor.currentFilePath;
+  const isCurrentNote = isNotePath(effectiveFilePath);
+  const activePreview = editor.aiPreview;
+    const previewContent =
+      activePreview && !activePreview.conflict && typeof activePreview.content === 'string'
+        ? activePreview.content
+        : editor.currentFileContent;
+    const usesLegacyPreviewContent =
+      activePreview?.is_new ||
+      (activePreview &&
+        typeof activePreview.content === 'string' &&
+        !Array.isArray(activePreview.changes));
 
   const scrollTabsWithWheel = (event) => {
     const strip = tabsStripRef.current;
@@ -87,6 +98,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
               editor.openTabs.map((tab) => {
                 const active = tab.path === editor.currentFilePath;
                 const dirty = (tab.content || '') !== (tab.savedContent || '');
+                const tabDisplayPath = tab.aiPreview?.path || tab.path;
                 return (
                   <div
                     key={tab.path}
@@ -178,7 +190,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
                     )}
                     <FileCode2 size={14} className="shrink-0 text-blue-500" />
                     <span className="min-w-0 flex-1 truncate font-medium">
-                      {isNotePath(tab.path) ? getNoteTitle(tab.path) : tab.path.split('/').pop() || tab.path}
+                      {isNotePath(tabDisplayPath) ? getNoteTitle(tabDisplayPath) : tabDisplayPath.split('/').pop() || tabDisplayPath}
                     </span>
                     {dirty && <span className="shrink-0 text-[10px] text-orange-500">●</span>}
                     <button
@@ -255,6 +267,20 @@ export default function EditorPanel({ ide, editor, panelId }) {
           className="editor-drop-overlay motion-color pointer-events-none absolute inset-x-10 bottom-4 top-16 z-10 rounded-2xl border-2 border-dashed border-transparent max-[900px]:inset-x-6 max-[640px]:inset-x-3"
         />
         <div className="relative z-20 flex min-h-0 flex-1 flex-col">
+          {activePreview && (
+            <div
+              className={`ai-edit-preview-status ${activePreview.conflict ? 'is-conflict' : ''}`}
+              data-testid="ai-edit-preview-status"
+            >
+              {activePreview.conflict
+                ? 'AI 预览与未保存内容冲突，当前保留你的编辑'
+                : activePreview.status === 'completed'
+                  ? 'AI 已保存，正在同步文件'
+                  : activePreview.deleted
+                    ? 'AI 正在预览删除'
+                    : 'AI 正在编辑'}
+            </div>
+          )}
           {editor.externalFileConflict && (
             <div className="flex-none px-12 pt-7 max-[900px]:px-8 max-[640px]:px-5">
               {editor.externalFileConflict && (
@@ -306,16 +332,21 @@ export default function EditorPanel({ ide, editor, panelId }) {
               </div>
             ) : isCurrentNote ? (
               <RichTextEditor
-                filePath={editor.currentFilePath}
-                html={editor.currentFileContent}
+                  filePath={effectiveFilePath}
+                  html={usesLegacyPreviewContent ? previewContent : editor.currentFileContent}
                 onHtmlChange={editor.setCurrentFileContent}
                 onStatusMessage={editor.setEditorStatusMessage}
+                readOnly={(!!activePreview && !activePreview.conflict) || editor.isAuthoritativeSyncing}
+                aiPreview={activePreview}
+                onAIEditReconciled={editor.acknowledgeAIEditReconciled}
               />
             ) : (
               <textarea
                 data-testid="editor-textarea"
-                value={editor.currentFileContent}
+                value={previewContent}
                 onChange={(e) => editor.setCurrentFileContent(e.target.value)}
+                readOnly={(!!activePreview && !activePreview.conflict) || editor.isAuthoritativeSyncing}
+                data-ai-preview={activePreview && !activePreview.conflict ? 'true' : undefined}
                 className="editor-textarea custom-scrollbar block h-full min-h-0 w-full resize-none overflow-y-auto overflow-x-hidden bg-transparent px-12 py-7 pb-36 leading-7 tracking-[0.012em] text-gray-800 outline-none placeholder-gray-400 dark:text-gray-300 dark:placeholder-gray-500 max-[900px]:px-8 max-[640px]:px-5"
                 spellCheck={false}
               />

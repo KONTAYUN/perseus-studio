@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -21,18 +24,99 @@ func (s *AgentRunStore) AppendEvent(ctx context.Context, input AgentEventInput) 
 	if err != nil {
 		raw = []byte(`{"error":"failed to encode event payload"}`)
 	}
-	id := nextStoreID("evt", now)
-	row := s.db.QueryRowContext(ctx, `
+	id := strings.TrimSpace(input.ID)
+	if id == "" {
+		id = nextStoreID("evt", now)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AgentEvent{}, err
+	}
+	defer tx.Rollback()
+	if input.ID != "" {
+		existing, lookupErr := scanAgentEvent(tx.QueryRowContext(ctx, `
+SELECT id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
+FROM agent_events WHERE id = ?
+`, id))
+		if lookupErr == nil {
+			if existing.RunID == input.RunID && existing.UserID == input.UserID &&
+				existing.ConversationID == input.ConversationID && existing.MessageID == input.MessageID &&
+				existing.TaskID == input.TaskID && existing.Type == eventType &&
+				existing.Level == level && existing.PayloadJSON == string(raw) {
+				return existing, nil
+			}
+			return AgentEvent{}, fmt.Errorf("agent event id %s was replayed with different content", id)
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return AgentEvent{}, lookupErr
+		}
+	}
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `
+UPDATE agent_runs
+SET event_head_seq = event_head_seq + 1, updated_at = ?
+WHERE id = ? AND user_id = ?
+RETURNING event_head_seq
+`, now, input.RunID, input.UserID).Scan(&seq); err != nil {
+		return AgentEvent{}, err
+	}
+	row := tx.QueryRowContext(ctx, `
 INSERT INTO agent_events (
   id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
 ) VALUES (
-  ?, ?, ?, ?, ?, ?, ?, ?,
-  COALESCE((SELECT MAX(seq) + 1 FROM agent_events WHERE run_id = ?), 1),
-  ?, ?
+  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
 RETURNING id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
-`, id, input.RunID, input.UserID, input.ConversationID, input.MessageID, input.TaskID, eventType, level, input.RunID, string(raw), now)
-	return scanAgentEvent(row)
+`, id, input.RunID, input.UserID, input.ConversationID, input.MessageID, input.TaskID, eventType, level, seq, string(raw), now)
+	item, err := scanAgentEvent(row)
+	if err != nil {
+		return AgentEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AgentEvent{}, err
+	}
+	return item, nil
+}
+
+func (s *AgentRunStore) EventHeadSeq(ctx context.Context, userID, runID string) (int64, error) {
+	var seq int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT event_head_seq FROM agent_runs WHERE id = ? AND user_id = ?
+`, runID, userID).Scan(&seq)
+	return seq, err
+}
+
+func (s *AgentRunStore) normalizeAgentEventSequences(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+WITH ranked AS (
+  SELECT id, ROW_NUMBER() OVER (
+    PARTITION BY run_id ORDER BY seq ASC, created_at ASC, id ASC
+  ) AS normalized_seq
+  FROM agent_events
+)
+UPDATE agent_events
+SET seq = (SELECT normalized_seq FROM ranked WHERE ranked.id = agent_events.id)
+WHERE seq <> (SELECT normalized_seq FROM ranked WHERE ranked.id = agent_events.id)
+`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE agent_runs
+SET event_head_seq = COALESCE((SELECT MAX(seq) FROM agent_events WHERE run_id = agent_runs.id), 0),
+    final_seq = CASE
+      WHEN status IN (?, ?, ?, ?, ?)
+      THEN COALESCE((SELECT MAX(seq) FROM agent_events WHERE run_id = agent_runs.id), 0)
+      ELSE 0
+    END
+`, AgentRunSucceeded, AgentRunWaiting, AgentRunDelegated, AgentRunFailed, AgentRunCanceled); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *AgentRunStore) ListEvents(ctx context.Context, userID, runID string) ([]AgentEvent, error) {

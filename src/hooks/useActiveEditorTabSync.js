@@ -9,9 +9,13 @@ export default function useActiveEditorTabSync({
   currentFilePath,
   currentFileType,
   currentFileVersionId,
+  currentDocumentVersion,
   editorStatusMessage,
   externalFileConflict,
+  aiPreview,
   savedFileContent,
+  userRevision,
+  savedUserRevision,
   setOpenTabs,
 }) {
   useEffect(() => {
@@ -27,9 +31,13 @@ export default function useActiveEditorTabSync({
     savedFileContent,
     currentFileHash,
     currentFileVersionId,
+    currentDocumentVersion,
     currentFileType,
     currentFileNotice,
     externalFileConflict,
+    aiPreview,
+    userRevision,
+    savedUserRevision,
     editorStatusMessage,
   ]);
 }

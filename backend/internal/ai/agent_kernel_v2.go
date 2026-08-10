@@ -31,16 +31,22 @@ type AgentKernelState struct {
 }
 
 type AgentReadTarget struct {
-	ToolName  string `json:"tool_name"`
-	Path      string `json:"path,omitempty"`
-	View      string `json:"view,omitempty"`
-	Mode      string `json:"mode,omitempty"`
-	BlockID   string `json:"block_id,omitempty"`
-	SectionID string `json:"section_id,omitempty"`
-	DocHash   string `json:"doc_hash,omitempty"`
-	LedgerID  string `json:"ledger_id,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Round     int    `json:"round,omitempty"`
+	ToolName           string            `json:"tool_name"`
+	Path               string            `json:"path,omitempty"`
+	View               string            `json:"view,omitempty"`
+	Mode               string            `json:"mode,omitempty"`
+	BlockID            string            `json:"block_id,omitempty"`
+	SectionID          string            `json:"section_id,omitempty"`
+	BlockIDs           []string          `json:"block_ids,omitempty"`
+	SectionIDs         []string          `json:"section_ids,omitempty"`
+	CompleteBlockIDs   []string          `json:"complete_block_ids,omitempty"`
+	BlockHashes        map[string]string `json:"block_hashes,omitempty"`
+	DocHash            string            `json:"doc_hash,omitempty"`
+	LedgerID           string            `json:"ledger_id,omitempty"`
+	Status             string            `json:"status,omitempty"`
+	SourceTruncated    bool              `json:"source_truncated,omitempty"`
+	ModelViewTruncated bool              `json:"model_view_truncated,omitempty"`
+	Round              int               `json:"round,omitempty"`
 }
 
 type AgentProgressEvent struct {
@@ -316,6 +322,8 @@ func kernelToolTargetKey(toolName, argumentsJSON string, event ToolEvent, target
 			target.DocHash,
 			target.BlockID,
 			target.SectionID,
+			strings.Join(sortedUniqueStrings(target.BlockIDs), ","),
+			strings.Join(sortedUniqueStrings(target.SectionIDs), ","),
 		}, "\x00")
 	}
 	if isReadWorkspaceTool(toolName) {
@@ -338,13 +346,15 @@ func kernelReadTargetFromArguments(toolName, argumentsJSON string) AgentReadTarg
 		return AgentReadTarget{ToolName: toolName}
 	}
 	target := AgentReadTarget{
-		ToolName:  toolName,
-		Path:      normalizeWorkspaceEventPath(stringFromAny(decoded["path"])),
-		View:      strings.TrimSpace(stringFromAny(decoded["view"])),
-		Mode:      strings.TrimSpace(stringFromAny(decoded["mode"])),
-		BlockID:   strings.TrimSpace(stringFromAny(decoded["block_id"])),
-		SectionID: strings.TrimSpace(stringFromAny(decoded["section_id"])),
-		DocHash:   strings.TrimSpace(stringFromAny(decoded["doc_hash"])),
+		ToolName:   toolName,
+		Path:       normalizeWorkspaceEventPath(stringFromAny(decoded["path"])),
+		View:       strings.TrimSpace(stringFromAny(decoded["view"])),
+		Mode:       strings.TrimSpace(stringFromAny(decoded["mode"])),
+		BlockID:    strings.TrimSpace(stringFromAny(decoded["block_id"])),
+		SectionID:  strings.TrimSpace(stringFromAny(decoded["section_id"])),
+		BlockIDs:   sortedUniqueStrings(stringSliceFromAnyLoose(decoded["block_ids"])),
+		SectionIDs: sortedUniqueStrings(stringSliceFromAnyLoose(decoded["section_ids"])),
+		DocHash:    strings.TrimSpace(firstNonEmpty(stringFromAny(decoded["document_version"]), stringFromAny(decoded["doc_hash"]))),
 	}
 	if target.Mode == "" && toolName == "read_workspace_note_view" {
 		target.Mode = "full"
@@ -375,14 +385,26 @@ func kernelReadTargetFromToolResult(toolName, result string) AgentReadTarget {
 		return AgentReadTarget{ToolName: toolName}
 	}
 	target := AgentReadTarget{
-		ToolName:  firstNonEmpty(stringFromAny(payload["tool_name"]), stringFromAny(payload["tool"]), toolName),
-		Path:      normalizeWorkspaceEventPath(stringFromAny(payload["path"])),
-		View:      strings.TrimSpace(stringFromAny(payload["view"])),
-		Mode:      strings.TrimSpace(stringFromAny(payload["mode"])),
-		BlockID:   strings.TrimSpace(stringFromAny(payload["block_id"])),
-		SectionID: strings.TrimSpace(stringFromAny(payload["section_id"])),
-		DocHash:   strings.TrimSpace(stringFromAny(payload["doc_hash"])),
-		LedgerID:  strings.TrimSpace(stringFromAny(payload["ledger_id"])),
+		ToolName:           firstNonEmpty(stringFromAny(payload["tool_name"]), stringFromAny(payload["tool"]), toolName),
+		Path:               normalizeWorkspaceEventPath(stringFromAny(payload["path"])),
+		View:               strings.TrimSpace(stringFromAny(payload["view"])),
+		Mode:               strings.TrimSpace(stringFromAny(payload["mode"])),
+		BlockID:            strings.TrimSpace(stringFromAny(payload["block_id"])),
+		SectionID:          strings.TrimSpace(stringFromAny(payload["section_id"])),
+		BlockIDs:           sortedUniqueStrings(stringSliceFromAnyLoose(payload["covered_block_ids"])),
+		SectionIDs:         sortedUniqueStrings(stringSliceFromAnyLoose(payload["section_ids"])),
+		CompleteBlockIDs:   sortedUniqueStrings(stringSliceFromAnyLoose(payload["complete_block_ids"])),
+		BlockHashes:        stringMapFromAny(payload["block_hashes"]),
+		DocHash:            strings.TrimSpace(firstNonEmpty(stringFromAny(payload["document_version"]), stringFromAny(payload["doc_hash"]))),
+		LedgerID:           strings.TrimSpace(stringFromAny(payload["ledger_id"])),
+		SourceTruncated:    boolFromAny(payload["source_truncated"]) || boolFromAny(payload["truncated"]),
+		ModelViewTruncated: boolFromAny(payload["model_view_truncated"]),
+	}
+	if target.BlockID != "" && len(target.BlockIDs) == 0 {
+		target.BlockIDs = []string{target.BlockID}
+	}
+	if target.SectionID != "" && len(target.SectionIDs) == 0 {
+		target.SectionIDs = []string{target.SectionID}
 	}
 	if toolName == "read_workspace_text" && target.LedgerID == "" {
 		start := intFromAny(payload["start_line"])
@@ -421,6 +443,19 @@ func mergeKernelReadTarget(primary, fallback AgentReadTarget) AgentReadTarget {
 	if target.SectionID == "" {
 		target.SectionID = fallback.SectionID
 	}
+	target.BlockIDs = sortedUniqueStrings(append(target.BlockIDs, fallback.BlockIDs...))
+	target.SectionIDs = sortedUniqueStrings(append(target.SectionIDs, fallback.SectionIDs...))
+	target.CompleteBlockIDs = sortedUniqueStrings(append(target.CompleteBlockIDs, fallback.CompleteBlockIDs...))
+	target.SourceTruncated = target.SourceTruncated || fallback.SourceTruncated
+	target.ModelViewTruncated = target.ModelViewTruncated || fallback.ModelViewTruncated
+	if len(target.BlockHashes) == 0 && len(fallback.BlockHashes) > 0 {
+		target.BlockHashes = map[string]string{}
+	}
+	for id, hash := range fallback.BlockHashes {
+		if target.BlockHashes[id] == "" {
+			target.BlockHashes[id] = hash
+		}
+	}
 	if target.DocHash == "" {
 		target.DocHash = fallback.DocHash
 	}
@@ -428,6 +463,35 @@ func mergeKernelReadTarget(primary, fallback AgentReadTarget) AgentReadTarget {
 		target.LedgerID = fallback.LedgerID
 	}
 	return target
+}
+
+func sortedUniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func stringMapFromAny(value any) map[string]string {
+	decoded, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, len(decoded))
+	for key, raw := range decoded {
+		if value, ok := raw.(string); ok && strings.TrimSpace(value) != "" {
+			result[key] = value
+		}
+	}
+	return result
 }
 
 func (r *agentRuntime) kernelProgressFingerprint() string {

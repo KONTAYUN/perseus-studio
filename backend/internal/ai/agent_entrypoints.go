@@ -33,6 +33,7 @@ func (s *Service) runOpenAIAgent(ctx context.Context, conversationID, messageID 
 		kernel:           kernel,
 		contextItems:     contextItems,
 	}
+	runtime.editPreviews = newEditPreviewManager(s, opts)
 	if checkpoint, ok := s.loadRunCheckpoint(ctx, opts); ok {
 		runtime.restoreCheckpoint(checkpoint)
 	}
@@ -67,6 +68,7 @@ func (s *Service) runAnthropicAgent(ctx context.Context, conversationID, message
 		kernel:           kernel,
 		contextItems:     contextItems,
 	}
+	runtime.editPreviews = newEditPreviewManager(s, opts)
 	if checkpoint, ok := s.loadRunCheckpoint(ctx, opts); ok {
 		runtime.restoreCheckpoint(checkpoint)
 	}

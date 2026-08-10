@@ -261,8 +261,8 @@ func TestAgentBudgetExhaustionRequestsNoToolSummaryAndResetsCheckpointBudget(t *
 	if checkpoint.CurrentRound != 0 || checkpoint.ToolCalls != 0 {
 		t.Fatalf("expected reset checkpoint budget, got round=%d tools=%d", checkpoint.CurrentRound, checkpoint.ToolCalls)
 	}
-	if len(checkpoint.AppliedMutations) != 1 {
-		t.Fatalf("expected applied mutation ledger to be preserved, got %#v", checkpoint.AppliedMutations)
+	if len(checkpoint.AppliedMutations) != 0 {
+		t.Fatalf("run-wide mutation result reuse must stay disabled, got %#v", checkpoint.AppliedMutations)
 	}
 }
 
@@ -747,8 +747,11 @@ func TestGenerateReplyOpenAIStreamsFinalTextAfterToolResult(t *testing.T) {
 	if requestCount.Load() != 2 {
 		t.Fatalf("expected tool execution plus completion, got %d requests", requestCount.Load())
 	}
-	if streamed.String() != "" {
-		t.Fatalf("tool preambles must stay out of the main assistant stream, got %q", streamed.String())
+	if strings.TrimSpace(streamed.String()) == "" {
+		t.Fatal("tool-associated commentary should stream before tool execution")
+	}
+	if strings.Contains(streamed.String(), reply.Content) {
+		t.Fatalf("final completion must not be duplicated in commentary: %q", streamed.String())
 	}
 	if !strings.Contains(reply.Content, "下面是整理后的结论") {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
@@ -900,7 +903,7 @@ func TestGenerateReplyOpenAIStartBackgroundTaskReturnsWithoutSecondProviderTurn(
 	}
 }
 
-func TestAgentRuntimeExecutesOnlyOneToolPerModelTurn(t *testing.T) {
+func TestAgentRuntimeExecutesMultipleSerialToolsInModelOrder(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 	if _, err := env.files.CreateFile(ctx, "a.txt", "before"); err != nil {
@@ -937,8 +940,83 @@ func TestAgentRuntimeExecutesOnlyOneToolPerModelTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
-	if file.Content != "before" {
-		t.Fatalf("second tool call should not have executed in same turn, got file content %q", file.Content)
+	if file.Content != "after" {
+		t.Fatalf("serial tool calls should execute in model order, got file content %q", file.Content)
+	}
+}
+
+func TestAgentRuntimeExecutesParallelReadsAndReturnsResultsInModelOrder(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	if _, err := env.files.CreateFile(ctx, "first.txt", "first-content"); err != nil {
+		t.Fatalf("CreateFile first.txt returned error: %v", err)
+	}
+	if _, err := env.files.CreateFile(ctx, "second.txt", "second-content"); err != nil {
+		t.Fatalf("CreateFile second.txt returned error: %v", err)
+	}
+
+	var requestCount atomic.Int32
+	var parallelBatches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("invalid request payload: %v", err)
+		}
+		switch requestCount.Add(1) {
+		case 1:
+			writeOpenAIStreamTextAndToolCalls(t, w, "I will read both files.", []streamToolCall{
+				{id: "parallel_read_1", name: "read_workspace_text", args: `{"path":"first.txt"}`},
+				{id: "parallel_read_2", name: "read_workspace_text", args: `{"path":"second.txt"}`},
+			})
+		case 2:
+			var toolContents []string
+			rawMessages, _ := payload["messages"].([]any)
+			for _, rawMessage := range rawMessages {
+				message, _ := rawMessage.(map[string]any)
+				if message["role"] != "tool" {
+					continue
+				}
+				toolContents = append(toolContents, fmt.Sprint(message["content"]))
+			}
+			if len(toolContents) < 2 {
+				t.Fatalf("expected both parallel read results, got %#v", toolContents)
+			}
+			lastTwo := toolContents[len(toolContents)-2:]
+			if !strings.Contains(lastTwo[0], "first-content") || !strings.Contains(lastTwo[1], "second-content") {
+				t.Fatalf("parallel results must retain model call order, got %#v", lastTwo)
+			}
+			writeOpenAIToolCall(t, w, "parallel_done", "attempt_completion", `{"result":"Both files were read."}`)
+		default:
+			t.Fatalf("unexpected request count: %d", requestCount.Load())
+		}
+	}))
+	defer server.Close()
+
+	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "Read both files.")
+	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{
+		{Kind: "workspace_file", Path: "first.txt"},
+		{Kind: "workspace_file", Path: "second.txt"},
+	}, RunOptions{
+		UserID: testUserID,
+		Event: func(eventType, level string, payload map[string]any) {
+			if eventType == "parallel_tool_batch_completed" {
+				parallelBatches.Add(1)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateReply returned error: %v", err)
+	}
+	if reply.Content != "Both files were read." {
+		t.Fatalf("unexpected reply content: %q", reply.Content)
+	}
+	if parallelBatches.Load() != 1 {
+		t.Fatalf("expected one parallel read batch, got %d", parallelBatches.Load())
 	}
 }
 
@@ -1761,7 +1839,7 @@ func TestGenerateReplyOpenAIRejectsCompletionThatLeaksPatchProtocol(t *testing.T
 	}
 }
 
-func TestGenerateReplySuppressesActionPreamblesAndEmitsFinalSegment(t *testing.T) {
+func TestGenerateReplyPublishesToolCommentarySeparatelyFromFinalResult(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 
@@ -1864,14 +1942,15 @@ func TestGenerateReplySuppressesActionPreamblesAndEmitsFinalSegment(t *testing.T
 	if heldPreambles != 0 {
 		t.Fatalf("turn-item buffering should not expose legacy preamble events, got %d segments=%#v", heldPreambles, assistantBodies)
 	}
-	if len(assistantBodies) != 1 {
-		t.Fatalf("expected only final assistant segment, got %#v", assistantBodies)
+	if len(assistantBodies) != 3 {
+		t.Fatalf("expected two commentary messages and one final result, got %#v", assistantBodies)
 	}
-	if strings.Contains(strings.Join(assistantBodies, "\n"), "我先创建文件夹") || strings.Contains(strings.Join(assistantBodies, "\n"), "我现在写第一章内容") {
-		t.Fatalf("action preambles should not be committed as visible assistant content, got %#v", assistantBodies)
+	joinedCommentary := strings.Join(assistantBodies[:2], "\n")
+	if !strings.Contains(joinedCommentary, "我先创建文件夹") || !strings.Contains(joinedCommentary, "我现在写第一章内容") {
+		t.Fatalf("expected both tool commentaries to be visible, got %#v", assistantBodies)
 	}
-	if !strings.Contains(assistantBodies[0], "chapter-1.txt") {
-		t.Fatalf("expected final segment to include completion summary, got %#v", assistantBodies)
+	if strings.Contains(joinedCommentary, reply.Content) || assistantBodies[2] != reply.Content {
+		t.Fatalf("final completion must remain separate from commentary, got %#v", assistantBodies)
 	}
 }
 
@@ -2013,7 +2092,7 @@ func TestGenerateReplyOpenAIRepeatedEmptySaveArgumentsStopsLoop(t *testing.T) {
 	}
 }
 
-func TestGenerateReplyOpenAIDeduplicatesRepeatedMutationToolCall(t *testing.T) {
+func TestGenerateReplyOpenAINewMutationCallRechecksCurrentState(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
 
@@ -2038,9 +2117,11 @@ func TestGenerateReplyOpenAIDeduplicatesRepeatedMutationToolCall(t *testing.T) {
 			writeOpenAIToolCall(t, w, "dup_2", "save_workspace_file", `{"path":"dedupe.txt","content":"hello","mode":"create"}`)
 		case 4:
 			lastToolContent := lastOpenAIToolContent(t, payload)
-			if !strings.Contains(lastToolContent, "already_applied") {
-				t.Fatalf("expected duplicate mutation to return already_applied, got %s", lastToolContent)
+			if !strings.Contains(lastToolContent, "workspace_path_already_exists") {
+				t.Fatalf("new call ID must recheck current state, got %s", lastToolContent)
 			}
+			writeOpenAIToolCall(t, w, "verify_1", "read_workspace_text", `{"path":"dedupe.txt"}`)
+		case 5:
 			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建 dedupe.txt。","changed_paths":["dedupe.txt"]}`)
 		default:
 			t.Fatalf("unexpected request count: %d", count)
@@ -3272,8 +3353,8 @@ func TestGenerateReplyStreamsAttemptCompletionPreviewWithoutDuplicateModelComple
 	if reply.Content != "最终答复内容" {
 		t.Fatalf("unexpected reply content: %q", reply.Content)
 	}
-	if got := strings.Join(modelDeltas, ""); got != "" {
-		t.Fatalf("tool commentary must stay out of ordinary model deltas: %#v", modelDeltas)
+	if got := strings.Join(modelDeltas, ""); got == "" {
+		t.Fatalf("tool commentary should stream as commentary model deltas: %#v", modelDeltas)
 	}
 	if strings.Contains(strings.Join(modelDeltas, ""), "最终答复") {
 		t.Fatalf("attempt_completion.result leaked into ordinary model deltas: %#v", modelDeltas)
@@ -3675,8 +3756,8 @@ func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any)
 		"attempt_completion 是终止动作，不能创建、修改、移动或删除文件",
 		"当前文件上下文和编辑器面板上下文只包含路径等 metadata",
 		"find_workspace_files 按名称/路径/glob 找文件",
-		"改文件统一直接输出以 *** Begin Patch 开始、*** End Patch 结束的 patch 块",
-		"任何文件内容变更都使用 *** Begin Patch / *** End Patch patch 块表达，这是唯一的文件内容编辑动作",
+		"修改普通文本或代码文件使用 apply_workspace_patch",
+		"所有文件副作用必须通过结构化工具调用完成",
 		"run_workspace_command 在 workspace 内运行命令",
 		"不可以永久删除文件",
 		"不可以访问 workspace 之外的路径",

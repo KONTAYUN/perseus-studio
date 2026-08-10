@@ -13,6 +13,7 @@ import {
 import useActiveEditorTabSync from './useActiveEditorTabSync';
 import useEditorTabAutoSave from './useEditorTabAutoSave';
 import useEditorTabRefSync from './useEditorTabRefSync';
+import { canApplyAIEditPreviewDelta, mergeAIEditPreview } from './aiPreviewState';
 
 export default function useEditorTabs({
   confirm,
@@ -30,12 +31,18 @@ export default function useEditorTabs({
   const [savedFileContent, setSavedFileContent] = useState('');
   const [currentFileHash, setCurrentFileHash] = useState('');
   const [currentFileVersionId, setCurrentFileVersionId] = useState('');
+  const [currentDocumentVersion, setCurrentDocumentVersion] = useState('');
   const [currentFileType, setCurrentFileType] = useState('text');
   const [currentFileNotice, setCurrentFileNotice] = useState('');
   const [externalFileConflict, setExternalFileConflict] = useState(null);
   const [editorStatusMessage, setEditorStatusMessageState] = useState('');
   const [openTabs, setOpenTabs] = useState([]);
   const [activeTabPath, setActiveTabPath] = useState('');
+  const [aiPreview, setAIEditPreviewState] = useState(null);
+  const [userRevision, setUserRevision] = useState(0);
+  const [savedUserRevision, setSavedUserRevision] = useState(0);
+  const isAuthoritativeSyncing =
+    !!aiPreview && ['previewing', 'committing', 'reconciling'].includes(aiPreview.status);
 
   const currentFilePathRef = useRef('');
   const currentFileContentRef = useRef('');
@@ -47,6 +54,10 @@ export default function useEditorTabs({
   const activeTabPathRef = useRef('');
   const autoSaveTimerRef = useRef(null);
   const editorLoadRequestRef = useRef(0);
+  const userRevisionRef = useRef(0);
+  const savedUserRevisionRef = useRef(0);
+  const currentDocumentVersionRef = useRef('');
+  currentDocumentVersionRef.current = currentDocumentVersion;
   const setEditorStatusMessage = useCallback((message, options) => {
     setEditorStatusMessageState(message);
     if (typeof message === 'string' && message.trim()) {
@@ -56,7 +67,7 @@ export default function useEditorTabs({
 
   const isTextFile = currentFileType === 'text';
   const isDirty =
-    currentFilePath !== '' && isTextFile && currentFileContent !== savedFileContent;
+    currentFilePath !== '' && isTextFile && userRevision > savedUserRevision;
 
   useEditorTabRefSync({
     activeTabPath,
@@ -86,9 +97,13 @@ export default function useEditorTabs({
     currentFileNotice,
     currentFileType,
     currentFileVersionId,
+    currentDocumentVersion,
     editorStatusMessage,
     externalFileConflict,
+    aiPreview,
     savedFileContent,
+    userRevision,
+    savedUserRevision,
     setOpenTabs,
   });
 
@@ -100,15 +115,21 @@ export default function useEditorTabs({
     isDirty,
     isDirtyRef,
     isEditorLoading,
+    isAuthoritativeSyncing,
     isSavingFile,
     isTextFile,
     saveFileContent,
-    savedFileContent,
+    userRevision,
+    savedUserRevision,
   });
 
   const loadFileIntoEditor = createEditorFileLoader({
     editorLoadRequestRef,
+    currentFileContentRef,
+    savedFileContentRef,
+    isDirtyRef,
     setActivePanel,
+    setAIEditPreview: setAIEditPreviewState,
     setActiveTabPath,
     setCurrentFileContent,
     setCurrentFileHash,
@@ -116,6 +137,9 @@ export default function useEditorTabs({
     setCurrentFilePath,
     setCurrentFileType,
     setCurrentFileVersionId,
+    setCurrentDocumentVersion,
+    setUserRevision: setUserRevisionState,
+    setSavedUserRevision: setSavedUserRevisionState,
     setEditorStatusMessage,
     setErrorMessage,
     setExternalFileConflict,
@@ -159,11 +183,15 @@ export default function useEditorTabs({
     setCurrentFilePath(tab.path);
     setCurrentFileContent(tab.content || '');
     setSavedFileContent(tab.savedContent || '');
+    setUserRevisionState(tab.userRevision || 0);
+    setSavedUserRevisionState(tab.savedUserRevision || 0);
     setCurrentFileHash(tab.hash || '');
     setCurrentFileVersionId(tab.versionId || '');
+    setCurrentDocumentVersion(tab.documentVersion || tab.hash || '');
     setCurrentFileType(tab.fileType || detectFileType(tab.path));
     setCurrentFileNotice(tab.notice || '');
     setExternalFileConflict(tab.conflict || null);
+    setAIEditPreviewState(tab.aiPreview || null);
     setEditorStatusMessageState(tab.statusMessage || '');
     setSelectedItemPath?.(tab.path);
     setSelectedItemType?.('file');
@@ -251,10 +279,14 @@ export default function useEditorTabs({
       savedContent: savedFileContent,
       hash: currentFileHash,
       versionId: currentFileVersionId,
+      documentVersion: currentDocumentVersion,
       fileType: currentFileType,
       notice: currentFileNotice,
       conflict: externalFileConflict,
       statusMessage: editorStatusMessage,
+      aiPreview,
+      userRevision,
+      savedUserRevision,
       updatedAt: Date.now(),
       ...overrides,
     };
@@ -273,11 +305,15 @@ export default function useEditorTabs({
     setCurrentFilePath(snapshot.path);
     setCurrentFileContent(snapshot.content || '');
     setSavedFileContent(snapshot.savedContent || '');
+    setUserRevisionState(snapshot.userRevision || 0);
+    setSavedUserRevisionState(snapshot.savedUserRevision || 0);
     setCurrentFileHash(snapshot.hash || '');
     setCurrentFileVersionId(snapshot.versionId || '');
+    setCurrentDocumentVersion(snapshot.documentVersion || snapshot.hash || '');
     setCurrentFileType(snapshot.fileType || detectFileType(snapshot.path));
     setCurrentFileNotice(snapshot.notice || '');
     setExternalFileConflict(snapshot.conflict || null);
+    setAIEditPreviewState(snapshot.aiPreview || null);
     setEditorStatusMessageState(snapshot.statusMessage || '');
     setSelectedItemPath?.(snapshot.path);
     setSelectedItemType?.('file');
@@ -298,9 +334,7 @@ export default function useEditorTabs({
       autoSaveTimerRef.current = null;
     }
     const path = currentFilePathRef.current;
-    const content = currentFileContentRef.current;
-    const saved = savedFileContentRef.current;
-    if (!path || !isTextFileRef.current || content === saved || externalFileConflictRef.current) return;
+    if (!path || !isTextFileRef.current || userRevisionRef.current <= savedUserRevisionRef.current || externalFileConflictRef.current) return;
     await saveFileContent({ auto: true, flush: true });
   }
 
@@ -319,11 +353,18 @@ export default function useEditorTabs({
       const result = await apiPost('/api/files/write', {
         path,
         content,
+        base_document_version: currentDocumentVersionRef.current,
+        user_revision: userRevisionRef.current,
+        save_request_id:
+          globalThis.crypto?.randomUUID?.() ||
+          `save-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       });
       if (currentFilePathRef.current === path) {
         setSavedFileContent(content);
+        setSavedUserRevisionState(userRevisionRef.current);
         setCurrentFileHash(result.hash || '');
         setCurrentFileVersionId(result.version_id || '');
+        setCurrentDocumentVersion(result.document_version || result.hash || '');
         setEditorStatusMessage('');
       }
       setOpenTabs((current) =>
@@ -335,6 +376,8 @@ export default function useEditorTabs({
                 savedContent: content,
                 hash: result.hash || '',
                 versionId: result.version_id || '',
+                documentVersion: result.document_version || result.hash || '',
+                savedUserRevision: tab.userRevision || userRevisionRef.current,
                 statusMessage: '',
               }
             : tab
@@ -343,6 +386,14 @@ export default function useEditorTabs({
       await loadTree?.();
     } catch (error) {
       console.error('saveCurrentFile failed', error);
+      if (error?.code === 'document_version_stale') {
+        setExternalFileConflict({
+          path,
+          reloadPath: path,
+          code: error.code,
+          message: error.message,
+        });
+      }
       setErrorMessage?.(error.message);
       setEditorStatusMessage(auto ? '保存失败' : '');
       throw error;
@@ -358,9 +409,13 @@ export default function useEditorTabs({
     setSavedFileContent('');
     setCurrentFileHash('');
     setCurrentFileVersionId('');
+    setCurrentDocumentVersion('');
     setCurrentFileType('text');
     setCurrentFileNotice('');
     setExternalFileConflict(null);
+    setAIEditPreviewState(null);
+    setUserRevisionState(0);
+    setSavedUserRevisionState(0);
     setEditorStatusMessage('');
     setActiveTabPath('');
   }
@@ -382,14 +437,142 @@ export default function useEditorTabs({
     });
   }
 
+  function applyAIEditPreview(event) {
+    const path = event?.path || '';
+    const previewID = event?.preview_id || '';
+    if (!path || !previewID) return false;
+
+    const currentTabs = openTabsRef.current;
+    const existingPreview = currentTabs.find(
+      (tab) => tab.aiPreview?.preview_id === previewID
+    );
+    const existing = currentTabs.find((tab) => tab.path === path);
+    const currentPreview = existingPreview?.aiPreview || existing?.aiPreview;
+    const incomingRevision = Number(event.revision || 0);
+    const currentRevision = Number(currentPreview?.revision || 0);
+    if (
+      currentPreview?.preview_id === previewID &&
+      ((incomingRevision > 0 && currentRevision >= incomingRevision) ||
+        (event.content != null && currentPreview.content === event.content))
+    ) {
+      return true;
+    }
+    const reverted =
+      event.status === 'reverted' || event.type === 'workspace_edit_preview_reverted';
+    const completed =
+      event.status === 'completed' || event.type === 'workspace_edit_preview_completed';
+
+    if (completed) {
+      const terminalTab = existingPreview || existing;
+      if (!terminalTab?.aiPreview || terminalTab.aiPreview.preview_id !== previewID) return false;
+      const committingPreview = { ...terminalTab.aiPreview, ...event, status: 'committing' };
+      const nextTabs = currentTabs.map((tab) =>
+        tab.path === terminalTab.path ? { ...tab, aiPreview: committingPreview } : tab
+      );
+      openTabsRef.current = nextTabs;
+      setOpenTabs(nextTabs);
+      if (currentFilePathRef.current === terminalTab.path) {
+        setAIEditPreviewState(committingPreview);
+        setEditorStatusMessageState('AI 修改正在提交');
+      }
+      return true;
+    }
+
+    if (reverted) {
+      const terminalTab = existingPreview || existing;
+      if (!terminalTab?.aiPreview || terminalTab.aiPreview.preview_id !== previewID) return false;
+      if (terminalTab.previewOnly || terminalTab.previewSourcePath) {
+        const nextTabs = currentTabs.filter((tab) => tab.path !== terminalTab.path);
+        openTabsRef.current = nextTabs;
+        setOpenTabs(nextTabs);
+        if (currentFilePathRef.current === terminalTab.path) {
+          const next = nextTabs[nextTabs.length - 1];
+          if (next) void activateTab(next.path, { skipFlush: true });
+          else closeCurrentFile();
+        }
+        return true;
+      }
+      const nextTabs = currentTabs.map((tab) =>
+        tab.path === terminalTab.path ? { ...tab, aiPreview: null } : tab
+      );
+      openTabsRef.current = nextTabs;
+      setOpenTabs(nextTabs);
+      if (currentFilePathRef.current === path) setAIEditPreviewState(null);
+      return true;
+    }
+
+    if (!canApplyAIEditPreviewDelta(currentPreview, event)) {
+      return false;
+    }
+    const preview = mergeAIEditPreview(currentPreview, event);
+    cancelPendingAutoSave();
+    if (existingPreview) {
+      const nextTabs = currentTabs.map((tab) =>
+        tab.path === existingPreview.path ? { ...tab, aiPreview: preview } : tab
+      );
+      openTabsRef.current = nextTabs;
+      setOpenTabs(nextTabs);
+      if (currentFilePathRef.current === existingPreview.path) setAIEditPreviewState(preview);
+      return true;
+    }
+    if (existing) {
+      const dirty = (existing.content || '') !== (existing.savedContent || '');
+      if (dirty) {
+        openTabSnapshot({
+          path: `__ai_preview__/${previewID}`,
+          content: '',
+          savedContent: '',
+          hash: event.base_hash || existing.hash || '',
+          versionId: '',
+          fileType: detectFileType(path),
+          notice: '',
+          conflict: null,
+          statusMessage: '',
+          aiPreview: preview,
+          previewOnly: true,
+          previewSourcePath: path,
+          userRevision: existing.userRevision || 0,
+          savedUserRevision: existing.savedUserRevision || 0,
+        });
+        return true;
+      }
+      const nextTabs = currentTabs.map((tab) =>
+        tab.path === path ? { ...tab, aiPreview: preview } : tab
+      );
+      openTabsRef.current = nextTabs;
+      setOpenTabs(nextTabs);
+      if (currentFilePathRef.current === path) setAIEditPreviewState(preview);
+      return true;
+    }
+
+    openTabSnapshot({
+      path,
+      content: '',
+      savedContent: '',
+      hash: event.base_hash || '',
+      versionId: '',
+      fileType: detectFileType(path),
+      notice: '',
+      conflict: null,
+      statusMessage: '',
+      aiPreview: preview,
+      previewOnly: !!event.is_new,
+      userRevision: 0,
+      savedUserRevision: 0,
+    });
+    return true;
+  }
+
   const {
     applyPathUpdate,
     clearPathState,
     refreshWorkspaceAfterAssistantTools,
   } = createEditorToolRefreshActions({
+    autoSaveTimerRef,
     closeCurrentFile,
     currentFilePathRef,
     isDirtyRef,
+    applyAuthoritativeFileSnapshot,
     loadFileIntoEditor,
     openTabsRef,
     setActiveTabPath,
@@ -400,10 +583,112 @@ export default function useEditorTabs({
     setOpenTabs,
   });
 
+  function setUserRevisionState(value) {
+    const next = Number(value || 0);
+    userRevisionRef.current = next;
+    setUserRevision(next);
+  }
+
+  function setSavedUserRevisionState(value) {
+    const next = Number(value || 0);
+    savedUserRevisionRef.current = next;
+    setSavedUserRevision(next);
+  }
+
+  function applyUserFileContent(content) {
+    if (aiPreview && ['previewing', 'committing', 'reconciling'].includes(aiPreview.status)) {
+      return;
+    }
+    const next = typeof content === 'string' ? content : '';
+    const nextRevision = userRevisionRef.current + 1;
+    currentFileContentRef.current = next;
+    userRevisionRef.current = nextRevision;
+    setCurrentFileContent(next);
+    setUserRevision(nextRevision);
+  }
+
+  function cancelPendingAutoSave() {
+    if (!autoSaveTimerRef.current) return;
+    window.clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = null;
+  }
+
+  function applyAuthoritativeFileSnapshot(path, file, event = {}) {
+    if (!path || !file) return;
+    cancelPendingAutoSave();
+    const nextRevision = Math.max(userRevisionRef.current, savedUserRevisionRef.current);
+    const documentVersion = event.document_version || file.document_version || file.hash || event.hash || '';
+    const nextTab = (tab) => {
+      const reconcilingPreview = tab.aiPreview
+        ? {
+            ...tab.aiPreview,
+            status: 'reconciling',
+            authoritative_html: file.content,
+            authoritative_document_version: documentVersion,
+          }
+        : null;
+      return {
+        ...tab,
+        content: file.content,
+        savedContent: file.content,
+        hash: event.file_hash || event.hash || file.hash || '',
+        versionId: event.version_id || tab.versionId || '',
+        documentVersion,
+        userRevision: tab.userRevision || nextRevision,
+        savedUserRevision: tab.userRevision || nextRevision,
+        aiPreview: reconcilingPreview,
+        previewOnly: false,
+        activeMutationId: event.mutation_id || '',
+        statusMessage: '',
+      };
+    };
+    const activeTab = openTabsRef.current.find((tab) => tab.path === path);
+    const reconcilingPreview = activeTab?.aiPreview
+      ? {
+          ...activeTab.aiPreview,
+          status: 'reconciling',
+          authoritative_html: file.content,
+          authoritative_document_version: documentVersion,
+        }
+      : null;
+    setOpenTabs((current) => current.map((tab) => (tab.path === path ? nextTab(tab) : tab)));
+    if (currentFilePathRef.current !== path) return;
+    currentFileContentRef.current = file.content;
+    savedFileContentRef.current = file.content;
+    isDirtyRef.current = false;
+    setCurrentFileContent(file.content);
+    setSavedFileContent(file.content);
+    setCurrentFileHash(event.file_hash || event.hash || file.hash || '');
+    setCurrentFileVersionId(event.version_id || '');
+    setCurrentDocumentVersion(documentVersion);
+    setUserRevisionState(nextRevision);
+    setSavedUserRevisionState(nextRevision);
+    setAIEditPreviewState(reconcilingPreview);
+    setExternalFileConflict(null);
+    setEditorStatusMessageState('');
+  }
+
+  function acknowledgeAIEditReconciled(previewID) {
+    if (!previewID) return;
+    setOpenTabs((current) =>
+      current.map((tab) =>
+        tab.aiPreview?.preview_id === previewID
+          ? { ...tab, aiPreview: null, statusMessage: '' }
+          : tab
+      )
+    );
+    setAIEditPreviewState((current) =>
+      current?.preview_id === previewID ? null : current
+    );
+  }
+
   return {
     activeTabPath,
     activeTabPathRef,
     activateTab,
+    aiPreview,
+    acknowledgeAIEditReconciled,
+    applyAIEditPreview,
     applyPathUpdate,
     clearPathState,
     closeCurrentFile,
@@ -417,6 +702,7 @@ export default function useEditorTabs({
     currentFilePathRef,
     currentFileType,
     currentFileVersionId,
+    currentDocumentVersion,
     editorStatusMessage,
     externalFileConflict,
     flushAutoSave,
@@ -424,6 +710,7 @@ export default function useEditorTabs({
     isDirty,
     isDirtyRef,
     isEditorLoading,
+    isAuthoritativeSyncing,
     isSavingFile,
     isTextFile,
     keepLocalFileChanges,
@@ -437,7 +724,9 @@ export default function useEditorTabs({
     saveCurrentFile,
     deleteFileVersion,
     restoreFileVersion,
-    setCurrentFileContent,
+    setCurrentFileContent: applyUserFileContent,
     setEditorStatusMessage,
+    userRevision,
+    savedUserRevision,
   };
 }

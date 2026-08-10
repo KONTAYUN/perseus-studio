@@ -8,7 +8,7 @@ import (
 
 func (s *ConfigStore) ListModelProviders(ctx context.Context, userID string) ([]ModelProvider, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
+SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_parallel_tool_calls, parallel_capability_source, tool_argument_stream_mode, stream_mode_source, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
        context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
        native_patch_tool_enabled,
        reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
@@ -38,7 +38,7 @@ func (s *ConfigStore) ListModelProvidersForUser(ctx context.Context, userID, rol
 		return s.ListAllModelProviders(ctx)
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
+SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_parallel_tool_calls, parallel_capability_source, tool_argument_stream_mode, stream_mode_source, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
        context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
        native_patch_tool_enabled,
        reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
@@ -65,7 +65,7 @@ ORDER BY is_default DESC, updated_at DESC
 
 func (s *ConfigStore) ListAllModelProviders(ctx context.Context) ([]ModelProvider, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
+SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_parallel_tool_calls, parallel_capability_source, tool_argument_stream_mode, stream_mode_source, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
        context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
        native_patch_tool_enabled,
        reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
@@ -118,14 +118,27 @@ func (s *ConfigStore) CreateModelProvider(ctx context.Context, userID string, in
 	if capabilitySource == "" {
 		capabilitySource = "user"
 	}
+	parallelCapabilitySource := strings.TrimSpace(input.ParallelCapabilitySource)
+	if parallelCapabilitySource == "" {
+		parallelCapabilitySource = "user"
+	}
+	toolArgumentStreamMode := normalizeToolArgumentStreamMode(input.ToolArgumentStreamMode, input.Protocol)
+	toolArgumentStreamModeSource := strings.TrimSpace(input.ToolArgumentStreamModeSource)
+	if toolArgumentStreamModeSource == "" {
+		if strings.TrimSpace(input.ToolArgumentStreamMode) == "" {
+			toolArgumentStreamModeSource = "protocol_default"
+		} else {
+			toolArgumentStreamModeSource = "user_configured"
+		}
+	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO model_providers (
-  id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
+  id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_parallel_tool_calls, parallel_capability_source, tool_argument_stream_mode, stream_mode_source, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
   context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled, native_patch_tool_enabled, reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
   created_at, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, id, userID, strings.TrimSpace(input.Name), visibility, input.Protocol, adapterMode, authMode, normalizeModelCapability(input.SupportsTools), normalizeModelCapability(input.SupportsVision), capabilitySource, strings.TrimSpace(input.BaseURL), input.APIKey, strings.TrimSpace(input.ModelID), boolToInt(input.Enabled), boolToInt(input.IsDefault),
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, id, userID, strings.TrimSpace(input.Name), visibility, input.Protocol, adapterMode, authMode, normalizeModelCapability(input.SupportsTools), normalizeModelCapability(input.SupportsParallelToolCalls), parallelCapabilitySource, toolArgumentStreamMode, toolArgumentStreamModeSource, normalizeModelCapability(input.SupportsVision), capabilitySource, strings.TrimSpace(input.BaseURL), input.APIKey, strings.TrimSpace(input.ModelID), boolToInt(input.Enabled), boolToInt(input.IsDefault),
 		settings.ContextWindowTokens, boolToInt(settings.AutoCompactEnabled), settings.AutoCompactThresholdPercent, settings.CompactReservedTokens, boolToInt(settings.PruneToolOutputsEnabled), boolToInt(settings.NativePatchToolEnabled), NormalizeReasoningCapability(input.ReasoningCapability), NormalizeReasoningCapabilitySource(input.ReasoningCapabilitySource), NormalizeReasoningProfileLevels(input.ReasoningProfileLevels), now, now)
 	if err != nil {
 		return ModelProvider{}, err
@@ -172,13 +185,26 @@ func (s *ConfigStore) UpdateModelProvider(ctx context.Context, userID, id string
 	if capabilitySource == "" {
 		capabilitySource = "user"
 	}
+	parallelCapabilitySource := strings.TrimSpace(input.ParallelCapabilitySource)
+	if parallelCapabilitySource == "" {
+		parallelCapabilitySource = "user"
+	}
+	toolArgumentStreamMode := normalizeToolArgumentStreamMode(input.ToolArgumentStreamMode, input.Protocol)
+	toolArgumentStreamModeSource := strings.TrimSpace(input.ToolArgumentStreamModeSource)
+	if toolArgumentStreamModeSource == "" {
+		if strings.TrimSpace(input.ToolArgumentStreamMode) == "" {
+			toolArgumentStreamModeSource = "protocol_default"
+		} else {
+			toolArgumentStreamModeSource = "user_configured"
+		}
+	}
 	_, err = tx.ExecContext(ctx, `
 UPDATE model_providers
-SET name = ?, visibility = ?, protocol = ?, adapter_mode = ?, auth_mode = ?, supports_tools = ?, supports_vision = ?, capability_source = ?, base_url = ?, api_key = ?, model_id = ?, enabled = ?, is_default = ?,
+SET name = ?, visibility = ?, protocol = ?, adapter_mode = ?, auth_mode = ?, supports_tools = ?, supports_parallel_tool_calls = ?, parallel_capability_source = ?, tool_argument_stream_mode = ?, stream_mode_source = ?, supports_vision = ?, capability_source = ?, base_url = ?, api_key = ?, model_id = ?, enabled = ?, is_default = ?,
     context_window_tokens = ?, auto_compact_enabled = ?, auto_compact_threshold_percent = ?, compact_reserved_tokens = ?, prune_tool_outputs_enabled = ?, native_patch_tool_enabled = ?, reasoning_capability = ?, reasoning_capability_source = ?, reasoning_profile_levels = ?,
     updated_at = ?
 WHERE id = ? AND user_id = ?
-`, strings.TrimSpace(input.Name), visibility, input.Protocol, adapterMode, authMode, normalizeModelCapability(input.SupportsTools), normalizeModelCapability(input.SupportsVision), capabilitySource, strings.TrimSpace(input.BaseURL), apiKey, strings.TrimSpace(input.ModelID), boolToInt(input.Enabled), boolToInt(input.IsDefault),
+`, strings.TrimSpace(input.Name), visibility, input.Protocol, adapterMode, authMode, normalizeModelCapability(input.SupportsTools), normalizeModelCapability(input.SupportsParallelToolCalls), parallelCapabilitySource, toolArgumentStreamMode, toolArgumentStreamModeSource, normalizeModelCapability(input.SupportsVision), capabilitySource, strings.TrimSpace(input.BaseURL), apiKey, strings.TrimSpace(input.ModelID), boolToInt(input.Enabled), boolToInt(input.IsDefault),
 		settings.ContextWindowTokens, boolToInt(settings.AutoCompactEnabled), settings.AutoCompactThresholdPercent, settings.CompactReservedTokens, boolToInt(settings.PruneToolOutputsEnabled), boolToInt(settings.NativePatchToolEnabled),
 		NormalizeReasoningCapability(input.ReasoningCapability), NormalizeReasoningCapabilitySource(input.ReasoningCapabilitySource), NormalizeReasoningProfileLevels(input.ReasoningProfileLevels), now, id, userID)
 	if err != nil {
@@ -243,7 +269,7 @@ func (s *ConfigStore) SetDefaultModelProviderAny(ctx context.Context, id string)
 
 func (s *ConfigStore) GetModelProvider(ctx context.Context, userID, id string) (ModelProvider, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
+SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_parallel_tool_calls, parallel_capability_source, tool_argument_stream_mode, stream_mode_source, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
        context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
        native_patch_tool_enabled,
        reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
@@ -259,7 +285,7 @@ func (s *ConfigStore) GetModelProviderForUser(ctx context.Context, userID, role,
 		return s.GetModelProviderAny(ctx, id)
 	}
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
+SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_parallel_tool_calls, parallel_capability_source, tool_argument_stream_mode, stream_mode_source, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
        context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
        native_patch_tool_enabled,
        reasoning_capability, reasoning_capability_source, reasoning_profile_levels,
@@ -272,7 +298,7 @@ WHERE id = ? AND enabled = 1 AND visibility = ?
 
 func (s *ConfigStore) GetModelProviderAny(ctx context.Context, id string) (ModelProvider, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
+SELECT id, user_id, name, visibility, protocol, adapter_mode, auth_mode, supports_tools, supports_parallel_tool_calls, parallel_capability_source, tool_argument_stream_mode, stream_mode_source, supports_vision, capability_source, base_url, api_key, model_id, enabled, is_default,
        context_window_tokens, auto_compact_enabled, auto_compact_threshold_percent, compact_reserved_tokens, prune_tool_outputs_enabled,
        native_patch_tool_enabled,
        reasoning_capability, reasoning_capability_source, reasoning_profile_levels,

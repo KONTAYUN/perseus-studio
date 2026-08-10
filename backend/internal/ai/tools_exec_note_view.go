@@ -17,15 +17,18 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 		return "", "", "正在读取笔记视图...", "", err
 	}
 	var args struct {
-		Path       string `json:"path"`
-		View       string `json:"view"`
-		Mode       string `json:"mode"`
-		BlockID    string `json:"block_id"`
-		SectionID  string `json:"section_id"`
-		DocHash    string `json:"doc_hash"`
-		StartBlock int    `json:"start_block"`
-		MaxBlocks  int    `json:"max_blocks"`
-		MaxChars   int    `json:"max_chars"`
+		Path            string   `json:"path"`
+		View            string   `json:"view"`
+		Mode            string   `json:"mode"`
+		BlockID         string   `json:"block_id"`
+		BlockIDs        []string `json:"block_ids"`
+		SectionID       string   `json:"section_id"`
+		SectionIDs      []string `json:"section_ids"`
+		DocHash         string   `json:"doc_hash"`
+		DocumentVersion string   `json:"document_version"`
+		StartBlock      int      `json:"start_block"`
+		MaxBlocks       int      `json:"max_blocks"`
+		MaxChars        int      `json:"max_chars"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		return "", "", "正在读取笔记视图...", "", fmt.Errorf("invalid tool arguments")
@@ -57,7 +60,13 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 	}
 
 	if args.Mode != "full" {
-		return s.execReadWorkspaceNoteBlockView(result.Path, result.Content, result.Hash, args.View, args.Mode, args.BlockID, args.SectionID, args.DocHash, args.StartBlock, args.MaxBlocks, args.MaxChars)
+		if len(args.BlockIDs) > 0 || len(args.SectionIDs) > 0 {
+			return s.execReadWorkspaceNoteBatchView(
+				result.Path, result.Content, result.Hash, args.View, args.Mode,
+				args.BlockIDs, args.SectionIDs, firstNonEmpty(args.DocumentVersion, args.DocHash), args.MaxChars,
+			)
+		}
+		return s.execReadWorkspaceNoteBlockView(result.Path, result.Content, result.Hash, args.View, args.Mode, args.BlockID, args.SectionID, firstNonEmpty(args.DocumentVersion, args.DocHash), args.StartBlock, args.MaxBlocks, args.MaxChars)
 	}
 
 	viewContent := renderNoteView(result.Content, args.View)
@@ -66,16 +75,31 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 		viewContent = string([]rune(viewContent)[:maxNoteViewRunes])
 		truncated = true
 	}
+	completeBlockIDs := []string(nil)
+	completeBlockHashes := map[string]string{}
+	if strings.EqualFold(args.View, "raw") && !truncated {
+		doc := buildNoteBlockDocument(result.Content)
+		completeBlockIDs = make([]string, 0, len(doc.Blocks))
+		for _, block := range doc.Blocks {
+			completeBlockIDs = append(completeBlockIDs, block.ID)
+			completeBlockHashes[block.ID] = noteBlockHash(block)
+		}
+	}
 	payload := workspaceToolPayload("read_workspace_note_view", result.Path, map[string]any{
-		"path":      result.Path,
-		"view":      args.View,
-		"mode":      args.Mode,
-		"content":   viewContent,
-		"truncated": truncated,
-		"hash":      result.Hash,
-		"doc_hash":  noteDocHash(result.Content),
-		"ledger_id": noteViewLedgerID(result.Path, args.View, args.Mode, "", "", noteDocHash(result.Content)),
-		"next_hint": "Use text/structure for content work and format for lightweight style awareness. For exact HTML, call mode=index first, then mode=block or mode=section with raw.",
+		"path":                 result.Path,
+		"view":                 args.View,
+		"mode":                 args.Mode,
+		"content":              viewContent,
+		"truncated":            truncated,
+		"source_truncated":     truncated,
+		"model_view_truncated": false,
+		"complete_block_ids":   completeBlockIDs,
+		"block_hashes":         completeBlockHashes,
+		"hash":                 result.Hash,
+		"doc_hash":             noteDocHash(result.Content),
+		"document_version":     noteDocHash(result.Content),
+		"ledger_id":            noteViewLedgerID(result.Path, args.View, args.Mode, "", "", noteDocHash(result.Content)),
+		"next_hint":            "Use text/structure for content work and format for lightweight style awareness. For exact HTML, call mode=index first, then mode=block or mode=section with raw.",
 	})
 	summary := fmt.Sprintf("read %s note view for %s (%d chars, truncated=%t)", args.View, result.Path, len([]rune(viewContent)), truncated)
 	return mustJSON(payload), summary, "正在读取笔记视图...", result.Path, nil
@@ -83,17 +107,22 @@ func (s *Service) execReadWorkspaceNoteView(ctx context.Context, userID, argumen
 
 func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view, mode, blockID, sectionID, expectedDocHash string, startBlock, maxBlocks, maxChars int) (string, string, string, string, error) {
 	doc := buildNoteBlockDocument(fragment)
-	if expectedDocHash = strings.TrimSpace(expectedDocHash); expectedDocHash != "" && expectedDocHash != doc.DocHash {
-		return "", "", "正在读取笔记视图...", path, fmt.Errorf("note view doc_hash is stale; call read_workspace_note_view with mode=index again")
+	expectedDocHash = strings.TrimSpace(expectedDocHash)
+	if (mode == "block" || mode == "section") && expectedDocHash == "" {
+		return "", "", "姝ｅ湪璇诲彇绗旇瑙嗗浘...", path, newToolError(ToolErrorDocumentVersionRequired, "mode=block or mode=section requires the complete current document_version; read mode=index first", nil)
+	}
+	if (mode == "block" || mode == "section") && !noteDocumentVersionMatches(expectedDocHash, doc.DocHash) {
+		return "", "", "正在读取笔记视图...", path, fmt.Errorf("note document_version is stale; call read_workspace_note_view with mode=index again")
 	}
 	base := map[string]any{
-		"path":      path,
-		"view":      view,
-		"mode":      mode,
-		"hash":      fileHash,
-		"doc_hash":  doc.DocHash,
-		"ledger_id": noteViewLedgerID(path, view, mode, blockID, sectionID, doc.DocHash),
-		"next_hint": "Use mode=index to locate HTML blocks, then mode=block or mode=section for targeted raw HTML before precise formatting edits.",
+		"path":             path,
+		"view":             view,
+		"mode":             mode,
+		"hash":             fileHash,
+		"doc_hash":         doc.DocHash,
+		"document_version": doc.DocHash,
+		"ledger_id":        noteViewLedgerID(path, view, mode, blockID, sectionID, doc.DocHash),
+		"next_hint":        "Use mode=index to locate HTML blocks, then mode=block or mode=section for targeted raw HTML before precise formatting edits.",
 	}
 	switch mode {
 	case "index":
@@ -109,6 +138,9 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 		base["total_text_chars"] = doc.TotalTextRune
 		base["total_raw_chars"] = doc.TotalRawRune
 		base["truncated"] = page.HasMore
+		base["source_truncated"] = false
+		base["model_view_truncated"] = false
+		base["complete_block_ids"] = []string{}
 		if page.HasMore {
 			base["next_action"] = fmt.Sprintf("Choose a visible block_id/section_id when enough, or continue the index with start_block=%d. For exact HTML edits, read the chosen target with mode=block or mode=section and view=raw.", page.NextStartBlock)
 		} else {
@@ -128,6 +160,12 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 		}
 		content := renderNoteBlocks([]noteBlock{block}, view)
 		content, truncated := limitNoteContent(content, maxChars)
+		if strings.EqualFold(view, "raw") && truncated {
+			typed := newToolError(ToolErrorNoteBlockTooLarge, "raw note block exceeds the complete-read budget", nil)
+			typed.Target = path
+			typed.Details = map[string]any{"block_id": block.ID, "max_chars": maxChars, "raw_chars": block.RawRunes}
+			return "", "", "姝ｅ湪璇诲彇绗旇瑙嗗浘...", path, typed
+		}
 		base["block_id"] = block.ID
 		base["ledger_id"] = noteViewLedgerID(path, view, mode, block.ID, "", doc.DocHash)
 		base["block"] = map[string]any{
@@ -141,9 +179,21 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 			"has_images":   block.HasImages,
 			"has_tables":   block.HasTables,
 			"has_styles":   block.HasStyles,
+			"block_hash":   noteBlockHash(block),
+		}
+		base["covered_block_ids"] = []string{block.ID}
+		base["block_hashes"] = map[string]string{block.ID: noteBlockHash(block)}
+		complete := strings.EqualFold(view, "raw") && !truncated
+		if complete {
+			base["complete_block_ids"] = []string{block.ID}
+			base["text_segments"] = noteBlockTextSegments(block)
+		} else {
+			base["complete_block_ids"] = []string{}
 		}
 		base["content"] = content
 		base["truncated"] = truncated
+		base["source_truncated"] = truncated
+		base["model_view_truncated"] = false
 		if truncated {
 			base["next_action"] = "This block is still large. Re-read the note with mode=index and choose a smaller neighboring block or a more specific section."
 		}
@@ -161,11 +211,39 @@ func (s *Service) execReadWorkspaceNoteBlockView(path, fragment, fileHash, view,
 		}
 		content := renderNoteBlocks(blocks, view)
 		content, truncated := limitNoteContent(content, maxChars)
+		if strings.EqualFold(view, "raw") && truncated {
+			typed := newToolError(ToolErrorNoteBlockTooLarge, "raw note section exceeds the complete-read budget; read smaller blocks", nil)
+			typed.Target = path
+			typed.Details = map[string]any{"section_id": section.ID, "max_chars": maxChars, "block_count": len(blocks)}
+			return "", "", "姝ｅ湪璇诲彇绗旇瑙嗗浘...", path, typed
+		}
 		base["section_id"] = section.ID
+		base["section_ids"] = []string{section.ID}
 		base["ledger_id"] = noteViewLedgerID(path, view, mode, "", section.ID, doc.DocHash)
 		base["section"] = section
 		base["content"] = content
+		covered := make([]string, 0, len(blocks))
+		hashes := map[string]string{}
+		var segments []map[string]any
+		complete := strings.EqualFold(view, "raw") && !truncated
+		for _, block := range blocks {
+			covered = append(covered, block.ID)
+			hashes[block.ID] = noteBlockHash(block)
+			if complete {
+				segments = append(segments, noteBlockTextSegments(block)...)
+			}
+		}
+		base["covered_block_ids"] = sortedUniqueStrings(covered)
+		base["block_hashes"] = hashes
+		if complete {
+			base["complete_block_ids"] = sortedUniqueStrings(covered)
+			base["text_segments"] = segments
+		} else {
+			base["complete_block_ids"] = []string{}
+		}
 		base["truncated"] = truncated
+		base["source_truncated"] = truncated
+		base["model_view_truncated"] = false
 		if truncated {
 			base["next_action"] = "This section is still large. Use mode=index and read the specific block_id values inside this section."
 		}

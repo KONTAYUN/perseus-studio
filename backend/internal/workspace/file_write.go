@@ -34,12 +34,17 @@ func (s *Service) WriteBytes(ctx context.Context, path string, content []byte, s
 	}
 
 	var versionID string
+	unchanged := false
 	if info, statErr := os.Stat(absPath); statErr == nil && !info.IsDir() {
 		oldContent, err := os.ReadFile(absPath)
 		if err != nil {
 			return FileWriteResult{}, err
 		}
-		if isTextPath(cleanPath) && hashBytes(oldContent) != hashBytes(content) {
+		if isHTMLNotePath(cleanPath) && HTMLFragmentsSemanticallyEqual(string(oldContent), string(content)) {
+			content = oldContent
+		}
+		unchanged = hashBytes(oldContent) == hashBytes(content)
+		if isTextPath(cleanPath) && !unchanged {
 			versionID, err = s.createFileVersion(ctx, cleanPath, oldContent, source)
 			if err != nil {
 				return FileWriteResult{}, err
@@ -47,6 +52,14 @@ func (s *Service) WriteBytes(ctx context.Context, path string, content []byte, s
 		}
 	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return FileWriteResult{}, statErr
+	}
+
+	if unchanged {
+		return FileWriteResult{
+			Path: cleanPath,
+			Hash: hashBytes(content),
+			Size: int64(len(content)),
+		}, nil
 	}
 
 	if err := writeAtomic(absPath, content); err != nil {

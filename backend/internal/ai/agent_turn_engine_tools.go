@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 func (r *agentRuntime) executeTurnEngineToolCalls(ctx context.Context, calls []agentToolCall, repeats *agentTurnRepeatDetector) (*BackgroundTaskRequest, bool, error) {
 	calls = normalizeAgentToolCallIDs(calls)
 	_, maxToolCalls := r.turnEngineLimits()
-	for callIndex, call := range calls {
+	for callIndex := 0; callIndex < len(calls); {
+		call := calls[callIndex]
 		if r.toolCalls >= maxToolCalls {
 			for _, skipped := range calls[callIndex:] {
 				result, event := r.toolBudgetExhaustedResult(skipped, maxToolCalls)
@@ -30,6 +32,22 @@ func (r *agentRuntime) executeTurnEngineToolCalls(ctx context.Context, calls []a
 				return nil, false, err
 			}
 			return nil, false, r.failTurnEngineRepeat(call)
+		}
+		if toolExecutionMode(call.Name) == ToolExecutionParallelRead {
+			batchEnd := callIndex + 1
+			for batchEnd < len(calls) &&
+				batchEnd-callIndex < 4 &&
+				toolExecutionMode(calls[batchEnd].Name) == ToolExecutionParallelRead &&
+				r.toolCalls+(batchEnd-callIndex) < maxToolCalls {
+				batchEnd++
+			}
+			if batchEnd > callIndex {
+				if err := r.executeParallelReadBatch(ctx, calls[callIndex:batchEnd]); err != nil {
+					return nil, false, err
+				}
+				callIndex = batchEnd
+				continue
+			}
 		}
 
 		r.toolCalls++
@@ -71,8 +89,6 @@ func (r *agentRuntime) executeTurnEngineToolCalls(ctx context.Context, calls []a
 		}
 		if request != nil || completed {
 			r.appendTurnEngineAbortedToolCalls(calls[callIndex+1:], "run stopped after terminal tool result")
-		} else if callIndex+1 < len(calls) {
-			r.appendTurnEngineAbortedToolCalls(calls[callIndex+1:], "serial tool execution requires the model to reevaluate after the first tool result")
 		}
 		if checkpointErr := r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint()); checkpointErr != nil {
 			return nil, false, checkpointErr
@@ -83,11 +99,97 @@ func (r *agentRuntime) executeTurnEngineToolCalls(ctx context.Context, calls []a
 		if request != nil || completed {
 			return request, completed, nil
 		}
-		if callIndex+1 < len(calls) {
-			return nil, false, nil
-		}
+		callIndex++
 	}
 	return nil, false, nil
+}
+
+type parallelReadResult struct {
+	call    agentToolCall
+	result  string
+	event   ToolEvent
+	isError bool
+	err     error
+}
+
+func (r *agentRuntime) executeParallelReadBatch(ctx context.Context, calls []agentToolCall) error {
+	r.parallelToolBatches++
+	results := make([]parallelReadResult, len(calls))
+	var wg sync.WaitGroup
+	for index := range calls {
+		call := calls[index]
+		r.toolCalls++
+		r.appendKernelToolCallItem(call)
+		results[index].call = call
+		if errText := r.normalizeAndValidateToolCall(&call); errText != "" {
+			event := r.invalidToolCallEvent(ctx, call, errText)
+			results[index] = parallelReadResult{
+				call: call, result: r.toolErrorJSON(call.Name, errText),
+				event: event, isError: true,
+			}
+			continue
+		}
+		if errText := r.validateSelectedReferenceScope(call); errText != "" {
+			event := r.invalidToolCallEvent(ctx, call, errText)
+			results[index] = parallelReadResult{
+				call: call, result: r.toolErrorJSON(call.Name, errText),
+				event: event, isError: true,
+			}
+			continue
+		}
+		results[index].call = call
+		wg.Add(1)
+		go func(resultIndex int, batchCall agentToolCall) {
+			defer wg.Done()
+			argumentsJSON := executionToolArgumentsJSON(batchCall)
+			operationHash := mutationOperationHash(batchCall.Name, argumentsJSON)
+			execOpts := r.opts
+			execOpts.CurrentToolCallID = batchCall.ID
+			result, event, err := r.service.executeAndRecordTool(
+				ctx, r.conversationID, r.messageID, batchCall.Name,
+				argumentsJSON, operationHash, execOpts, r.profile,
+			)
+			results[resultIndex] = parallelReadResult{
+				call: batchCall, result: result, event: event,
+				isError: event.Status != "success", err: err,
+			}
+		}(index, call)
+	}
+	wg.Wait()
+
+	emitToolLifecycleEvent(r.opts, "parallel_tool_batch_completed", "info", map[string]any{
+		"batch_size":      len(calls),
+		"max_concurrency": 4,
+		"round":           r.currentRound,
+		"batch_count":     r.parallelToolBatches,
+	})
+	for _, item := range results {
+		event := item.event
+		if item.err != nil && event.ToolName == "" {
+			event = r.turnEngineExecutionErrorEvent(item.call, item.err)
+			item.result = firstNonEmpty(item.result, r.toolErrorJSON(item.call.Name, item.err.Error()))
+			item.isError = true
+		}
+		r.events = append(r.events, event)
+		if item.isError {
+			r.recordTypedToolError(item.call.Name, executionToolArgumentsJSON(item.call), toolErrorFromEvent(event))
+		} else {
+			r.recordStrategySuccess(item.call, event)
+			r.clearToolErrors()
+		}
+		r.appendTurnEngineToolResult(item.call, event, item.isError, item.result)
+		if item.err != nil {
+			return item.err
+		}
+	}
+	return r.service.saveRunCheckpoint(ctx, r.opts, r.checkpoint())
+}
+
+func toolExecutionMode(name string) ToolExecutionMode {
+	if entry, ok := toolManifestEntry(strings.TrimSpace(name)); ok {
+		return entry.ExecutionMode
+	}
+	return ToolExecutionSerial
 }
 
 func (r *agentRuntime) appendTurnEngineAbortedToolCalls(calls []agentToolCall, reason string) {

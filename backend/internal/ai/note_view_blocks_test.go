@@ -132,6 +132,14 @@ func TestReadWorkspaceNoteViewBlockAndSectionRaw(t *testing.T) {
 	if blockPayload["mode"] != "block" || blockPayload["block_id"] != "b0002" {
 		t.Fatalf("unexpected block payload metadata: %#v", blockPayload)
 	}
+	segments, ok := blockPayload["text_segments"].([]any)
+	if !ok || len(segments) == 0 {
+		t.Fatalf("raw block should expose text segments for precise edits: %#v", blockPayload)
+	}
+	segment, ok := segments[0].(map[string]any)
+	if !ok || stringFromAny(segment["segment_id"]) == "" || stringFromAny(segment["block_hash"]) == "" {
+		t.Fatalf("raw text segment is missing stable metadata: %#v", segments[0])
+	}
 	content := stringFromAny(blockPayload["content"])
 	if !strings.Contains(content, `<p style="color:#ff0000">Alpha</p>`) {
 		t.Fatalf("expected raw paragraph HTML, got %q", content)
@@ -152,6 +160,12 @@ func TestReadWorkspaceNoteViewBlockAndSectionRaw(t *testing.T) {
 			t.Fatalf("section content missing %q: %q", want, sectionContent)
 		}
 	}
+	if got := stringSliceFromAnyLoose(sectionPayload["section_ids"]); len(got) != 1 || got[0] != "s0001" {
+		t.Fatalf("section raw read should expose section coverage: %#v", sectionPayload["section_ids"])
+	}
+	if covered := stringSliceFromAnyLoose(sectionPayload["covered_block_ids"]); len(covered) != 4 {
+		t.Fatalf("section raw read should expose every covered block: %#v", sectionPayload["covered_block_ids"])
+	}
 }
 
 func TestReadWorkspaceNoteViewRejectsStaleDocHash(t *testing.T) {
@@ -161,8 +175,36 @@ func TestReadWorkspaceNoteViewRejectsStaleDocHash(t *testing.T) {
 		t.Fatalf("CreateFile returned error: %v", err)
 	}
 	_, _, _, _, err := env.service.executeTool(ctx, "read_workspace_note_view", `{"path":"Stale.html","mode":"block","view":"raw","block_id":"b0001","doc_hash":"stale"}`, RunOptions{UserID: testUserID})
-	if err == nil || !strings.Contains(err.Error(), "doc_hash is stale") {
-		t.Fatalf("expected stale doc_hash error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "document_version is stale") {
+		t.Fatalf("expected stale document_version error, got %v", err)
+	}
+}
+
+func TestReadWorkspaceNoteIndexIgnoresStaleDocHash(t *testing.T) {
+	env := newTestAIEnv(t)
+	ctx := context.Background()
+	if _, err := env.files.CreateFile(ctx, "FreshIndex.html", `<h1>Current</h1><p>Body</p>`); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	raw, _, _, _, err := env.service.executeTool(
+		ctx,
+		"read_workspace_note_view",
+		`{"path":"FreshIndex.html","mode":"index","doc_hash":"stale"}`,
+		RunOptions{UserID: testUserID},
+	)
+	if err != nil {
+		t.Fatalf("mode=index should refresh despite stale hash: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("invalid index payload: %v", err)
+	}
+	if stringFromAny(payload["doc_hash"]) == "" || stringFromAny(payload["doc_hash"]) == "stale" {
+		t.Fatalf("expected current doc_hash, got %#v", payload["doc_hash"])
+	}
+	documentVersion := stringFromAny(payload["document_version"])
+	if len(documentVersion) != 64 || documentVersion != stringFromAny(payload["doc_hash"]) {
+		t.Fatalf("expected a full document_version, got %#v", payload)
 	}
 }
 

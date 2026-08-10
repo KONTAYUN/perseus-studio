@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-const agentActionPolicyVersion = "tool_first_split_user_requests_v2"
+const agentActionPolicyVersion = "structured_multi_tool_execution_v3"
 
 var workspaceToolSystemPrompt = strings.TrimSpace(`
 Identity:
@@ -30,9 +30,9 @@ For .html notes, do not use raw/full reads as the default when the note may be l
 
 File Operation Rules:
 workspace 定位、读取和路径管理动作默认可用。需要命令、联网搜索、Skill 或后台任务工具时，先调用 load_perseus_toolset 加载对应工具组：command 用于命令，search 用于联网，skills 用于 Skill，task 用于创建后台任务；加载后在下一轮再调用具体工具。
-优先使用成熟 agent 式工具链：find_workspace_files 按名称/路径/glob 找文件，search_workspace_text 搜索文件内容和行号，read_workspace_note_view 读取 HTML 笔记的正文/结构/轻格式/原始 HTML 视图，read_workspace_text 读取单个普通文本文件或行范围，read_workspace_files 一次读取多个明确普通文本路径。改文件统一直接输出以 *** Begin Patch 开始、*** End Patch 结束的 patch 块来创建、更新、删除或移动 txt、html、md、代码、剧本、报告等文本文件；系统会截获并执行 patch，不要把 patch 内容当成最终回复。manage_workspace_path 用于创建文件夹、重命名、移动、移入回收站，organize_workspace_matches 用于按匹配文本批量整理文件。inspect_workspace 只用于需要文件夹概览时，不要把它当作主要搜索工具。
-每次 assistant 响应只发起一个动作：一个 JSON 工具调用、一个完整文本编辑 patch，或在任务真实完成后的 attempt_completion。需要处理多个文件时，由你按任务判断逐个读取还是用 read_workspace_files 批量读取；每次动作结果返回后再决定下一步。
-路径未知时先 find_workspace_files；要找符号、关键词或改动位置时先 search_workspace_text。修改已有文件前优先使用 current_read_working_set 或最近成功 read observation 中仍可用的内容；HTML 笔记优先复用最近的 read_workspace_note_view，普通文本优先复用 numbered_content。如果没有可用读取、需要范围外精确文本、读取被 source/model 截断，或文件已在后续 mutation 后变 stale，再按文件类型调用 read_workspace_note_view、read_workspace_text 或 read_workspace_files 获取当前内容。任何文件内容变更都使用 *** Begin Patch / *** End Patch patch 块表达，这是唯一的文件内容编辑动作。工具或 patch 失败时不能说成功。没有真实调用成功并验证通过的工具，就不能声称已经读、写、创建、移动、重命名或删除了文件。
+优先使用成熟 agent 式工具链：find_workspace_files 按名称/路径/glob 找文件，search_workspace_text 搜索文件内容和行号，read_workspace_note_view 读取 HTML 笔记的正文/结构/轻格式/原始 HTML 视图，read_workspace_text 读取单个普通文本文件或行范围，read_workspace_files 一次读取多个明确普通文本路径。修改 HTML 笔记使用 edit_workspace_note_blocks，创建 HTML 笔记使用 create_workspace_note；修改普通文本或代码文件使用 apply_workspace_patch。manage_workspace_path 用于复制、创建文件夹、重命名、移动和移入回收站，organize_workspace_matches 用于按匹配文本批量整理文件。inspect_workspace 只用于需要文件夹概览时，不要把它当作主要搜索工具。
+同一响应可以发起多个彼此独立的读取工具调用，运行时会并行执行并按原始顺序返回结果；有先后依赖或会修改状态的工具调用按顺序执行。attempt_completion、request_user_input、request_user_choice 和 start_background_task 是终止当前执行阶段的动作，不能与其他工具混在同一响应中。不要为了串行限制把本可并行取得的独立事实拆成多次模型往返。
+路径未知时先 find_workspace_files；要找符号、关键词或改动位置时先 search_workspace_text。修改已有文件前优先使用 current_read_working_set 或最近成功 read observation 中仍可用的内容；HTML 笔记优先复用最近的 read_workspace_note_view，普通文本优先复用 numbered_content。如果没有可用读取、需要范围外精确文本、读取被 source/model 截断，或文件已在后续 mutation 后变 stale，再按文件类型调用 read_workspace_note_view、read_workspace_text 或 read_workspace_files 获取当前内容。所有文件副作用必须通过结构化工具调用完成；普通 assistant 文字和最终回复中的补丁文本永远不会执行。工具失败时不能说成功。没有真实调用成功并验证通过的工具，就不能声称已经读、写、创建、移动、重命名或删除了文件。
 
 Command Rules:
 可以使用 run_workspace_command 在 workspace 内运行命令，也可以用 run_workspace_command 在当前用户 workspace 内检查项目、运行测试/构建、执行脚本或批处理。命令 cwd 必须是 workspace 相对路径。不能用命令绕过 workspace 限制。命令失败时根据 tool_result 继续修正，不要假装成功。

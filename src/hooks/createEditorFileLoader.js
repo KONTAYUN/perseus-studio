@@ -11,14 +11,21 @@ export function createEditorFileLoader({
   setCurrentFilePath,
   setCurrentFileType,
   setCurrentFileVersionId,
+  setCurrentDocumentVersion,
+  setUserRevision,
+  setSavedUserRevision,
   setErrorMessage,
   setExternalFileConflict,
   setIsEditorLoading,
+  currentFileContentRef,
+  savedFileContentRef,
+  isDirtyRef,
   setOpenTabs,
   setSavedFileContent,
   setSelectedItemPath,
   setSelectedItemType,
   setEditorStatusMessage,
+  setAIEditPreview,
 }) {
   async function loadFileIntoEditor(path, options = {}) {
     const {
@@ -37,6 +44,7 @@ export function createEditorFileLoader({
       setExternalFileConflict(null);
     }
     setEditorStatusMessage(statusMessage);
+    setAIEditPreview?.(null);
     if (!preserveSelection) {
       setSelectedItemPath?.(path);
       setSelectedItemType?.('file');
@@ -53,6 +61,9 @@ export function createEditorFileLoader({
         if (requestId !== editorLoadRequestRef.current) return;
         setCurrentFileContent('');
         setSavedFileContent('');
+        setUserRevision?.(0);
+        setSavedUserRevision?.(0);
+        setCurrentDocumentVersion?.(hash || '');
         setCurrentFileNotice('图片文件暂不支持编辑');
         setActiveTabPath(path);
         upsertOpenTab({
@@ -61,10 +72,15 @@ export function createEditorFileLoader({
           savedContent: '',
           hash: hash || '',
           versionId: versionId || '',
+          documentVersion: hash || '',
           fileType,
           notice: '图片文件暂不支持编辑',
           conflict: null,
           statusMessage,
+          aiPreview: null,
+          previewOnly: false,
+          userRevision: 0,
+          savedUserRevision: 0,
         });
         if (activatePanel) setActivePanel?.('editor');
         return;
@@ -74,6 +90,9 @@ export function createEditorFileLoader({
         if (requestId !== editorLoadRequestRef.current) return;
         setCurrentFileContent('');
         setSavedFileContent('');
+        setUserRevision?.(0);
+        setSavedUserRevision?.(0);
+        setCurrentDocumentVersion?.(hash || '');
         setCurrentFileNotice('该文件类型暂不支持预览或编辑');
         setActiveTabPath(path);
         upsertOpenTab({
@@ -82,10 +101,15 @@ export function createEditorFileLoader({
           savedContent: '',
           hash: hash || '',
           versionId: versionId || '',
+          documentVersion: hash || '',
           fileType,
           notice: '该文件类型暂不支持预览或编辑',
           conflict: null,
           statusMessage,
+          aiPreview: null,
+          previewOnly: false,
+          userRevision: 0,
+          savedUserRevision: 0,
         });
         if (activatePanel) setActivePanel?.('editor');
         return;
@@ -93,12 +117,18 @@ export function createEditorFileLoader({
 
       const file = await apiGet(`/api/files/read?path=${encodeURIComponent(path)}`);
       if (requestId !== editorLoadRequestRef.current) return;
+      currentFileContentRef.current = file.content;
+      savedFileContentRef.current = file.content;
+      isDirtyRef.current = false;
       setCurrentFilePath(file.path);
       setCurrentFileNotice('');
       setCurrentFileContent(file.content);
       setSavedFileContent(file.content);
+      setUserRevision?.(0);
+      setSavedUserRevision?.(0);
       setCurrentFileHash(hash || file.hash || '');
       setCurrentFileVersionId(versionId || '');
+      setCurrentDocumentVersion?.(file.document_version || file.hash || hash || '');
       setActiveTabPath(file.path);
       upsertOpenTab({
         path: file.path,
@@ -106,10 +136,15 @@ export function createEditorFileLoader({
         savedContent: file.content,
         hash: hash || file.hash || '',
         versionId: versionId || '',
+        documentVersion: file.document_version || file.hash || hash || '',
         fileType,
         notice: '',
         conflict: null,
         statusMessage,
+        aiPreview: null,
+        previewOnly: false,
+        userRevision: 0,
+        savedUserRevision: 0,
       });
       if (activatePanel) setActivePanel?.('editor');
     } catch (error) {

@@ -20,6 +20,8 @@ test('isTabDirty compares current and saved content safely', () => {
   assert.equal(isTabDirty(null), false);
   assert.equal(isTabDirty({ content: '', savedContent: undefined }), false);
   assert.equal(isTabDirty({ content: 'draft', savedContent: 'saved' }), true);
+  assert.equal(isTabDirty({ content: 'normalized', savedContent: 'different', userRevision: 4, savedUserRevision: 4 }), false);
+  assert.equal(isTabDirty({ content: 'same', savedContent: 'same', userRevision: 5, savedUserRevision: 4 }), true);
 });
 
 test('removeTabByPath and nextActiveTabAfterClose keep tab order stable', () => {

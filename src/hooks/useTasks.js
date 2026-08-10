@@ -36,24 +36,64 @@ export default function useTasks(config = {}) {
 
     if (!config.enabled || !selectedTaskId) return undefined;
     if (selectedTask?.status === 'running' || selectedTask?.status === 'pending') {
-      const source = new EventSource(`${API_BASE_URL}/api/tasks/${encodeURIComponent(selectedTaskId)}/stream`, {
-        withCredentials: true,
-      });
-      eventSourceRef.current = source;
-
-      source.addEventListener('task', (event) => {
-        const task = JSON.parse(event.data);
-        upsertTask(task);
-      });
-      source.addEventListener('log', (event) => {
-        const log = JSON.parse(event.data);
-        setTaskLogs((current) => appendLog(current, log));
-      });
-      source.onerror = () => {
-        setTaskError('任务日志连接中断，正在等待下次刷新');
+      let disposed = false;
+      let cursor = 0;
+      let finalSeq = 0;
+      let pendingTask = null;
+      let reconnectTimer = null;
+      const open = () => {
+        if (disposed) return;
+        const suffix = cursor ? `?after_seq=${encodeURIComponent(cursor)}` : '';
+        const source = new EventSource(
+          `${API_BASE_URL}/api/tasks/${encodeURIComponent(selectedTaskId)}/stream${suffix}`,
+          { withCredentials: true }
+        );
+        eventSourceRef.current = source;
+        source.addEventListener('stream_opened', (event) => {
+          const payload = JSON.parse(event.data);
+          finalSeq = Math.max(finalSeq, Number(payload.final_seq) || 0);
+          if (payload.task) pendingTask = payload.task;
+        });
+        source.addEventListener('task', (event) => {
+          const task = JSON.parse(event.data);
+          finalSeq = Math.max(finalSeq, Number(task.final_seq) || 0);
+          if (['done', 'failed', 'canceled'].includes(task.status)) pendingTask = task;
+          else upsertTask(task);
+        });
+        source.addEventListener('log', (event) => {
+          const log = JSON.parse(event.data);
+          const seq = Number(log.seq) || 0;
+          if (seq <= cursor) return;
+          if (seq !== cursor + 1) {
+            source.close();
+            reconnectTimer = window.setTimeout(open, 50);
+            return;
+          }
+          setTaskLogs((current) => appendLog(current, log));
+          cursor = seq;
+        });
+        source.addEventListener('replay_complete', (event) => {
+          const payload = JSON.parse(event.data);
+          finalSeq = Math.max(finalSeq, Number(payload.final_seq) || 0);
+          if (pendingTask && cursor >= finalSeq) {
+            upsertTask(pendingTask);
+            pendingTask = null;
+          }
+        });
+        source.onerror = () => {
+          source.close();
+          if (disposed) return;
+          setTaskError('任务日志连接中断，正在恢复');
+          reconnectTimer = window.setTimeout(open, 500);
+        };
       };
+      open();
 
-      return () => source.close();
+      return () => {
+        disposed = true;
+        if (reconnectTimer) window.clearTimeout(reconnectTimer);
+        eventSourceRef.current?.close();
+      };
     }
 
     loadTaskLogs(selectedTaskId);

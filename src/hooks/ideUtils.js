@@ -232,6 +232,7 @@ export function isWorkspaceRefreshEvent(item) {
 
 export function editorToolEventKey(item) {
   if (!item || item.status !== 'success' || !isWorkspaceRefreshEvent(item)) return '';
+  if (item.mutation_id) return `mutation:${item.mutation_id}`;
   const changedPaths = Array.isArray(item.changed_paths) ? item.changed_paths.join('|') : '';
   const moved = Array.isArray(item.moved)
     ? item.moved.map((move) => `${move?.old_path || ''}>${move?.new_path || ''}:${move?.status || ''}`).join('|')

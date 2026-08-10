@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +125,8 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request, taskID
 		return
 	}
 
+	events, unsubscribe := s.broker.Subscribe(taskID)
+	defer unsubscribe()
 	task, err := s.store.GetTask(r.Context(), user.UserID, taskID)
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -133,10 +136,9 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request, taskID
 		writeError(w, status, err.Error())
 		return
 	}
-	logs, err := s.store.GetLogs(r.Context(), user.UserID, taskID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	cursor := streamCursor(r)
+	if cursor > task.EventHeadSeq {
+		cursor = 0
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -144,14 +146,36 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request, taskID
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	writeSSE(w, "task", task)
-	for _, item := range logs {
-		writeSSE(w, "log", item)
+	if writeSSE(w, "stream_opened", map[string]any{
+		"task": task, "event_head_seq": task.EventHeadSeq, "final_seq": task.FinalSeq,
+	}) != nil {
+		return
+	}
+	drain := func() bool {
+		logs, listErr := s.store.GetLogsAfter(r.Context(), user.UserID, taskID, cursor)
+		if listErr != nil {
+			return false
+		}
+		for _, item := range logs {
+			if item.Seq != cursor+1 || writeSSEWithID(w, "log", strconv.FormatInt(item.Seq, 10), item) != nil {
+				return false
+			}
+			cursor = item.Seq
+		}
+		return true
+	}
+	if !drain() {
+		return
+	}
+	task, err = s.store.GetTask(r.Context(), user.UserID, taskID)
+	if err != nil || writeSSE(w, "task", task) != nil ||
+		writeSSE(w, "replay_complete", map[string]any{"through_seq": cursor, "final_seq": task.FinalSeq}) != nil {
+		return
 	}
 	flusher.Flush()
-
-	events, unsubscribe := s.broker.Subscribe(taskID)
-	defer unsubscribe()
+	if taskIsTerminal(task.Status) && cursor >= task.FinalSeq {
+		return
+	}
 
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
@@ -160,17 +184,31 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request, taskID
 		select {
 		case <-r.Context().Done():
 			return
-		case event := <-events:
-			switch event.Type {
-			case "task":
-				writeSSE(w, "task", event.Task)
-			case "log":
-				writeSSE(w, "log", event.Log)
+		case <-events:
+			if !drain() {
+				return
+			}
+			task, err = s.store.GetTask(r.Context(), user.UserID, taskID)
+			if err != nil || writeSSE(w, "task", task) != nil ||
+				writeSSE(w, "replay_complete", map[string]any{"through_seq": cursor, "final_seq": task.FinalSeq}) != nil {
+				return
 			}
 			flusher.Flush()
+			if taskIsTerminal(task.Status) && cursor >= task.FinalSeq {
+				return
+			}
 		case <-heartbeat.C:
-			fmt.Fprint(w, ": heartbeat\n\n")
+			if !drain() {
+				return
+			}
+			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
+}
+
+func taskIsTerminal(status store.TaskStatus) bool {
+	return status == store.TaskDone || status == store.TaskFailed || status == store.TaskCanceled
 }

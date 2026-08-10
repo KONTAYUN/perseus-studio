@@ -128,6 +128,21 @@ func (s *Service) execApplyWorkspacePatch(ctx context.Context, userID, arguments
 	if patchText == "" {
 		return "", "", "正在编辑文件...", "", fmt.Errorf("invalid tool arguments: patch is required")
 	}
+	for _, candidate := range workspacePatchCandidatePaths(patchText) {
+		if !strings.HasSuffix(strings.ToLower(candidate), ".html") {
+			continue
+		}
+		if _, readErr := files.ReadFile(candidate); readErr == nil {
+			typed := newToolError(ToolErrorHTMLBlockRequired, "existing HTML notes must be edited with edit_workspace_note_blocks", nil)
+			typed.Target = candidate
+			typed.Details = map[string]any{
+				"path":      candidate,
+				"next_tool": "edit_workspace_note_blocks",
+				"read_tool": "read_workspace_note_view",
+			}
+			return toolErrorJSONPayload("apply_workspace_patch", typed), typed.Error(), "正在编辑文件...", candidate, typed
+		}
+	}
 	result, err := applyWorkspacePatch(ctx, files, patchText)
 	if err != nil {
 		payload := map[string]any{
@@ -136,7 +151,7 @@ func (s *Service) execApplyWorkspacePatch(ctx context.Context, userID, arguments
 			"files_changed":       false,
 			"transport":           "structured_tool",
 			"failure_stage":       "patch_apply_verification",
-			"recovery_hint":       "The patch was captured, but verification failed before writing. Read the target file/range again and submit a corrected *** Begin Patch text patch before claiming completion.",
+			"recovery_hint":       "Verification failed before writing. Read the target again and call apply_workspace_patch with corrected structured arguments before claiming completion.",
 			"unapplied_patch_sha": hashWorkspaceText(patchText),
 		}
 		if paths := workspacePatchCandidatePaths(patchText); len(paths) > 0 {

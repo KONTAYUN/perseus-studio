@@ -15,6 +15,7 @@ function MessageBubble({ message, ide, canRegenerate, isActiveUserRequest = fals
   const showLoadingOnly = message.pending && !(message.content || '').trim();
   const shouldShowFooterGap = shouldReserveMessageFooter(message);
   const isSteerMessage = message.kind === 'steer';
+  const isCommentary = message.kind === 'assistant_commentary';
   const userRequest = userRequestAttachment(message);
   const resumeBlocked = message.error && isResumeBlockedByFailure(message);
   const resumeButtonLabel = resumeBlocked ? formatRetryAfterLabel(message.retryAfterMs, message.resetAt) : '继续';
@@ -94,7 +95,7 @@ function MessageBubble({ message, ide, canRegenerate, isActiveUserRequest = fals
                 <Copy size={13} />
               </MessageActionButton>
             )}
-            {!!(message.content || '').trim() && canRegenerate && (
+            {!!(message.content || '').trim() && canRegenerate && !isCommentary && (
               <MessageActionButton
                 title="重新生成"
                 onClick={(e) => {
@@ -105,7 +106,7 @@ function MessageBubble({ message, ide, canRegenerate, isActiveUserRequest = fals
                 <RefreshCw size={13} />
               </MessageActionButton>
             )}
-            {!!(message.content || '').trim() && (
+            {!!(message.content || '').trim() && !isCommentary && (
               <MessageActionButton
                 title="从这里创建分支"
                 onClick={(e) => {
@@ -311,7 +312,7 @@ function MessageActionButton({ children, title, onClick }) {
 export function lastAssistantMessageId(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const item = messages[index];
-    if (item.role === 'assistant' && !item.pending && !item.error) return item.id;
+    if (item.role === 'assistant' && item.kind !== 'assistant_commentary' && !item.pending && !item.error) return item.id;
     if (item.role === 'user') return '';
   }
   return '';

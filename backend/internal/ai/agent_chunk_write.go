@@ -22,11 +22,6 @@ type finalizeWriteArgs struct {
 }
 
 func (r *agentRuntime) validateChunkWriteToolCall(call agentToolCall) string {
-	if r != nil && isWorkspaceMutationTool(call.Name) {
-		if _, ok := r.appliedMutations[mutationOperationHash(call.Name, executionToolArgumentsJSON(call))]; ok {
-			return ""
-		}
-	}
 	switch call.Name {
 	case "write_workspace_chunk":
 		args, err := parseChunkWriteArgs(executionToolArgumentsJSON(call))

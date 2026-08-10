@@ -63,7 +63,8 @@ func (s *TaskStore) ListTasks(ctx context.Context, userID string, limit int) ([]
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, user_id, type, status, title, payload_json, result_json, error_message, worker_id, retry_count,
-       progress_stage, progress_message, created_at, started_at, finished_at, cancel_requested_at
+       progress_stage, progress_message, created_at, started_at, finished_at, cancel_requested_at,
+       event_head_seq, final_seq
 FROM tasks
 WHERE user_id = ?
 ORDER BY created_at DESC
@@ -88,7 +89,8 @@ LIMIT ?
 func (s *TaskStore) GetTask(ctx context.Context, userID, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, user_id, type, status, title, payload_json, result_json, error_message, worker_id, retry_count,
-       progress_stage, progress_message, created_at, started_at, finished_at, cancel_requested_at
+       progress_stage, progress_message, created_at, started_at, finished_at, cancel_requested_at,
+       event_head_seq, final_seq
 FROM tasks
 WHERE id = ? AND user_id = ?
 `, id, userID)
@@ -98,7 +100,8 @@ WHERE id = ? AND user_id = ?
 func (s *TaskStore) GetTaskByID(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, user_id, type, status, title, payload_json, result_json, error_message, worker_id, retry_count,
-       progress_stage, progress_message, created_at, started_at, finished_at, cancel_requested_at
+       progress_stage, progress_message, created_at, started_at, finished_at, cancel_requested_at,
+       event_head_seq, final_seq
 FROM tasks
 WHERE id = ?
 `, id)
@@ -121,7 +124,8 @@ WHERE id = (
   LIMIT 1
 )
 RETURNING id, user_id, type, status, title, payload_json, result_json, error_message, worker_id, retry_count,
-          progress_stage, progress_message, created_at, started_at, finished_at, cancel_requested_at
+          progress_stage, progress_message, created_at, started_at, finished_at, cancel_requested_at,
+          event_head_seq, final_seq
 `, TaskRunning, workerID, time.Now().UTC(), TaskPending)
 
 	task, err := scanTask(row)
@@ -153,7 +157,11 @@ SET status = ?,
     result_json = COALESCE(?, result_json),
     worker_id = COALESCE(?, worker_id),
     started_at = COALESCE(?, started_at),
-    finished_at = COALESCE(?, finished_at)
+    finished_at = COALESCE(?, finished_at),
+    final_seq = CASE
+      WHEN ? IN (?, ?, ?) THEN event_head_seq
+      ELSE final_seq
+    END
 WHERE id = ?
 `,
 		input.Status,
@@ -164,6 +172,10 @@ WHERE id = ?
 		input.WorkerID,
 		startedAt,
 		finishedAt,
+		input.Status,
+		TaskDone,
+		TaskFailed,
+		TaskCanceled,
 		taskID,
 	)
 	if err != nil {

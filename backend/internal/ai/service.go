@@ -59,41 +59,50 @@ type EditorPanelContext struct {
 }
 
 type ToolEvent struct {
-	Type              string              `json:"type,omitempty"`
-	ToolCallID        string              `json:"tool_call_id,omitempty"`
-	ToolName          string              `json:"tool_name"`
-	StatusKind        string              `json:"status_kind,omitempty"`
-	Label             string              `json:"label"`
-	Status            string              `json:"status"`
-	TargetSummary     string              `json:"target_summary,omitempty"`
-	OperationHash     string              `json:"operation_hash,omitempty"`
-	Question          string              `json:"question,omitempty"`
-	Options           []string            `json:"options,omitempty"`
-	AllowFreeform     *bool               `json:"allow_freeform,omitempty"`
-	AnswerMessageID   string              `json:"answer_message_id,omitempty"`
-	SkillID           string              `json:"skill_id,omitempty"`
-	Path              string              `json:"path,omitempty"`
-	OldPath           string              `json:"old_path,omitempty"`
-	NewPath           string              `json:"new_path,omitempty"`
-	ChangedPaths      []string            `json:"changed_paths,omitempty"`
-	Moved             []WorkspacePathMove `json:"moved,omitempty"`
-	Operation         string              `json:"operation,omitempty"`
-	VersionID         string              `json:"version_id,omitempty"`
-	Hash              string              `json:"hash,omitempty"`
-	Command           string              `json:"command,omitempty"`
-	Cwd               string              `json:"cwd,omitempty"`
-	Stdout            string              `json:"stdout,omitempty"`
-	Stderr            string              `json:"stderr,omitempty"`
-	ExitCode          *int                `json:"exit_code,omitempty"`
-	TimedOut          bool                `json:"timed_out,omitempty"`
-	Provider          string              `json:"provider,omitempty"`
-	URL               string              `json:"url,omitempty"`
-	Error             string              `json:"error,omitempty"`
-	ErrorCode         ToolErrorCode       `json:"error_code,omitempty"`
-	ErrorCategory     string              `json:"error_category,omitempty"`
-	Retryable         bool                `json:"retryable,omitempty"`
-	RecommendedAction string              `json:"recommended_action,omitempty"`
-	DurationMS        int64               `json:"duration_ms,omitempty"`
+	Type                string              `json:"type,omitempty"`
+	ToolCallID          string              `json:"tool_call_id,omitempty"`
+	ToolName            string              `json:"tool_name"`
+	StatusKind          string              `json:"status_kind,omitempty"`
+	Label               string              `json:"label"`
+	Status              string              `json:"status"`
+	TargetSummary       string              `json:"target_summary,omitempty"`
+	OperationHash       string              `json:"operation_hash,omitempty"`
+	Question            string              `json:"question,omitempty"`
+	Options             []string            `json:"options,omitempty"`
+	AllowFreeform       *bool               `json:"allow_freeform,omitempty"`
+	AnswerMessageID     string              `json:"answer_message_id,omitempty"`
+	SkillID             string              `json:"skill_id,omitempty"`
+	Path                string              `json:"path,omitempty"`
+	OldPath             string              `json:"old_path,omitempty"`
+	NewPath             string              `json:"new_path,omitempty"`
+	ChangedPaths        []string            `json:"changed_paths,omitempty"`
+	Moved               []WorkspacePathMove `json:"moved,omitempty"`
+	Operation           string              `json:"operation,omitempty"`
+	MutationID          string              `json:"mutation_id,omitempty"`
+	Origin              string              `json:"origin,omitempty"`
+	Authoritative       bool                `json:"authoritative,omitempty"`
+	VersionID           string              `json:"version_id,omitempty"`
+	DocumentVersion     string              `json:"document_version,omitempty"`
+	ChangedBlocks       []map[string]any    `json:"changed_blocks,omitempty"`
+	ValidationStatus    string              `json:"validation_status,omitempty"`
+	StructureDelta      map[string]any      `json:"structure_delta,omitempty"`
+	HistoryNodesCreated int                 `json:"history_nodes_created,omitempty"`
+	Hash                string              `json:"hash,omitempty"`
+	Command             string              `json:"command,omitempty"`
+	Cwd                 string              `json:"cwd,omitempty"`
+	Stdout              string              `json:"stdout,omitempty"`
+	Stderr              string              `json:"stderr,omitempty"`
+	ExitCode            *int                `json:"exit_code,omitempty"`
+	TimedOut            bool                `json:"timed_out,omitempty"`
+	Provider            string              `json:"provider,omitempty"`
+	URL                 string              `json:"url,omitempty"`
+	Error               string              `json:"error,omitempty"`
+	ErrorCode           ToolErrorCode       `json:"error_code,omitempty"`
+	ErrorCategory       string              `json:"error_category,omitempty"`
+	ErrorPhase          string              `json:"phase,omitempty"`
+	Retryable           bool                `json:"retryable,omitempty"`
+	RecommendedAction   string              `json:"recommended_action,omitempty"`
+	DurationMS          int64               `json:"duration_ms,omitempty"`
 }
 
 type WorkspacePathMove struct {
@@ -144,21 +153,37 @@ type ConversationTitleResult struct {
 }
 
 type RunOptions struct {
-	UserID                      string
-	UserRole                    string
-	RunID                       string
-	TaskID                      string
-	ForceTool                   string
-	ThinkingMode                string
-	Attachments                 []AttachmentPayload
-	Log                         func(level, message string)
-	Event                       func(eventType, level string, payload map[string]any)
-	OnAssistantMessageStarted   func(messageID string, content string, segmentIndex int)
-	OnAssistantMessageDelta     func(messageID string, delta string)
-	OnAssistantMessageCompleted func(messageID string, finalContent string, segmentIndex int)
-	OnAssistantMessageDiscarded func(messageID string, reason string, segmentIndex int)
-	OnAssistantToolBoundary     func()
-	OnProviderAttempt           func()
+	UserID                             string
+	UserRole                           string
+	RunID                              string
+	TaskID                             string
+	ForceTool                          string
+	ThinkingMode                       string
+	Attachments                        []AttachmentPayload
+	Log                                func(level, message string)
+	Event                              func(eventType, level string, payload map[string]any)
+	TransientEvent                     func(eventType, level string, payload map[string]any)
+	EditPreviewLatest                  func(eventType, level string, payload map[string]any)
+	EditPreviewCheckpoint              func(ctx context.Context, eventType string, payload map[string]any) error
+	OnAssistantMessageStarted          func(messageID string, content string, segmentIndex int)
+	OnAssistantMessageDelta            func(messageID string, delta string)
+	OnAssistantMessageCompleted        func(messageID string, finalContent string, segmentIndex int)
+	OnAssistantMessageDiscarded        func(messageID string, reason string, segmentIndex int)
+	OnAssistantCurrentMessageDiscarded func(reason string)
+	OnAssistantToolBoundary            func()
+	OnProviderAttempt                  func()
+	OnToolCallArgumentsDelta           func(ToolCallArgumentsDelta)
+	CurrentToolCallID                  string
+}
+
+type ToolCallArgumentsDelta struct {
+	Index         int
+	ToolCallID    string
+	ToolName      string
+	ArgumentsJSON string
+	StreamMode    string
+	Relation      string
+	Replayed      bool
 }
 
 type ExpectedOutput struct {

@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE TABLE IF NOT EXISTS tool_calls (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL,
   user_id TEXT NOT NULL DEFAULT '',
   run_id TEXT NOT NULL DEFAULT '',
   conversation_id TEXT,
@@ -172,7 +172,8 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   changed_paths_json TEXT NOT NULL DEFAULT '',
   version_id TEXT NOT NULL DEFAULT '',
   content_hash TEXT NOT NULL DEFAULT '',
-  created_at DATETIME NOT NULL
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (run_id, id)
 );
 `
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
@@ -230,6 +231,9 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 		if err := AddColumnIfNotExists(ctx, s.db, "tool_calls", migration.column, migration.def); err != nil {
 			return err
 		}
+	}
+	if err := s.migrateToolCallRunScopedPrimaryKey(ctx); err != nil {
+		return err
 	}
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at DESC);

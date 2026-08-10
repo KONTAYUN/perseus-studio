@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"webide-backend/internal/workspace"
 )
 
@@ -72,6 +73,23 @@ func (s *Server) handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	if isNoteLikePath(req.Path) {
 		req.Content = sanitizeHTMLFragment(req.Content)
+	}
+	if expected := strings.TrimSpace(req.BaseDocumentVersion); expected != "" {
+		current, readErr := files.ReadFile(req.Path)
+		if readErr != nil {
+			s.writeFileError(w, readErr)
+			return
+		}
+		legacyShortVersion := len(expected) == 16 && strings.HasPrefix(current.Hash, expected)
+		if expected != current.Hash && !legacyShortVersion {
+			writeCodedError(
+				w,
+				http.StatusConflict,
+				"document_version_stale",
+				"the file changed after this editor revision was loaded",
+			)
+			return
+		}
 	}
 	result, err := files.WriteFile(r.Context(), req.Path, req.Content, "write")
 	if err != nil {

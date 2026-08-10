@@ -2,6 +2,9 @@ import { detectFileType, isAnyTrashPath, isWorkspaceFileChangeEvent, isWorkspace
 
 export function isTabDirty(tab) {
   if (!tab) return false;
+  if (Number.isFinite(tab.userRevision) && Number.isFinite(tab.savedUserRevision)) {
+    return tab.userRevision > tab.savedUserRevision;
+  }
   return (tab.content || '') !== (tab.savedContent || '');
 }
 

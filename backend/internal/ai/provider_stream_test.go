@@ -71,6 +71,71 @@ func TestParseOpenAIStreamDeduplicatesExactSSEReplay(t *testing.T) {
 	}
 }
 
+func TestToolArgumentStreamAssemblerDeltaKeepsIdenticalFragments(t *testing.T) {
+	assembler := toolArgumentStreamAssembler{mode: "delta"}
+	if _, _, _, err := assembler.append("x"); err != nil {
+		t.Fatalf("first delta returned error: %v", err)
+	}
+	assembled, relation, replayed, err := assembler.append("x")
+	if err != nil {
+		t.Fatalf("second delta returned error: %v", err)
+	}
+	if assembled != "xx" || relation != "delta" || replayed {
+		t.Fatalf("identical delta fragment was treated as replay: value=%q relation=%q replayed=%v", assembled, relation, replayed)
+	}
+}
+
+func TestToolArgumentStreamAssemblerUsesExplicitSnapshotMode(t *testing.T) {
+	assembler := toolArgumentStreamAssembler{mode: "snapshot"}
+	if _, relation, _, err := assembler.append(`{"path":"a"}`); err != nil || relation != "initial" {
+		t.Fatalf("unexpected initial snapshot: relation=%q err=%v", relation, err)
+	}
+	assembled, relation, replayed, err := assembler.append(`{"path":"ab"}`)
+	if err != nil || assembled != `{"path":"ab"}` || relation != "snapshot" || replayed {
+		t.Fatalf("explicit snapshot was not accepted: value=%q relation=%q replayed=%v err=%v", assembled, relation, replayed, err)
+	}
+	assembled, relation, replayed, err = assembler.append(`{"path":"ab"}`)
+	if err != nil || assembled != `{"path":"ab"}` || relation != "replay" || !replayed {
+		t.Fatalf("identical snapshot was not treated as replay: value=%q relation=%q replayed=%v err=%v", assembled, relation, replayed, err)
+	}
+}
+
+func TestToolArgumentStreamAssemblerRejectsImplicitAutoMode(t *testing.T) {
+	assembler := toolArgumentStreamAssembler{mode: "auto"}
+	if _, _, _, err := assembler.append(`{"path":"a"}`); err == nil {
+		t.Fatal("auto mode must not infer a provider protocol")
+	}
+}
+
+func TestToolArgumentStreamAssemblerRejectsUnexplainedModeSwitch(t *testing.T) {
+	assembler := toolArgumentStreamAssembler{mode: "auto"}
+	_, _, _, _ = assembler.append(`{"path"`)
+	_, _, _, _ = assembler.append(`{"path":"a"}`)
+	_, _, _, err := assembler.append(`}`)
+	protocolErr, ok := err.(*ProviderProtocolError)
+	if !ok || protocolErr.Code != string(ToolErrorProviderArgumentStream) {
+		t.Fatalf("expected structured argument stream conflict, got %#v", err)
+	}
+}
+
+func TestParseOpenAIStreamAssemblesExplicitCumulativeToolArguments(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_workspace_text","arguments":"{\"path\""}}]}}]}`,
+		``,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	turn, err := parseOpenAIStreamWithOptions(strings.NewReader(stream), providerStreamParseOptions{ToolArgumentStreamMode: "snapshot"})
+	if err != nil {
+		t.Fatalf("cumulative OpenAI stream returned error: %v", err)
+	}
+	if len(turn.ToolCalls) != 1 || turn.ToolCalls[0].ArgumentsJSON != `{"path":"a.txt"}` {
+		t.Fatalf("unexpected assembled tool call: %#v", turn.ToolCalls)
+	}
+}
+
 func TestParseAnthropicStreamDeduplicatesExactSSEReplay(t *testing.T) {
 	delta := `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}`
 	stream := strings.Join([]string{

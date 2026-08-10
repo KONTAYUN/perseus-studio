@@ -12,9 +12,11 @@ import {
 import { detectFileType, isAnyTrashPath, isTextPath, isWorkspaceFileChangeEvent, pathMatches } from './ideUtils';
 
 export function createEditorToolRefreshActions({
+  autoSaveTimerRef,
   closeCurrentFile,
   currentFilePathRef,
   isDirtyRef,
+  applyAuthoritativeFileSnapshot,
   loadFileIntoEditor,
   openTabsRef,
   setActiveTabPath,
@@ -86,12 +88,25 @@ export function createEditorToolRefreshActions({
     }
 
     if (reloadPlan?.path) {
-      await loadFileIntoEditor(reloadPlan.path, {
-        preserveSelection: true,
-        hash: reloadPlan.hash || '',
-        versionId: reloadPlan.versionId || '',
-        statusMessage: reloadPlan.statusMessage,
-      });
+      const authoritativeEvent = successfulEvents.find((event) =>
+        event.authoritative === true &&
+        (event.path === reloadPlan.path || event.changed_paths?.includes(reloadPlan.path))
+      );
+      if (authoritativeEvent && autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      if (authoritativeEvent && isTextPath(reloadPlan.path)) {
+        const file = await apiGet(`/api/files/read?path=${encodeURIComponent(reloadPlan.path)}`);
+        applyAuthoritativeFileSnapshot(reloadPlan.path, file, authoritativeEvent);
+      } else {
+        await loadFileIntoEditor(reloadPlan.path, {
+          preserveSelection: true,
+          hash: reloadPlan.hash || '',
+          versionId: reloadPlan.versionId || '',
+          statusMessage: reloadPlan.statusMessage,
+        });
+      }
     }
   }
 
@@ -145,6 +160,11 @@ export function createEditorToolRefreshActions({
                   savedContent: file.content,
                   hash: event.hash || file.hash || '',
                   versionId: event.version_id || item.versionId || '',
+                  documentVersion: event.document_version || file.document_version || file.hash || '',
+                  userRevision: item.userRevision || 0,
+                  savedUserRevision: item.userRevision || 0,
+                  aiPreview: null,
+                  previewOnly: false,
                   statusMessage: '已自动刷新 AI 修改后的文件内容。',
                 }
               : item

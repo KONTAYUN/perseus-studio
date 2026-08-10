@@ -62,6 +62,10 @@ func (s *Service) executeToolRaw(ctx context.Context, name, argumentsJSON string
 		return s.execReadWorkspaceNoteView(ctx, opts.UserID, argumentsJSON)
 	case "read_workspace_files":
 		return s.execReadWorkspaceFiles(ctx, opts.UserID, argumentsJSON)
+	case "edit_workspace_note_blocks":
+		return s.execEditWorkspaceNoteBlocks(ctx, opts.UserID, argumentsJSON)
+	case "create_workspace_note":
+		return s.execCreateWorkspaceNote(ctx, opts.UserID, argumentsJSON)
 	case "apply_workspace_patch":
 		return s.execApplyWorkspacePatch(ctx, opts.UserID, argumentsJSON)
 	case "edit_workspace_text":
@@ -79,7 +83,7 @@ func (s *Service) executeToolRaw(ctx context.Context, name, argumentsJSON string
 	case "organize_workspace_matches":
 		return s.execOrganizeWorkspaceMatches(ctx, opts.UserID, argumentsJSON)
 	case "list_workspace_files", "read_workspace_file", "create_workspace_file", "write_workspace_file", "mkdir_workspace", "rename_workspace_path", "move_workspace_path", "delete_workspace_path":
-		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, a *** Begin Patch text patch, manage_workspace_path, or organize_workspace_matches", name)
+		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, apply_workspace_patch, manage_workspace_path, or organize_workspace_matches", name)
 	case "run_workspace_command":
 		return s.execRunWorkspaceCommand(ctx, opts.UserID, argumentsJSON)
 	case "perseus_search_web", "web_search":

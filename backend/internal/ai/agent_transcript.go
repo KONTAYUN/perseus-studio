@@ -340,9 +340,13 @@ type AgentRuntimeCheckpoint struct {
 	LastProviderEmptyResponse bool                                `json:"last_provider_empty_response"`
 	CompletedContent          string                              `json:"completed_content"`
 	CurrentRound              int                                 `json:"current_round"`
+	CumulativeInputTokens     int                                 `json:"cumulative_input_tokens,omitempty"`
+	ParallelToolBatches       int                                 `json:"parallel_tool_batches,omitempty"`
 	ActionProgress            ActionProgressLedger                `json:"action_progress,omitempty"`
 	LoopGuard                 AgentLoopGuard                      `json:"loop_guard,omitempty"`
 	Kernel                    AgentKernelState                    `json:"kernel,omitempty"`
+	StrategyLedger            StrategyLedger                      `json:"strategy_ledger,omitempty"`
+	ActiveTaskPlan            *taskPlanUpdate                     `json:"active_task_plan,omitempty"`
 	Seq                       int64                               `json:"seq,omitempty"`
 }
 
@@ -365,13 +369,16 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 		LastProviderEmptyResponse: r.lastProviderEmptyResponse,
 		CompletedContent:          r.completedContent,
 		CurrentRound:              r.currentRound,
+		CumulativeInputTokens:     r.cumulativeInputTokens,
+		ParallelToolBatches:       r.parallelToolBatches,
 		ActionProgress:            r.actionProgress,
 		LoopGuard:                 r.loopGuard,
 		Kernel:                    normalizeAgentKernelState(r.kernel),
+		StrategyLedger:            cloneStrategyLedger(r.strategyLedger),
+		ActiveTaskPlan:            cloneTaskPlan(r.activeTaskPlan),
 	}
-	for key, value := range r.appliedMutations {
-		checkpoint.AppliedMutations[key] = value
-	}
+	// AppliedMutations is retained in the checkpoint schema only for backward
+	// compatibility. Successful operations are never reused across call IDs.
 	for key, value := range r.chunkWrites {
 		checkpoint.ChunkWrites[key] = value
 	}
@@ -385,9 +392,6 @@ func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
 	r.transcript = checkpoint.Transcript.Clone()
 	r.events = append([]ToolEvent(nil), checkpoint.Events...)
 	r.appliedMutations = map[string]ToolEvent{}
-	for key, value := range checkpoint.AppliedMutations {
-		r.appliedMutations[key] = value
-	}
 	r.chunkWrites = map[string]workspaceChunkWriteState{}
 	for key, value := range checkpoint.ChunkWrites {
 		r.chunkWrites[key] = value
@@ -408,7 +412,25 @@ func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
 	r.lastProviderEmptyResponse = checkpoint.LastProviderEmptyResponse
 	r.completedContent = checkpoint.CompletedContent
 	r.currentRound = checkpoint.CurrentRound
+	r.cumulativeInputTokens = checkpoint.CumulativeInputTokens
+	r.parallelToolBatches = checkpoint.ParallelToolBatches
 	r.actionProgress = checkpoint.ActionProgress
 	r.loopGuard = checkpoint.LoopGuard
 	r.kernel = normalizeAgentKernelState(checkpoint.Kernel)
+	r.strategyLedger = cloneStrategyLedger(checkpoint.StrategyLedger)
+	r.activeTaskPlan = cloneTaskPlan(checkpoint.ActiveTaskPlan)
+}
+
+func cloneTaskPlan(plan *taskPlanUpdate) *taskPlanUpdate {
+	if plan == nil {
+		return nil
+	}
+	cloned := *plan
+	cloned.LocalTargets = append([]string(nil), plan.LocalTargets...)
+	cloned.ExternalTargets = append([]string(nil), plan.ExternalTargets...)
+	cloned.CompletedSteps = append([]string(nil), plan.CompletedSteps...)
+	cloned.NextSteps = append([]string(nil), plan.NextSteps...)
+	cloned.VerifiedFacts = append([]string(nil), plan.VerifiedFacts...)
+	cloned.MissingInfo = append([]string(nil), plan.MissingInfo...)
+	return &cloned
 }

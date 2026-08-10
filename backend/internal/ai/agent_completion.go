@@ -81,6 +81,9 @@ func renderCompletionUserVisibleContent(attempt completionAttempt) string {
 }
 
 func (r *agentRuntime) completionRejection(attempt completionAttempt) string {
+	if r.activeTaskPlan != nil && r.activeTaskPlan.Status != "completed" {
+		return "The structured task plan is still in progress. Verify the remaining work, update the plan to completed, then call attempt_completion."
+	}
 	if unverified := r.completionPathsWithoutVerifiedMutation(attempt.ChangedPaths); len(unverified) > 0 {
 		return "attempt_completion 声明了未被真实 workspace 变更验证的 changed_paths：" + strings.Join(unverified, ", ") + "。请先执行真实 workspace 编辑动作；attempt_completion 不能创建或修改文件。"
 	}

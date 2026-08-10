@@ -19,6 +19,7 @@ import useRichTextDocumentSync from './useRichTextDocumentSync';
 import useRichTextImageUpload from './useRichTextImageUpload';
 import useRichTextToolbarLifecycle from './useRichTextToolbarLifecycle';
 import { buildRichTextSelectionContext } from './richTextSelectionContext';
+import { getEditorTransactionOrigin } from './richTextTransactionOrigin';
 
 export default function RichTextEditor({
   filePath,
@@ -28,11 +29,17 @@ export default function RichTextEditor({
   onStatusMessage,
   clearSelectionVersion = 0,
   pinnedSelections = [],
+  readOnly = false,
+  aiPreview = null,
+  onAIEditReconciled,
 }) {
   const imageInputRef = React.useRef(null);
   const isPointerSelectingRef = React.useRef(false);
   const isBlockToolbarInteractionRef = React.useRef(false);
   const lastCommittedHtmlRef = React.useRef(html || '');
+  const lastRenderedHtmlRef = React.useRef(html || '');
+  const readOnlyRef = React.useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const lastSelectionToolbarPlacementRef = React.useRef('above');
   const lastTableToolbarPlacementRef = React.useRef('above');
   const [pendingTableConfig, setPendingTableConfig] = React.useState({
@@ -239,6 +246,7 @@ export default function RichTextEditor({
     content: decorateHtmlWithAssetUrls(filePath, html || ''),
     immediatelyRender: false,
     shouldRerenderOnTransaction: false,
+    editable: !readOnly,
     extensions: createRichTextEditorExtensions(),
     editorProps: {
       attributes: {
@@ -275,9 +283,17 @@ export default function RichTextEditor({
         return true;
       },
     },
-    onUpdate({ editor: nextEditor }) {
+    onUpdate({ editor: nextEditor, transaction }) {
+      const transactionOrigin = getEditorTransactionOrigin(nextEditor, transaction);
+      if (
+        readOnlyRef.current ||
+        transactionOrigin !== 'user'
+      ) {
+        return;
+      }
       const nextHtml = getSanitizedEditorHtml(nextEditor);
       lastCommittedHtmlRef.current = nextHtml;
+      lastRenderedHtmlRef.current = nextHtml;
       onHtmlChange?.(nextHtml);
       if (selectionToolbarState.range) syncSelectionToolbar(nextEditor);
       syncTableToolbar(nextEditor);
@@ -285,10 +301,7 @@ export default function RichTextEditor({
     },
     onCreate({ editor: nextEditor }) {
       const normalizedHtml = getSanitizedEditorHtml(nextEditor);
-      if (normalizedHtml !== lastCommittedHtmlRef.current) {
-        lastCommittedHtmlRef.current = normalizedHtml;
-        onHtmlChange?.(normalizedHtml);
-      }
+      lastRenderedHtmlRef.current = normalizedHtml;
       syncTableToolbar(nextEditor);
       syncBlockToolbarTrigger(nextEditor);
     },
@@ -312,12 +325,48 @@ export default function RichTextEditor({
     editor,
     filePath,
     html,
+    aiPreview,
+    onAIEditReconciled,
     lastCommittedHtmlRef,
+    lastRenderedHtmlRef,
     lastSelectionToolbarPlacementRef,
     pinnedSelections,
     setSelectionToolbarState,
     createHiddenFloatingToolbarState,
   });
+
+  React.useEffect(() => {
+    if (!editor) return;
+    readOnlyRef.current = readOnly;
+    editor.setEditable(!readOnly);
+  }, [editor, readOnly]);
+
+  React.useEffect(() => {
+    if (!editor?.view?.dom) return;
+    const root = editor.view.dom;
+    root.toggleAttribute('data-ai-preview', !!aiPreview && !aiPreview.conflict);
+    root.toggleAttribute('data-ai-preview-delete', !!aiPreview?.deleted);
+    const blockNodes = collectPreviewBlockNodes(root);
+    blockNodes.forEach((node) => node.removeAttribute('data-ai-preview-change'));
+    for (const change of aiPreview?.changes || []) {
+      const index = Number.parseInt(String(change?.block_id || '').replace(/^b/, ''), 10) - 1;
+      if (index >= 0 && blockNodes[index]) {
+        blockNodes[index].setAttribute('data-ai-preview-change', change.operation || 'replace_html');
+      }
+      if (change?.operation === 'delete_block_range') {
+        const endIndex =
+          Number.parseInt(String(change?.end_block_id || '').replace(/^b/, ''), 10) - 1;
+        for (let rangeIndex = index; rangeIndex <= endIndex; rangeIndex += 1) {
+          blockNodes[rangeIndex]?.setAttribute('data-ai-preview-change', 'delete');
+        }
+      }
+    }
+    return () => {
+      root.removeAttribute('data-ai-preview');
+      root.removeAttribute('data-ai-preview-delete');
+      blockNodes.forEach((node) => node.removeAttribute('data-ai-preview-change'));
+    };
+  }, [aiPreview, editor]);
 
   const hideSelectionToolbar = React.useCallback(() => {
     lastSelectionToolbarPlacementRef.current = selectionToolbarState.placement || 'above';
@@ -442,4 +491,20 @@ export default function RichTextEditor({
       onTableConfigChange={setPendingTableConfig}
     />
   );
+}
+
+function collectPreviewBlockNodes(root) {
+  const blockTags = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'P', 'BLOCKQUOTE', 'LI', 'PRE', 'TABLE', 'IMG']);
+  const nodes = [];
+  const walk = (node) => {
+    for (const child of Array.from(node?.children || [])) {
+      if (blockTags.has(child.tagName)) {
+        nodes.push(child);
+      } else {
+        walk(child);
+      }
+    }
+  };
+  walk(root);
+  return nodes;
 }

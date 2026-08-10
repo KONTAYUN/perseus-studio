@@ -30,6 +30,14 @@ const (
 	ModelActionTerminal ModelActionKind = "terminal_action"
 )
 
+type ToolExecutionMode string
+
+const (
+	ToolExecutionParallelRead ToolExecutionMode = "parallel_read"
+	ToolExecutionSerial       ToolExecutionMode = "serial"
+	ToolExecutionTerminal     ToolExecutionMode = "terminal"
+)
+
 type ToolManifestEntry struct {
 	Name                string
 	Toolset             string
@@ -45,6 +53,7 @@ type ToolManifestEntry struct {
 	Transport           ToolTransport
 	ActionKind          ModelActionKind
 	Terminal            bool
+	ExecutionMode       ToolExecutionMode
 	StatusKind          string
 	Label               string
 	RecoveryProtocol    string
@@ -117,6 +126,8 @@ var toolManifestEntries = []ToolManifestEntry{
 	{Name: "read_workspace_files", Toolset: "workspace", Group: ToolGroupRead, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已读取文件", StatusKind: "workspace_read"},
 	{Name: "manage_workspace_path", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已管理路径", StatusKind: "workspace_path"},
 	{Name: "organize_workspace_matches", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已整理文件", StatusKind: "workspace_path"},
+	{Name: "edit_workspace_note_blocks", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已编辑笔记", StatusKind: "workspace_edit"},
+	{Name: "create_workspace_note", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已创建笔记", StatusKind: "workspace_edit"},
 	{Name: "apply_workspace_patch", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已编辑文件", StatusKind: "workspace_edit", PrimaryEditProtocol: true},
 	{Name: "edit_workspace_text", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "apply_workspace_patch"},
 	{Name: "replace_workspace_lines", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit"},
@@ -163,6 +174,16 @@ func normalizeToolManifestEntry(entry ToolManifestEntry) ToolManifestEntry {
 	if entry.Group == ToolGroupRead || entry.Group == ToolGroupSearch || entry.Group == ToolGroupWeb {
 		entry.ReadOnly = true
 	}
+	if entry.ExecutionMode == "" {
+		switch {
+		case entry.Terminal || entry.Group == ToolGroupQuestion || entry.Name == "start_background_task":
+			entry.ExecutionMode = ToolExecutionTerminal
+		case entry.ReadOnly:
+			entry.ExecutionMode = ToolExecutionParallelRead
+		default:
+			entry.ExecutionMode = ToolExecutionSerial
+		}
+	}
 	return entry
 }
 
@@ -173,21 +194,22 @@ func toolManifestEntry(name string) (ToolManifestEntry, bool) {
 
 func toolManifestDigest() string {
 	type digestEntry struct {
-		Name                string          `json:"name"`
-		Toolset             string          `json:"toolset,omitempty"`
-		Group               ToolGroup       `json:"group,omitempty"`
-		ProviderVisible     bool            `json:"provider_visible,omitempty"`
-		ModelVisible        bool            `json:"model_visible,omitempty"`
-		Mutation            bool            `json:"mutation,omitempty"`
-		ReadOnly            bool            `json:"read_only,omitempty"`
-		RiskLevel           string          `json:"risk_level,omitempty"`
-		RequiresApproval    bool            `json:"requires_approval,omitempty"`
-		ResultKind          string          `json:"result_kind,omitempty"`
-		LegacyCompat        bool            `json:"legacy_compat,omitempty"`
-		Transport           ToolTransport   `json:"transport,omitempty"`
-		ActionKind          ModelActionKind `json:"action_kind,omitempty"`
-		Terminal            bool            `json:"terminal,omitempty"`
-		PrimaryEditProtocol bool            `json:"primary_edit_protocol,omitempty"`
+		Name                string            `json:"name"`
+		Toolset             string            `json:"toolset,omitempty"`
+		Group               ToolGroup         `json:"group,omitempty"`
+		ProviderVisible     bool              `json:"provider_visible,omitempty"`
+		ModelVisible        bool              `json:"model_visible,omitempty"`
+		Mutation            bool              `json:"mutation,omitempty"`
+		ReadOnly            bool              `json:"read_only,omitempty"`
+		RiskLevel           string            `json:"risk_level,omitempty"`
+		RequiresApproval    bool              `json:"requires_approval,omitempty"`
+		ResultKind          string            `json:"result_kind,omitempty"`
+		LegacyCompat        bool              `json:"legacy_compat,omitempty"`
+		Transport           ToolTransport     `json:"transport,omitempty"`
+		ActionKind          ModelActionKind   `json:"action_kind,omitempty"`
+		Terminal            bool              `json:"terminal,omitempty"`
+		ExecutionMode       ToolExecutionMode `json:"execution_mode,omitempty"`
+		PrimaryEditProtocol bool              `json:"primary_edit_protocol,omitempty"`
 	}
 	items := make([]digestEntry, 0, len(toolManifestEntries))
 	for _, entry := range toolManifestEntries {
@@ -207,6 +229,7 @@ func toolManifestDigest() string {
 			Transport:           entry.Transport,
 			ActionKind:          entry.ActionKind,
 			Terminal:            entry.Terminal,
+			ExecutionMode:       entry.ExecutionMode,
 			PrimaryEditProtocol: entry.PrimaryEditProtocol,
 		})
 	}

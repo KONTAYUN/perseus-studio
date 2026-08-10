@@ -266,7 +266,9 @@ function latestRunRecoveryEventTypes(run) {
   }
   return [
     'assistant_message_started',
+    'assistant_commentary_started',
     'assistant_message_completed',
+    'assistant_commentary_completed',
     'assistant_message_presentation_updated',
     'tool_call_started',
     'tool_call_completed',

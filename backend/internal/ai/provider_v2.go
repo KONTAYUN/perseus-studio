@@ -101,9 +101,10 @@ func anthropicProviderToolChoice(choice providerToolChoice) map[string]any {
 	return anthropicProviderToolChoiceForReasoning(choice, false)
 }
 
-func anthropicProviderToolChoiceForReasoning(choice providerToolChoice, reasoningEnabled bool) map[string]any {
+func anthropicProviderToolChoiceForReasoning(choice providerToolChoice, reasoningEnabled bool, parallelEnabled ...bool) map[string]any {
 	choice = normalizeProviderToolChoice(choice)
-	payload := map[string]any{"type": "auto", "disable_parallel_tool_use": true}
+	allowParallel := len(parallelEnabled) > 0 && parallelEnabled[0]
+	payload := map[string]any{"type": "auto", "disable_parallel_tool_use": !allowParallel}
 	if reasoningEnabled && choice.requiresTool() {
 		return payload
 	}
@@ -157,6 +158,8 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"visual_token_estimate_source":      summary.VisualTokenEstimateSource,
 		"compaction_threshold_tokens":       summary.CompactionThresholdTokens,
 		"tool_results_pruned":               summary.ToolResultsPruned,
+		"consumed_payloads_demoted":         summary.ConsumedPayloadsDemoted,
+		"consumed_payload_bytes_removed":    summary.ConsumedPayloadBytesRemoved,
 		"compaction_boundary_seq":           summary.CompactionBoundarySeq,
 		"retained_turns":                    summary.RetainedTurns,
 		"editor_context_paths":              summary.EditorContextPaths,
@@ -195,6 +198,8 @@ func emitProviderRequestSummary(opts RunOptions, summary ProviderRequestSummary)
 		"accepted_content_only_after_tools": summary.AcceptedContentOnlyAfterTools,
 		"anthropic_prompt_cache_enabled":    summary.AnthropicPromptCacheEnabled,
 		"provider_round_count":              summary.ProviderRoundCount,
+		"cumulative_estimated_input_tokens": summary.CumulativeEstimatedInputTokens,
+		"parallel_tool_batches":             summary.ParallelToolBatches,
 		"source_read_truncated":             summary.SourceReadTruncated,
 		"model_view_truncated":              summary.ModelViewTruncated,
 		"provider_context_compacted":        summary.ProviderContextCompacted,

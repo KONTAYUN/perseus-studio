@@ -15,9 +15,14 @@ test('toolEventFromPayload preserves typed workspace change events for editor re
       path: 'drafts/a.md',
       changed_paths: ['drafts/a.md'],
       operation: 'patch',
+      mutation_id: 'run1:tc1',
       operation_hash: 'hash-op',
       hash: 'hash-content',
+      document_version: 'document-version',
       version_id: 'v1',
+      history_nodes_created: 1,
+      changed_blocks: [{ block_id: 'b0001', operation: 'replace_text' }],
+      validation_status: 'verified',
     },
     'workspace_file_changed'
   );
@@ -25,7 +30,12 @@ test('toolEventFromPayload preserves typed workspace change events for editor re
   assert.equal(event.type, 'workspace_file_changed');
   assert.equal(event.tool_call_id, 'tc1');
   assert.equal(event.operation_hash, 'hash-op');
+  assert.equal(event.mutation_id, 'run1:tc1');
   assert.equal(event.version_id, 'v1');
+  assert.equal(event.document_version, 'document-version');
+  assert.equal(event.history_nodes_created, 1);
+  assert.equal(event.validation_status, 'verified');
+  assert.deepEqual(event.changed_blocks, [{ block_id: 'b0001', operation: 'replace_text' }]);
   assert.deepEqual(event.changed_paths, ['drafts/a.md']);
   assert.equal(shouldReloadWorkspaceForToolEvents([event]), true);
 });

@@ -40,7 +40,7 @@ INSERT INTO tool_calls (
 	if err != nil {
 		return ToolCall{}, err
 	}
-	return s.GetToolCall(ctx, input.UserID, id)
+	return s.GetToolCallForRun(ctx, input.UserID, input.RunID, id)
 }
 
 func (s *ConversationStore) StartToolCall(ctx context.Context, input ToolCallInput) (ToolCall, error) {
@@ -67,7 +67,7 @@ INSERT INTO tool_calls (
 	if err != nil {
 		return ToolCall{}, err
 	}
-	return s.GetToolCall(ctx, input.UserID, id)
+	return s.GetToolCallForRun(ctx, input.UserID, input.RunID, id)
 }
 
 func (s *ConversationStore) CompleteToolCall(ctx context.Context, input ToolCallInput) (ToolCall, error) {
@@ -94,22 +94,25 @@ SET result_summary = ?,
     changed_paths_json = ?,
     version_id = ?,
     content_hash = ?
-WHERE id = ? AND user_id = ?
-`, input.ResultSummary, status, input.Error, completedAt, input.DurationMS, input.ResultJSON, input.ChangedPathsJSON, input.VersionID, input.ContentHash, id, input.UserID)
+WHERE id = ? AND user_id = ? AND (? = '' OR run_id = ?)
+`, input.ResultSummary, status, input.Error, completedAt, input.DurationMS, input.ResultJSON, input.ChangedPathsJSON, input.VersionID, input.ContentHash, id, input.UserID, input.RunID, input.RunID)
 	if err != nil {
 		return ToolCall{}, err
 	}
-	if rows, rowErr := errRowsAffected(ctx, s.db, id, input.UserID); rowErr != nil {
+	if rows, rowErr := toolCallRowsAffected(ctx, s.db, id, input.UserID, input.RunID); rowErr != nil {
 		return ToolCall{}, rowErr
 	} else if rows == 0 {
 		return ToolCall{}, sql.ErrNoRows
 	}
-	return s.GetToolCall(ctx, input.UserID, id)
+	return s.GetToolCallForRun(ctx, input.UserID, input.RunID, id)
 }
 
-func errRowsAffected(ctx context.Context, db *sql.DB, id, userID string) (int, error) {
+func toolCallRowsAffected(ctx context.Context, db *sql.DB, id, userID, runID string) (int, error) {
 	var count int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tool_calls WHERE id = ? AND user_id = ?`, id, userID).Scan(&count)
+	err := db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM tool_calls
+WHERE id = ? AND user_id = ? AND (? = '' OR run_id = ?)
+`, id, userID, runID, runID).Scan(&count)
 	return count, err
 }
 
@@ -120,7 +123,20 @@ SELECT id, user_id, run_id, conversation_id, message_id, task_id, tool_name, ope
        result_json, changed_paths_json, version_id, content_hash, created_at
 FROM tool_calls
 WHERE id = ? AND user_id = ?
+ORDER BY created_at DESC
+LIMIT 1
 `, id, userID)
+	return scanToolCall(row)
+}
+
+func (s *ConversationStore) GetToolCallForRun(ctx context.Context, userID, runID, id string) (ToolCall, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, user_id, run_id, conversation_id, message_id, task_id, tool_name, operation_hash,
+       arguments_json, result_summary, status, error, started_at, completed_at, duration_ms,
+       result_json, changed_paths_json, version_id, content_hash, created_at
+FROM tool_calls
+WHERE id = ? AND user_id = ? AND run_id = ?
+`, id, userID, runID)
 	return scanToolCall(row)
 }
 

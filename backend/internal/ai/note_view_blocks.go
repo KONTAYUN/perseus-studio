@@ -42,6 +42,52 @@ type noteBlock struct {
 	Text        string `json:"-"`
 }
 
+func noteBlockHash(block noteBlock) string {
+	return noteDocHash(block.RawHTML)
+}
+
+func noteBlockTextSegments(block noteBlock) []map[string]any {
+	root, err := nethtml.Parse(strings.NewReader("<!doctype html><html><body>" + block.RawHTML + "</body></html>"))
+	if err != nil {
+		return nil
+	}
+	body := findFirstHTMLNode(root, "body")
+	if body == nil {
+		return nil
+	}
+	segments := make([]map[string]any, 0)
+	index := 0
+	var walk func(*nethtml.Node, []string)
+	walk = func(node *nethtml.Node, ancestors []string) {
+		if node == nil {
+			return
+		}
+		if node.Type == nethtml.TextNode {
+			index++
+			segments = append(segments, map[string]any{
+				"segment_id":    fmt.Sprintf("%s:s%04d", block.ID, index),
+				"block_id":      block.ID,
+				"text":          node.Data,
+				"text_chars":    len([]rune(node.Data)),
+				"ancestor_tags": append([]string(nil), ancestors...),
+				"block_hash":    noteBlockHash(block),
+			})
+			return
+		}
+		nextAncestors := ancestors
+		if node.Type == nethtml.ElementNode {
+			nextAncestors = append(append([]string(nil), ancestors...), strings.ToLower(node.Data))
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child, nextAncestors)
+		}
+	}
+	for child := body.FirstChild; child != nil; child = child.NextSibling {
+		walk(child, nil)
+	}
+	return segments
+}
+
 type noteIndexBlockPage struct {
 	Blocks         []map[string]any
 	StartBlock     int
@@ -161,7 +207,13 @@ func newNoteBlock(id, tag, headingPath string, level int, rawHTML, text string) 
 
 func noteDocHash(fragment string) string {
 	sum := sha256.Sum256([]byte(fragment))
-	return hex.EncodeToString(sum[:8])
+	return hex.EncodeToString(sum[:])
+}
+
+func noteDocumentVersionMatches(expected, current string) bool {
+	expected = strings.TrimSpace(expected)
+	current = strings.TrimSpace(current)
+	return expected != "" && expected == current
 }
 
 func isNoteBlockNode(n *nethtml.Node) bool {

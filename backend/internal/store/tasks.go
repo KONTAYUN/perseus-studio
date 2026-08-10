@@ -33,6 +33,8 @@ type Task struct {
 	StartedAt         sql.NullTime   `json:"started_at"`
 	FinishedAt        sql.NullTime   `json:"finished_at"`
 	CancelRequestedAt sql.NullTime   `json:"cancel_requested_at"`
+	EventHeadSeq      int64          `json:"event_head_seq"`
+	FinalSeq          int64          `json:"final_seq"`
 }
 
 type TaskLog struct {
@@ -112,12 +114,33 @@ CREATE TABLE IF NOT EXISTS task_logs (
 			return err
 		}
 	}
+	if err := AddColumnIfNotExists(ctx, s.db, "tasks", "event_head_seq", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := AddColumnIfNotExists(ctx, s.db, "tasks", "final_seq", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE tasks
+SET event_head_seq = COALESCE((SELECT MAX(seq) FROM task_logs WHERE task_id = tasks.id), 0)
+WHERE event_head_seq = 0
+`); err != nil {
+		return err
+	}
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_task_logs_task_id_seq ON task_logs(task_id, seq);
 CREATE INDEX IF NOT EXISTS idx_task_logs_user_id ON task_logs(user_id);
 `
-	_, err := s.db.ExecContext(ctx, indexes)
+	if _, err := s.db.ExecContext(ctx, indexes); err != nil {
+		return err
+	}
+	if err := s.normalizeTaskLogSequences(ctx); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_logs_task_seq_unique ON task_logs(task_id, seq)
+`)
 	return err
 }

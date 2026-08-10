@@ -44,8 +44,13 @@ func validateModelProvider(input ModelProviderInput, requireKey bool) error {
 	if !validModelAuthMode(input.AuthMode) {
 		return fmt.Errorf("auth_mode is invalid")
 	}
-	if !validModelCapability(input.SupportsTools) || !validModelCapability(input.SupportsVision) {
+	if !validModelCapability(input.SupportsTools) ||
+		!validModelCapability(input.SupportsParallelToolCalls) ||
+		!validModelCapability(input.SupportsVision) {
 		return fmt.Errorf("model capabilities must be supported, unsupported, or unknown")
+	}
+	if !validToolArgumentStreamMode(input.ToolArgumentStreamMode) {
+		return fmt.Errorf("tool_argument_stream_mode must be delta or snapshot")
 	}
 	if strings.TrimSpace(input.ReasoningCapability) != "" && NormalizeReasoningCapability(input.ReasoningCapability) != strings.ToLower(strings.TrimSpace(input.ReasoningCapability)) {
 		return fmt.Errorf("reasoning_capability must be auto, disabled, openai_reasoning, or anthropic_adaptive")
@@ -110,6 +115,10 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 		&item.AdapterMode,
 		&item.AuthMode,
 		&item.SupportsTools,
+		&item.SupportsParallelToolCalls,
+		&item.ParallelCapabilitySource,
+		&item.ToolArgumentStreamMode,
+		&item.ToolArgumentStreamModeSource,
 		&item.SupportsVision,
 		&item.CapabilitySource,
 		&item.BaseURL,
@@ -141,6 +150,19 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 	item.AdapterMode = normalizeModelAdapterMode(item.AdapterMode, item.Protocol)
 	item.AuthMode = normalizeModelAuthMode(item.AuthMode, item.AdapterMode)
 	item.SupportsTools = normalizeModelCapability(item.SupportsTools)
+	item.SupportsParallelToolCalls = normalizeModelCapability(item.SupportsParallelToolCalls)
+	if strings.TrimSpace(item.ParallelCapabilitySource) == "" {
+		item.ParallelCapabilitySource = "default"
+	}
+	legacyStreamMode := strings.ToLower(strings.TrimSpace(item.ToolArgumentStreamMode))
+	item.ToolArgumentStreamMode = normalizeToolArgumentStreamMode(item.ToolArgumentStreamMode, item.Protocol)
+	if strings.TrimSpace(item.ToolArgumentStreamModeSource) == "" {
+		if legacyStreamMode == "" || legacyStreamMode == "auto" {
+			item.ToolArgumentStreamModeSource = "legacy_migration"
+		} else {
+			item.ToolArgumentStreamModeSource = "protocol_default"
+		}
+	}
 	item.SupportsVision = normalizeModelCapability(item.SupportsVision)
 	if strings.TrimSpace(item.CapabilitySource) == "" {
 		item.CapabilitySource = "default"
@@ -149,6 +171,23 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 	item.ReasoningSupport = ReasoningSupportFromThinkingProfile(item.ThinkingProfile)
 	item.MaskedKey = maskKey(item.APIKey)
 	return item, err
+}
+
+func normalizeToolArgumentStreamMode(value, protocol string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "delta", "snapshot":
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+	return "delta"
+}
+
+func validToolArgumentStreamMode(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "delta", "snapshot":
+		return true
+	default:
+		return false
+	}
 }
 
 func validModelAdapterMode(value string) bool {

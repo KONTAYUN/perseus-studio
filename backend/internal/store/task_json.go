@@ -38,6 +38,8 @@ func scanTask(s scanner) (Task, error) {
 		&task.StartedAt,
 		&task.FinishedAt,
 		&task.CancelRequestedAt,
+		&task.EventHeadSeq,
+		&task.FinalSeq,
 	)
 	return task, err
 }
@@ -67,6 +69,8 @@ func (t Task) MarshalJSON() ([]byte, error) {
 		StartedAt         *time.Time `json:"started_at"`
 		FinishedAt        *time.Time `json:"finished_at"`
 		CancelRequestedAt *time.Time `json:"cancel_requested_at"`
+		EventHeadSeq      int64      `json:"event_head_seq"`
+		FinalSeq          int64      `json:"final_seq"`
 	}
 
 	dto := taskDTO{
@@ -86,6 +90,8 @@ func (t Task) MarshalJSON() ([]byte, error) {
 		StartedAt:         nullableTime(t.StartedAt),
 		FinishedAt:        nullableTime(t.FinishedAt),
 		CancelRequestedAt: nullableTime(t.CancelRequestedAt),
+		EventHeadSeq:      t.EventHeadSeq,
+		FinalSeq:          t.FinalSeq,
 	}
 
 	return json.Marshal(dto)

@@ -116,6 +116,16 @@ export default function useIdeEditorPanels({
     return editorPanels[panelId] || editor1;
   }
 
+  function applyAIEditPreview(event) {
+    if (!event?.path) return false;
+    const existing = visibleEditorEntries().find(({ editor }) =>
+      editor.openTabs.some((tab) => tab.path === event.path)
+    );
+    const panelId = existing?.panel?.id || preferredEditorPanelId() || ensureEditorPanel();
+    const target = existing?.editor || editorPanels[panelId] || editor1;
+    return target.applyAIEditPreview(event);
+  }
+
   function addPanel(type) {
     const panelId = layout.addPanel(type);
     if (type === 'editor' && panelId) layout.setActiveEditorPanelId(panelId);
@@ -155,6 +165,7 @@ export default function useIdeEditorPanels({
   return {
     activeEditor,
     addPanel,
+    applyAIEditPreview,
     buildCurrentFileContext,
     closeDraggedPanel,
     closePanel,

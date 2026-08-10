@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { apiGet } from '../api/client';
 import { createChatCompactionActions } from './chatCompactionActions';
 import { createChatConversationActions } from './chatConversationActions';
 import { createChatRegenerateResumeActions } from './chatRegenerateResumeActions';
@@ -16,6 +17,7 @@ export default function useChatState({
   buildCurrentFileContext,
   confirm,
   onAssistantToolEvents,
+  onAssistantPreviewEvent,
   onTasksChanged,
   selectedModel,
   setSelectedModelId,
@@ -260,6 +262,14 @@ export default function useChatState({
     activeAgentRunRef.current = activeRun;
     setActiveAgentRun(activeRun);
     try {
+      try {
+        const previewState = await apiGet(`/api/agent-runs/${encodeURIComponent(runId)}/previews`);
+        for (const preview of previewState?.items || []) {
+          await onAssistantPreviewEvent?.(preview);
+        }
+      } catch (error) {
+        console.debug('active edit preview recovery skipped', error);
+      }
       await waitForAgentRunStream({
         afterSeq,
         control,
@@ -268,6 +278,7 @@ export default function useChatState({
         userMessageId,
         loadConversations,
         onAssistantToolEvents,
+        onAssistantPreviewEvent,
         onTasksChanged,
         runId,
         selectedModel,

@@ -176,3 +176,68 @@ func TestAgentRunSteerRejectsCompletedRun(t *testing.T) {
 		t.Fatalf("expected completed run to reject steer, got %d", rec.Code)
 	}
 }
+
+func TestAgentRunStreamReplaysThroughFinalSequenceBeforeClosing(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "stream.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := store.NewUserStore(db)
+	if err := users.Migrate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	user, err := users.CreateUser(t.Context(), "stream-user", "password", "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := store.NewSessionStore(db)
+	if err := sessions.Migrate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	runs := store.NewAgentRunStore(db)
+	if err := runs.Migrate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.CreateRun(t.Context(), store.CreateAgentRunInput{
+		ID: "stream-run", UserID: user.ID, ConversationID: "stream-conversation", ModelProviderID: "provider",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index <= 3; index++ {
+		if _, err := runs.AppendEvent(t.Context(), store.AgentEventInput{
+			RunID: run.ID, UserID: user.ID, ConversationID: run.ConversationID,
+			Type: "test_event", Payload: map[string]any{"index": index},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := runs.UpdateRun(t.Context(), user.ID, run.ID, store.UpdateAgentRunInput{
+		Status: store.AgentRunSucceeded, Stage: "completed", SetCompletedAt: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{
+		runs: runs, runBroker: tasks.NewBroker(), mux: http.NewServeMux(), sessions: sessions,
+	}
+	server.register()
+	req := httptest.NewRequest(http.MethodGet, "/api/agent-runs/stream-run/stream?after_seq=1", nil)
+	attachTestSession(t, server, req, "stream-token", user)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stream status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "id: 1\n") || !strings.Contains(body, "id: 2\n") || !strings.Contains(body, "id: 3\n") {
+		t.Fatalf("stream did not replay exactly after the requested cursor:\n%s", body)
+	}
+	if !strings.Contains(body, "event: stream_opened") ||
+		!strings.Contains(body, "event: replay_complete") ||
+		!strings.Contains(body, `"through_seq":3`) ||
+		!strings.Contains(body, `"final_seq":3`) {
+		t.Fatalf("stream did not publish its replay and terminal barrier:\n%s", body)
+	}
+}

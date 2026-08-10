@@ -135,7 +135,17 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	if call.ID == "" {
 		call.ID = fmt.Sprintf("tool_%d", r.toolCalls)
 	}
+	previewStarted := false
+	previewResolved := false
+	defer func() {
+		if previewStarted && !previewResolved && r.editPreviews != nil {
+			r.editPreviews.revert(call.ID, "tool_not_executed")
+		}
+	}()
 	if errText := r.normalizeAndValidateToolCall(&call); errText != "" {
+		if r.editPreviews != nil {
+			r.editPreviews.revert(call.ID, "invalid_tool_arguments")
+		}
 		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
 		if call.Name == "apply_workspace_patch" {
 			return r.actionRejectedObservation(errText, "apply_workspace_patch_json_tool_call", nil), true, nil, false, nil
@@ -181,8 +191,10 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		r.events = append(r.events, event)
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
 	}
-	if errText := r.validateHTMLNoteMutationPrecondition(ctx, call); errText != "" {
-		r.recordToolError(call.Name, executionToolArgumentsJSON(call), errText)
+	if preconditionErr := r.validateHTMLNoteMutationPrecondition(ctx, call); preconditionErr != nil {
+		typed := normalizeToolError(preconditionErr)
+		errText := typed.Error()
+		r.recordTypedToolError(call.Name, executionToolArgumentsJSON(call), typed)
 		emitToolLifecycleEvent(r.opts, "html_note_write_guard_rejected", "warn", map[string]any{
 			"tool_call_id": call.ID,
 			"tool_name":    call.Name,
@@ -191,44 +203,59 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		})
 		event := r.invalidToolCallEvent(ctx, call, errText)
 		r.events = append(r.events, event)
-		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
+		return toolErrorJSONPayload(call.Name, typed), true, nil, false, nil
 	}
-	operationHash := ""
-	if isWorkspaceMutationTool(call.Name) {
-		operationHash = mutationOperationHash(call.Name, executionToolArgumentsJSON(call))
-		if previous, ok := r.appliedMutations[operationHash]; ok {
-			result, event := r.alreadyAppliedToolResult(call, previous)
-			r.events = append(r.events, event)
-			emitToolLifecycleEvent(r.opts, "tool_call_completed", "info", map[string]any{
-				"tool_call_id":    call.ID,
-				"tool_name":       call.Name,
-				"status_kind":     manifestStatusKind(call.Name),
-				"round":           r.currentRound,
-				"status":          "success",
-				"label":           event.Label,
-				"path":            event.Path,
-				"old_path":        event.OldPath,
-				"new_path":        event.NewPath,
-				"changed_paths":   event.ChangedPaths,
-				"operation_hash":  operationHash,
-				"already_applied": true,
-				"result_summary":  "workspace mutation already applied in this run",
-				"verification":    ToolVerification{Status: "verified", Message: "already applied earlier in this run", Path: event.Path},
-			})
-			emitToolLifecycleEvent(r.opts, "tool_result_returned", "info", map[string]any{
-				"tool_call_id":    call.ID,
-				"tool_name":       call.Name,
-				"status_kind":     manifestStatusKind(call.Name),
-				"round":           r.currentRound,
-				"status":          "success",
-				"is_error":        false,
-				"operation_hash":  operationHash,
-				"already_applied": true,
-			})
-			return result, false, nil, false, nil
+	if preflightErr := r.validateNoteBlockEditExecutionPreflight(ctx, call); preflightErr != nil {
+		typed := normalizeToolError(preflightErr)
+		typed.Phase = "preflight"
+		errText := typed.Error()
+		r.recordTypedToolError(call.Name, executionToolArgumentsJSON(call), typed)
+		emitToolLifecycleEvent(r.opts, "html_note_edit_preflight_rejected", "warn", map[string]any{
+			"tool_call_id": call.ID,
+			"tool_name":    call.Name,
+			"phase":        typed.Phase,
+			"error_code":   typed.Code,
+		})
+		event := r.invalidToolCallEvent(ctx, call, errText)
+		event.ErrorCode = typed.Code
+		event.ErrorCategory = typed.Category
+		event.ErrorPhase = typed.Phase
+		event.Retryable = typed.Retryable
+		event.RecommendedAction = typed.RecommendedAction
+		r.events = append(r.events, event)
+		return toolErrorJSONPayload(call.Name, typed), true, nil, false, nil
+	}
+	if strategyErr := r.rejectRepeatedFailedStrategy(call); strategyErr != nil {
+		r.recordTypedToolError(call.Name, executionToolArgumentsJSON(call), strategyErr)
+		event := r.invalidToolCallEvent(ctx, call, strategyErr.Error())
+		typed := normalizeToolError(strategyErr)
+		event.ErrorCode = typed.Code
+		event.ErrorCategory = typed.Category
+		event.Retryable = typed.Retryable
+		event.RecommendedAction = typed.RecommendedAction
+		r.events = append(r.events, event)
+		return toolErrorJSONPayload(call.Name, typed), true, nil, false, nil
+	}
+	if r.editPreviews != nil {
+		r.editPreviews.handle(ctx, ToolCallArgumentsDelta{
+			ToolCallID: call.ID, ToolName: call.Name, ArgumentsJSON: executionToolArgumentsJSON(call),
+		}, true)
+		previewStarted = true
+	}
+	// The operation hash is diagnostic only. Exact transport replay is keyed by
+	// run_id + tool_call_id in executeAndRecordTool.
+	operationHash := mutationOperationHash(call.Name, executionToolArgumentsJSON(call))
+	execOpts := r.opts
+	execOpts.CurrentToolCallID = call.ID
+	result, event, execErr := r.service.executeAndRecordTool(ctx, r.conversationID, r.messageID, call.Name, executionToolArgumentsJSON(call), operationHash, execOpts, r.profile)
+	previewResolved = true
+	if r.editPreviews != nil {
+		if event.Status == "success" {
+			r.editPreviews.complete(call.ID, event)
+		} else {
+			r.editPreviews.revert(call.ID, firstNonEmpty(string(event.ErrorCode), "tool_failed"))
 		}
 	}
-	result, event, execErr := r.service.executeAndRecordTool(ctx, r.conversationID, r.messageID, call.Name, executionToolArgumentsJSON(call), operationHash, r.opts, r.profile)
 	event.OperationHash = operationHash
 	r.events = append(r.events, event)
 	if execErr != nil {
@@ -239,9 +266,6 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	}
 	if event.Status == "success" && isWorkspaceMutationTool(call.Name) {
 		r.performedMutation = true
-		if operationHash != "" {
-			r.appliedMutations[operationHash] = event
-		}
 		r.recordChunkWriteSuccess(call, &event)
 		result = r.annotateChunkWriteResult(call, result)
 	}
@@ -249,6 +273,7 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		r.performedMutation = true
 	}
 	if event.Status == "success" {
+		r.recordStrategySuccess(call, event)
 		r.clearToolErrors()
 	} else {
 		r.recordTypedToolError(call.Name, executionToolArgumentsJSON(call), toolErrorFromEvent(event))
@@ -263,36 +288,6 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		"is_error":     event.Status != "success",
 	})
 	return result, event.Status != "success", nil, false, nil
-}
-
-func (r *agentRuntime) alreadyAppliedToolResult(call agentToolCall, previous ToolEvent) (string, ToolEvent) {
-	previous.ToolCallID = call.ID
-	previous.Status = "success"
-	previous.Label = userFriendlyToolLabel(call.Name)
-	if previous.Label == "" {
-		previous.Label = "已处理"
-	}
-	if previous.ToolName == "" {
-		previous.ToolName = call.Name
-	}
-	if previous.StatusKind == "" {
-		previous.StatusKind = manifestStatusKind(call.Name)
-	}
-	payload := map[string]any{
-		"status":          "already_applied",
-		"tool_name":       call.Name,
-		"operation_hash":  previous.OperationHash,
-		"path":            previous.Path,
-		"old_path":        previous.OldPath,
-		"new_path":        previous.NewPath,
-		"changed_paths":   previous.ChangedPaths,
-		"version_id":      previous.VersionID,
-		"hash":            previous.Hash,
-		"message":         "This workspace mutation was already applied in this run. Continue from the verified existing result instead of repeating it.",
-		"recovery_hint":   "Do not repeat the same mutation. Use the existing changed_paths and continue, then call attempt_completion when the task is done.",
-		"already_applied": true,
-	}
-	return mustJSON(payload), previous
 }
 
 func (r *agentRuntime) invalidToolCallEvent(ctx context.Context, call agentToolCall, message string) ToolEvent {

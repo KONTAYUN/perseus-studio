@@ -31,7 +31,7 @@ func (r *agentRuntime) requiresWorkspaceMutationAction(targetPaths []string) boo
 	if r == nil {
 		return false
 	}
-	if r.performedMutation || len(r.appliedMutations) > 0 {
+	if r.performedMutation {
 		return true
 	}
 	for _, path := range normalizedProviderPaths(targetPaths) {

@@ -157,6 +157,8 @@ func toolTargetSummary(name, argumentsJSON string) string {
 			parts = append(parts, "doc="+truncatePlainRunes(target.DocHash, 12))
 		}
 		return strings.Join(nonEmptyStrings(parts...), " ")
+	case "edit_workspace_note_blocks", "create_workspace_note":
+		return pathSummary(stringField(decoded, "path"))
 	case "inspect_workspace", "read_workspace_text", "apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write":
 		if name == "apply_workspace_patch" {
 			if path := firstPatchPathFromText(stringField(decoded, "patch")); path != "" {

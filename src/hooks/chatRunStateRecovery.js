@@ -113,9 +113,9 @@ function buildRunProgressSnapshot(events = [], run = {}) {
   for (const event of events || []) {
     const type = event?.type || '';
     const payload = event?.payload || {};
-    if (type === 'assistant_message_started') {
+    if (type === 'assistant_message_started' || type === 'assistant_commentary_started') {
       activeMessageId = payload.assistant_message?.id || activeMessageId;
-    } else if (type === 'assistant_message_completed' && payload.assistant_message?.id === activeMessageId) {
+    } else if ((type === 'assistant_message_completed' || type === 'assistant_commentary_completed') && payload.assistant_message?.id === activeMessageId) {
       activeMessageId = '';
     }
 

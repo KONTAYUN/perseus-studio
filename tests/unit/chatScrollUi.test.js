@@ -14,6 +14,14 @@ const panelSource = readFileSync(
   new URL('../../src/components/chat/ChatPanel.jsx', import.meta.url),
   'utf8'
 );
+const emptyStateSource = readFileSync(
+  new URL('../../src/components/chat/EmptyChatState.jsx', import.meta.url),
+  'utf8'
+);
+const chatStylesSource = readFileSync(
+  new URL('../../src/styles/chat.css', import.meta.url),
+  'utf8'
+);
 const packageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
 );
@@ -47,4 +55,12 @@ test('the existing bottom button re-enables sticky scrolling', () => {
   assert.match(panelSource, /showScrollToBottom/);
   assert.match(panelSource, /scrollToBottom\('smooth'\)/);
   assert.match(panelSource, /data-testid="scroll-to-bottom-button"/);
+});
+
+test('the empty chat card keeps its frame without a nested backdrop layer', () => {
+  assert.match(emptyStateSource, /data-testid="empty-chat-state"/);
+  assert.match(emptyStateSource, /empty-chat-card/);
+  assert.match(emptyStateSource, /border border-gray-100/);
+  assert.doesNotMatch(emptyStateSource, /backdrop-blur/);
+  assert.match(chatStylesSource, /\.empty-chat-card/);
 });

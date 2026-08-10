@@ -55,7 +55,11 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 		}
 		req.Snapshot.Summary.ToolChoice = providerToolChoiceSummary(actualChoice)
 		req.Snapshot.Summary.RequiresTool = normalizeProviderToolChoice(actualChoice).requiresTool()
-		payload["tool_choice"] = anthropicProviderToolChoiceForReasoning(req.ToolChoice, reasoningPolicy.AnthropicAdaptiveEnabled())
+		payload["tool_choice"] = anthropicProviderToolChoiceForReasoning(
+			req.ToolChoice,
+			reasoningPolicy.AnthropicAdaptiveEnabled(),
+			req.Provider.SupportsParallelToolCalls == store.ModelCapabilitySupported,
+		)
 	}
 	if req.Snapshot.AnthropicSystem != "" {
 		cacheEnabled := anthropicPromptCacheEnabled()
@@ -108,20 +112,27 @@ func (p anthropicProviderV2) Turn(ctx context.Context, req providerTurnRequest) 
 		var emitText func(string)
 		if req.Opts.Event != nil && providerTurnCanStreamAssistantText(req) {
 			emitText = func(text string) {
-				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{"text": text})
+				emitToolLifecycleEvent(req.Opts, "model_delta", "info", map[string]any{
+					"text":         text,
+					"message_kind": "assistant_commentary",
+				})
 			}
 		}
 		turn, err := parseAnthropicStreamWithOptions(streamBody, providerStreamParseOptions{
-			EmitText:            emitText,
-			RevealTextAfterTool: revealTextAfterAction,
+			EmitText:               emitText,
+			RevealTextAfterTool:    revealTextAfterAction,
+			EmitToolArguments:      req.Opts.OnToolCallArgumentsDelta,
+			ToolArgumentStreamMode: "delta",
 		})
 		if err != nil {
 			if _, partial := partialTurnFromStreamError(err); !partial && !providerStreamTurnHasStarted(turn) && shouldRetryProviderStreamError(ctx, err) {
 				closeStream()
 				var terminal bool
 				turn, terminal, err = p.retryStream(ctx, &req, payload, endpoint, providerStreamParseOptions{
-					EmitText:            emitText,
-					RevealTextAfterTool: revealTextAfterAction,
+					EmitText:               emitText,
+					RevealTextAfterTool:    revealTextAfterAction,
+					EmitToolArguments:      req.Opts.OnToolCallArgumentsDelta,
+					ToolArgumentStreamMode: "delta",
 				}, err)
 				if terminal {
 					return turn, err
