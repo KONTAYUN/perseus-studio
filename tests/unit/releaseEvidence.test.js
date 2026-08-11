@@ -8,9 +8,17 @@ import {
   EvidenceInputError,
   describeArtifact,
   readJSONStrict,
+  summarizePlaywright,
   validateCollectedEvidence,
   verifyArtifact,
 } from '../../scripts/release-evidence-lib.mjs';
+
+test('Playwright JSON status is derived from structured stats and errors', () => {
+  assert.equal(summarizePlaywright({ stats: { expected: 4, unexpected: 0 }, errors: [] }).status, 'passed');
+  assert.equal(summarizePlaywright({ stats: { expected: 3, unexpected: 1 }, errors: [] }).status, 'failed');
+  assert.equal(summarizePlaywright({ stats: { expected: 4, unexpected: 0 }, errors: [{}] }).status, 'failed');
+  assert.equal(summarizePlaywright({}).status, 'unknown');
+});
 
 test('strict JSON reader distinguishes missing, BOM, and corrupt evidence', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'perseus-evidence-'));

@@ -87,12 +87,20 @@ export function findArtifact(gate, role) {
 }
 
 export function summarizePlaywright(report) {
+  const hasStats = report?.stats && typeof report.stats === 'object';
+  const unexpected = hasStats && typeof report.stats.unexpected === 'number' ? report.stats.unexpected : null;
+  const topLevelErrors = Array.isArray(report?.errors) ? report.errors.length : null;
+  const status = report?.status || (
+    hasStats && unexpected !== null && topLevelErrors !== null
+      ? (unexpected === 0 && topLevelErrors === 0 ? 'passed' : 'failed')
+      : 'unknown'
+  );
   return {
-    status: report?.status || 'unknown',
+    status,
     started_at: report?.stats?.startTime || null,
     duration_ms: report?.stats?.duration ?? null,
     expected: report?.stats?.expected ?? null,
-    unexpected: report?.stats?.unexpected ?? null,
+    unexpected,
     flaky: report?.stats?.flaky ?? null,
     skipped: report?.stats?.skipped ?? null,
   };
