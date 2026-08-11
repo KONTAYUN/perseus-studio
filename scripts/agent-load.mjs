@@ -63,7 +63,7 @@ function restartWebide() {
 }
 
 function containerInspect() {
-  return JSON.parse(compose('exec', '-T', 'webide', 'perseus-maintain', 'inspect'));
+  return JSON.parse(compose('exec', '-T', 'webide', 'perseus-maintain', 'inspect', '--full-integrity'));
 }
 
 function containerRSSBytes() {
@@ -193,6 +193,10 @@ async function main() {
       sqlite_integrity: after.integrity,
       agent_event_payload_growth_bytes: (after.tables?.agent_events?.payload_bytes || 0) - (before.tables?.agent_events?.payload_bytes || 0),
       active_preview_rows: after.tables?.agent_edit_previews?.rows || 0,
+      event_sequence_gap_runs: after.event_consistency?.sequence_gap_runs || 0,
+      event_head_mismatch_runs: after.event_consistency?.head_mismatch_runs || 0,
+      final_barrier_mismatch_runs: after.event_consistency?.final_barrier_mismatch_runs || 0,
+      duplicate_mutation_ids: after.event_consistency?.duplicate_mutation_ids || 0,
       terminal_failures: terminalFailures,
     },
   };
@@ -205,6 +209,10 @@ async function main() {
   if (report.results.database_growth_per_run_bytes >= 500 * 1024) failures.push('database growth exceeded 500 KiB per run');
   if (report.results.sqlite_integrity !== 'ok') failures.push('SQLite integrity check failed');
   if (report.results.active_preview_rows !== 0) failures.push('completed runs retained active previews');
+  if (report.results.event_sequence_gap_runs !== 0) failures.push('agent event sequence gaps detected');
+  if (report.results.event_head_mismatch_runs !== 0) failures.push('agent event head mismatches detected');
+  if (report.results.final_barrier_mismatch_runs !== 0) failures.push('agent final barrier mismatches detected');
+  if (report.results.duplicate_mutation_ids !== 0) failures.push('duplicate authoritative mutation events detected');
   report.failures = failures;
   await fs.mkdir(path.dirname(reportPath), { recursive: true });
   await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);

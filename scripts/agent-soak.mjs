@@ -84,6 +84,10 @@ const summary = {
   max_database_growth_per_run_bytes: Math.max(...reports.map((report) => report.results.database_growth_per_run_bytes), 0),
   max_provider_peak_concurrency: Math.max(...reports.map((report) => report.results.provider_peak_concurrency), 0),
   max_active_preview_rows: Math.max(...reports.map((report) => report.results.active_preview_rows), 0),
+  max_event_sequence_gap_runs: Math.max(...reports.map((report) => report.results.event_sequence_gap_runs || 0), 0),
+  max_event_head_mismatch_runs: Math.max(...reports.map((report) => report.results.event_head_mismatch_runs || 0), 0),
+  max_final_barrier_mismatch_runs: Math.max(...reports.map((report) => report.results.final_barrier_mismatch_runs || 0), 0),
+  max_duplicate_mutation_ids: Math.max(...reports.map((report) => report.results.duplicate_mutation_ids || 0), 0),
   failures: reports.flatMap((report) => report.failures || []),
 };
 await fs.writeFile(path.join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);

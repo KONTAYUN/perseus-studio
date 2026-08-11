@@ -10,10 +10,10 @@ export default defineConfig({
   },
   fullyParallel: false,
   workers: 1,
-  outputDir: 'test-results',
+  outputDir: process.env.PERSEUS_PLAYWRIGHT_OUTPUT_DIR || 'test-results/playwright-output',
   reporter: [
     ['list'],
-    ['html', { outputFolder: 'playwright-report', open: 'never' }],
+    ['html', { outputFolder: process.env.PERSEUS_PLAYWRIGHT_HTML_OUTPUT || 'playwright-report', open: 'never' }],
     ['json', { outputFile: process.env.PERSEUS_PLAYWRIGHT_JSON_OUTPUT || 'test-results/playwright-results.json' }],
   ],
   use: {

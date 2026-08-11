@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ func TestArchivePreservesEventEnvelopeAndCompactsPayload(t *testing.T) {
 	if err := store.NewTaskStore(db).Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
+	ensureRequiredInspectionSchema(t, db)
 	old := time.Now().UTC().Add(-72 * time.Hour)
 	insertArchiveFixture(t, db, old)
 
@@ -122,6 +124,7 @@ func TestBackupProducesVerifiedDatabaseAndManifest(t *testing.T) {
 	if err := store.NewAgentRunStore(db).Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
+	ensureRequiredInspectionSchema(t, db)
 	if _, err := db.Exec(`CREATE TABLE backup_fixture (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO backup_fixture(value) VALUES ('preserve');`); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +153,96 @@ func TestBackupProducesVerifiedDatabaseAndManifest(t *testing.T) {
 	}
 }
 
+func TestVerifyRestoreComparesProtectedDataAndRemovesTemporaryCopy(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "app.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ensureRequiredInspectionSchema(t, db)
+	if _, err := db.Exec(`INSERT INTO users(id, username) VALUES ('user-1', 'alice'); INSERT INTO conversations(id) VALUES ('conv-1')`); err != nil {
+		t.Fatal(err)
+	}
+	userRoot := filepath.Join(root, "users")
+	if err := os.MkdirAll(filepath.Join(userRoot, "user-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userRoot, "user-1", "note.html"), []byte("<p>verified</p>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(root, "backups", "app.db")
+	if _, err := Backup(ctx, db, dbPath, backupPath); err != nil {
+		t.Fatal(err)
+	}
+	report, err := VerifyRestore(ctx, db, dbPath, backupPath, userRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.RestoreVerified || !report.TemporaryRestoreRemoved || report.Integrity != "ok" || !report.ForeignKeysValid {
+		t.Fatalf("unexpected restore report: %+v", report)
+	}
+	if report.ProtectedTables["users"].Rows != 1 || report.UserData == nil || report.UserData.Files != 1 {
+		t.Fatalf("protected data was not verified: %+v", report)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "backups", ".restore-verify-*"))
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("temporary restore remains: matches=%v err=%v", matches, err)
+	}
+}
+
+func TestMaintenancePathsStayInsidePersistentDataRoot(t *testing.T) {
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "app.db")
+	backup := DefaultBackupPath(dbPath, time.Date(2026, 8, 11, 4, 0, 0, 0, time.UTC))
+	if !strings.HasPrefix(backup, filepath.Join(root, "backups")) {
+		t.Fatalf("default backup is not persistent: %s", backup)
+	}
+	if _, err := ValidateMaintenanceOutputPath(dbPath, backup); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(filepath.Dir(root), "ephemeral.db")
+	if _, err := ValidateMaintenanceOutputPath(dbPath, outside); err == nil {
+		t.Fatalf("outside output was accepted: %s", outside)
+	}
+	for _, reserved := range []string{dbPath, dbPath + "-wal", dbPath + "-shm", dbPath + "-journal"} {
+		if _, err := ValidateMaintenanceOutputPath(dbPath, reserved); err == nil {
+			t.Fatalf("reserved database path was accepted: %s", reserved)
+		}
+	}
+}
+
+func TestBackupAndArchiveRefuseExistingOutputs(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "app.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ensureRequiredInspectionSchema(t, db)
+	existing := filepath.Join(root, "backups", "existing.db")
+	if err := os.MkdirAll(filepath.Dir(existing), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(existing, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Backup(ctx, db, dbPath, existing); err == nil {
+		t.Fatal("backup overwrote an existing output")
+	}
+	content, err := os.ReadFile(existing)
+	if err != nil || string(content) != "keep" {
+		t.Fatalf("existing backup output changed: content=%q err=%v", content, err)
+	}
+	if _, err := Archive(ctx, db, ArchiveOptions{Before: time.Now().UTC(), Output: existing, Apply: true}); err == nil {
+		t.Fatal("archive overwrote an existing output")
+	}
+}
+
 func TestInspectModes(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "app.db")
@@ -158,13 +251,39 @@ func TestInspectModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	ensureRequiredInspectionSchema(t, db)
 	quick, err := InspectWithOptions(ctx, db, dbPath, InspectOptions{})
-	if err != nil || quick.IntegrityMode != "quick" || quick.Integrity != "ok" {
+	if err != nil || quick.IntegrityMode != "not_run" || quick.Integrity != "not_run" || quick.Connectivity != "ok" || len(quick.Tables) != 0 {
 		t.Fatalf("quick inspect failed: %+v err=%v", quick, err)
 	}
 	full, err := InspectWithOptions(ctx, db, dbPath, InspectOptions{FullIntegrity: true})
 	if err != nil || full.IntegrityMode != "full" || full.Integrity != "ok" {
 		t.Fatalf("full inspect failed: %+v err=%v", full, err)
+	}
+}
+
+func ensureRequiredInspectionSchema(t *testing.T, db *sql.DB) {
+	t.Helper()
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS user_sessions (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS tool_calls (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS file_versions (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS agent_runs (id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'queued', event_head_seq INTEGER NOT NULL DEFAULT 0, final_seq INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE IF NOT EXISTS agent_events (id TEXT PRIMARY KEY, run_id TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT '', seq INTEGER NOT NULL DEFAULT 0, payload_json TEXT NOT NULL DEFAULT '{}')`,
+		`CREATE TABLE IF NOT EXISTS agent_turn_items (id TEXT PRIMARY KEY, payload_json TEXT NOT NULL DEFAULT '{}')`,
+		`CREATE TABLE IF NOT EXISTS agent_edit_previews (preview_id TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL DEFAULT '{}')`,
+		`CREATE TABLE IF NOT EXISTS diagnostic_logs (id TEXT PRIMARY KEY, response_snippet TEXT NOT NULL DEFAULT '', request_summary TEXT NOT NULL DEFAULT '', error_message TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS chat_attachments (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS message_attachments (message_id TEXT NOT NULL, attachment_id TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS trash_items (id TEXT PRIMARY KEY)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

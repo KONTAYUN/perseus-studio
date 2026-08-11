@@ -28,14 +28,18 @@ Run inspection inside the production container:
 docker compose exec webide perseus-maintain inspect --quick
 ```
 
-The JSON report includes integrity status, database size, free pages, row counts,
-and payload bytes for high-volume tables.
+The quick JSON report checks connectivity, required schema, database size and
+page metadata only. It does not scan the database or high-volume payloads.
 
 Use the full check explicitly during a maintenance window or release verification:
 
 ```bash
 docker compose exec webide perseus-maintain inspect --full-integrity
 ```
+
+The full report adds `PRAGMA integrity_check`, row counts, payload bytes, event
+sequence/head/final-barrier consistency and duplicate authoritative mutation
+checks.
 
 ## Consistent database backup
 
@@ -48,6 +52,25 @@ docker compose stop webide
 docker compose run --rm --no-deps webide perseus-maintain backup \
   --output /data/backups/app-before-maintenance.db
 ```
+
+When `--output` is omitted, the command uses a timestamped file under
+`/data/backups`. Explicit output paths must stay under `/data` or a root listed
+in `PERSEUS_MAINTENANCE_OUTPUT_ROOTS`.
+Backup and archive commands refuse to overwrite existing outputs and reject the
+live database, WAL, SHM and journal paths.
+
+Verify an actual temporary restore before treating the backup as rollback proof:
+
+```bash
+docker compose run --rm --no-deps webide perseus-maintain verify-restore \
+  --backup /data/backups/app-before-maintenance.db \
+  --user-data-root /data/users
+```
+
+The verifier checks the manifest checksum, restores a separate temporary
+database, runs full integrity and foreign-key checks, compares protected-table
+counts and hashes, records the user-file manifest, then removes the temporary
+restore.
 
 ## Archiving run telemetry
 
@@ -95,10 +118,19 @@ npm run test:release-evidence
 ```
 
 The complete local release gate also runs the full backend/frontend checks,
-browser tests, provider matrix, load test, and the 30-minute soak:
+browser tests, provider matrix, load test, 30-minute soak, backup/restore
+verification, offline VACUUM, strict evidence validation and scorecard generation:
 
 ```bash
 npm run test:release-gate
+```
+
+To generate the same maintenance report for the normal production Compose
+stack, set `PERSEUS_MAINTENANCE_PRODUCTION=1` and run the explicit maintenance
+command. It stops and restarts `webide` during the verified maintenance window:
+
+```bash
+PERSEUS_MAINTENANCE_PRODUCTION=1 npm run maintenance:evidence
 ```
 
 Nightly soak defaults to 30 minutes and periodically restarts the service:

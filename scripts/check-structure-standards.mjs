@@ -171,6 +171,20 @@ for (const file of backendFiles) {
   checkStructuredStatePolicy(file);
 }
 
+const releaseScripts = walk(path.join(root, 'scripts'), (_full, name) => name.endsWith('.mjs'));
+for (const file of releaseScripts) {
+  checkStructuredStatePolicy(file);
+  const source = fs.readFileSync(file, 'utf8');
+  for (const match of source.matchAll(/catch\s*\{\s*return\s+null;?\s*\}/g)) {
+    const line = source.slice(0, match.index).split(/\r?\n/).length;
+    fail(`${rel(file)}:${line} release and maintenance evidence parsing must not silently become null`);
+  }
+}
+
+if (/Current evidence-backed score:/i.test(scorecard) || /\d[,.]\d{3}\s+Runs/i.test(scorecard)) {
+  fail('docs/PROJECT_HEALTH_SCORECARD.md:1 current scores and runtime counts must come from the generated scorecard artifact');
+}
+
 checkCSS();
 checkForbiddenResidue(path.join(root, 'package.json'));
 if (fs.existsSync(path.join(root, 'package-lock.json'))) {

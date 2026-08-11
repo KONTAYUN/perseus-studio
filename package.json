@@ -18,6 +18,8 @@
     "test:load": "node scripts/agent-load.mjs",
     "test:soak": "node scripts/agent-soak.mjs",
     "test:release-evidence": "node scripts/collect-release-evidence.mjs",
+    "test:scorecard": "node scripts/generate-project-scorecard.mjs",
+    "maintenance:evidence": "node scripts/run-maintenance-evidence.mjs",
     "test:release-gate": "node scripts/release-gate.mjs"
   },
   "dependencies": {

@@ -30,9 +30,20 @@ type InspectReport struct {
 	PageCount     int64                `json:"page_count"`
 	PageSize      int64                `json:"page_size"`
 	FreePages     int64                `json:"free_pages"`
+	Connectivity  string               `json:"connectivity"`
+	Schema        string               `json:"schema"`
 	IntegrityMode string               `json:"integrity_mode"`
 	Integrity     string               `json:"integrity"`
+	MissingTables []string             `json:"missing_tables,omitempty"`
 	Tables        map[string]TableStat `json:"tables"`
+	Consistency   EventConsistency     `json:"event_consistency"`
+}
+
+type EventConsistency struct {
+	SequenceGapRuns          int64 `json:"sequence_gap_runs"`
+	HeadMismatchRuns         int64 `json:"head_mismatch_runs"`
+	FinalBarrierMismatchRuns int64 `json:"final_barrier_mismatch_runs"`
+	DuplicateMutationIDs     int64 `json:"duplicate_mutation_ids"`
 }
 
 type InspectOptions struct {
@@ -72,7 +83,13 @@ func Inspect(ctx context.Context, db *sql.DB, dbPath string) (InspectReport, err
 }
 
 func InspectWithOptions(ctx context.Context, db *sql.DB, dbPath string, options InspectOptions) (InspectReport, error) {
-	report := InspectReport{DatabasePath: dbPath, Tables: map[string]TableStat{}}
+	report := InspectReport{
+		DatabasePath: dbPath, Tables: map[string]TableStat{},
+		Connectivity: "ok", Schema: "ok", IntegrityMode: "not_run", Integrity: "not_run",
+	}
+	if err := db.PingContext(ctx); err != nil {
+		return InspectReport{}, err
+	}
 	if info, err := os.Stat(dbPath); err == nil {
 		report.DatabaseBytes = info.Size()
 	}
@@ -85,14 +102,61 @@ func InspectWithOptions(ctx context.Context, db *sql.DB, dbPath string, options 
 			return InspectReport{}, err
 		}
 	}
-	integrityQuery := "PRAGMA quick_check"
-	report.IntegrityMode = "quick"
-	if options.FullIntegrity {
-		integrityQuery = "PRAGMA integrity_check"
-		report.IntegrityMode = "full"
+	for _, table := range requiredTables {
+		exists, err := tableExists(ctx, db, table)
+		if err != nil {
+			return InspectReport{}, err
+		}
+		if !exists {
+			report.MissingTables = append(report.MissingTables, table)
+		}
 	}
-	if err := db.QueryRowContext(ctx, integrityQuery).Scan(&report.Integrity); err != nil {
+	if len(report.MissingTables) > 0 {
+		report.Schema = "missing_required_tables"
+		return report, fmt.Errorf("required database tables are missing: %s", strings.Join(report.MissingTables, ", "))
+	}
+	if !options.FullIntegrity {
+		return report, nil
+	}
+	report.IntegrityMode = "full"
+	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&report.Integrity); err != nil {
 		return InspectReport{}, err
+	}
+	consistencyQueries := map[string]*int64{
+		`SELECT COUNT(*) FROM (
+			SELECT run_id
+			FROM agent_events
+			GROUP BY run_id
+			HAVING MIN(seq) <> 1 OR MAX(seq) <> COUNT(*) OR COUNT(DISTINCT seq) <> COUNT(*)
+		)`: &report.Consistency.SequenceGapRuns,
+		`SELECT COUNT(*)
+		 FROM agent_runs r
+		 WHERE r.event_head_seq <> COALESCE((SELECT MAX(e.seq) FROM agent_events e WHERE e.run_id = r.id), 0)`: &report.Consistency.HeadMismatchRuns,
+		`SELECT COUNT(*)
+		 FROM agent_runs r
+		 WHERE (
+			r.status IN ('succeeded','failed','canceled','delegated','waiting_for_user')
+			AND (r.final_seq <= 0 OR r.final_seq <> r.event_head_seq OR NOT EXISTS (
+				SELECT 1 FROM agent_events e WHERE e.run_id = r.id AND e.seq = r.final_seq
+			))
+		 ) OR (
+			r.status NOT IN ('succeeded','failed','canceled','delegated','waiting_for_user')
+			AND r.final_seq <> 0
+		 )`: &report.Consistency.FinalBarrierMismatchRuns,
+		`SELECT COUNT(*) FROM (
+			SELECT run_id, json_extract(payload_json, '$.mutation_id') AS mutation_id
+			FROM agent_events
+			WHERE type = 'workspace_file_changed'
+			  AND json_valid(payload_json)
+			  AND COALESCE(json_extract(payload_json, '$.mutation_id'), '') <> ''
+			GROUP BY run_id, mutation_id
+			HAVING COUNT(*) > 1
+		)`: &report.Consistency.DuplicateMutationIDs,
+	}
+	for query, target := range consistencyQueries {
+		if err := db.QueryRowContext(ctx, query).Scan(target); err != nil {
+			return InspectReport{}, err
+		}
 	}
 	queries := map[string]string{
 		"agent_runs":          `SELECT COUNT(*), 0 FROM agent_runs`,
@@ -118,6 +182,11 @@ func InspectWithOptions(ctx context.Context, db *sql.DB, dbPath string, options 
 	return report, nil
 }
 
+var requiredTables = []string{
+	"users", "user_sessions", "conversations", "messages", "agent_runs",
+	"agent_events", "agent_turn_items", "tool_calls", "file_versions",
+}
+
 // Backup creates a consistent offline SQLite backup using SQLite itself. It is
 // intentionally separate from raw file copying so a WAL/journal cannot be
 // captured halfway through a transaction.
@@ -133,6 +202,9 @@ func Backup(ctx context.Context, db *sql.DB, sourcePath, outputPath string) (Bac
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return BackupReport{}, err
 	}
+	if err := requireNewOutput(outputPath, outputPath+".manifest.json"); err != nil {
+		return BackupReport{}, err
+	}
 	var integrity string
 	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil {
 		return BackupReport{}, err
@@ -140,8 +212,8 @@ func Backup(ctx context.Context, db *sql.DB, sourcePath, outputPath string) (Bac
 	if integrity != "ok" {
 		return BackupReport{}, fmt.Errorf("integrity check failed before backup: %s", integrity)
 	}
-	_ = os.Remove(outputPath)
 	if _, err := db.ExecContext(ctx, "VACUUM INTO "+sqliteStringLiteral(outputPath)); err != nil {
+		_ = os.Remove(outputPath)
 		return BackupReport{}, err
 	}
 	checksum, err := fileSHA256(outputPath)
@@ -195,6 +267,9 @@ func Archive(ctx context.Context, db *sql.DB, options ArchiveOptions) (ArchiveMa
 	if !options.Apply {
 		return manifest, nil
 	}
+	if err := requireNewOutput(options.Output, options.Output+".manifest.json", options.Output+".tmp"); err != nil {
+		return ArchiveManifest{}, err
+	}
 	if err := os.MkdirAll(filepath.Dir(options.Output), 0o755); err != nil {
 		return ArchiveManifest{}, err
 	}
@@ -225,6 +300,17 @@ func Archive(ctx context.Context, db *sql.DB, options ArchiveOptions) (ArchiveMa
 		return ArchiveManifest{}, err
 	}
 	return manifest, nil
+}
+
+func requireNewOutput(paths ...string) error {
+	for _, path := range paths {
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("maintenance output already exists: %s", path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func Vacuum(ctx context.Context, db *sql.DB) error {

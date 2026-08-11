@@ -1,47 +1,24 @@
 # Perseus Studio Project Health Scorecard
 
-This scorecard records verifiable engineering evidence. The release target is **9.0 / 10 or better**, but a score is not published unless the listed runtime gates have passed for the same revision.
+This document defines the scoring policy and responsibility register. The current
+release score is generated from validated schema-v2 evidence at
+`test-results/PROJECT_HEALTH_SCORECARD.generated.md`; it is never maintained by
+hand in this tracked file.
 
-## Current Score
+## Scoring Policy
 
-Baseline at commit `e45afc5`: **8.6 / 10**.
+The generator starts from 10.0 only after the strict release gate passes. It
+applies explicit deductions for known deployment and verification boundaries:
 
-Current evidence-backed score: **9.1 / 10 at commit `48ea8ad`**.
+- Single-instance SQLite deployment boundary: `-0.2`.
+- In-memory abuse counters reset after restart: `-0.1`.
+- Broad files retained in the responsibility register: `-0.1`.
+- Remote CI is absent from local evidence: `-0.2`.
+- Live third-party provider evaluation is unverified: `-0.3`.
 
-The score is based on the local release gate, 30-minute soak, provider matrix,
-Docker identity/readiness, and the production database maintenance run recorded
-on 2026-08-11. Live third-party provider evaluation remains `unverified` because
-no real provider credentials were configured; this is an explicit residual risk,
-not an inferred pass.
-
-| Gate | Status | Evidence required |
-|---|---|---|
-| Single Agent runtime | proven | One `kernel_v3 + runTurnEngine` production path; legacy data is read-only migration input. |
-| Transactional terminal event | proven | Store/API concurrency and idempotency tests for `FinalizeRunWithEvent`. |
-| HTTP and container security | proven | CORS, CSRF, trusted proxy, body-limit and rate-limit tests; image runs as UID/GID 10001. |
-| Persistent multi-user scheduling | proven | Unit tests plus two Docker load runs. The primary run completed 100/100 Runs for 20 users with provider peak concurrency 4; the restart run completed 10/10 without duplicate mutation. |
-| Browser Agent lifecycle | proven | 46 Docker Playwright scenarios passed and one optional live-provider case skipped. Coverage includes offline preview recovery, slow multi-image persistence, three provider stream protocols, queue/commentary, replay, 429, EOF, note edit/one history, user input/choice, and workspace UI. |
-| Release image | proven | The tested image reports health/readiness 200, runs as UID/GID 10001, and reports SQLite `integrity_check=ok`. The normal 8080 data replacement was then verified after backup, archive, and VACUUM. |
-
-## Weighted Evidence
-
-| Area | Weight | Score | Evidence | Remaining risk |
-|---|---:|---:|---|---|
-| Agent architecture and maintainability | 2.0 | 1.8 | One `kernel_v3 + runTurnEngine` production path, canonical `ToolManifest`, typed item history, old runtime paths removed from execution. | Several intentionally broad orchestration files remain under responsibility review. |
-| Event, data, and recovery integrity | 2.0 | 1.9 | Transactional terminal event/barrier, shared durable Run/Task tailer, contiguous SSE replay, offline preview recovery, restart recovery, 10,000-event and concurrent finalizer tests. | Single-instance SQLite is an explicit deployment boundary. |
-| HTTP, authentication, and operations | 2.0 | 1.8 | Same-origin default, CSRF/CORS tests, trusted proxy policy, rate limits, bounded bodies/timeouts, non-root image, readiness, explicit permission repair, inspect/archive/vacuum tools, and Compose limits. | In-memory abuse limits reset on process restart by design; archive application is intentionally an operator action. |
-| Product correctness and resilience | 2.0 | 1.9 | Browser fault injection proves preview reconnect, final authoritative handoff, reading-anchor retention, no duplicate history, slow multi-image persistence, and protocol-equivalent provider behavior. | Real third-party gateways can still deviate from their declared protocol. |
-| Automated verification and delivery | 2.0 | 1.7 | Full Go suite, 157 frontend unit tests, UI/structure gates, production build, 46 passing Playwright cases, 100-Run load gate, 30-minute/7,400-Run soak, release evidence JSON, and nightly soak workflow. | Remote CI and optional live-provider eval remain unverified for this local release. |
-
-## Release Evidence
-
-- Release gate: passed; the exact tested commit is recorded in `test-results/release-evidence.json` and must match the current release candidate.
-- Soak: 30 minutes, 74 cycles, 7,400 Runs, no failures, no SQLite busy errors, maximum API health p95 29.603 ms, maximum RSS 56,455,332 bytes.
-- Production database: full integrity `ok` before and after maintenance; `541,679,616` bytes before VACUUM and `477,544,448` bytes after, reclaiming `64,135,168` bytes.
-- Production backup: `/data/backups/app-before-maintenance-20260811-030339.db`, SHA-256 `c712a5799d6aac8562bc2ee8fe6c103584561c965a2be491ebbf10b5d75377ac`.
-- Archive: 90-day archive applied with zero eligible records; archive manifest was written and verified.
-- Protected data counts matched the verified backup: users, sessions, conversations, messages, Turn Items, tool calls, file history, chat attachments, message attachments, and trash items.
-- Provider live test: `unverified` because no real provider environment was configured.
+The generated report must bind the score to one clean commit and include E2E,
+fault, provider-matrix, load, soak, container, full SQLite integrity, backup and
+real temporary-restore evidence. Missing or corrupt evidence produces no score.
 
 ## Optimization Baseline
 
@@ -85,6 +62,7 @@ These production files cross the 450-line review threshold or sit near it. A thr
 | `backend/internal/api/agent_run_handlers.go` | Agent Run control routes plus the ordered SSE tailer: cursor parsing, durable replay, preview snapshot recovery, terminal barrier, cancel/resume and follow-up routing. | Keep the Run protocol boundary together while event persistence remains in the store and model execution remains in the run coordinator. If it grows again, extract only the reusable durable SSE tailer shared with tasks, not arbitrary route fragments. |
 | `backend/internal/store/agent_runs.go` | Agent Run schema, migration, lifecycle state, terminal sequence barrier and JSON projection. | Keep the Run aggregate schema and state transition contract together. Event append/replay stays in `agent_events.go`; split only if migration normalization becomes an independent migration package. |
 | `backend/internal/store/agent_events.go` | Durable Agent Run event append/replay, terminal barriers, user-resume transitions, and restart requeue transitions. | Keep the event lifecycle transactions together so sequence allocation, idempotency, and status barriers cannot drift. Split only if a separately reusable event-log package emerges for both Run and Task streams. |
+| `backend/internal/maintenance/maintenance.go` | Offline inspection, consistent backup, telemetry archive and VACUUM primitives shared by the maintenance CLI. | Keep the operation entrypoints together while restore verification and persistent output-path policy remain in dedicated files. Split only if archive encoding and compaction become independently reusable services. |
 | `src/hooks/chatRunStream.js` | One event-stream consumer that owns event ordering, assistant draft lifecycle, current-message presentation updates, progress projection, and terminal run settlement. | Keep event consumption in one ordered state machine. Pure payload normalization remains in `chatRunMessageState.js` and `chatRunStreamToolEvents.js`; split only if a new independent protocol responsibility appears. |
 | `src/hooks/useEditorTabs.js` | Editor-tab aggregate state, autosave coordination, authoritative file snapshots, conflicts, and transient AI edit previews. | Keep the tab aggregate in one hook while preview parsing and stream transport remain outside it. If preview interactions expand, extract a dedicated preview-state reducer rather than splitting by line count. |
 | `src/components/settings/ModelProviderSettings.jsx` | Model provider CRUD form and the explicit adapter, authentication, tool, vision, and context capability controls that must be saved as one coherent provider configuration. | Keep the configuration transaction in one form for now. Reusable field controls stay shared; split only if provider discovery or capability-catalog editing becomes an independent workflow. |
