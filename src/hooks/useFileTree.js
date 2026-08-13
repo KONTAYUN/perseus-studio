@@ -6,7 +6,7 @@ import {
   persistOpenFolders,
   readStoredOpenFolders,
 } from './ideUtils';
-import { filterNoteTree } from './noteTreeUtils.js';
+import { filterWorkspaceTree } from './noteTreeUtils.js';
 import { createFileTreeDownloadActions } from './fileTreeDownloadActions';
 import { createFileTreeMutationActions } from './fileTreeMutationActions';
 import { createNoteTransferActions } from './noteTransferActions.js';
@@ -56,7 +56,7 @@ export default function useFileTree({
     openConfirmDialog,
     submitFileDialog,
   } = useFileDialogState();
-  const files = decorateTree(filterNoteTree(treeData), openFolders);
+  const files = decorateTree(filterWorkspaceTree(treeData), openFolders);
   const flatFiles = flattenTree(files);
   const {
     clearSelection,

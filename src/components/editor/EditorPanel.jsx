@@ -1,24 +1,71 @@
-import React, { useRef, useState } from 'react';
-import { Download, FileCode2, PanelTop, X } from 'lucide-react';
-import { getNoteTitle, isNotePath } from '../../hooks/noteTreeUtils.js';
-import { Button } from '../ui';
+import React, { lazy, Suspense, useCallback, useRef, useState } from 'react';
+import { Code2, Eye, FileCode2, PanelTop, X } from 'lucide-react';
+import { apiUploadFile, workspaceFileContentUrl } from '../../api/client.js';
+import {
+  buildMarkdownAssetUploadPath,
+  getNoteAssetReferencePath,
+  getNoteTitle,
+  isMarkdownPath,
+  isNotePath,
+} from '../../hooks/noteTreeUtils.js';
+import { Button, SegmentedControl } from '../ui';
 import RichTextEditor from './richText/RichTextEditor.jsx';
+
+const WorkspaceMarkdownEditor = lazy(() => import('./WorkspaceMarkdownEditor.jsx'));
 
 export default function EditorPanel({ ide, editor, panelId }) {
   const tabsStripRef = useRef(null);
+  const sourceTextareaRef = useRef(null);
+  const markdownUploadContextRef = useRef(null);
   const [tabDropIndicator, setTabDropIndicator] = useState(null);
   const effectiveFilePath = editor.aiPreview?.path || editor.currentFilePath;
   const isCurrentNote = isNotePath(effectiveFilePath);
+  const isCurrentMarkdown = isMarkdownPath(effectiveFilePath);
   const activePreview = editor.aiPreview;
-    const previewContent =
-      activePreview && !activePreview.conflict && typeof activePreview.content === 'string'
-        ? activePreview.content
-        : editor.currentFileContent;
-    const usesLegacyPreviewContent =
-      activePreview?.is_new ||
-      (activePreview &&
-        typeof activePreview.content === 'string' &&
-        !Array.isArray(activePreview.changes));
+  const previewContent =
+    activePreview && !activePreview.conflict && typeof activePreview.content === 'string'
+      ? activePreview.content
+      : editor.currentFileContent;
+  const usesLegacyPreviewContent =
+    activePreview?.is_new ||
+    (activePreview &&
+      typeof activePreview.content === 'string' &&
+      !Array.isArray(activePreview.changes));
+
+  markdownUploadContextRef.current = {
+    filePath: effectiveFilePath,
+    setStatusMessage: editor.setEditorStatusMessage,
+    loadTree: ide.loadTree,
+  };
+
+  const uploadMarkdownImage = useCallback(async (file) => {
+    const { filePath, setStatusMessage, loadTree } = markdownUploadContextRef.current || {};
+    if (!file || !filePath) throw new Error('Markdown image upload requires an active file.');
+    const uploadPath = buildMarkdownAssetUploadPath(filePath, file.name);
+    const referencePath = getNoteAssetReferencePath(filePath, uploadPath);
+    try {
+      setStatusMessage?.('Uploading image...');
+      await apiUploadFile(uploadPath, file, false);
+      await loadTree?.();
+      setStatusMessage?.('Image inserted.');
+      return referencePath;
+    } catch (error) {
+      setStatusMessage?.(`Image upload failed: ${error.message}`);
+      throw error;
+    }
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!isCurrentMarkdown || editor.markdownViewState.markdownViewMode !== 'source') return;
+    const textarea = sourceTextareaRef.current;
+    if (!textarea) return;
+    textarea.scrollTop = editor.markdownViewState.markdownSourceScrollTop;
+    const contentLength = textarea.value.length;
+    textarea.setSelectionRange(
+      Math.min(editor.markdownViewState.markdownSelectionStart, contentLength),
+      Math.min(editor.markdownViewState.markdownSelectionEnd, contentLength)
+    );
+  }, [effectiveFilePath, editor.markdownViewState.markdownViewMode, isCurrentMarkdown]);
 
   const scrollTabsWithWheel = (event) => {
     const strip = tabsStripRef.current;
@@ -101,7 +148,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
                 const tabDisplayPath = tab.aiPreview?.path || tab.path;
                 return (
                   <div
-                    key={tab.path}
+                    key={tab.tabId || tab.aiPreview?.preview_id || tab.path}
                     role="button"
                     tabIndex={0}
                     data-testid={`editor-tab-${tab.path}`}
@@ -213,27 +260,26 @@ export default function EditorPanel({ ide, editor, panelId }) {
           </div>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          {editor.currentFilePath && editor.isTextFile && !isCurrentNote && (
-            <Button
-              data-testid="editor-download"
-              type="button"
-              variant="subtle"
-              size="xs"
-              draggable
-              onDragStart={(e) => {
-                e.stopPropagation();
-                ide.handleDownloadDragStart(e, editor.currentFilePath, editor.currentFileContent);
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                ide.downloadFile(editor.currentFilePath).catch((error) => console.error(error));
-              }}
-              className="h-8 px-2"
-              title="下载"
-            >
-              <Download size={13} />
-              <span className="hidden xl:inline">下载</span>
-            </Button>
+          {isCurrentMarkdown && (
+            <SegmentedControl
+              className="editor-markdown-mode-control"
+              value={editor.markdownViewState.markdownViewMode}
+              onChange={(markdownViewMode) => editor.updateMarkdownViewState({ markdownViewMode })}
+              options={[
+                {
+                  value: 'rich-text',
+                  testId: 'markdown-mode-rich-text',
+                  title: 'Visual Markdown editor',
+                  label: <><Eye size={13} /><span>{'\u53ef\u89c6\u5316'}</span></>,
+                },
+                {
+                  value: 'source',
+                  testId: 'markdown-mode-source',
+                  title: 'Edit Markdown source',
+                  label: <><Code2 size={13} /><span>{'\u6e90\u7801'}</span></>,
+                },
+              ]}
+            />
           )}
         </div>
       </div>
@@ -328,6 +374,14 @@ export default function EditorPanel({ ide, editor, panelId }) {
               <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
                 正在加载文件...
               </div>
+            ) : editor.currentFileType === 'image' ? (
+              <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-7">
+                <img
+                  src={workspaceFileContentUrl(effectiveFilePath)}
+                  alt={effectiveFilePath.split('/').pop() || 'workspace image'}
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
             ) : !editor.isTextFile ? (
               <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
                 {editor.currentFileNotice}
@@ -342,11 +396,48 @@ export default function EditorPanel({ ide, editor, panelId }) {
                 aiPreview={activePreview}
                 onAIEditReconciled={editor.acknowledgeAIEditReconciled}
               />
+            ) : isCurrentMarkdown && editor.markdownViewState.markdownViewMode === 'rich-text' ? (
+              <Suspense
+                fallback={
+                  <div className="flex h-full items-center justify-center text-sm text-gray-400 dark:text-gray-500">
+                    Loading Markdown editor...
+                  </div>
+                }
+              >
+                <WorkspaceMarkdownEditor
+                  key={effectiveFilePath}
+                  path={effectiveFilePath}
+                  content={previewContent}
+                  readOnly={(!!activePreview && !activePreview.conflict) || editor.isAuthoritativeSyncing}
+                  scrollTop={editor.markdownViewState.markdownRichTextScrollTop}
+                  onScrollTopChange={(markdownRichTextScrollTop) =>
+                    editor.updateMarkdownViewState({ markdownRichTextScrollTop })
+                  }
+                  onContentChange={editor.setCurrentFileContent}
+                  onStatusMessage={editor.setEditorStatusMessage}
+                  onImageUpload={uploadMarkdownImage}
+                  onOpenFile={(path) => ide.openFile(path)}
+                />
+              </Suspense>
             ) : (
               <textarea
+                ref={sourceTextareaRef}
                 data-testid="editor-textarea"
                 value={previewContent}
                 onChange={(e) => editor.setCurrentFileContent(e.target.value)}
+                onScroll={(e) => {
+                  if (isCurrentMarkdown) {
+                    editor.updateMarkdownViewState({ markdownSourceScrollTop: e.currentTarget.scrollTop });
+                  }
+                }}
+                onSelect={(e) => {
+                  if (isCurrentMarkdown) {
+                    editor.updateMarkdownViewState({
+                      markdownSelectionStart: e.currentTarget.selectionStart,
+                      markdownSelectionEnd: e.currentTarget.selectionEnd,
+                    });
+                  }
+                }}
                 readOnly={(!!activePreview && !activePreview.conflict) || editor.isAuthoritativeSyncing}
                 data-ai-preview={activePreview && !activePreview.conflict ? 'true' : undefined}
                 className="editor-textarea custom-scrollbar block h-full min-h-0 w-full resize-none overflow-y-auto overflow-x-hidden bg-transparent px-12 py-7 pb-36 leading-7 tracking-[0.012em] text-gray-800 outline-none placeholder-gray-400 dark:text-gray-300 dark:placeholder-gray-500 max-[900px]:px-8 max-[640px]:px-5"

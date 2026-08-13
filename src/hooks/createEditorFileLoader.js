@@ -1,5 +1,6 @@
 import { apiGet } from '../api/client';
 import { detectFileType } from './ideUtils';
+import { defaultMarkdownViewState } from '../components/editor/workspaceMarkdownUtils.js';
 
 export function createEditorFileLoader({
   editorLoadRequestRef,
@@ -22,6 +23,7 @@ export function createEditorFileLoader({
   isDirtyRef,
   setOpenTabs,
   setSavedFileContent,
+  setMarkdownViewState,
   setSelectedItemPath,
   setSelectedItemType,
   setEditorStatusMessage,
@@ -53,6 +55,7 @@ export function createEditorFileLoader({
     try {
       const fileType = detectFileType(path);
       setCurrentFilePath(path);
+      setMarkdownViewState?.(defaultMarkdownViewState(path));
       setCurrentFileType(fileType);
       setCurrentFileHash(hash || '');
       setCurrentFileVersionId(versionId || '');
@@ -81,6 +84,7 @@ export function createEditorFileLoader({
           previewOnly: false,
           userRevision: 0,
           savedUserRevision: 0,
+          ...defaultMarkdownViewState(path),
         });
         if (activatePanel) setActivePanel?.('editor');
         return;
@@ -110,6 +114,7 @@ export function createEditorFileLoader({
           previewOnly: false,
           userRevision: 0,
           savedUserRevision: 0,
+          ...defaultMarkdownViewState(path),
         });
         if (activatePanel) setActivePanel?.('editor');
         return;
@@ -145,6 +150,7 @@ export function createEditorFileLoader({
         previewOnly: false,
         userRevision: 0,
         savedUserRevision: 0,
+        ...defaultMarkdownViewState(file.path),
       });
       if (activatePanel) setActivePanel?.('editor');
     } catch (error) {

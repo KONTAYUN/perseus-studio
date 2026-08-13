@@ -5,10 +5,19 @@ export function isNotePath(path = '') {
   return lower.endsWith('.html');
 }
 
+export function isMarkdownPath(path = '') {
+  return /\.(?:md|markdown)$/i.test(String(path || ''));
+}
+
 export function getNoteTitle(path = '') {
   const name = String(path || '').split('/').pop() || '';
   if (name.toLowerCase().endsWith('.html')) return name.slice(0, -5);
   return name;
+}
+
+export function getMarkdownTitle(path = '') {
+  const name = String(path || '').split('/').pop() || '';
+  return name.replace(/\.(?:md|markdown)$/i, '') || 'document';
 }
 
 export function getNotePathLabel(path = '') {
@@ -24,16 +33,16 @@ export function isSystemNoteAssetFolder(path = '') {
     .some((segment) => segment === '.assets');
 }
 
-export function filterNoteTree(items) {
+export function filterWorkspaceTree(items) {
   const next = [];
   for (const item of items || []) {
     if (!item?.path || isAnyTrashPath(item.path) || isSystemNoteAssetFolder(item.path)) continue;
     if (item.type === 'folder') {
-      const children = filterNoteTree(item.children || []);
+      const children = filterWorkspaceTree(item.children || []);
       next.push({ ...item, children });
       continue;
     }
-    if (isNotePath(item.path)) next.push({ ...item });
+    next.push({ ...item });
   }
   return next;
 }
@@ -53,6 +62,19 @@ export function buildNoteAssetUploadPath(notePath, fileName) {
   const noteTitle = getNoteTitle(normalizedNote) || 'note';
   const timestamp = Date.now();
   const assetFolder = parentPath ? `${parentPath}/.assets/${noteTitle}` : `.assets/${noteTitle}`;
+  return `${assetFolder}/${timestamp}-${cleanedName}`;
+}
+
+export function buildMarkdownAssetUploadPath(markdownPath, fileName) {
+  const normalizedPath = String(markdownPath || '').trim().replace(/\\/g, '/');
+  const sourceName = String(fileName || 'asset').replace(/\\/g, '/').split('/').pop() || 'asset';
+  const cleanedName = sourceName.replace(/[:*?"<>|]/g, '-').replace(/\s+/g, '-');
+  const parentPath = getParentPath(normalizedPath);
+  const documentTitle = getMarkdownTitle(normalizedPath);
+  const timestamp = Date.now();
+  const assetFolder = parentPath
+    ? `${parentPath}/.assets/${documentTitle}`
+    : `.assets/${documentTitle}`;
   return `${assetFolder}/${timestamp}-${cleanedName}`;
 }
 

@@ -3,75 +3,91 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"webide-backend/internal/workspace"
 )
 
-func (m *editPreviewManager) buildSnapshots(ctx context.Context, toolName, partial string) []editPreviewSnapshot {
+func (m *editPreviewManager) buildSnapshots(ctx context.Context, toolName, partial string) ([]editPreviewSnapshot, int) {
 	if ctx.Err() != nil || m.service == nil || m.userID == "" {
-		return nil
+		return nil, 0
 	}
 	files, err := m.service.factory.Workspace(m.userID)
 	if err != nil {
-		return nil
+		return nil, 0
 	}
 	switch toolName {
 	case "create_workspace_note":
+		if !topLevelJSONStringFieldComplete(partial, "path") {
+			return nil, 1
+		}
 		var args struct {
 			Path string `json:"path"`
 			HTML string `json:"html"`
 		}
 		if !decodePartialJSONObject(partial, &args) {
-			return nil
+			return nil, 0
 		}
 		args.Path = strings.TrimSpace(args.Path)
 		if args.Path == "" || !strings.HasSuffix(strings.ToLower(args.Path), ".html") {
-			return nil
+			return nil, 0
 		}
 		if _, err := files.ReadFile(args.Path); err == nil {
-			return nil
+			return nil, 0
 		}
 		content := workspace.SanitizeHTMLFragment(args.HTML)
 		if strings.TrimSpace(content) == "" {
-			return nil
+			return nil, 0
 		}
-		return []editPreviewSnapshot{{Path: args.Path, Content: content, Operation: "create", IsNew: true}}
+		return []editPreviewSnapshot{{TargetID: "target_0", TargetIndex: 0, Path: args.Path, PathComplete: true, Content: content, Operation: "create", IsNew: true}}, 0
 	case "edit_workspace_note_blocks":
+		if !topLevelJSONStringFieldComplete(partial, "path") {
+			return nil, 1
+		}
 		var args noteBlockEditArgs
 		if !decodePartialJSONObject(partial, &args) {
-			return nil
+			return nil, 0
 		}
 		version := firstNonEmpty(args.DocumentVersion, args.DocHash)
 		if args.Path == "" || version == "" || len(args.Edits) == 0 {
-			return nil
+			return nil, 0
 		}
 		read, err := files.ReadFile(args.Path)
 		if err != nil {
-			return nil
+			return nil, 0
 		}
 		doc := buildNoteBlockDocument(read.Content)
 		if !noteDocumentVersionMatches(version, doc.DocHash) {
-			return nil
+			return nil, 0
 		}
 		content, _, err := applyNoteBlockEdits(read.Content, args.Edits)
 		if err != nil {
-			return nil
+			return nil, 0
 		}
 		return []editPreviewSnapshot{{
-			Path: args.Path, BaseHash: read.Hash, DocumentVersion: doc.DocHash, Content: content,
+			TargetID: "target_0", TargetIndex: 0, Path: args.Path, PathComplete: true,
+			BaseHash: read.Hash, DocumentVersion: doc.DocHash, Content: content,
 			Operation: "edit_note_blocks", Changes: previewNoteBlockChanges(args.Edits),
-		}}
+		}}, 0
 	case "apply_workspace_patch":
 		var args struct {
 			Patch string `json:"patch"`
 		}
 		if !decodePartialJSONObject(partial, &args) {
-			return nil
+			return nil, 0
 		}
-		return buildWorkspacePatchPreviewSnapshots(files, args.Patch)
+		patchFieldComplete := topLevelJSONStringFieldComplete(partial, "patch")
+		patchText, incompletePath := completePatchPreviewInput(args.Patch, patchFieldComplete)
+		if patchText == "" {
+			if incompletePath {
+				return nil, 1
+			}
+			return nil, 0
+		}
+		return buildWorkspacePatchPreviewSnapshots(files, patchText), boolInt(incompletePath)
 	default:
-		return nil
+		return nil, 0
 	}
 }
 
@@ -186,7 +202,7 @@ func buildWorkspacePatchPreviewSnapshots(files *workspace.Service, patchText str
 		return nil
 	}
 	var snapshots []editPreviewSnapshot
-	for _, op := range patch.Operations {
+	for index, op := range patch.Operations {
 		path := strings.TrimSpace(op.Path)
 		if path == "" {
 			continue
@@ -197,7 +213,8 @@ func buildWorkspacePatchPreviewSnapshots(files *workspace.Service, patchText str
 				continue
 			}
 			snapshots = append(snapshots, editPreviewSnapshot{
-				Path: path, Content: strings.Join(op.Lines, ""), Operation: "add", IsNew: true,
+				TargetID: "target_" + strconv.Itoa(index), TargetIndex: index,
+				Path: path, PathComplete: true, Content: strings.Join(op.Lines, ""), Operation: "add", IsNew: true,
 			})
 		case workspacePatchUpdate:
 			read, err := files.ReadFile(path)
@@ -213,7 +230,8 @@ func buildWorkspacePatchPreviewSnapshots(files *workspace.Service, patchText str
 				target = strings.TrimSpace(op.MovePath)
 			}
 			snapshots = append(snapshots, editPreviewSnapshot{
-				Path: target, BaseHash: read.Hash, Content: content, Operation: "update",
+				TargetID: "target_" + strconv.Itoa(index), TargetIndex: index,
+				Path: target, PathComplete: true, BaseHash: read.Hash, Content: content, Operation: "update",
 			})
 		case workspacePatchDelete:
 			read, err := files.ReadFile(path)
@@ -221,7 +239,8 @@ func buildWorkspacePatchPreviewSnapshots(files *workspace.Service, patchText str
 				continue
 			}
 			snapshots = append(snapshots, editPreviewSnapshot{
-				Path: path, BaseHash: read.Hash, Content: read.Content, Operation: "delete", Deleted: true,
+				TargetID: "target_" + strconv.Itoa(index), TargetIndex: index,
+				Path: path, PathComplete: true, BaseHash: read.Hash, Content: read.Content, Operation: "delete", Deleted: true,
 			})
 		}
 	}

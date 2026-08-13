@@ -64,6 +64,8 @@ export function SegmentedControl({ options = [], value, onChange, className = ''
             className="motion-button ui-segmented-option"
             data-active={active ? 'true' : 'false'}
             aria-pressed={active}
+            data-testid={option.testId}
+            title={option.title}
             onClick={() => onChange?.(option.value)}
           >
             {option.label}

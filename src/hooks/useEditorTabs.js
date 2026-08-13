@@ -13,7 +13,17 @@ import {
 import useActiveEditorTabSync from './useActiveEditorTabSync';
 import useEditorTabAutoSave from './useEditorTabAutoSave';
 import useEditorTabRefSync from './useEditorTabRefSync';
-import { canApplyAIEditPreviewDelta, mergeAIEditPreview } from './aiPreviewState';
+import {
+  canApplyAIEditPreviewDelta,
+  mergeAIEditPreview,
+  mergePreviewTabByIdentity,
+  removeOrphanedMutationPreviewTabs,
+} from './aiPreviewState';
+import {
+  defaultMarkdownViewState,
+  markdownViewStateFromTab,
+} from '../components/editor/workspaceMarkdownUtils.js';
+import { isNotePath } from './noteTreeUtils.js';
 
 export default function useEditorTabs({
   confirm,
@@ -41,6 +51,7 @@ export default function useEditorTabs({
   const [aiPreview, setAIEditPreviewState] = useState(null);
   const [userRevision, setUserRevision] = useState(0);
   const [savedUserRevision, setSavedUserRevision] = useState(0);
+  const [markdownViewState, setMarkdownViewState] = useState(defaultMarkdownViewState());
   const isAuthoritativeSyncing =
     !!aiPreview && ['previewing', 'committing', 'reconciling'].includes(aiPreview.status);
 
@@ -64,6 +75,13 @@ export default function useEditorTabs({
       notify?.(message, options);
     }
   }, [notify]);
+
+  function markdownStateForTab(tab = {}) {
+    return markdownViewStateFromTab({
+      ...tab,
+      path: tab.aiPreview?.path || tab.previewSourcePath || tab.path,
+    });
+  }
 
   const isTextFile = currentFileType === 'text';
   const isDirty =
@@ -104,6 +122,7 @@ export default function useEditorTabs({
     savedFileContent,
     userRevision,
     savedUserRevision,
+    markdownViewState,
     setOpenTabs,
   });
 
@@ -146,6 +165,7 @@ export default function useEditorTabs({
     setIsEditorLoading,
     setOpenTabs,
     setSavedFileContent,
+    setMarkdownViewState,
     setSelectedItemPath,
     setSelectedItemType,
   });
@@ -192,6 +212,7 @@ export default function useEditorTabs({
     setCurrentFileNotice(tab.notice || '');
     setExternalFileConflict(tab.conflict || null);
     setAIEditPreviewState(tab.aiPreview || null);
+    setMarkdownViewState(markdownStateForTab(tab));
     setEditorStatusMessageState(tab.statusMessage || '');
     setSelectedItemPath?.(tab.path);
     setSelectedItemType?.('file');
@@ -287,6 +308,7 @@ export default function useEditorTabs({
       aiPreview,
       userRevision,
       savedUserRevision,
+      ...markdownViewState,
       updatedAt: Date.now(),
       ...overrides,
     };
@@ -314,6 +336,7 @@ export default function useEditorTabs({
     setCurrentFileNotice(snapshot.notice || '');
     setExternalFileConflict(snapshot.conflict || null);
     setAIEditPreviewState(snapshot.aiPreview || null);
+    setMarkdownViewState(markdownStateForTab(snapshot));
     setEditorStatusMessageState(snapshot.statusMessage || '');
     setSelectedItemPath?.(snapshot.path);
     setSelectedItemType?.('file');
@@ -416,6 +439,7 @@ export default function useEditorTabs({
     setAIEditPreviewState(null);
     setUserRevisionState(0);
     setSavedUserRevisionState(0);
+    setMarkdownViewState(defaultMarkdownViewState());
     setEditorStatusMessage('');
     setActiveTabPath('');
   }
@@ -425,6 +449,13 @@ export default function useEditorTabs({
     setExternalFileConflict(null);
     setEditorStatusMessage('已保留本地修改；如需写回磁盘，请手动保存。', { tone: 'warning' });
     setErrorMessage?.('');
+  }
+
+  function updateMarkdownViewState(patch) {
+    setMarkdownViewState((current) => ({
+      ...current,
+      ...(typeof patch === 'function' ? patch(current) : patch),
+    }));
   }
 
   async function reloadCurrentFileFromConflict() {
@@ -507,12 +538,26 @@ export default function useEditorTabs({
     const preview = mergeAIEditPreview(currentPreview, event);
     cancelPendingAutoSave();
     if (existingPreview) {
-      const nextTabs = currentTabs.map((tab) =>
-        tab.path === existingPreview.path ? { ...tab, aiPreview: preview } : tab
+      const merged = mergePreviewTabByIdentity(currentTabs, previewID, path, preview);
+      if (!merged) return false;
+      const previousPath = merged.previousPath;
+      const nextTabs = merged.tabs.map((tab) =>
+        tab.aiPreview?.preview_id === previewID
+          ? { ...tab, fileType: detectFileType(path) }
+          : tab
       );
       openTabsRef.current = nextTabs;
       setOpenTabs(nextTabs);
-      if (currentFilePathRef.current === existingPreview.path) setAIEditPreviewState(preview);
+      if (currentFilePathRef.current === previousPath) {
+        currentFilePathRef.current = path;
+        activeTabPathRef.current = path;
+        setCurrentFilePath(path);
+        setActiveTabPath(path);
+        setCurrentFileType(detectFileType(path));
+        setSelectedItemPath?.(path);
+        setSelectedItemType?.('file');
+        setAIEditPreviewState(preview);
+      }
       return true;
     }
     if (existing) {
@@ -520,6 +565,7 @@ export default function useEditorTabs({
       if (dirty) {
         openTabSnapshot({
           path: `__ai_preview__/${previewID}`,
+          tabId: previewID,
           content: '',
           savedContent: '',
           hash: event.base_hash || existing.hash || '',
@@ -533,6 +579,7 @@ export default function useEditorTabs({
           previewSourcePath: path,
           userRevision: existing.userRevision || 0,
           savedUserRevision: existing.savedUserRevision || 0,
+          ...markdownStateForTab({ ...existing, path }),
         });
         return true;
       }
@@ -547,6 +594,7 @@ export default function useEditorTabs({
 
     openTabSnapshot({
       path,
+      tabId: previewID,
       content: '',
       savedContent: '',
       hash: event.base_hash || '',
@@ -573,6 +621,7 @@ export default function useEditorTabs({
     currentFilePathRef,
     isDirtyRef,
     applyAuthoritativeFileSnapshot,
+    reconcileAuthoritativePreviewTabs,
     loadFileIntoEditor,
     openTabsRef,
     setActiveTabPath,
@@ -618,8 +667,9 @@ export default function useEditorTabs({
     cancelPendingAutoSave();
     const nextRevision = Math.max(userRevisionRef.current, savedUserRevisionRef.current);
     const documentVersion = event.document_version || file.document_version || file.hash || event.hash || '';
+    const requiresEditorReconciliation = isNotePath(path);
     const nextTab = (tab) => {
-      const reconcilingPreview = tab.aiPreview
+      const reconcilingPreview = requiresEditorReconciliation && tab.aiPreview
         ? {
             ...tab.aiPreview,
             status: 'reconciling',
@@ -643,7 +693,7 @@ export default function useEditorTabs({
       };
     };
     const activeTab = openTabsRef.current.find((tab) => tab.path === path);
-    const reconcilingPreview = activeTab?.aiPreview
+    const reconcilingPreview = requiresEditorReconciliation && activeTab?.aiPreview
       ? {
           ...activeTab.aiPreview,
           status: 'reconciling',
@@ -668,6 +718,30 @@ export default function useEditorTabs({
     setEditorStatusMessageState('');
   }
 
+  function reconcileAuthoritativePreviewTabs(event = {}) {
+    const mutationID = event.mutation_id || '';
+    if (!mutationID) return;
+    const changedPaths = new Set(
+      (event.changed_paths?.length ? event.changed_paths : [event.path]).filter(Boolean)
+    );
+    if (changedPaths.size === 0) return;
+    const currentTabs = openTabsRef.current;
+    const nextTabs = removeOrphanedMutationPreviewTabs(currentTabs, event);
+    if (nextTabs.length === currentTabs.length) return;
+    openTabsRef.current = nextTabs;
+    setOpenTabs(nextTabs);
+    if (!nextTabs.some((tab) => tab.path === currentFilePathRef.current)) {
+      const survivingTarget = nextTabs.find(
+        (tab) =>
+          tab.aiPreview?.mutation_id === mutationID &&
+          changedPaths.has(tab.aiPreview?.path || tab.path)
+      );
+      const fallback = survivingTarget || nextTabs[nextTabs.length - 1];
+      if (fallback) void activateTab(fallback.path, { skipFlush: true });
+      else closeCurrentFile();
+    }
+  }
+
   function acknowledgeAIEditReconciled(previewID) {
     if (!previewID) return;
     setOpenTabs((current) =>
@@ -689,6 +763,7 @@ export default function useEditorTabs({
     aiPreview,
     acknowledgeAIEditReconciled,
     applyAIEditPreview,
+    reconcileAuthoritativePreviewTabs,
     applyPathUpdate,
     clearPathState,
     closeCurrentFile,
@@ -713,6 +788,7 @@ export default function useEditorTabs({
     isAuthoritativeSyncing,
     isSavingFile,
     isTextFile,
+    markdownViewState,
     keepLocalFileChanges,
     loadFileIntoEditor,
     openFile,
@@ -726,6 +802,7 @@ export default function useEditorTabs({
     restoreFileVersion,
     setCurrentFileContent: applyUserFileContent,
     setEditorStatusMessage,
+    updateMarkdownViewState,
     userRevision,
     savedUserRevision,
   };

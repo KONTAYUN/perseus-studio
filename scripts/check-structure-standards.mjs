@@ -104,6 +104,9 @@ function checkStructuredStatePolicy(file) {
     [/\bextractWorkspacePatchBlock\b/g, 'workspace patches must come from apply_workspace_patch arguments, not assistant text'],
     [/\bmake\(chan\s+(?:tasks\.)?Event\s*,\s*\d+/g, 'durable events must not travel through a bounded in-memory payload queue'],
     [/\blastEventSeq\s*=\s*Math\.max\(/g, 'event cursors must advance contiguously after successful handling, not jump to the maximum seen sequence'],
+    [/\bfilterNoteTree\b/g, 'workspace visibility must not be coupled to the HTML rich-text note type'],
+    [/stableEditPreviewID\([^\n)]*(?:snapshot\.)?[Pp]ath/g, 'preview identity must use a structured target id, not a streamed path'],
+    [/toolID\s*\+\s*["'`]\\x00["'`]\s*\+\s*snapshot\.Path/g, 'preview manager keys must use stable structured target ids, not streamed paths'],
   ];
   for (const [pattern, message] of patterns) {
     for (const match of source.matchAll(pattern)) {

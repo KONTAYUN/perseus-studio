@@ -372,6 +372,42 @@ async function fileEditResponse(response, request, payload, scenario) {
   response.end('{"error":{"code":"fixture_file_edit_state_failed"}}');
 }
 
+async function fileCreateResponse(response, request, payload) {
+  const path = fixturePath(payload);
+  const lastCall = lastAssistantToolCall(payload);
+  const lastName = lastCall?.function?.name || '';
+
+  if (!lastCall) {
+    await respondTool(response, request, payload, 'fixture-file-create-load-tools', 'load_perseus_toolset', { toolset: 'workspace' }, 'Loading the workspace tools.');
+    return;
+  }
+  if (lastName === 'load_perseus_toolset') {
+    const patch = [
+      '*** Begin Patch',
+      `*** Add File: ${path}`,
+      '+# Seedance storyboard',
+      '+',
+      '+A deterministic streamed Markdown file.',
+      '+',
+      '+```text',
+      '+streamed fixture text',
+      '+```',
+      '*** End Patch',
+    ].join('\n');
+    await respondTool(response, request, payload, 'fixture-file-create-mutation', 'apply_workspace_patch', { patch }, 'Creating one streamed workspace file.');
+    return;
+  }
+  if (lastName === 'apply_workspace_patch') {
+    await respondTool(response, request, payload, 'fixture-file-create-complete', 'attempt_completion', {
+      result: 'E2E file-create completed.',
+    }, 'The workspace file is committed and visible.');
+    return;
+  }
+
+  response.writeHead(500, { 'Content-Type': 'application/json' });
+  response.end('{"error":{"code":"fixture_file_create_state_failed"}}');
+}
+
 function initialToolChunks(scenario) {
   const commentary = scenario === 'replay'
     ? 'Replay-safe commentary.'
@@ -455,6 +491,10 @@ const server = http.createServer((request, response) => {
     }
     if (scenario === 'file-edit' || scenario === 'file-edit-long') {
       await fileEditResponse(response, request, payload, scenario);
+      return;
+    }
+    if (scenario === 'file-create') {
+      await fileCreateResponse(response, request, payload);
       return;
     }
     if (scenario === 'image' && !containsToolResult && !hasProviderImage(payload)) {

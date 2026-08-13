@@ -101,6 +101,75 @@ test('Agent note edit reaches the open editor once and creates one history versi
   }
 });
 
+test('streamed Markdown creation opens one preview tab and appears in the workspace without refresh', async ({ page }) => {
+  const path = `Seedance-storyboard-${Date.now()}.md`;
+  try {
+    await page.getByTestId('chat-input').fill(`[fixture:file-create] [path:${path}] Create one Markdown file.`);
+    await page.getByTestId('chat-send-button').click();
+    await expect(page.getByText('E2E file-create completed.', { exact: true })).toBeVisible({ timeout: 30_000 });
+
+    await expect(page.getByTestId(`file-row-${path}`)).toBeVisible();
+    await expect(page.getByTestId(`editor-tab-${path}`)).toHaveCount(1);
+    await expect(page.getByTestId('editor-download')).toHaveCount(0);
+    await expect(page.getByTestId('markdown-editor')).toContainText('A deterministic streamed Markdown file.');
+    await expect(page.getByText('Text', { exact: true })).toBeVisible();
+
+    const visualEditor = page.getByTestId('markdown-editor').locator('[contenteditable="true"]').first();
+    await expect(visualEditor).toBeVisible();
+    await visualEditor.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.insertText('visual edit');
+    await expect(page.getByTestId('markdown-editor')).toContainText('visual edit');
+
+    await page.getByTestId('markdown-mode-source').click();
+    await expect(page.getByTestId('editor-textarea')).toContainText('```');
+    await page.getByTestId('editor-textarea').fill('# Seedance storyboard\n\n```text\nupdated source\n```');
+    await page.getByTestId('markdown-mode-rich-text').click();
+    await expect(page.getByTestId('markdown-editor')).toContainText('updated source');
+    await expect(page.getByText('Text', { exact: true })).toBeVisible();
+
+    await page.waitForTimeout(1_200);
+    const saved = await apiGet(page, `/api/files/read?path=${encodeURIComponent(path)}`);
+    expect(saved.content).toContain('updated source');
+    await expect(page.getByTestId(`download-${path}`)).toHaveCount(1);
+  } finally {
+    await apiPost(page, '/api/files/delete', { path }).catch(() => {});
+  }
+});
+
+test('Markdown tabs keep independent modes and workspace links open sibling files', async ({ page }) => {
+  const suffix = Date.now();
+  const firstPath = `markdown-mode-${suffix}-a.md`;
+  const secondPath = `markdown-mode-${suffix}-b.markdown`;
+  await apiPost(page, '/api/files/create', {
+    path: firstPath,
+    content: `# First document\n\n[Open sibling](./${secondPath})`,
+  });
+  await apiPost(page, '/api/files/create', {
+    path: secondPath,
+    content: '# Second document',
+  });
+  try {
+    await page.reload();
+    await page.getByTestId(`file-row-${firstPath}`).click();
+    await expect(page.getByTestId('markdown-editor')).toContainText('First document');
+    await page.getByRole('link', { name: 'Open sibling' }).click();
+    await expect(page.getByTestId(`editor-tab-${secondPath}`)).toHaveAttribute('data-active', 'true');
+    await expect(page.getByTestId('markdown-editor')).toContainText('Second document');
+
+    await page.getByTestId(`editor-tab-${firstPath}`).click();
+    await page.getByTestId('markdown-mode-source').click();
+    await expect(page.getByTestId('editor-textarea')).toContainText('Open sibling');
+    await page.getByTestId(`editor-tab-${secondPath}`).click();
+    await expect(page.getByTestId('markdown-editor')).toContainText('Second document');
+    await page.getByTestId(`editor-tab-${firstPath}`).click();
+    await expect(page.getByTestId('editor-textarea')).toContainText('Open sibling');
+  } finally {
+    await apiPost(page, '/api/files/delete', { path: firstPath }).catch(() => {});
+    await apiPost(page, '/api/files/delete', { path: secondPath }).catch(() => {});
+  }
+});
+
 test('open user input resumes the same Agent run without synthetic choices', async ({ page }) => {
   await page.getByTestId('chat-input').fill('[fixture:user-input] Request one external result.');
   await page.getByTestId('chat-send-button').click();

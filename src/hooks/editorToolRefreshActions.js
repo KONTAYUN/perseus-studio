@@ -17,6 +17,7 @@ export function createEditorToolRefreshActions({
   currentFilePathRef,
   isDirtyRef,
   applyAuthoritativeFileSnapshot,
+  reconcileAuthoritativePreviewTabs,
   loadFileIntoEditor,
   openTabsRef,
   setActiveTabPath,
@@ -55,6 +56,9 @@ export function createEditorToolRefreshActions({
     const dirty = isDirtyRef.current;
 
     for (const event of successfulEvents) {
+      if (event.authoritative === true) {
+        reconcileAuthoritativePreviewTabs?.(event);
+      }
       const moves = pathMovesFromToolEvent(event);
       if (moves.length > 0) {
         for (const move of moves) {

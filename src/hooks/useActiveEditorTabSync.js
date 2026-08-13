@@ -16,6 +16,7 @@ export default function useActiveEditorTabSync({
   savedFileContent,
   userRevision,
   savedUserRevision,
+  markdownViewState,
   setOpenTabs,
 }) {
   useEffect(() => {
@@ -39,5 +40,6 @@ export default function useActiveEditorTabSync({
     userRevision,
     savedUserRevision,
     editorStatusMessage,
+    markdownViewState,
   ]);
 }

@@ -21,6 +21,18 @@ func TestCompletePartialJSONObjectClosesStringAndContainers(t *testing.T) {
 	}
 }
 
+func TestTopLevelJSONStringFieldCompleteRejectsStreamedPathFragments(t *testing.T) {
+	if topLevelJSONStringFieldComplete(`{"path":"draft`, "path") {
+		t.Fatal("unfinished path string must not be treated as complete")
+	}
+	if !topLevelJSONStringFieldComplete(`{"path":"draft.md","content":"still streaming`, "path") {
+		t.Fatal("closed path must remain usable while a later field streams")
+	}
+	if !topLevelJSONStringFieldComplete(`{"metadata":{"path":"wrong"},"path":"right.md","content":"x"}`, "path") {
+		t.Fatal("top-level path was not recognized")
+	}
+}
+
 func TestEditPreviewManagerPublishesSafeCreatePreviewWithoutWriting(t *testing.T) {
 	env := newTestAIEnv(t)
 	ctx := context.Background()
@@ -66,6 +78,80 @@ func TestEditPreviewManagerPublishesSafeCreatePreviewWithoutWriting(t *testing.T
 	})
 	if len(eventTypes) != 2 || eventTypes[1] != "workspace_edit_preview_completed" {
 		t.Fatalf("expected completed preview event, got %#v", eventTypes)
+	}
+}
+
+func TestEditPreviewManagerDoesNotPublishPartialPatchPaths(t *testing.T) {
+	env := newTestAIEnv(t)
+	var eventTypes []string
+	var payloads []map[string]any
+	manager := newEditPreviewManager(env.service, RunOptions{
+		UserID: testUserID,
+		RunID:  "run-partial-path",
+		TransientEvent: func(eventType, _ string, payload map[string]any) {
+			eventTypes = append(eventTypes, eventType)
+			payloads = append(payloads, payload)
+		},
+		Event: func(eventType, _ string, payload map[string]any) {
+			eventTypes = append(eventTypes, eventType)
+			payloads = append(payloads, payload)
+		},
+	})
+
+	fragments := []string{
+		`{"patch":"*** Begin Patch\n*** Add File: 汐`,
+		`{"patch":"*** Begin Patch\n*** Add File: 汐塔_Seedance`,
+		`{"patch":"*** Begin Patch\n*** Add File: 汐塔_Seedance分镜提示词.md`,
+	}
+	for iteration := 0; iteration < 1000; iteration++ {
+		for _, fragment := range fragments {
+			manager.handle(context.Background(), ToolCallArgumentsDelta{
+				ToolCallID: "call-streamed-path", ToolName: "apply_workspace_patch", ArgumentsJSON: fragment,
+			}, false)
+		}
+	}
+	if len(eventTypes) != 0 {
+		t.Fatalf("partial patch paths opened previews: %#v", payloads)
+	}
+
+	manager.handle(context.Background(), ToolCallArgumentsDelta{
+		ToolCallID: "call-streamed-path", ToolName: "apply_workspace_patch",
+		ArgumentsJSON: `{"patch":"*** Begin Patch\n*** Add File: 汐塔_Seedance分镜提示词.md\n+# 标题\n*** End Patch"}`,
+	}, true)
+	if len(eventTypes) != 1 || eventTypes[0] != "workspace_edit_preview_started" {
+		t.Fatalf("complete target did not start exactly one preview: %#v", eventTypes)
+	}
+	if payloads[0]["path"] != "汐塔_Seedance分镜提示词.md" || payloads[0]["target_id"] != "target_0" || payloads[0]["path_complete"] != true {
+		t.Fatalf("unexpected stable target payload: %#v", payloads[0])
+	}
+	manager.complete("call-streamed-path", ToolEvent{Status: "success", Operation: "patch"})
+	if len(eventTypes) != 2 || eventTypes[1] != "workspace_edit_preview_completed" {
+		t.Fatalf("expected one terminal event, got %#v", eventTypes)
+	}
+}
+
+func TestEditPreviewManagerKeepsStableTargetsForMultiFilePatch(t *testing.T) {
+	env := newTestAIEnv(t)
+	var payloads []map[string]any
+	manager := newEditPreviewManager(env.service, RunOptions{
+		UserID: testUserID,
+		RunID:  "run-multi-target",
+		TransientEvent: func(_ string, _ string, payload map[string]any) {
+			payloads = append(payloads, payload)
+		},
+	})
+	arguments := `{"patch":"*** Begin Patch\n*** Add File: one.md\n+one\n*** Add File: two.md\n+two\n*** End Patch"}`
+	manager.handle(context.Background(), ToolCallArgumentsDelta{
+		ToolCallID: "call-multi", ToolName: "apply_workspace_patch", ArgumentsJSON: arguments,
+	}, true)
+	if len(payloads) != 2 {
+		t.Fatalf("multi-file patch preview count = %d, want 2", len(payloads))
+	}
+	if payloads[0]["target_id"] != "target_0" || payloads[1]["target_id"] != "target_1" {
+		t.Fatalf("unexpected target identities: %#v", payloads)
+	}
+	if payloads[0]["preview_id"] == payloads[1]["preview_id"] {
+		t.Fatal("independent patch targets reused one preview ID")
 	}
 }
 
@@ -182,16 +268,16 @@ func TestEditPreviewManagerPublishesBlockChangesWithoutWholeDocument(t *testing.
 	}
 }
 
-func TestStableEditPreviewIDUsesRunCallAndPath(t *testing.T) {
-	first := stableEditPreviewID("run-1", "call-1", "note.html")
-	if first == "" || first != stableEditPreviewID("run-1", "call-1", "note.html") {
+func TestStableEditPreviewIDUsesRunCallAndTarget(t *testing.T) {
+	first := stableEditPreviewID("run-1", "call-1", "target_0")
+	if first == "" || first != stableEditPreviewID("run-1", "call-1", "target_0") {
 		t.Fatalf("preview ID must be stable: %q", first)
 	}
-	if first == stableEditPreviewID("run-1", "call-2", "note.html") {
+	if first == stableEditPreviewID("run-1", "call-2", "target_0") {
 		t.Fatal("different tool calls must not reuse a preview ID")
 	}
-	if first == stableEditPreviewID("run-1", "call-1", "other.html") {
-		t.Fatal("different paths must not reuse a preview ID")
+	if first == stableEditPreviewID("run-1", "call-1", "target_1") {
+		t.Fatal("different targets must not reuse a preview ID")
 	}
 }
 

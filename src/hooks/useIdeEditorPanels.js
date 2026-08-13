@@ -119,7 +119,11 @@ export default function useIdeEditorPanels({
   function applyAIEditPreview(event) {
     if (!event?.path) return false;
     const existing = visibleEditorEntries().find(({ editor }) =>
-      editor.openTabs.some((tab) => tab.path === event.path)
+      editor.openTabs.some(
+        (tab) =>
+          (event.preview_id && tab.aiPreview?.preview_id === event.preview_id) ||
+          tab.path === event.path
+      )
     );
     const panelId = existing?.panel?.id || preferredEditorPanelId() || ensureEditorPanel();
     const target = existing?.editor || editorPanels[panelId] || editor1;

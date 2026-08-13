@@ -19,7 +19,10 @@ const (
 )
 
 type editPreviewSnapshot struct {
+	TargetID        string
+	TargetIndex     int
 	Path            string
+	PathComplete    bool
 	BaseHash        string
 	DocumentVersion string
 	Content         string
@@ -30,16 +33,21 @@ type editPreviewSnapshot struct {
 }
 
 type editPreviewMetrics struct {
-	RawArgumentDeltas  int
-	ParseableDeltas    int
-	ThrottledDeltas    int
-	DuplicateSnapshots int
+	RawArgumentDeltas       int
+	ParseableDeltas         int
+	ThrottledDeltas         int
+	DuplicateSnapshots      int
+	RejectedIncompletePaths int
+	TargetsEstablished      int
 }
 
 type activeEditPreview struct {
 	PreviewID       string
 	ToolID          string
+	TargetID        string
+	TargetIndex     int
 	Path            string
+	PathUpdates     int
 	Revision        int
 	Content         string
 	LastEmit        time.Time
@@ -95,13 +103,18 @@ func (m *editPreviewManager) handle(ctx context.Context, delta ToolCallArguments
 	}
 	metrics.RawArgumentDeltas++
 
-	snapshots := m.buildSnapshots(ctx, delta.ToolName, delta.ArgumentsJSON)
+	snapshots, incompletePaths := m.buildSnapshots(ctx, delta.ToolName, delta.ArgumentsJSON)
+	metrics.RejectedIncompletePaths += incompletePaths
 	if len(snapshots) > 0 {
 		metrics.ParseableDeltas++
 	}
 	now := time.Now()
 	for _, snapshot := range snapshots {
-		key := toolID + "\x00" + snapshot.Path
+		if !snapshot.PathComplete || strings.TrimSpace(snapshot.TargetID) == "" {
+			metrics.RejectedIncompletePaths++
+			continue
+		}
+		key := toolID + "\x00" + snapshot.TargetID
 		current := m.byKey[key]
 		if current != nil && current.Content == snapshot.Content {
 			metrics.DuplicateSnapshots++
@@ -120,13 +133,19 @@ func (m *editPreviewManager) handle(ctx context.Context, delta ToolCallArguments
 		eventType := "workspace_edit_preview_updated"
 		if current == nil {
 			current = &activeEditPreview{
-				PreviewID: stableEditPreviewID(m.runID, toolID, snapshot.Path),
-				ToolID:    toolID, Path: snapshot.Path,
+				PreviewID: stableEditPreviewID(m.runID, toolID, snapshot.TargetID),
+				ToolID:    toolID, TargetID: snapshot.TargetID, TargetIndex: snapshot.TargetIndex,
+				Path:    snapshot.Path,
 				Metrics: metrics,
 			}
 			m.byKey[key] = current
 			m.toolKeys[toolID] = append(m.toolKeys[toolID], key)
+			metrics.TargetsEstablished++
 			eventType = "workspace_edit_preview_started"
+		}
+		if current.Path != snapshot.Path {
+			current.Path = snapshot.Path
+			current.PathUpdates++
 		}
 		baseRevision := current.Revision
 		changedBlocks, removedBlocks := diffPreviewChanges(current.Changes, snapshot.Changes)
@@ -141,7 +160,8 @@ func (m *editPreviewManager) handle(ctx context.Context, delta ToolCallArguments
 		fullPayload := map[string]any{
 			"preview_id": current.PreviewID, "tool_call_id": toolID, "run_id": m.runID,
 			"mutation_id": previewMutationID(m.runID, toolID),
-			"path":        snapshot.Path, "base_hash": snapshot.BaseHash, "revision": current.Revision,
+			"target_id":   current.TargetID, "target_index": current.TargetIndex, "path_complete": true,
+			"path": snapshot.Path, "base_hash": snapshot.BaseHash, "revision": current.Revision,
 			"base_revision":    baseRevision,
 			"document_version": snapshot.DocumentVersion,
 			"operation":        snapshot.Operation, "changes": snapshot.Changes, "status": "previewing",
@@ -176,11 +196,11 @@ func (m *editPreviewManager) handle(ctx context.Context, delta ToolCallArguments
 	}
 }
 
-func stableEditPreviewID(runID, toolCallID, path string) string {
+func stableEditPreviewID(runID, toolCallID, targetID string) string {
 	raw := strings.Join([]string{
 		strings.TrimSpace(runID),
 		strings.TrimSpace(toolCallID),
-		normalizeWorkspaceEventPath(path),
+		strings.TrimSpace(targetID),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(raw))
 	return fmt.Sprintf("preview_%x", sum[:12])
@@ -225,7 +245,8 @@ func (m *editPreviewManager) finish(toolID, eventType, status, reason string, ev
 		payload := map[string]any{
 			"preview_id": current.PreviewID, "tool_call_id": toolID, "run_id": m.runID,
 			"mutation_id": previewMutationID(m.runID, toolID),
-			"path":        current.Path, "revision": current.Revision, "status": status,
+			"target_id":   current.TargetID, "target_index": current.TargetIndex, "path_complete": true,
+			"path": current.Path, "revision": current.Revision, "status": status,
 			"operation": event.Operation, "hash": event.Hash, "version_id": event.VersionID,
 			"document_version":          event.DocumentVersion,
 			"changes":                   current.Changes,
@@ -241,6 +262,9 @@ func (m *editPreviewManager) finish(toolID, eventType, status, reason string, ev
 			"parseable_argument_deltas": current.Metrics.ParseableDeltas,
 			"throttled_argument_deltas": current.Metrics.ThrottledDeltas,
 			"duplicate_snapshots":       current.Metrics.DuplicateSnapshots,
+			"rejected_incomplete_paths": current.Metrics.RejectedIncompletePaths,
+			"targets_established":       current.Metrics.TargetsEstablished,
+			"path_updates":              current.PathUpdates,
 		}
 		if reason != "" {
 			payload["reason"] = reason

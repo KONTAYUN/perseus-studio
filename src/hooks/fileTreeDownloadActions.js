@@ -1,6 +1,7 @@
 import {
   buildZipDownloadBlob,
   downloadBlob,
+  downloadWorkspaceFile,
   downloadText,
   handleDownloadDragStart,
   readTextFileForDownload,
@@ -21,8 +22,7 @@ export function createFileTreeDownloadActions({
 
   async function downloadFile(path) {
     try {
-      const file = await readTextFileForDownload(path);
-      downloadText(file.path, file.content);
+      await downloadWorkspaceFile(path);
     } catch (error) {
       console.error('downloadFile failed', error);
       setErrorMessage(error.message);

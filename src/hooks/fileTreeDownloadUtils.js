@@ -1,4 +1,4 @@
-import { apiGet } from '../api/client';
+import { apiGet, workspaceFileContentUrl } from '../api/client';
 import { collectDownloadFiles, createZipBlob, isTextPath } from './ideUtils';
 
 export function downloadBlob(fileName, blob) {
@@ -34,6 +34,19 @@ export async function readTextFileForDownload(path) {
   }
   const file = await apiGet(`/api/files/read?path=${encodeURIComponent(path)}`);
   return { path: file.path, content: file.content };
+}
+
+export async function downloadWorkspaceFile(path) {
+  if (isTextPath(path)) {
+    const file = await readTextFileForDownload(path);
+    downloadText(file.path, file.content);
+    return;
+  }
+  const response = await fetch(workspaceFileContentUrl(path), { credentials: 'include' });
+  if (!response.ok) {
+    throw new Error(`下载失败 (${response.status})`);
+  }
+  downloadBlob(path.split('/').pop() || 'download', await response.blob());
 }
 
 export async function buildZipDownloadBlob(items, treeData) {
