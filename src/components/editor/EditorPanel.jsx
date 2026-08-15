@@ -17,7 +17,11 @@ export default function EditorPanel({ ide, editor, panelId }) {
   const tabsStripRef = useRef(null);
   const sourceTextareaRef = useRef(null);
   const markdownUploadContextRef = useRef(null);
+  const editorActionsRef = useRef(editor);
+  const ideActionsRef = useRef(ide);
   const [tabDropIndicator, setTabDropIndicator] = useState(null);
+  editorActionsRef.current = editor;
+  ideActionsRef.current = ide;
   const effectiveFilePath = editor.aiPreview?.path || editor.currentFilePath;
   const isCurrentNote = isNotePath(effectiveFilePath);
   const isCurrentMarkdown = isMarkdownPath(effectiveFilePath);
@@ -53,6 +57,24 @@ export default function EditorPanel({ ide, editor, panelId }) {
       setStatusMessage?.(`Image upload failed: ${error.message}`);
       throw error;
     }
+  }, []);
+
+  const handleMarkdownContentChange = useCallback((content) => {
+    editorActionsRef.current.setCurrentFileContent(content);
+  }, []);
+
+  const handleMarkdownScrollTopChange = useCallback((scrollTopValue) => {
+    editorActionsRef.current.updateMarkdownViewState({
+      markdownRichTextScrollTop: scrollTopValue,
+    });
+  }, []);
+
+  const handleMarkdownStatusMessage = useCallback((message, options) => {
+    editorActionsRef.current.setEditorStatusMessage(message, options);
+  }, []);
+
+  const handleMarkdownOpenFile = useCallback((filePath) => {
+    ideActionsRef.current.openFile(filePath);
   }, []);
 
   React.useLayoutEffect(() => {
@@ -410,13 +432,11 @@ export default function EditorPanel({ ide, editor, panelId }) {
                   content={previewContent}
                   readOnly={(!!activePreview && !activePreview.conflict) || editor.isAuthoritativeSyncing}
                   scrollTop={editor.markdownViewState.markdownRichTextScrollTop}
-                  onScrollTopChange={(markdownRichTextScrollTop) =>
-                    editor.updateMarkdownViewState({ markdownRichTextScrollTop })
-                  }
-                  onContentChange={editor.setCurrentFileContent}
-                  onStatusMessage={editor.setEditorStatusMessage}
+                  onScrollTopChange={handleMarkdownScrollTopChange}
+                  onContentChange={handleMarkdownContentChange}
+                  onStatusMessage={handleMarkdownStatusMessage}
                   onImageUpload={uploadMarkdownImage}
-                  onOpenFile={(path) => ide.openFile(path)}
+                  onOpenFile={handleMarkdownOpenFile}
                 />
               </Suspense>
             ) : (

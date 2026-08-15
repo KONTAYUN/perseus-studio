@@ -112,7 +112,12 @@ test('streamed Markdown creation opens one preview tab and appears in the worksp
     await expect(page.getByTestId(`editor-tab-${path}`)).toHaveCount(1);
     await expect(page.getByTestId('editor-download')).toHaveCount(0);
     await expect(page.getByTestId('markdown-editor')).toContainText('A deterministic streamed Markdown file.');
-    await expect(page.getByText('Text', { exact: true })).toBeVisible();
+    const codeWrapper = page.locator('[class*="codeMirrorWrapper"]').first();
+    const codeToolbar = page.getByTestId('markdown-code-toolbar');
+    await expect(codeToolbar).toHaveCount(0);
+    await codeWrapper.locator('.cm-content').click();
+    await expect(codeToolbar).toBeVisible();
+    await expect(codeToolbar.locator('[role="combobox"]')).toHaveText('Text');
 
     const visualEditor = page.getByTestId('markdown-editor').locator('[contenteditable="true"]').first();
     await expect(visualEditor).toBeVisible();
@@ -126,7 +131,12 @@ test('streamed Markdown creation opens one preview tab and appears in the worksp
     await page.getByTestId('editor-textarea').fill('# Seedance storyboard\n\n```text\nupdated source\n```');
     await page.getByTestId('markdown-mode-rich-text').click();
     await expect(page.getByTestId('markdown-editor')).toContainText('updated source');
-    await expect(page.getByText('Text', { exact: true })).toBeVisible();
+    const updatedCodeWrapper = page.locator('[class*="codeMirrorWrapper"]').first();
+    const updatedCodeToolbar = page.getByTestId('markdown-code-toolbar');
+    await expect(updatedCodeToolbar).toHaveCount(0);
+    await updatedCodeWrapper.locator('.cm-content').click();
+    await expect(updatedCodeToolbar).toBeVisible();
+    await expect(updatedCodeToolbar.locator('[role="combobox"]')).toHaveText('Text');
 
     await page.waitForTimeout(1_200);
     const saved = await apiGet(page, `/api/files/read?path=${encodeURIComponent(path)}`);

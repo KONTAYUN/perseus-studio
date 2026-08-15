@@ -1,0 +1,1087 @@
+/* Markdown editor surface: the editor follows Perseus' quiet, contextual HTML editor language. */
+.workspace-markdown-editor.mdxeditor {
+  /* MDXEditor declares its own base variables on the editor root. Keep the
+     adapter boundary explicit so its light defaults cannot override the
+     application's surface and text tokens. */
+  --markdown-surface: rgb(248 249 251);
+  --markdown-panel: rgb(255 255 255 / 0.94);
+  --markdown-panel-subtle: rgb(15 23 42 / 0.05);
+  --markdown-line: rgb(15 23 42 / 0.1);
+  --markdown-border: rgb(15 23 42 / 0.14);
+  --markdown-text: rgb(31 41 55);
+  --markdown-muted: rgb(100 116 139);
+  --markdown-accent: rgb(37 99 235);
+  --markdown-accent-soft: rgb(59 130 246 / 0.12);
+
+  --basePageBg: var(--markdown-surface);
+  --baseBase: var(--markdown-panel);
+  --baseBgSubtle: var(--markdown-panel-subtle);
+  --baseBg: rgb(15 23 42 / 0.07);
+  --baseBgHover: rgb(15 23 42 / 0.1);
+  --baseBgActive: rgb(15 23 42 / 0.14);
+  --baseLine: var(--markdown-line);
+  --baseBorder: var(--markdown-border);
+  --baseBorderHover: rgb(15 23 42 / 0.22);
+  --baseSolid: rgb(100 116 139);
+  --baseSolidHover: rgb(71 85 105);
+  --baseText: var(--markdown-muted);
+  --baseTextContrast: var(--markdown-text);
+  --accentBgSubtle: var(--markdown-accent-soft);
+  --accentBg: rgb(59 130 246 / 0.16);
+  --accentBgHover: rgb(59 130 246 / 0.22);
+  --accentBgActive: rgb(59 130 246 / 0.28);
+  --accentLine: rgb(96 165 250 / 0.62);
+  --accentBorder: rgb(96 165 250 / 0.7);
+  --accentBorderHover: rgb(59 130 246 / 0.82);
+  --accentSolid: var(--markdown-accent);
+  --accentSolidHover: rgb(29 78 216);
+  --accentText: rgb(29 78 216);
+  --accentTextContrast: rgb(255 255 255);
+  min-height: 100%;
+  background: var(--markdown-surface);
+  color: var(--markdown-text);
+}
+
+.dark .workspace-markdown-editor.mdxeditor {
+  --markdown-surface: rgb(28 28 30 / 0.94);
+  --markdown-panel: rgb(31 32 35);
+  --markdown-panel-subtle: rgb(255 255 255 / 0.06);
+  --markdown-line: rgb(255 255 255 / 0.1);
+  --markdown-border: rgb(255 255 255 / 0.14);
+  --markdown-text: rgb(229 231 235);
+  --markdown-muted: rgb(156 163 175);
+  --markdown-accent: rgb(96 165 250);
+  --markdown-accent-soft: rgb(96 165 250 / 0.14);
+
+  --basePageBg: var(--markdown-surface);
+  --baseBase: var(--markdown-panel);
+  --baseBgSubtle: var(--markdown-panel-subtle);
+  --baseBg: rgb(255 255 255 / 0.07);
+  --baseBgHover: rgb(255 255 255 / 0.1);
+  --baseBgActive: rgb(255 255 255 / 0.14);
+  --baseLine: var(--markdown-line);
+  --baseBorder: var(--markdown-border);
+  --baseBorderHover: rgb(255 255 255 / 0.22);
+  --baseSolid: rgb(107 114 128);
+  --baseSolidHover: rgb(156 163 175);
+  --baseText: var(--markdown-muted);
+  --baseTextContrast: var(--markdown-text);
+  --accentBgSubtle: var(--markdown-accent-soft);
+  --accentBg: rgb(96 165 250 / 0.18);
+  --accentBgHover: rgb(96 165 250 / 0.24);
+  --accentBgActive: rgb(96 165 250 / 0.3);
+  --accentLine: rgb(147 197 253 / 0.58);
+  --accentBorder: rgb(147 197 253 / 0.68);
+  --accentBorderHover: rgb(96 165 250 / 0.84);
+  --accentSolid: var(--markdown-accent);
+  --accentSolidHover: rgb(147 197 253);
+  --accentText: rgb(147 197 253);
+  --accentTextContrast: rgb(15 23 42);
+}
+
+.workspace-markdown-editor-overlay-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.workspace-markdown-editor .mdxeditor-root-contenteditable,
+.workspace-markdown-editor .mdxeditor-contenteditable-wrapper {
+  background: var(--markdown-surface);
+  color: var(--markdown-text);
+}
+
+.workspace-markdown-editor .mdxeditor-contenteditable-wrapper > [contenteditable='true'] {
+  padding: 30px 0 120px;
+  background: transparent;
+  color: var(--markdown-text);
+}
+
+.workspace-markdown-editor-content {
+  width: min(100%, 920px);
+  margin: 0 auto;
+  color: var(--markdown-text);
+  font-size: 15px;
+  line-height: 1.68;
+  letter-spacing: 0;
+}
+
+.workspace-markdown-editor-content > * {
+  scroll-margin-block: 72px;
+}
+
+.workspace-markdown-editor-content > * + * {
+  margin-top: 0.8em;
+}
+
+.workspace-markdown-editor-content h1,
+.workspace-markdown-editor-content h2,
+.workspace-markdown-editor-content h3,
+.workspace-markdown-editor-content h4,
+.workspace-markdown-editor-content h5,
+.workspace-markdown-editor-content h6 {
+  color: var(--markdown-text);
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1.28;
+}
+
+.workspace-markdown-editor-content h1 {
+  margin-top: 0;
+  font-size: clamp(1.6rem, 2.4vw, 2.05rem);
+}
+
+.workspace-markdown-editor-content h2 {
+  margin-top: 1.6em;
+  font-size: clamp(1.3rem, 1.9vw, 1.55rem);
+}
+
+.workspace-markdown-editor-content h3 {
+  margin-top: 1.35em;
+  font-size: 1.18rem;
+}
+
+.workspace-markdown-editor-content p,
+.workspace-markdown-editor-content li {
+  color: var(--markdown-text);
+}
+
+/* The application reset intentionally removes list markers from UI lists.
+   Markdown content is a document surface, so its semantic list markers must
+   be restored here instead of relying on browser defaults. */
+.workspace-markdown-editor-content ul,
+.workspace-markdown-editor-content ol {
+  margin: 0.55em 0 0.75em;
+  padding-inline-start: 1.55em;
+}
+
+.workspace-markdown-editor-content ul:not([data-type='taskList']):not(:has(> li[role='checkbox'])) {
+  list-style: disc;
+}
+
+.workspace-markdown-editor-content ol {
+  list-style: decimal;
+}
+
+.workspace-markdown-editor-content ul ul {
+  list-style: circle;
+}
+
+.workspace-markdown-editor-content ul ul ul {
+  list-style: square;
+}
+
+.workspace-markdown-editor-content ol ol {
+  list-style: lower-alpha;
+}
+
+.workspace-markdown-editor-content li {
+  display: list-item;
+  margin: 0.18em 0;
+  padding-inline-start: 0.12em;
+  line-height: 1.55;
+}
+
+.workspace-markdown-editor-content ul[data-type='taskList'],
+.workspace-markdown-editor-content ul:has(> li[role='checkbox']) {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+/* MDXEditor models a GFM task item as a semantic checkbox list item. Its
+   default negative list indent is designed for its stock light theme and
+   conflicts with this editor's document reset, which is why the checkbox and
+   text used to overlap. Keep the semantic contract and own the layout here. */
+.workspace-markdown-editor-content li[role='checkbox'] {
+  position: relative;
+  box-sizing: border-box;
+  display: block;
+  min-height: 1.45em;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
+  padding-left: 1.8rem;
+  padding-inline-start: 1.8rem;
+  text-indent: 0;
+  list-style: none;
+}
+
+.workspace-markdown-editor-content li[role='checkbox']::before {
+  position: absolute;
+  top: 0.18em;
+  left: 0;
+  width: 1rem;
+  height: 1rem;
+  box-sizing: border-box;
+  border: 1px solid var(--markdown-muted);
+  border-radius: 4px;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  content: '';
+  pointer-events: none;
+  z-index: 0;
+}
+
+.workspace-markdown-editor-content li[role='checkbox'] > * {
+  position: relative;
+  z-index: 1;
+}
+
+.workspace-markdown-editor-content li[role='checkbox'][aria-checked='true']::before {
+  border-color: var(--accentSolid);
+  background-color: var(--accentSolid);
+  background-image: none;
+}
+
+.workspace-markdown-editor-content li[role='checkbox']::after {
+  position: absolute;
+  top: 0.34em;
+  right: auto;
+  bottom: auto;
+  left: 0.29rem;
+  display: none;
+  width: 0.4rem;
+  height: 0.22rem;
+  border: 0;
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+  content: none;
+  pointer-events: none;
+  transform: rotate(-45deg);
+  z-index: 1;
+}
+
+.workspace-markdown-editor-content li[role='checkbox'][aria-checked='true']::after {
+  display: block;
+  border-bottom: 2px solid var(--accentTextContrast);
+  border-left: 2px solid var(--accentTextContrast);
+  content: '';
+}
+
+.workspace-markdown-editor-content blockquote {
+  margin-inline: 0;
+  border-inline-start: 3px solid var(--accentLine);
+  border-radius: 0 var(--radius-control-sm) var(--radius-control-sm) 0;
+  background: var(--markdown-panel-subtle);
+  color: var(--markdown-muted);
+  padding: 0.25em 1em;
+}
+
+.workspace-markdown-editor-content code {
+  border: 1px solid var(--markdown-line);
+  border-radius: 5px;
+  background: var(--markdown-panel-subtle);
+  color: var(--accentText);
+  padding: 0.08em 0.32em;
+}
+
+.workspace-markdown-editor-content pre {
+  overflow-x: auto;
+  border: 1px solid var(--markdown-line);
+  border-radius: var(--radius-control-sm);
+  background: rgb(243 245 248);
+  color: rgb(30 41 59);
+  padding: 0.95rem 1rem;
+}
+
+.dark .workspace-markdown-editor-content pre {
+  background: rgb(18 20 24);
+  color: rgb(229 231 235);
+}
+
+.workspace-markdown-editor-content pre code {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.workspace-markdown-editor-content img {
+  max-width: 100%;
+  border-radius: var(--radius-control-sm);
+}
+
+.workspace-markdown-editor [class*='codeMirrorWrapper'],
+.workspace-markdown-editor .sp-layout,
+.workspace-markdown-editor .cm-editor {
+  min-height: 0 !important;
+  height: auto !important;
+  border-color: var(--markdown-line);
+  background: rgb(243 245 248);
+  color: rgb(30 41 59);
+}
+
+.dark .workspace-markdown-editor [class*='codeMirrorWrapper'],
+.dark .workspace-markdown-editor .sp-layout,
+.dark .workspace-markdown-editor .cm-editor {
+  background: rgb(18 20 24);
+  color: rgb(229 231 235);
+}
+
+.workspace-markdown-editor .cm-scroller {
+  min-height: 0 !important;
+  max-height: min(360px, 45vh);
+  overflow: auto !important;
+  padding-top: 12px !important;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(100 116 139 / 0.62) rgb(148 163 184 / 0.14);
+}
+
+.workspace-markdown-editor .cm-scroller::-webkit-scrollbar,
+.workspace-markdown-editor-content pre::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.workspace-markdown-editor .cm-scroller::-webkit-scrollbar-track,
+.workspace-markdown-editor-content pre::-webkit-scrollbar-track {
+  background: rgb(148 163 184 / 0.12);
+  border-radius: 999px;
+}
+
+.workspace-markdown-editor .cm-scroller::-webkit-scrollbar-thumb,
+.workspace-markdown-editor-content pre::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: rgb(100 116 139 / 0.62);
+}
+
+.workspace-markdown-editor .cm-scroller::-webkit-scrollbar-thumb:hover,
+.workspace-markdown-editor-content pre::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(148 163 184 / 0.82);
+}
+
+.dark .workspace-markdown-editor .cm-scroller {
+  scrollbar-color: rgb(148 163 184 / 0.58) rgb(15 23 42 / 0.42);
+}
+
+.dark .workspace-markdown-editor .cm-scroller::-webkit-scrollbar-track,
+.dark .workspace-markdown-editor-content pre::-webkit-scrollbar-track {
+  background: rgb(15 23 42 / 0.42);
+}
+
+.dark .workspace-markdown-editor .cm-scroller::-webkit-scrollbar-thumb,
+.dark .workspace-markdown-editor-content pre::-webkit-scrollbar-thumb {
+  background-color: rgb(148 163 184 / 0.58);
+}
+
+.dark .workspace-markdown-editor .cm-scroller::-webkit-scrollbar-thumb:hover,
+.dark .workspace-markdown-editor-content pre::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(203 213 225 / 0.76);
+}
+
+.workspace-markdown-editor .cm-content {
+  min-height: 0 !important;
+  padding-block: 12px;
+  caret-color: var(--accentLine);
+  font-family: 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* CodeMirror remains the authoritative code surface. MDXEditor still mounts
+   its internal toolbar for command wiring, but the user-facing controls are
+   rendered by the contextual plugin outside the code block. Keeping the
+   internal surface out of the layout prevents duplicate controls and avoids
+   covering the first lines of code. */
+.workspace-markdown-editor [class*='codeMirrorWrapper'] {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--markdown-line);
+  border-radius: var(--radius-control-sm);
+  padding: 0;
+}
+
+.workspace-markdown-editor [class*='codeMirrorToolbar'] {
+  display: none !important;
+}
+
+.workspace-markdown-code-toolbar {
+  position: absolute;
+  z-index: 1600;
+  pointer-events: auto;
+  isolation: isolate;
+  max-width: calc(100vw - 16px);
+}
+
+.workspace-markdown-code-toolbar .workspace-markdown-floating-surface {
+  max-width: calc(100vw - 16px);
+  border-radius: var(--radius-control-sm);
+  box-shadow: 0 14px 32px rgb(15 23 42 / 0.22), 0 2px 8px rgb(15 23 42 / 0.1);
+}
+
+.dark .workspace-markdown-code-toolbar .workspace-markdown-floating-surface {
+  border-color: rgb(255 255 255 / 0.12);
+  background: rgb(31 32 35);
+  box-shadow: 0 18px 42px rgb(0 0 0 / 0.36), 0 2px 10px rgb(0 0 0 / 0.24);
+}
+
+.workspace-markdown-code-toolbar [class*='selectWithLabel'] {
+  display: block;
+  margin: 0;
+}
+
+.workspace-markdown-code-toolbar [class*='selectWithLabel'] > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.workspace-markdown-code-toolbar [data-toolbar-item='true'],
+.workspace-markdown-code-toolbar button,
+.workspace-markdown-code-toolbar [role='button'] {
+  min-width: 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-micro);
+}
+
+.workspace-markdown-code-toolbar [data-toolbar-item='true']:hover:not(:disabled),
+.workspace-markdown-code-toolbar button:hover:not(:disabled),
+.workspace-markdown-code-toolbar [role='button']:hover:not([aria-disabled='true']) {
+  background: var(--markdown-panel-subtle);
+  color: var(--markdown-text);
+}
+
+.workspace-markdown-code-toolbar [data-toolbar-item='true']:focus-visible,
+.workspace-markdown-code-toolbar button:focus-visible,
+.workspace-markdown-code-toolbar [role='button']:focus-visible {
+  outline: 2px solid var(--accentLine);
+  outline-offset: 2px;
+}
+
+.workspace-markdown-code-toolbar[data-placement='above']::after,
+.workspace-markdown-code-toolbar[data-placement='below']::after {
+  position: absolute;
+  right: 18px;
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid rgb(255 255 255 / 0.12);
+  border-bottom: 1px solid rgb(255 255 255 / 0.12);
+  background: rgb(31 32 35);
+  content: '';
+  transform: rotate(45deg);
+}
+
+.workspace-markdown-code-toolbar[data-placement='above']::after {
+  bottom: -5px;
+}
+
+.workspace-markdown-code-toolbar[data-placement='below']::after {
+  top: -5px;
+  transform: rotate(225deg);
+}
+
+.workspace-markdown-editor .cm-gutters {
+  border-right: 1px solid var(--markdown-line);
+  background: rgb(232 235 240);
+  color: rgb(100 116 139);
+}
+
+.dark .workspace-markdown-editor .cm-gutters {
+  background: rgb(23 25 29);
+  color: rgb(148 163 184);
+}
+
+.workspace-markdown-editor .cm-activeLine,
+.workspace-markdown-editor .cm-activeLineGutter {
+  background: rgb(96 165 250 / 0.08);
+}
+
+.workspace-markdown-editor .cm-selectionBackground,
+.workspace-markdown-editor .cm-focused .cm-selectionBackground {
+  background: rgb(37 99 235 / 0.32) !important;
+}
+
+.dark .workspace-markdown-editor .cm-selectionBackground,
+.dark .workspace-markdown-editor .cm-focused .cm-selectionBackground {
+  background: rgb(96 165 250 / 0.42) !important;
+}
+
+.workspace-markdown-editor .cm-content ::selection,
+.workspace-markdown-editor .cm-line ::selection {
+  background: rgb(37 99 235 / 0.32);
+  color: rgb(15 23 42);
+}
+
+.dark .workspace-markdown-editor .cm-content ::selection,
+.dark .workspace-markdown-editor .cm-line ::selection {
+  background: rgb(96 165 250 / 0.42);
+  color: rgb(255 255 255);
+}
+
+.workspace-markdown-floating-surface {
+  pointer-events: auto;
+  display: inline-flex;
+  max-width: min(calc(100vw - 24px), 620px);
+  align-items: center;
+  border: 1px solid var(--markdown-border, rgb(15 23 42 / 0.14));
+  border-radius: var(--radius-control);
+  background: var(--markdown-panel, rgb(255 255 255));
+  box-shadow: 0 18px 42px rgb(15 23 42 / 0.2), 0 2px 8px rgb(15 23 42 / 0.08);
+  color: var(--markdown-text, rgb(30 41 59));
+  padding: 4px;
+}
+
+.dark .workspace-markdown-floating-surface {
+  border-color: rgb(255 255 255 / 0.12);
+  background: rgb(31 32 35);
+  box-shadow: 0 20px 48px rgb(0 0 0 / 0.34), 0 2px 10px rgb(0 0 0 / 0.22);
+  color: rgb(238 239 242);
+}
+
+.workspace-markdown-selection-toolbar,
+.workspace-markdown-block-toolbar {
+  z-index: 1600;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+/* MDXEditor mounts Radix portals into a body-level host. Keep that host out
+   of document flow so menus and tooltips share the same overlay plane as the
+   HTML editor instead of becoming a zero-height child at the end of <body>. */
+.workspace-markdown-editor.mdxeditor-popup-container {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 3000 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  pointer-events: none;
+}
+
+.workspace-markdown-editor.mdxeditor-popup-container > * {
+  pointer-events: auto;
+}
+
+.workspace-markdown-editor.mdxeditor-popup-container [role='listbox'],
+.workspace-markdown-editor.mdxeditor-popup-container [role='dialog'],
+.workspace-markdown-editor.mdxeditor-popup-container [role='tooltip'] {
+  pointer-events: auto;
+}
+
+/* A legacy MDX toolbar must never reappear above the contextual controls. */
+.workspace-markdown-editor .mdxeditor-toolbar {
+  display: none !important;
+}
+
+.workspace-markdown-toolbar-content {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 4px;
+}
+
+.workspace-markdown-radix-toolbar {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 4px;
+}
+
+.workspace-markdown-toolbar-content > [role='separator'] {
+  height: 22px;
+  margin-inline: 4px;
+  border-color: var(--markdown-line, rgb(15 23 42 / 0.1));
+}
+
+.workspace-markdown-floating-surface [data-toolbar-item='true'],
+.workspace-markdown-floating-surface button,
+.workspace-markdown-floating-surface [role='button'] {
+  min-width: 30px;
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 30px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-micro);
+  color: var(--markdown-muted, rgb(100 116 139));
+  background: transparent;
+  transition:
+    color var(--motion-fast) var(--ease-motion),
+    background-color var(--motion-fast) var(--ease-motion),
+    transform var(--motion-fast) var(--ease-motion);
+}
+
+/* MDXEditor places the Tooltip trigger around the icon inside toggle
+   buttons. Stretching that public trigger to the whole control makes the
+   affordance discoverable without changing the command implementation. */
+.workspace-markdown-floating-surface [data-toolbar-item='true'] {
+  position: relative;
+}
+
+.workspace-markdown-floating-surface [data-toolbar-item='true'] > [class*='tooltipTrigger'] {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-markdown-floating-surface [data-toolbar-item='true']:hover:not(:disabled),
+.workspace-markdown-floating-surface button:hover:not(:disabled),
+.workspace-markdown-floating-surface [role='button']:hover:not([aria-disabled='true']) {
+  color: var(--markdown-text, rgb(30 41 59));
+  background: var(--markdown-panel-subtle, rgb(248 249 251));
+}
+
+.workspace-markdown-floating-surface [data-toolbar-item='true'][data-state='on'],
+.workspace-markdown-floating-surface [data-toolbar-item='true'][aria-pressed='true'],
+.workspace-markdown-floating-surface [data-state='checked'] {
+  color: var(--accentText, rgb(29 78 216));
+  background: var(--accentBgSubtle, rgb(239 246 255));
+}
+
+.dark .workspace-markdown-floating-surface [data-toolbar-item='true'],
+.dark .workspace-markdown-floating-surface button,
+.dark .workspace-markdown-floating-surface [role='button'] {
+  color: rgb(174 178 187);
+}
+
+.dark .workspace-markdown-floating-surface [data-toolbar-item='true']:hover:not(:disabled),
+.dark .workspace-markdown-floating-surface button:hover:not(:disabled),
+.dark .workspace-markdown-floating-surface [role='button']:hover:not([aria-disabled='true']) {
+  color: rgb(226 232 240);
+  background: rgb(255 255 255 / 0.08);
+}
+
+.dark .workspace-markdown-floating-surface [data-toolbar-item='true'][data-state='on'],
+.dark .workspace-markdown-floating-surface [data-toolbar-item='true'][aria-pressed='true'],
+.dark .workspace-markdown-floating-surface [data-state='checked'] {
+  color: rgb(191 219 254);
+  background: rgb(59 130 246 / 0.16);
+}
+
+.workspace-markdown-block-trigger {
+  position: absolute;
+  z-index: 1590;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  grid-template-columns: repeat(2, 3px);
+  place-content: center;
+  gap: 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-micro);
+  background: transparent;
+  color: var(--markdown-muted, rgb(100 116 139));
+  opacity: 0;
+  pointer-events: auto;
+  padding: 0;
+  transition:
+    opacity var(--motion-fast) var(--ease-motion),
+    background-color var(--motion-fast) var(--ease-motion),
+    color var(--motion-fast) var(--ease-motion);
+}
+
+.workspace-markdown-block-trigger:hover,
+.workspace-markdown-block-trigger.is-current,
+.workspace-markdown-block-trigger.is-active,
+.workspace-markdown-block-trigger:focus-visible {
+  opacity: 1;
+  outline: none;
+  background: var(--markdown-panel-subtle, rgb(37 38 42));
+  color: var(--markdown-muted, rgb(174 178 187));
+}
+
+.workspace-markdown-selection-toolbar,
+.workspace-markdown-block-toolbar {
+  position: absolute;
+}
+
+.workspace-markdown-block-trigger span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.workspace-markdown-floating-surface [data-toolbar-item='true']:focus-visible,
+.workspace-markdown-floating-surface button:focus-visible,
+.workspace-markdown-block-trigger:focus-visible {
+  outline: 2px solid var(--accentLine, rgb(96 165 250));
+  outline-offset: 2px;
+}
+
+.workspace-markdown-editor .mdxeditor-select-content,
+.workspace-markdown-editor [data-editor-dropdown='true'] {
+  z-index: 1700;
+  border: 1px solid var(--baseBorder);
+  border-radius: var(--radius-control-sm);
+  background: var(--baseBase);
+  box-shadow: 0 16px 36px rgb(15 23 42 / 0.22);
+  color: var(--baseTextContrast);
+}
+
+.dark .workspace-markdown-editor .mdxeditor-select-content,
+.dark .workspace-markdown-editor [data-editor-dropdown='true'] {
+  border-color: rgb(255 255 255 / 0.12);
+  background: rgb(31 32 35);
+  color: rgb(238 239 242);
+  box-shadow: 0 20px 48px rgb(0 0 0 / 0.34), 0 2px 10px rgb(0 0 0 / 0.22);
+}
+
+.dark .workspace-markdown-editor .mdxeditor-select-content [role='option'],
+.dark .workspace-markdown-editor [data-editor-dropdown='true'] [role='option'] {
+  color: rgb(224 226 231);
+}
+
+.dark .workspace-markdown-editor .mdxeditor-select-content [role='option'][data-highlighted],
+.dark .workspace-markdown-editor [data-editor-dropdown='true'] [role='option'][data-highlighted] {
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(255 255 255);
+}
+
+.workspace-markdown-block-toolbar {
+  max-width: calc(100vw - 16px);
+}
+
+.workspace-markdown-block-toolbar .workspace-markdown-floating-surface {
+  width: max-content;
+  min-width: 0;
+  max-width: min(360px, calc(100vw - 16px));
+  box-sizing: border-box;
+}
+
+.workspace-markdown-block-toolbar::before {
+  position: absolute;
+  left: 14px;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid rgb(255 255 255 / 0.12);
+  border-left: 1px solid rgb(255 255 255 / 0.12);
+  background: rgb(31 32 35);
+  content: '';
+  transform: rotate(45deg);
+}
+
+.workspace-markdown-block-toolbar[data-placement='below']::before {
+  top: -5px;
+}
+
+.workspace-markdown-block-toolbar[data-placement='above']::before {
+  bottom: -5px;
+  transform: rotate(225deg);
+}
+
+.workspace-markdown-block-toolbar .workspace-markdown-floating-surface {
+  position: relative;
+}
+
+/* MDXEditor's shared toolbar rule gives every control a 30px icon box. A
+   select is a labeled control, not an icon-only button; keep its value visible
+   and give the block/language controls one deliberate width. These selectors
+   intentionally live after the shared button rule so the cascade reflects
+   the component hierarchy rather than depending on !important. */
+.workspace-markdown-block-toolbar .workspace-markdown-floating-surface [class*='selectTrigger'],
+.workspace-markdown-code-toolbar .workspace-markdown-floating-surface [class*='selectTrigger'] {
+  display: inline-flex;
+  width: 112px;
+  min-width: 112px;
+  flex: 0 0 112px;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: 9px;
+  color: var(--markdown-text, rgb(30 41 59));
+}
+
+.workspace-markdown-code-toolbar .workspace-markdown-floating-surface [class*='selectTrigger'] {
+  border: 1px solid var(--markdown-line, rgb(15 23 42 / 0.1));
+  border-radius: var(--radius-micro);
+  background: var(--markdown-panel-subtle, rgb(248 249 251));
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.dark .workspace-markdown-block-toolbar .workspace-markdown-floating-surface [class*='selectTrigger'],
+.dark .workspace-markdown-code-toolbar .workspace-markdown-floating-surface [class*='selectTrigger'] {
+  color: rgb(229 231 235);
+}
+
+.dark .workspace-markdown-code-toolbar .workspace-markdown-floating-surface [class*='selectTrigger'] {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.06);
+}
+
+.workspace-markdown-floating-surface [class*='selectTrigger'] > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-markdown-editor [data-editor-dropdown='true'] [data-highlighted],
+.workspace-markdown-editor [data-editor-dropdown='true'] [data-state='checked'] {
+  background: var(--baseBgHover);
+  color: var(--baseTextContrast);
+}
+
+.workspace-markdown-editor [role='tooltip'] {
+  z-index: 2800;
+  max-width: min(240px, calc(100vw - 24px));
+  padding: 5px 8px;
+  border: 1px solid rgb(15 23 42 / 0.16);
+  border-radius: var(--radius-control-sm);
+  background: rgb(255 255 255 / 0.96);
+  box-shadow: 0 10px 24px rgb(15 23 42 / 0.16);
+  color: rgb(15 23 42);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  pointer-events: none;
+  user-select: none;
+}
+
+.dark .workspace-markdown-editor [role='tooltip'] {
+  border-color: rgb(255 255 255 / 0.14);
+  background: rgb(35 37 42 / 0.98);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.36);
+  color: rgb(245 247 250);
+}
+
+.workspace-markdown-editor [role='dialog'] {
+  z-index: 1700;
+  pointer-events: auto;
+  border: 1px solid var(--baseBorder);
+  border-radius: var(--radius-card);
+  background: var(--baseBase);
+  color: var(--baseTextContrast);
+  box-shadow: 0 22px 64px rgb(0 0 0 / 0.32);
+}
+
+/* ImageDialog is supplied by MDXEditor, but its fields are still part of the
+   workspace surface. Keep the browser file control and text fields on the
+   same tokenized surface instead of letting the user agent fall back to a
+   light native form. */
+.workspace-markdown-editor [role='dialog'] input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--baseBorder);
+  border-radius: var(--radius-control-sm);
+  background: var(--baseBg);
+  color: var(--baseTextContrast);
+  color-scheme: light;
+  outline: none;
+}
+
+.workspace-markdown-editor [role='dialog'] input[type='text'],
+.workspace-markdown-editor [role='dialog'] input[type='number'] {
+  padding: 7px 9px;
+}
+
+.workspace-markdown-editor [role='dialog'] input[type='file'] {
+  padding: 3px;
+  cursor: pointer;
+}
+
+.workspace-markdown-editor [role='dialog'] input[type='file']::file-selector-button {
+  min-height: 27px;
+  margin-right: 8px;
+  padding: 4px 9px;
+  border: 1px solid var(--baseBorder);
+  border-radius: var(--radius-micro);
+  background: var(--baseBgHover);
+  color: var(--baseTextContrast);
+  cursor: pointer;
+  font: inherit;
+}
+
+.workspace-markdown-editor [role='dialog'] input:focus {
+  border-color: var(--accentLine);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accentLine) 20%, transparent);
+}
+
+.dark .workspace-markdown-editor [role='dialog'] input {
+  border-color: rgb(255 255 255 / 0.14);
+  background: rgb(24 25 28);
+  color: rgb(238 239 242);
+  color-scheme: dark;
+}
+
+.dark .workspace-markdown-editor [role='dialog'] input[type='file']::file-selector-button {
+  border-color: rgb(255 255 255 / 0.14);
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(238 239 242);
+}
+
+.workspace-markdown-editor-tooltip {
+  position: absolute;
+  z-index: 2900;
+  max-width: min(240px, calc(100vw - 24px));
+  padding: 5px 8px;
+  border: 1px solid rgb(15 23 42 / 0.16);
+  border-radius: var(--radius-control-sm);
+  background: rgb(255 255 255 / 0.96);
+  box-shadow: 0 10px 24px rgb(15 23 42 / 0.16);
+  color: rgb(15 23 42);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.dark .workspace-markdown-editor-tooltip {
+  border-color: rgb(255 255 255 / 0.14);
+  background: rgb(35 37 42 / 0.98);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.36);
+  color: rgb(245 247 250);
+}
+
+/* Tables expose row and column controls through semantic tool cells. The
+   upstream stylesheet reveals every control when the table is hovered. That
+   is the wrong interaction boundary for a dense document: keep the cells in
+   the table geometry, but reveal only the cell being used (or its open menu). */
+@media (hover: hover) {
+  .workspace-markdown-editor-content table [data-tool-cell='true'] button {
+    opacity: 0 !important;
+    pointer-events: none;
+    transition: opacity var(--motion-fast) var(--ease-motion);
+  }
+
+  .workspace-markdown-editor-content table [data-tool-cell='true']:hover > button,
+  .workspace-markdown-editor-content table [data-tool-cell='true']:focus-within > button,
+  .workspace-markdown-editor-content table [data-tool-cell='true'] > button[data-active='true'],
+  .workspace-markdown-editor-content table [data-tool-cell='true'] > button:focus-visible,
+  .workspace-markdown-editor-content table [data-tool-cell='true'] > button[aria-expanded='true'],
+  .workspace-markdown-editor-content table [data-tool-cell='true'] > button[data-state='open'],
+  .workspace-markdown-editor-content table [data-tool-cell='true'] > [data-state='open'] {
+    opacity: 1 !important;
+    pointer-events: auto;
+  }
+
+  /* A row action should be discoverable while reading that row, without
+     lighting up the action cells of every other row. */
+  .workspace-markdown-editor-content table tbody tr:has(> :not([data-tool-cell='true']):hover) > [data-tool-cell='true']:first-child > button {
+    opacity: 1 !important;
+    pointer-events: auto;
+  }
+}
+
+.workspace-markdown-link-dialog {
+  position: absolute;
+  z-index: 2600;
+  width: min(340px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid var(--baseBorder);
+  border-radius: var(--radius-card);
+  background: var(--baseBase);
+  color: var(--baseTextContrast);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.36);
+  pointer-events: auto;
+}
+
+.dark .workspace-markdown-link-dialog {
+  border-color: rgb(255 255 255 / 0.12);
+  background: rgb(31 32 35);
+  color: rgb(238 239 242);
+  box-shadow: 0 20px 48px rgb(0 0 0 / 0.34), 0 2px 10px rgb(0 0 0 / 0.22);
+}
+
+.workspace-markdown-link-dialog-form,
+.workspace-markdown-link-preview {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-markdown-link-dialog-field {
+  display: grid;
+  gap: 6px;
+  color: var(--baseTextMuted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workspace-markdown-link-dialog-field input {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--baseBorder);
+  border-radius: var(--radius-control-sm);
+  background: var(--baseBg);
+  color: var(--baseTextContrast);
+  outline: none;
+}
+
+.workspace-markdown-link-dialog-field input:focus {
+  border-color: var(--accentLine);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accentLine) 20%, transparent);
+}
+
+.workspace-markdown-link-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.workspace-markdown-link-dialog-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--baseBorder);
+  border-radius: var(--radius-control-sm);
+  background: var(--baseBgHover);
+  color: var(--baseTextContrast);
+  cursor: pointer;
+}
+
+.workspace-markdown-link-dialog-actions button:hover {
+  background: var(--baseBgActive);
+}
+
+.workspace-markdown-link-dialog-actions button:focus-visible {
+  outline: 2px solid var(--accentLine);
+  outline-offset: 2px;
+}
+
+.workspace-markdown-link-dialog-primary {
+  border-color: var(--accentLine) !important;
+  background: var(--accentBg) !important;
+  color: var(--accentText) !important;
+}
+
+.workspace-markdown-link-preview-url {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--accentText);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .workspace-markdown-floating-surface {
+    max-width: calc(100vw - 20px);
+    overflow-x: auto;
+  }
+
+  .workspace-markdown-editor .mdxeditor-contenteditable-wrapper > [contenteditable='true'] {
+    padding-top: 24px;
+  }
+
+  .workspace-markdown-editor-content {
+    font-size: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-markdown-block-trigger,
+  .workspace-markdown-floating-surface [data-toolbar-item='true'],
+  .workspace-markdown-floating-surface button {
+    transition: none;
+  }
+}
