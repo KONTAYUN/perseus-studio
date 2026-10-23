@@ -30,7 +30,15 @@ type ProviderReadReferenceView struct {
 
 func providerToolObservationContent(result TranscriptToolResult) string {
 	payload, ok := decodedToolResultPayload(result.Content)
-	if !ok || !needsProviderObservationView(payload) {
+	if !ok {
+		return result.Content
+	}
+	if !needsProviderObservationView(payload) {
+		if isReadWorkspaceTool(firstNonEmpty(result.ToolName, result.Event.ToolName)) {
+			// Checkpoints from before the encoding fix may contain HTML escapes.
+			// Canonicalize their JSON representation without changing file strings.
+			return mustJSON(payload)
+		}
 		return result.Content
 	}
 	if isReadWorkspaceTool(firstNonEmpty(result.ToolName, result.Event.ToolName)) {

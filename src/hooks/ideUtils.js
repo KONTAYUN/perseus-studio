@@ -276,7 +276,7 @@ export function createZipBlob(entries) {
 
   for (const entry of entries) {
     const nameBytes = encoder.encode(entry.path.replace(/\\/g, '/'));
-    const contentBytes = encoder.encode(entry.content);
+    const contentBytes = entry.bytes instanceof Uint8Array ? entry.bytes : encoder.encode(entry.content);
     const crc = crc32(contentBytes);
     const localHeader = createZipLocalHeader(nameBytes, contentBytes, crc);
     const centralHeader = createZipCentralHeader(nameBytes, contentBytes, crc, offset);

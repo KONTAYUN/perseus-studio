@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"webide-backend/internal/failure"
 )
 
 func (s *Service) execWebSearch(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
@@ -16,7 +17,7 @@ func (s *Service) execWebSearchForRole(ctx context.Context, userID, role, argume
 		MaxResults int    `json:"max_results"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在联网搜索...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在联网搜索...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	results, provider, err := s.webSearchForRole(ctx, userID, role, args.Query, args.MaxResults)
 	if err != nil {
@@ -36,7 +37,7 @@ func (s *Service) execWebExtractForRole(ctx context.Context, userID, role, argum
 		URL string `json:"url"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在读取网页...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在读取网页...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	result, err := s.webExtractForRole(ctx, userID, role, args.URL)
 	if err != nil {

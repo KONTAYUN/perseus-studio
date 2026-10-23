@@ -1,3 +1,4 @@
+.editor-panel-root { container-type: inline-size; }
 .editor-tabs-strip {
   overscroll-behavior-inline: contain;
   scrollbar-width: none;

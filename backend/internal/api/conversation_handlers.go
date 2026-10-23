@@ -3,9 +3,11 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
+	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
 )
 
@@ -83,8 +85,15 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusOK, item)
 			return
 		case http.MethodDelete:
-			if err := s.conversations.DeleteConversation(r.Context(), user.UserID, conversationID); err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
+			if err := s.deleteConversation(r.Context(), user.UserID, conversationID); err != nil {
+				status := http.StatusBadRequest
+				if errors.Is(err, sql.ErrNoRows) {
+					status = http.StatusNotFound
+				}
+				if errors.Is(err, store.ErrConversationBusy) {
+					status = http.StatusConflict
+				}
+				writeError(w, status, err.Error())
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"id": conversationID})
@@ -235,61 +244,24 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusBadRequest, "selected model is not available")
 			return
 		}
-		if modelProviderID != conversation.SelectedModelProviderID {
-			if err := s.conversations.UpdateConversationModel(r.Context(), user.UserID, conversationID, modelProviderID); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
+		prepared, err := s.runs.PrepareConversationRun(r.Context(), store.PrepareConversationRunInput{
+			UserID: user.UserID, ConversationID: conversationID, ModelProviderID: modelProviderID,
+			Content: content, AttachmentsJSON: string(attachmentsJSON), ThinkingMode: thinkingMode,
+			AttachmentPayloadsJSON: ai.PersistedAttachmentPayloads(attachmentPayloads),
+			RequestID:              r.Header.Get("Idempotency-Key"),
+		})
+		if err != nil {
+			writeRunPreparationError(w, err)
+			return
+		}
+		run, userMessage := prepared.Run, prepared.Message
+		updatedConversation, _ := s.conversations.GetConversation(r.Context(), user.UserID, conversationID)
+		if run.Status == store.AgentRunQueued && !s.runQueue.Contains(run.ID) {
+			if err := s.scheduleConversationRun(user.UserID, user.Role, conversationID, userMessage.ID, modelProviderID, userMessage.Content, string(attachmentsJSON), attachmentPayloads, thinkingMode, run.ID); err != nil {
+				writeError(w, http.StatusServiceUnavailable, err.Error())
 				return
 			}
 		}
-
-		userMessage, err := s.conversations.AppendMessage(r.Context(), user.UserID, conversationID, "user", strings.TrimSpace(content), string(attachmentsJSON))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		run, err := s.runs.CreateRun(r.Context(), store.CreateAgentRunInput{
-			UserID:          user.UserID,
-			ConversationID:  conversationID,
-			UserMessageID:   userMessage.ID,
-			ModelProviderID: modelProviderID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if _, err := s.appendRunEventStrict(r.Context(), store.AgentEventInput{
-			RunID:          run.ID,
-			UserID:         user.UserID,
-			ConversationID: conversationID,
-			MessageID:      userMessage.ID,
-			Type:           "user_message_committed",
-			Level:          "info",
-			Payload: map[string]any{
-				"message":      "user message committed",
-				"user_message": userMessage,
-			},
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if _, err := s.appendRunEventStrict(r.Context(), store.AgentEventInput{
-			RunID:          run.ID,
-			UserID:         user.UserID,
-			ConversationID: conversationID,
-			MessageID:      userMessage.ID,
-			Type:           "run_queued",
-			Level:          "info",
-			Payload: map[string]any{
-				"message": "run queued",
-			},
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		updatedConversation, _ := s.conversations.GetConversation(r.Context(), user.UserID, conversationID)
-		go s.executeConversationRun(user.UserID, user.Role, conversationID, userMessage.ID, modelProviderID, strings.TrimSpace(content), string(attachmentsJSON), attachmentPayloads, thinkingMode, run.ID)
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"conversation": updatedConversation,
 			"user_message": userMessage,

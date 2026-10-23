@@ -89,7 +89,7 @@ test('main workspace smoke flow works', async ({ page }) => {
   await expect(page.getByTestId('editor-panel').first()).toBeVisible();
 
   await page.getByTestId('settings-button').click();
-  await expect(page.getByText('模型供应商')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '模型与连接', exact: true })).toBeVisible();
   await page.getByTestId('open-diagnostics-settings').scrollIntoViewIfNeeded();
   await page.getByTestId('open-diagnostics-settings').click();
   await expect(page.getByTestId('diagnostics-view')).toBeVisible();
@@ -122,8 +122,9 @@ test('workspace file can be created through API and opened from file tree', asyn
     await expect(page.getByTestId('editor-textarea')).toHaveValue(fileContent);
 
     await page.getByTestId('settings-button').click();
-    await expect(page.getByTestId('model-name-input')).toBeVisible();
-    await expect(page.getByTestId('search-provider-select')).toBeVisible();
+    await expect(page.getByTestId('model-add-button')).toBeVisible();
+    await page.getByTestId('settings-nav-search').click();
+    await expect(page.getByTestId('search-add-button')).toBeVisible();
   } finally {
     await apiPost(page, '/api/files/delete', { path: folderPath }).catch(() => {});
   }
@@ -155,6 +156,9 @@ test('editor tabs can be reordered by dragging within the tab strip', async ({ p
       await expect(page.getByTestId(`editor-tab-${file}`)).toBeVisible();
     }
     await page.getByTestId('layout-2').click();
+
+    // Wait for the layout transition before measuring physical drag coordinates.
+    await expect.poll(() => page.locator('.panel-wrapper').evaluateAll((nodes) => nodes.reduce((n, node) => n + node.getAnimations().length, 0))).toBe(0);
 
     const sourceBox = await page.getByTestId(`editor-tab-${fileC}`).boundingBox();
     const targetBox = await page.getByTestId(`editor-tab-${fileA}`).boundingBox();
@@ -314,7 +318,19 @@ test('file tree supports manual drag ordering and self-drop hint', async ({ page
     const rowC = page.getByTestId(`file-row-${fileC}`);
     await expect(rowB).toBeVisible();
     await expect(rowC).toBeVisible();
-    await rowC.dragTo(rowB, { targetPosition: { x: 24, y: 2 } });
+    // Start on the row label, outside the hover action buttons and folder toggle.
+    // Long fixture trees may scroll while dragTo resolves the two endpoints.
+    // Settle and verify the actual source hit target before starting the drag.
+    await rowC.evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
+    await expect(rowB).toBeInViewport({ ratio: 1 });
+    await rowC.hover({ position: { x: 110, y: 15 } });
+    await expect.poll(() => rowC.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return document.elementFromPoint(rect.x + 110, rect.y + 15)?.closest('[data-file-path]')?.dataset.filePath;
+    })).toBe(fileC);
+    const reordered = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/api/files/reorder'));
+    await rowC.dragTo(rowB, { sourcePosition: { x: 110, y: 15 }, targetPosition: { x: 100, y: 2 } });
+    expect((await reordered).postDataJSON().path).toBe(fileC);
     await expect(page.getByText('已调整顺序')).toBeVisible();
 
     await page.reload();
@@ -330,7 +346,9 @@ test('file tree supports manual drag ordering and self-drop hint', async ({ page
     const folderRow = page.getByTestId(`file-row-${folderA}`);
     const childFolderRow = page.getByTestId(`file-row-${folderChild}`);
     await expect(childFolderRow).toBeVisible();
-    await folderRow.dragTo(childFolderRow, { targetPosition: { x: 36, y: 12 } });
+    await folderRow.evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
+    await expect(childFolderRow).toBeInViewport({ ratio: 1 });
+    await folderRow.dragTo(childFolderRow, { sourcePosition: { x: 110, y: 15 }, targetPosition: { x: 100, y: 12 } });
     await expect(page.getByText('不能移动到自身文件夹内部')).toBeVisible();
   } finally {
     await apiPost(page, '/api/files/delete', { path: folderPath }).catch(() => {});

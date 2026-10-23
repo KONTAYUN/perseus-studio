@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"errors"
+	"webide-backend/internal/runqueue"
 	"webide-backend/internal/store"
 )
 
@@ -30,7 +32,7 @@ func (s *Server) maybeGenerateConversationTitle(ctx context.Context, userID, use
 	if strings.TrimSpace(userContent) == "" && strings.TrimSpace(assistantContent) == "" {
 		return
 	}
-	titleCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	titleCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	result, err := s.ai.GenerateConversationTitle(titleCtx, userID, userRole, conversationID, userMessageID, modelProviderID, userContent, assistantContent)
 	if err != nil {
@@ -77,7 +79,20 @@ func (s *Server) maybeGenerateConversationTitle(ctx context.Context, userID, use
 }
 
 func (s *Server) maybeGenerateConversationTitleAsync(userID, userRole, conversationID, userMessageID, assistantMessageID, modelProviderID, userContent, assistantContent, runID string) {
-	go s.maybeGenerateConversationTitle(context.Background(), userID, userRole, conversationID, userMessageID, assistantMessageID, modelProviderID, userContent, assistantContent, runID)
+	if s.titleQueue == nil {
+		return
+	}
+	err := s.titleQueue.Submit("title:"+conversationID, userID, func(ctx context.Context) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf("[conversation_title] panic conversation=%s error=%v", conversationID, recovered)
+			}
+		}()
+		s.maybeGenerateConversationTitle(ctx, userID, userRole, conversationID, userMessageID, assistantMessageID, modelProviderID, userContent, assistantContent, runID)
+	})
+	if err != nil && !errors.Is(err, runqueue.ErrDuplicate) {
+		log.Printf("[conversation_title] optional job skipped conversation=%s error=%v", conversationID, err)
+	}
 }
 
 func shouldAutoGenerateConversationTitle(conversation store.Conversation) bool {

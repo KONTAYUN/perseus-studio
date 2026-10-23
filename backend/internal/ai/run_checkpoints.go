@@ -2,24 +2,35 @@ package ai
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
 func (s *Service) loadRunCheckpoint(ctx context.Context, opts RunOptions) (AgentRuntimeCheckpoint, bool) {
+	checkpoint, ok, _ := s.loadRunCheckpointStrict(ctx, opts)
+	return checkpoint, ok
+}
+
+// Missing is safe to start; unreadable or corrupt persisted state is not.
+func (s *Service) loadRunCheckpointStrict(ctx context.Context, opts RunOptions) (AgentRuntimeCheckpoint, bool, error) {
 	if s == nil || s.runs == nil || opts.UserID == "" || opts.RunID == "" {
-		return AgentRuntimeCheckpoint{}, false
+		return AgentRuntimeCheckpoint{}, false, nil
 	}
 	item, err := s.runs.LatestCheckpoint(ctx, opts.UserID, opts.RunID)
 	if err != nil {
-		return AgentRuntimeCheckpoint{}, false
+		if errors.Is(err, sql.ErrNoRows) {
+			return AgentRuntimeCheckpoint{}, false, nil
+		}
+		return AgentRuntimeCheckpoint{}, false, fmt.Errorf("read run checkpoint: %w", err)
 	}
 	var checkpoint AgentRuntimeCheckpoint
 	if err := json.Unmarshal([]byte(item.StateJSON), &checkpoint); err != nil {
-		return AgentRuntimeCheckpoint{}, false
+		return AgentRuntimeCheckpoint{}, false, fmt.Errorf("decode run checkpoint: %w", err)
 	}
 	checkpoint.Seq = item.Seq
-	return checkpoint, true
+	return checkpoint, true, nil
 }
 
 func (s *Service) saveRunCheckpoint(ctx context.Context, opts RunOptions, checkpoint AgentRuntimeCheckpoint) error {

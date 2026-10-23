@@ -37,6 +37,12 @@ func estimateMessagesTokens(messages []store.Message) int {
 		total += 4
 		total += estimateTextTokens(message.Role)
 		total += estimateTextTokens(message.Content)
+		for _, attachment := range StoredMessageAttachments(message) {
+			total += estimateTextTokens(attachment.Text)
+			if attachment.Kind == "image" {
+				total += 1600
+			}
+		}
 		if strings.TrimSpace(message.AttachmentsJSON) != "" && strings.TrimSpace(message.AttachmentsJSON) != "[]" {
 			total += estimateTextTokens(message.AttachmentsJSON)
 		}

@@ -34,7 +34,7 @@ func (e *providerPatchFilteredEmitter) Add(text string) {
 	if e == nil || text == "" {
 		return
 	}
-	visible := e.filter.Feed(text)
+	visible := text
 	if visible == "" {
 		return
 	}
@@ -54,12 +54,6 @@ func (e *providerPatchFilteredEmitter) MarkToolObserved() {
 func (e *providerPatchFilteredEmitter) Flush() {
 	if e == nil {
 		return
-	}
-	if tail := e.filter.Close(); tail != "" {
-		e.streamed.WriteString(tail)
-		if e.inner != nil {
-			e.inner.Add(tail)
-		}
 	}
 	if e.inner != nil {
 		e.inner.Flush()

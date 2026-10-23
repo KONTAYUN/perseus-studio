@@ -21,6 +21,11 @@ body {
 }
 
 :root {
+  --motion-fast: 120ms;
+  --motion-control: 160ms;
+  --motion-popover: 180ms;
+  --motion-panel: 240ms;
+  --motion-modal: 220ms;
   --ease-apple: cubic-bezier(0.19, 1, 0.22, 1);
   --ease-apple-soft: cubic-bezier(0.16, 1, 0.3, 1);
   --radius-micro: 7px;

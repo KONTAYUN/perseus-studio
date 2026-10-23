@@ -7,25 +7,30 @@ import (
 const ledgerToolResultMaxRunes = 20000
 
 type LedgerToolResultSnapshot struct {
-	ToolName              string         `json:"tool_name,omitempty"`
-	Status                string         `json:"status,omitempty"`
-	Path                  string         `json:"path,omitempty"`
-	Paths                 []string       `json:"paths,omitempty"`
-	ChangedPaths          []string       `json:"changed_paths,omitempty"`
-	StartLine             int            `json:"start_line,omitempty"`
-	EndLine               int            `json:"end_line,omitempty"`
-	TotalLines            int            `json:"total_lines,omitempty"`
-	Truncated             bool           `json:"truncated,omitempty"`
-	SourceReadTruncated   bool           `json:"source_read_truncated,omitempty"`
-	ModelViewTruncated    bool           `json:"model_view_truncated,omitempty"`
-	LedgerResultTruncated bool           `json:"ledger_result_truncated"`
-	OriginalChars         int            `json:"original_chars"`
-	OriginalBytes         int            `json:"original_bytes"`
-	ContentChars          int            `json:"content_chars,omitempty"`
-	NumberedContentChars  int            `json:"numbered_content_chars,omitempty"`
+	FailureClass          string           `json:"failure_class,omitempty"`
+	ExecutionOutcome      string           `json:"execution_outcome,omitempty"`
+	ExitCode              *int             `json:"exit_code,omitempty"`
+	TimedOut              bool             `json:"timed_out,omitempty"`
+	ObservationComplete   *bool            `json:"observation_complete,omitempty"`
+	ToolName              string           `json:"tool_name,omitempty"`
+	Status                string           `json:"status,omitempty"`
+	Path                  string           `json:"path,omitempty"`
+	Paths                 []string         `json:"paths,omitempty"`
+	ChangedPaths          []string         `json:"changed_paths,omitempty"`
+	StartLine             int              `json:"start_line,omitempty"`
+	EndLine               int              `json:"end_line,omitempty"`
+	TotalLines            int              `json:"total_lines,omitempty"`
+	Truncated             bool             `json:"truncated,omitempty"`
+	SourceReadTruncated   bool             `json:"source_read_truncated,omitempty"`
+	ModelViewTruncated    bool             `json:"model_view_truncated,omitempty"`
+	LedgerResultTruncated bool             `json:"ledger_result_truncated"`
+	OriginalChars         int              `json:"original_chars"`
+	OriginalBytes         int              `json:"original_bytes"`
+	ContentChars          int              `json:"content_chars,omitempty"`
+	NumberedContentChars  int              `json:"numbered_content_chars,omitempty"`
 	Items                 []map[string]any `json:"items,omitempty"`
-	PreviewHead           string         `json:"preview_head,omitempty"`
-	PreviewTail           string         `json:"preview_tail,omitempty"`
+	PreviewHead           string           `json:"preview_head,omitempty"`
+	PreviewTail           string           `json:"preview_tail,omitempty"`
 }
 
 func ledgerToolResultJSON(toolName, result string) string {
@@ -39,10 +44,10 @@ func ledgerToolResultJSON(toolName, result string) string {
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return mustJSON(map[string]any{
-			"tool_name":                toolName,
-			"ledger_result_truncated":  true,
-			"original_chars":           len([]rune(result)),
-			"original_bytes":           len([]byte(result)),
+			"tool_name":               toolName,
+			"ledger_result_truncated": true,
+			"original_chars":          len([]rune(result)),
+			"original_bytes":          len([]byte(result)),
 		})
 	}
 	if len([]rune(string(raw))) <= ledgerToolResultMaxRunes {
@@ -78,6 +83,16 @@ func buildLedgerToolResultSnapshot(toolName, result string) LedgerToolResultSnap
 	}
 	snapshot.ToolName = firstNonEmpty(toolName, stringFromAny(payload["tool_name"]), stringFromAny(payload["tool"]))
 	snapshot.Status = stringFromAny(payload["status"])
+	snapshot.FailureClass = stringFromAny(payload["failure_class"])
+	snapshot.ExecutionOutcome = stringFromAny(payload["execution_outcome"])
+	if _, ok := payload["exit_code"]; ok {
+		exitCode := intFromAny(payload["exit_code"])
+		snapshot.ExitCode = &exitCode
+	}
+	if complete, ok := payload["observation_complete"].(bool); ok {
+		snapshot.ObservationComplete = &complete
+	}
+	snapshot.TimedOut = boolFromAny(payload["timed_out"])
 	snapshot.Path = normalizeWorkspaceEventPath(stringFromAny(payload["path"]))
 	snapshot.Paths = normalizedProviderPaths(stringSliceFromAnyLoose(payload["paths"]))
 	snapshot.ChangedPaths = normalizedProviderPaths(stringSliceFromAnyLoose(payload["changed_paths"]))

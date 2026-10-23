@@ -245,6 +245,9 @@ func (s *Service) SearchTextScoped(query string, regex bool, maxResults int, con
 		if entry.IsDir() || !isTextPath(relPath) {
 			return nil
 		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
 		if !searchPathMatchesAnyInclude(relPath, opts.IncludeGlobs) || searchPathMatchesAnyExclude(relPath, opts.ExcludeGlobs) {
 			return nil
 		}

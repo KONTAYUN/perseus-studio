@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,10 +17,13 @@ import (
 )
 
 type apiTestAIEnv struct {
-	configs *store.ConfigStore
-	ai      *ai.Service
-	admin   store.User
-	user    store.User
+	db            *sql.DB
+	factory       *usersvc.Factory
+	conversations *store.ConversationStore
+	configs       *store.ConfigStore
+	ai            *ai.Service
+	admin         store.User
+	user          store.User
 }
 
 func newAPITestAIEnv(t *testing.T) apiTestAIEnv {
@@ -56,7 +60,7 @@ func newAPITestAIEnv(t *testing.T) apiTestAIEnv {
 	if err := conversations.Migrate(t.Context()); err != nil {
 		t.Fatalf("conversations.Migrate returned error: %v", err)
 	}
-	return apiTestAIEnv{
+	return apiTestAIEnv{db: db, factory: factory, conversations: conversations,
 		configs: configs,
 		ai:      ai.NewService(configs, factory, conversations),
 		admin:   admin,

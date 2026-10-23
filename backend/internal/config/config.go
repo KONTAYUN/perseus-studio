@@ -8,30 +8,36 @@ import (
 )
 
 type Config struct {
-	ListenAddr      string
-	DatabasePath    string
-	StaticRoot      string
-	UserDataRoot    string
-	EnableDebugAPI  bool
-	AdminUsername   string
-	AdminPassword   string
-	WorkerCount     int
-	PollInterval    time.Duration
-	ShutdownTimeout time.Duration
+	ListenAddr         string
+	DatabasePath       string
+	StaticRoot         string
+	UserDataRoot       string
+	EnableDebugAPI     bool
+	AdminUsername      string
+	AdminPassword      string
+	WorkerCount        int
+	PollInterval       time.Duration
+	ShutdownTimeout    time.Duration
+	AllowedOrigins     string
+	AgentConcurrency   int
+	AgentQueueCapacity int
 }
 
 func Load() Config {
 	return Config{
-		ListenAddr:      envOrDefault("BACKEND_ADDR", ":8080"),
-		DatabasePath:    envOrDefault("BACKEND_DB_PATH", "./data/app.db"),
-		StaticRoot:      envOrDefault("FRONTEND_DIST", "../dist"),
-		UserDataRoot:    envOrDefault("USER_DATA_ROOT", "./data/users"),
-		EnableDebugAPI:  envBoolOrDefault("ENABLE_DEBUG_API", false),
-		AdminUsername:   os.Getenv("PERSEUS_ADMIN_USERNAME"),
-		AdminPassword:   os.Getenv("PERSEUS_ADMIN_PASSWORD"),
-		WorkerCount:     envIntOrDefault("TASK_WORKER_COUNT", 2),
-		PollInterval:    envDurationOrDefault("TASK_POLL_INTERVAL", 1500*time.Millisecond),
-		ShutdownTimeout: envDurationOrDefault("BACKEND_SHUTDOWN_TIMEOUT", 10*time.Second),
+		ListenAddr:         envOrDefault("BACKEND_ADDR", ":8080"),
+		DatabasePath:       envOrDefault("BACKEND_DB_PATH", "./data/app.db"),
+		StaticRoot:         envOrDefault("FRONTEND_DIST", "../dist"),
+		UserDataRoot:       envOrDefault("USER_DATA_ROOT", "./data/users"),
+		EnableDebugAPI:     envBoolOrDefault("ENABLE_DEBUG_API", false),
+		AdminUsername:      os.Getenv("PERSEUS_ADMIN_USERNAME"),
+		AdminPassword:      os.Getenv("PERSEUS_ADMIN_PASSWORD"),
+		WorkerCount:        envIntOrDefault("TASK_WORKER_COUNT", 2),
+		PollInterval:       envDurationOrDefault("TASK_POLL_INTERVAL", 1500*time.Millisecond),
+		ShutdownTimeout:    envDurationOrDefault("BACKEND_SHUTDOWN_TIMEOUT", 10*time.Second),
+		AllowedOrigins:     os.Getenv("CORS_ALLOWED_ORIGINS"),
+		AgentConcurrency:   envIntOrDefault("AGENT_CONCURRENCY", 2),
+		AgentQueueCapacity: envIntOrDefault("AGENT_QUEUE_CAPACITY", 64),
 	}
 }
 

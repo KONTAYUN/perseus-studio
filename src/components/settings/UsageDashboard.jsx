@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowLeft, BarChart3, RefreshCw, Settings } from 'lucide-react';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../../api/client';
 import UsagePriceSettingsPanel from './UsagePriceSettingsPanel';
+import { useSettingsGuard } from './SettingsNavigation';
 import {
   displayPriceToMicro,
   formatCost,
@@ -44,6 +45,11 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
   const [showPriceSettings, setShowPriceSettings] = React.useState(false);
   const [message, setMessage] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
+  const [priceBaseline, setPriceBaseline] = React.useState(JSON.stringify(emptyPriceDraft()));
+  const [priceSaving, setPriceSaving] = React.useState(false);
+  const priceLock = React.useRef(false);
+  const navigation = useSettingsGuard({ dirty: showPriceSettings && JSON.stringify(priceDraft) !== priceBaseline,
+    busy: priceSaving, discard: resetPriceForm });
 
   const loadUsage = React.useCallback(async () => {
     setIsLoading(true);
@@ -81,6 +87,8 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
 
   async function savePrice(event) {
     event.preventDefault();
+    if (priceLock.current) return false;
+    priceLock.current = true; setPriceSaving(true);
     setMessage('');
     try {
       const payload = normalizePriceDraft(priceDraft);
@@ -91,14 +99,16 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
       }
       resetPriceForm();
       await loadUsage();
+      return true;
     } catch (error) {
       setMessage(error.message);
-    }
+      return false;
+    } finally { priceLock.current = false; setPriceSaving(false); }
   }
 
   function editPrice(item) {
     setEditingPriceId(item.id);
-    setPriceDraft({
+    const next = {
       model_provider_id: item.model_provider_id || '',
       model_id: item.model_id || '',
       currency: item.currency || 'USD',
@@ -106,7 +116,8 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
       output_price_micro: priceMicroToDisplay(item.output_price_micro),
       cache_creation_price_micro: priceMicroToDisplay(item.cache_creation_price_micro),
       cache_read_price_micro: priceMicroToDisplay(item.cache_read_price_micro),
-    });
+    };
+    setPriceDraft(next); setPriceBaseline(JSON.stringify(next));
   }
 
   async function deletePrice(item) {
@@ -129,15 +140,24 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
   function resetPriceForm() {
     setEditingPriceId('');
     setPriceDraft(emptyPriceDraft());
+    setPriceBaseline(JSON.stringify(emptyPriceDraft()));
   }
+
+  if (showPriceSettings) return <UsagePriceSettingsPanel
+    providers={providers} prices={prices} priceDraft={priceDraft} editingPriceId={editingPriceId}
+    onClose={() => navigation.attemptLeave(() => { resetPriceForm(); setShowPriceSettings(false); })}
+    onSave={savePrice} onReset={() => navigation.attemptLeave(resetPriceForm)}
+    onDiscard={action => navigation.attemptLeave(() => { resetPriceForm(); action(); })}
+    onDraftChange={setPriceDraft} onEdit={editPrice} onDelete={deletePrice} saving={priceSaving} error={message}
+  />;
 
   return (
     <SettingsSection data-testid="usage-dashboard" className="settings-view-enter">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+          {onBack && <Button type="button" variant="ghost" size="sm" onClick={onBack}>
             <ArrowLeft size={16} /> 用量统计
-          </Button>
+          </Button>}
           <Select value={range} onChange={(event) => setRange(event.target.value)} className="w-32">
             <option value="today">今天</option>
             <option value="7d">7 天</option>
@@ -206,20 +226,6 @@ export default function UsageDashboard({ dialog, onBack, currentUser }) {
         <UsageEvents events={events} usersById={usersById} providers={providers} />
       )}
 
-      {showPriceSettings && (
-        <UsagePriceSettingsPanel
-          providers={providers}
-          prices={prices}
-          priceDraft={priceDraft}
-          editingPriceId={editingPriceId}
-          onClose={() => setShowPriceSettings(false)}
-          onSave={savePrice}
-          onReset={resetPriceForm}
-          onDraftChange={setPriceDraft}
-          onEdit={editPrice}
-          onDelete={deletePrice}
-        />
-      )}
     </SettingsSection>
   );
 }

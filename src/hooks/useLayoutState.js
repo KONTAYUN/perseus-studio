@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const EDITOR_PANEL_IDS = ['editor_1', 'editor_2', 'editor_3'];
 const MAX_TOTAL_PANELS = 5;
@@ -47,8 +47,14 @@ export default function useLayoutState({ userId = '' } = {}) {
   const [isPanelTrashOver, setIsPanelTrashOver] = useState(false);
   const [panelAddMenuOpen, setPanelAddMenuOpen] = useState(false);
   const [layoutNotice, setLayoutNotice] = useState('');
-  const [recentlyAddedPanelId, setRecentlyAddedPanelId] = useState('');
   const [layoutAnimationAction, setLayoutAnimationAction] = useState(null);
+
+  const resizeCleanupRef = useRef(null);
+  const dragStartTimerRef = useRef(null);
+  useEffect(() => () => {
+    resizeCleanupRef.current?.();
+    window.clearTimeout(dragStartTimerRef.current);
+  }, []);
 
   const panelOrder = useMemo(() => panels.map((panel) => panel.id), [panels]);
 
@@ -73,7 +79,6 @@ export default function useLayoutState({ userId = '' } = {}) {
     setWidths({ fileTree: 260, chat: 400 });
     setActivePanel('none');
     setPanelAddMenuOpen(false);
-    setRecentlyAddedPanelId('');
   };
 
   const isPanelVisible = (id) => panels.some((panel) => panel.id === id);
@@ -93,7 +98,6 @@ export default function useLayoutState({ userId = '' } = {}) {
       }
       setLayoutAnimationAction({ kind: 'add', panelId: 'chat', key: Date.now() });
       setPanels((current) => [...current, { id: 'chat', type: 'chat' }]);
-      flashAddedPanel('chat');
       return 'chat';
     }
     if (type === 'fileTree') {
@@ -105,7 +109,6 @@ export default function useLayoutState({ userId = '' } = {}) {
       }
       setLayoutAnimationAction({ kind: 'add', panelId: 'fileTree', key: Date.now() });
       setPanels((current) => [...current, { id: 'fileTree', type: 'fileTree' }]);
-      flashAddedPanel('fileTree');
       return 'fileTree';
     }
     const editorCount = panels.filter((panel) => panel.type === 'editor').length;
@@ -121,15 +124,7 @@ export default function useLayoutState({ userId = '' } = {}) {
     }
     setLayoutAnimationAction({ kind: 'add', panelId: nextId, key: Date.now() });
     setPanels((current) => [...current, { id: nextId, type: 'editor' }]);
-    flashAddedPanel(nextId);
     return nextId;
-  };
-
-  const flashAddedPanel = (panelId) => {
-    setRecentlyAddedPanelId(panelId);
-    window.setTimeout(() => {
-      setRecentlyAddedPanelId((current) => (current === panelId ? '' : current));
-    }, 320);
   };
 
   const removePanel = (panelId, canRemove) => {
@@ -150,6 +145,7 @@ export default function useLayoutState({ userId = '' } = {}) {
   };
 
   const startResize = (e, leftPanelId, rightPanelId, panelSizes = {}) => {
+    resizeCleanupRef.current?.();
     e.preventDefault();
     e.stopPropagation();
     setIsDraggingMode(true);
@@ -186,11 +182,15 @@ export default function useLayoutState({ userId = '' } = {}) {
     const onMouseUp = () => {
       setIsDraggingMode(false);
       setDragType(null);
+      resizeCleanupRef.current?.();
+    };
+
+    resizeCleanupRef.current = () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      resizeCleanupRef.current = null;
     };
-
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
   };
@@ -199,7 +199,8 @@ export default function useLayoutState({ userId = '' } = {}) {
     e.stopPropagation();
     e.dataTransfer.setData('panel_id', id);
     e.dataTransfer.effectAllowed = 'move';
-    setTimeout(() => {
+    window.clearTimeout(dragStartTimerRef.current);
+    dragStartTimerRef.current = window.setTimeout(() => {
       setDraggingPanelId(id);
       setIsDraggingMode(true);
       setDragType('reorder');
@@ -235,6 +236,7 @@ export default function useLayoutState({ userId = '' } = {}) {
   };
 
   const handlePanelDragEnd = () => {
+    window.clearTimeout(dragStartTimerRef.current);
     setDraggingPanelId(null);
     setIsDraggingMode(false);
     setDragType(null);
@@ -247,7 +249,7 @@ export default function useLayoutState({ userId = '' } = {}) {
       return 'ui-panel-surface-drop bg-blue-50/20 dark:bg-blue-500/20 z-40';
     }
     if (activePanel === panelName) {
-      return 'border-gray-200/80 dark:border-white/10 z-40';
+      return 'ui-panel-surface-active z-40';
     }
     return 'border-gray-200/80 dark:border-white/10 z-10';
   };
@@ -282,7 +284,6 @@ export default function useLayoutState({ userId = '' } = {}) {
     panelAddMenuOpen,
     panelOrder,
     panels,
-    recentlyAddedPanelId,
     removePanel,
     setActiveEditorPanelId,
     setActivePanel,

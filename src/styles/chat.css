@@ -161,3 +161,6 @@
   background: rgb(59 130 246 / 0.1);
   color: rgb(191 219 254);
 }
+@media (hover: none) {
+  .message-actions { opacity: 1; }
+}

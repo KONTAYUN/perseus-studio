@@ -2,7 +2,6 @@ package ai
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -63,11 +62,11 @@ func (r *agentRuntime) recordConditionSatisfiedFromToolResult(call agentToolCall
 	r.recordConditionSatisfiedPath(firstNonEmpty(payload.Path, event.Path))
 }
 
-func (r *agentRuntime) recordConditionSatisfiedFromToolError(toolName, argumentsJSON, message string) {
+func (r *agentRuntime) recordConditionSatisfiedFromToolError(toolName, argumentsJSON string, err error) {
 	if r == nil || strings.TrimSpace(toolName) != "manage_workspace_path" {
 		return
 	}
-	if toolFailureClass(toolName, fmt.Errorf("%s", message)) != "workspace_path_already_exists" {
+	if toolFailureClass(toolName, err) != "workspace_path_already_exists" {
 		return
 	}
 	var payload struct {

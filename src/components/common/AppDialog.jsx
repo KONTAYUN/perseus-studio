@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Edit3, X } from 'lucide-react';
 import { Button, IconButton, Input } from '../ui';
+import useModalFocus from '../../hooks/useModalFocus';
 
 export function useAppDialog() {
   const [dialog, setDialog] = React.useState(null);
@@ -46,25 +47,15 @@ export function useAppDialog() {
 export default function AppDialog({ dialog, onClose }) {
   const [value, setValue] = React.useState('');
   const inputRef = React.useRef(null);
+  const modalRef = React.useRef(null);
+  const dismiss = React.useCallback(() => onClose(dialog?.type === 'prompt' ? null : false), [dialog?.type, onClose]);
+  useModalFocus(modalRef, Boolean(dialog), dismiss, dialog?.type === 'prompt' ? 'input' : '[data-dialog-cancel]');
 
-  React.useEffect(() => {
-    if (!dialog) return undefined;
+  React.useLayoutEffect(() => {
+    if (!dialog) return;
     setValue(dialog.initialValue || '');
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose(dialog.type === 'prompt' ? null : false);
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    if (dialog.type === 'prompt') queueMicrotask(() => inputRef.current?.select());
   }, [dialog, onClose]);
-
-  React.useEffect(() => {
-    if (dialog?.type !== 'prompt') return;
-    const timer = window.setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }, 60);
-    return () => window.clearTimeout(timer);
-  }, [dialog]);
 
   if (!dialog) return null;
 
@@ -86,6 +77,11 @@ export default function AppDialog({ dialog, onClose }) {
       }}
     >
       <form
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={dialog.title}
+        tabIndex={-1}
         onSubmit={submit}
         className="ui-overlay-surface motion-modal w-full max-w-md border border-white/50 bg-white/95 p-5 backdrop-blur-3xl dark:border-white/10 dark:bg-[#252527]/95"
       >
@@ -128,6 +124,7 @@ export default function AppDialog({ dialog, onClose }) {
 
         <div className="mt-6 flex justify-end gap-2">
           <Button
+            data-dialog-cancel=""
             type="button"
             onClick={() => onClose(dialog.type === 'prompt' ? null : false)}
             variant="secondary"

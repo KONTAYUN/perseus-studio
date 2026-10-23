@@ -19,8 +19,8 @@ func (s *UsageStore) Summary(ctx context.Context, query UsageQuery) (UsageSummar
 	}
 	totals, err := s.aggregateRow(ctx, `
 SELECT COUNT(*),
-  SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END),
-  SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
+  COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(input_tokens), 0),
   COALESCE(SUM(output_tokens), 0),
   COALESCE(SUM(cache_creation_tokens), 0),

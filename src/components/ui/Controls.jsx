@@ -52,9 +52,9 @@ export function Switch({ checked, onChange, title, disabled = false }) {
   );
 }
 
-export function SegmentedControl({ options = [], value, onChange, className = '' }) {
+export function SegmentedControl({ options = [], value, onChange, className = '', ...props }) {
   return (
-    <div className={cn('ui-segmented-control', className)} role="group">
+    <div className={cn('ui-segmented-control', className)} role="group" {...props}>
       {options.map((option) => {
         const active = option.value === value;
         return (

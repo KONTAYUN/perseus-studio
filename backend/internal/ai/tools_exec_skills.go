@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"webide-backend/internal/failure"
 
 	skillpkg "webide-backend/internal/skills"
 )
@@ -44,7 +45,7 @@ func (s *Service) execReadSkillForRole(ctx context.Context, userID, role, argume
 		SkillID string `json:"skill_id"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在读取 Skill...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在读取 Skill...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	skillsSvc, err := s.factory.Skills(userID)
 	if err != nil {
@@ -79,7 +80,7 @@ func (s *Service) execInstallSkillFromAttachment(ctx context.Context, userID, ar
 		Enabled      *bool  `json:"enabled"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在安装 Skill...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在安装 Skill...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	skillsSvc, err := s.factory.Skills(userID)
 	if err != nil {
@@ -127,7 +128,7 @@ func (s *Service) execDeleteSkillForRole(ctx context.Context, userID, role, argu
 		SkillID string `json:"skill_id"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在删除 Skill...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在删除 Skill...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	skillsSvc, err := s.factory.Skills(userID)
 	if err != nil {

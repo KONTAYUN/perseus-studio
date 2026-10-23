@@ -25,7 +25,7 @@ func (r *agentRuntime) handleNoToolTurn(ctx context.Context, turn agentModelTurn
 			diagID := r.service.recordProviderDiagnostic(ctx, r.opts, r.provider, r.conversationID, r.messageID, "provider_empty_response", "warn", 0, err)
 			r.invalidTurns++
 			if r.invalidTurns > agentMaxInvalidTurns {
-				emitToolLifecycleEvent(r.opts, "run_failed", "error", map[string]any{
+				emitToolLifecycleEvent(r.opts, "agent_execution_failed", "error", map[string]any{
 					"error":             err.Error(),
 					"diagnostic_log_id": diagID,
 					"provider":          r.provider.Name,

@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"reflect"
-	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -300,39 +300,36 @@ func TestReadTextFileRangeAndEditTextFile(t *testing.T) {
 	}
 }
 
-func TestEditTextFileSmartUsesTrimmedLineMatch(t *testing.T) {
-	ctx := context.Background()
+func TestEditTextFileSmartRejectsNonExactWhitespace(t *testing.T) {
 	files := newTestService(t)
-
-	if _, err := files.CreateFile(ctx, "draft.txt", "intro\n  target line  \nend\n"); err != nil {
-		t.Fatalf("CreateFile returned error: %v", err)
+	ctx := t.Context()
+	original := "intro\n  target line  \nend\n"
+	if _, err := files.CreateFile(ctx, "draft.txt", original); err != nil {
+		t.Fatal(err)
 	}
-	result, err := files.EditTextFileSmart(ctx, "draft.txt", "target line\n", "replacement\n", "test_edit", false)
-	if err != nil {
-		t.Fatalf("EditTextFileSmart returned error: %v", err)
+	if _, err := files.EditTextFileSmart(ctx, "draft.txt", "target line\n", "replacement\n", "test_edit", false); err == nil {
+		t.Fatal("silently normalized semantic whitespace")
 	}
-	if result.MatchKind != TextEditMatchTrimmedLines || result.Replacements != 1 {
-		t.Fatalf("unexpected smart edit result: %#v", result)
-	}
-	after, err := files.ReadFile("draft.txt")
-	if err != nil {
-		t.Fatalf("ReadFile after edit returned error: %v", err)
-	}
-	if after.Content != "intro\nreplacement\nend\n" {
-		t.Fatalf("unexpected edited content: %q", after.Content)
+	read, err := files.ReadFile("draft.txt")
+	if err != nil || read.Content != original {
+		t.Fatal("rejected edit changed file")
 	}
 }
 
-func TestEditTextFileSmartRejectsOmissionPlaceholder(t *testing.T) {
+func TestEditTextFilePreservesLegitimateOmissionPhrases(t *testing.T) {
 	ctx := context.Background()
 	files := newTestService(t)
 
 	if _, err := files.CreateFile(ctx, "draft.txt", "one\ntwo\n"); err != nil {
 		t.Fatalf("CreateFile returned error: %v", err)
 	}
-	_, err := files.EditTextFileSmart(ctx, "draft.txt", "one\n", "ONE\n其余不变", "test_edit", false)
-	if err == nil || !strings.Contains(err.Error(), "omission placeholder") {
-		t.Fatalf("expected omission placeholder error, got %v", err)
+	_, err := files.EditTextFileSmart(ctx, "draft.txt", "one\n", "文档规则：其余不变。\n", "test_edit", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := files.ReadFile("draft.txt")
+	if err != nil || read.Content != "文档规则：其余不变。\ntwo\n" {
+		t.Fatal("literal wording changed", read.Content, err)
 	}
 }
 
@@ -393,8 +390,16 @@ func TestTrashItemsRestoreAndConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TrashItems after restore returned error: %v", err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("expected trash to be empty after restore, got %#v", items)
+	if len(items) != 1 || items[0].OriginalPath != "docs/a.txt" {
+		t.Fatalf("expected overwritten content retained in trash, got %#v", items)
+	}
+	_, absBackup, err := files.sanitizePath(items[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := os.ReadFile(absBackup)
+	if err != nil || string(backup) != "conflict" {
+		t.Fatalf("overwritten content lost: %q %v", backup, err)
 	}
 }
 

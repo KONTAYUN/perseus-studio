@@ -29,7 +29,7 @@ func (s *Server) parseConversationMessageRequest(r *http.Request) (string, strin
 }
 
 func (s *Server) parseMultipartConversationMessage(r *http.Request) (string, string, string, []byte, []ai.AttachmentPayload, error) {
-	if err := r.ParseMultipartForm(80 << 20); err != nil {
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		return "", "", "", nil, nil, fmt.Errorf("invalid multipart body")
 	}
 
@@ -42,12 +42,18 @@ func (s *Server) parseMultipartConversationMessage(r *http.Request) (string, str
 	fileIndex := 0
 	for _, fieldName := range []string{"files[]", "files"} {
 		for _, header := range r.MultipartForm.File[fieldName] {
+			if header.Size > 64<<20 {
+				return "", "", "", nil, nil, fmt.Errorf("attachment exceeds 64 MiB")
+			}
 			file, err := header.Open()
 			if err != nil {
 				return "", "", "", nil, nil, fmt.Errorf("failed to open attachment")
 			}
-			raw, readErr := io.ReadAll(io.LimitReader(file, 64<<20))
+			raw, readErr := io.ReadAll(io.LimitReader(file, (64<<20)+1))
 			closeErr := file.Close()
+			if len(raw) > 64<<20 {
+				return "", "", "", nil, nil, fmt.Errorf("attachment exceeds 64 MiB")
+			}
 			if readErr != nil {
 				return "", "", "", nil, nil, fmt.Errorf("failed to read attachment")
 			}

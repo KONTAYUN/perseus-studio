@@ -103,6 +103,20 @@ CREATE TABLE IF NOT EXISTS task_logs (
   created_at DATETIME NOT NULL,
   FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS task_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  execution_id TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL,
+  level TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at DATETIME NOT NULL,
+  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  UNIQUE(task_id,seq)
+);
 `
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
 		return err
@@ -117,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_task_logs_task_id_seq ON task_logs(task_id, seq);
 CREATE INDEX IF NOT EXISTS idx_task_logs_user_id ON task_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_task_events_owner_cursor ON task_events(user_id,task_id,seq);
 `
 	_, err := s.db.ExecContext(ctx, indexes)
 	return err

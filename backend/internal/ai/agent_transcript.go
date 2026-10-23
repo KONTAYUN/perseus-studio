@@ -241,6 +241,10 @@ func cloneMapAnySlice(input []map[string]any) []map[string]any {
 }
 
 type AgentRuntimeCheckpoint struct {
+	UnresolvedCommands        map[string]string                   `json:"unresolved_commands,omitempty"`
+	AllowedWorkspacePaths     []string                            `json:"allowed_workspace_paths"`
+	CompletedOutcome          string                              `json:"completed_outcome,omitempty"`
+	LoopGuard                 AgentLoopGuard                      `json:"loop_guard,omitempty"`
 	Transcript                *AgentTranscript                    `json:"transcript"`
 	Events                    []ToolEvent                         `json:"events"`
 	AppliedMutations          map[string]ToolEvent                `json:"applied_mutations"`
@@ -265,6 +269,10 @@ type AgentRuntimeCheckpoint struct {
 
 func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 	checkpoint := AgentRuntimeCheckpoint{
+		UnresolvedCommands:        cloneStringMap(r.unresolvedCommands),
+		AllowedWorkspacePaths:     cloneScopePaths(r.opts.AllowedWorkspacePaths),
+		CompletedOutcome:          r.completedOutcome,
+		LoopGuard:                 cloneLoopGuard(r.loopGuard),
 		Transcript:                r.transcript.Clone(),
 		Events:                    append([]ToolEvent(nil), r.events...),
 		AppliedMutations:          map[string]ToolEvent{},
@@ -298,6 +306,10 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 }
 
 func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
+	r.opts.AllowedWorkspacePaths = intersectWorkspaceScopes(r.opts.AllowedWorkspacePaths, checkpoint.AllowedWorkspacePaths)
+	r.completedOutcome = checkpoint.CompletedOutcome
+	r.unresolvedCommands = cloneStringMap(checkpoint.UnresolvedCommands)
+	r.loopGuard = cloneLoopGuard(checkpoint.LoopGuard)
 	r.transcript = checkpoint.Transcript.Clone()
 	r.events = append([]ToolEvent(nil), checkpoint.Events...)
 	r.appliedMutations = map[string]ToolEvent{}

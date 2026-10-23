@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 
 	"webide-backend/internal/store"
 )
@@ -19,8 +20,8 @@ func (m *Manager) updateAndPublish(ctx context.Context, taskID string, status st
 	}
 }
 
-func (m *Manager) finishTask(ctx context.Context, taskID string, status store.TaskStatus, stage, message string, resultJSON *string, errText *string) {
-	task, err := m.store.UpdateTaskState(ctx, taskID, store.UpdateTaskStateInput{
+func (m *Manager) finishTask(ctx context.Context, taskID string, status store.TaskStatus, stage, message string, resultJSON *string, errText *string) error {
+	task, event, err := m.store.FinishWithEvent(ctx, taskID, store.UpdateTaskStateInput{
 		Status:          status,
 		ProgressStage:   stage,
 		ProgressMessage: message,
@@ -29,9 +30,14 @@ func (m *Manager) finishTask(ctx context.Context, taskID string, status store.Ta
 		SetFinishedAt:   true,
 	})
 	if err != nil {
-		return
+		log.Printf("[task] terminal persistence failed task=%s status=%s error=%v", taskID, status, err)
+		return err
+	}
+	if event != nil {
+		m.broker.Publish(taskID, Event{Type: "event", Log: event})
 	}
 	m.broker.Publish(taskID, Event{Type: "task", Task: task})
+	return nil
 }
 
 func (m *Manager) logAndPublish(ctx context.Context, userID, taskID, level, message string) {

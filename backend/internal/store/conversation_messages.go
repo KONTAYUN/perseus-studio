@@ -9,7 +9,8 @@ import (
 
 func (s *ConversationStore) ListMessages(ctx context.Context, userID, conversationID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at
+SELECT id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at,
+COALESCE((SELECT payload_json FROM message_attachment_payloads p WHERE p.message_id=messages.id AND p.user_id=messages.user_id),'')
 FROM messages
 WHERE conversation_id = ? AND user_id = ?
 ORDER BY created_at ASC
@@ -86,7 +87,8 @@ WHERE id = ? AND user_id = ?
 
 func (s *ConversationStore) GetMessage(ctx context.Context, userID, id string) (Message, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at
+SELECT id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at,
+COALESCE((SELECT payload_json FROM message_attachment_payloads p WHERE p.message_id=messages.id AND p.user_id=messages.user_id),'')
 FROM messages
 WHERE id = ? AND user_id = ?
 `, id, userID)

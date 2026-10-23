@@ -9,6 +9,8 @@ import (
 )
 
 func (s *Service) Mkdir(path string) (map[string]string, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	cleanPath, absPath, err := s.sanitizePath(path)
 	if err != nil {
 		return nil, err
@@ -23,6 +25,8 @@ func (s *Service) Mkdir(path string) (map[string]string, error) {
 }
 
 func (s *Service) MkdirNew(path string) (PathChangeResult, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	cleanPath, absPath, err := s.sanitizePath(path)
 	if err != nil {
 		return PathChangeResult{}, err
@@ -31,7 +35,7 @@ func (s *Service) MkdirNew(path string) (PathChangeResult, error) {
 		return PathChangeResult{}, trashManagedOnlyError()
 	}
 	if _, err := os.Stat(absPath); err == nil {
-		return PathChangeResult{}, fmt.Errorf("path already exists")
+		return PathChangeResult{}, ErrPathExists
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return PathChangeResult{}, err
 	}
@@ -45,6 +49,8 @@ func (s *Service) MkdirNew(path string) (PathChangeResult, error) {
 }
 
 func (s *Service) RenameWithNewName(oldPath, newName string) (PathChangeResult, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	cleanOld, _, err := s.sanitizePath(oldPath)
 	if err != nil {
 		return PathChangeResult{}, err
@@ -72,6 +78,8 @@ func (s *Service) RenameWithNewName(oldPath, newName string) (PathChangeResult, 
 }
 
 func (s *Service) MovePath(oldPath, newParentPath string) (PathChangeResult, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	cleanOld, absOld, err := s.sanitizePath(oldPath)
 	if err != nil {
 		return PathChangeResult{}, err
@@ -117,6 +125,8 @@ func (s *Service) MovePath(oldPath, newParentPath string) (PathChangeResult, err
 }
 
 func (s *Service) Rename(oldPath, newPath string) (map[string]string, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	cleanOld, _, err := s.sanitizePath(oldPath)
 	if err != nil {
 		return nil, err
@@ -136,6 +146,8 @@ func (s *Service) Rename(oldPath, newPath string) (map[string]string, error) {
 }
 
 func (s *Service) Delete(path string) (map[string]string, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	cleanPath, absPath, err := s.sanitizePath(path)
 	if err != nil {
 		return nil, err
@@ -156,11 +168,11 @@ func (s *Service) renameValidated(cleanOld, cleanNew string) (PathChangeResult, 
 	if isAnyTrashPath(cleanOld) || isAnyTrashPath(cleanNew) {
 		return PathChangeResult{}, trashManagedOnlyError()
 	}
-	_, absOld, err := s.sanitizePath(cleanOld)
+	cleanOld, absOld, err := s.sanitizePath(cleanOld)
 	if err != nil {
 		return PathChangeResult{}, err
 	}
-	_, absNew, err := s.sanitizePath(cleanNew)
+	cleanNew, absNew, err := s.sanitizePath(cleanNew)
 	if err != nil {
 		return PathChangeResult{}, err
 	}
@@ -176,7 +188,7 @@ func (s *Service) renameValidated(cleanOld, cleanNew string) (PathChangeResult, 
 		return PathChangeResult{}, err
 	}
 	if err := s.moveOrderMetadata(cleanOld, cleanNew); err != nil {
-		return PathChangeResult{}, err
+		return PathChangeResult{}, errors.Join(err, os.Rename(absNew, absOld))
 	}
 	return PathChangeResult{
 		Path:         cleanNew,

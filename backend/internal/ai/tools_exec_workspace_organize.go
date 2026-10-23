@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"webide-backend/internal/failure"
 
 	"webide-backend/internal/workspace"
 )
@@ -23,7 +24,7 @@ func (s *Service) execOrganizeWorkspaceMatches(ctx context.Context, userID, argu
 		MaxItems       int    `json:"max_items"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在整理文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在整理文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	args.MatchText = strings.TrimSpace(args.MatchText)
 	args.TargetFolder = strings.Trim(strings.TrimSpace(strings.ReplaceAll(args.TargetFolder, "\\", "/")), "/")

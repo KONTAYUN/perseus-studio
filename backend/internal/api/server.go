@@ -14,6 +14,7 @@ import (
 	"webide-backend/internal/ai"
 	"webide-backend/internal/config"
 	"webide-backend/internal/idgen"
+	"webide-backend/internal/runqueue"
 	"webide-backend/internal/store"
 	"webide-backend/internal/tasks"
 	"webide-backend/internal/usersvc"
@@ -28,22 +29,25 @@ type SessionInfo struct {
 }
 
 type Server struct {
-	store         *store.TaskStore
-	runs          *store.AgentRunStore
-	configs       *store.ConfigStore
-	conversations *store.ConversationStore
-	diagnostics   *store.DiagnosticStore
-	usage         *store.UsageStore
-	users         *store.UserStore
-	sessions      *store.SessionStore
-	broker        *tasks.Broker
-	runBroker     *tasks.Broker
-	factory       *usersvc.Factory
-	ai            *ai.Service
-	cfg           config.Config
-	mux           *http.ServeMux
-	runCancelMu   sync.Mutex
-	runCancels    map[string]*runCancelEntry
+	runQueue       *runqueue.Manager
+	titleQueue     *runqueue.Manager
+	store          *store.TaskStore
+	runs           *store.AgentRunStore
+	configs        *store.ConfigStore
+	conversations  *store.ConversationStore
+	diagnostics    *store.DiagnosticStore
+	usage          *store.UsageStore
+	users          *store.UserStore
+	sessions       *store.SessionStore
+	broker         *tasks.Broker
+	runBroker      *tasks.Broker
+	factory        *usersvc.Factory
+	ai             *ai.Service
+	cfg            config.Config
+	mux            *http.ServeMux
+	runCancelMu    sync.Mutex
+	registrationMu sync.Mutex
+	runCancels     map[string]*runCancelEntry
 }
 
 type runCancelEntry struct {
@@ -63,8 +67,9 @@ type searchFilesRequest struct {
 }
 
 type writeFileRequest struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path         string  `json:"path"`
+	Content      string  `json:"content"`
+	ExpectedHash *string `json:"expected_hash"`
 }
 
 type renameRequest struct {
@@ -136,7 +141,7 @@ type chatAttachmentMetadata struct {
 	Note              string `json:"note,omitempty"`
 }
 
-func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, configStore *store.ConfigStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, usageStore *store.UsageStore, userStore *store.UserStore, sessionStore *store.SessionStore, broker *tasks.Broker, runBroker *tasks.Broker, factory *usersvc.Factory, aiService *ai.Service, cfg config.Config) *Server {
+func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, configStore *store.ConfigStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, usageStore *store.UsageStore, userStore *store.UserStore, sessionStore *store.SessionStore, broker *tasks.Broker, runBroker *tasks.Broker, factory *usersvc.Factory, aiService *ai.Service, cfg config.Config, schedulers ...*runqueue.Manager) *Server {
 	s := &Server{
 		store:         taskStore,
 		runs:          runStore,
@@ -153,17 +158,23 @@ func NewServer(taskStore *store.TaskStore, runStore *store.AgentRunStore, config
 		cfg:           cfg,
 		mux:           http.NewServeMux(),
 		runCancels:    make(map[string]*runCancelEntry),
+		runQueue:      runqueue.New(cfg.AgentConcurrency, cfg.AgentQueueCapacity),
+		titleQueue:    runqueue.New(1, 16),
+	}
+	if len(schedulers) > 0 && schedulers[0] != nil {
+		s.runQueue = schedulers[0]
 	}
 	s.register()
 	return s
 }
 
 func (s *Server) Routes() http.Handler {
-	return s.withCORS(s.withAuth(s.mux))
+	return s.withCORS(s.withAuth(s.withBodyLimits(s.mux)))
 }
 
 func (s *Server) register() {
 	s.mux.HandleFunc("/api/health", s.handleHealth)
+	s.mux.HandleFunc("/api/ready", s.handleReadiness)
 	s.mux.HandleFunc("/api/version", s.handleVersion)
 	s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("/api/auth/register", s.handleAuthRegister)
@@ -182,6 +193,8 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/files/tree", s.handleFilesTree)
 	s.mux.HandleFunc("/api/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("/api/files/read", s.handleFilesRead)
+	s.mux.HandleFunc("/api/files/download", s.handleFilesDownload)
+	s.mux.HandleFunc("/api/workspace/changes", s.handleWorkspaceChanges)
 	s.mux.HandleFunc("/api/files/upload", s.handleFilesUpload)
 	s.mux.HandleFunc("/api/files/write", s.handleFilesWrite)
 	s.mux.HandleFunc("/api/files/create", s.handleFilesCreate)
@@ -202,6 +215,8 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/skills", s.handleSkills)
 	s.mux.HandleFunc("/api/skills/", s.handleSkillRoutes)
 	s.mux.HandleFunc("/api/conversations", s.handleConversations)
+	s.mux.HandleFunc("/api/pending-messages", s.handlePendingMessages)
+	s.mux.HandleFunc("/api/pending-messages/", s.handlePendingMessages)
 	s.mux.HandleFunc("/api/conversations/", s.handleConversationRoutes)
 	s.mux.HandleFunc("/api/agent-runs/", s.handleAgentRunRoutes)
 	s.mux.HandleFunc("/api/diagnostics/logs", s.handleDiagnosticLogs)
@@ -267,26 +282,6 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.ServeFile(w, r, target)
-}
-
-func (s *Server) withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		}
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func writeSSE(w http.ResponseWriter, event string, payload any) {

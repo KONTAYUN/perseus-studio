@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { apiPost } from '../api/client';
+import { createEditorSaveAction } from './editorSaveActions';
 import { createEditorFileLoader } from './createEditorFileLoader';
 import { createEditorToolRefreshActions } from './editorToolRefreshActions';
 import { detectFileType } from './ideUtils';
@@ -34,7 +34,11 @@ export default function useEditorTabs({
   const [editorStatusMessage, setEditorStatusMessage] = useState('');
   const [openTabs, setOpenTabs] = useState([]);
   const [activeTabPath, setActiveTabPath] = useState('');
+  const [documentModes, setDocumentModes] = useState({});
 
+  const currentFileHashRef = useRef('');
+  currentFileHashRef.current = currentFileHash;
+  const saveRequestRef = useRef(null);
   const currentFilePathRef = useRef('');
   const currentFileContentRef = useRef('');
   const savedFileContentRef = useRef('');
@@ -100,6 +104,8 @@ export default function useEditorTabs({
 
   const loadFileIntoEditor = createEditorFileLoader({
     editorLoadRequestRef,
+    currentFileContentRef,
+    isDirtyRef,
     setActivePanel,
     setActiveTabPath,
     setCurrentFileContent,
@@ -247,6 +253,14 @@ export default function useEditorTabs({
     const index = current.findIndex((item) => item.path === snapshot.path);
     const nextTabs = index === -1 ? [...current, snapshot] : current.map((item) => (item.path === snapshot.path ? snapshot : item));
     editorLoadRequestRef.current += 1;
+    currentFilePathRef.current = snapshot.path;
+    activeTabPathRef.current = snapshot.path;
+    currentFileContentRef.current = snapshot.content || '';
+    savedFileContentRef.current = snapshot.savedContent || '';
+    currentFileHashRef.current = snapshot.hash || '';
+    externalFileConflictRef.current = snapshot.conflict || null;
+    isDirtyRef.current = isTabDirty(snapshot);
+    isTextFileRef.current = (snapshot.fileType || detectFileType(snapshot.path)) === 'text';
     openTabsRef.current = nextTabs;
     setOpenTabs(nextTabs);
     setActiveTabPath(snapshot.path);
@@ -284,55 +298,30 @@ export default function useEditorTabs({
     await saveFileContent({ auto: true, flush: true });
   }
 
-  async function saveFileContent({ auto = false } = {}) {
-    const path = currentFilePathRef.current;
-    const content = currentFileContentRef.current;
-    if (!path || !isTextFileRef.current) return;
-    if (externalFileConflictRef.current?.reloadPath && path === externalFileConflictRef.current.reloadPath) {
-      setErrorMessage?.('该文件已被 AI 修改，但你有未保存内容，请先选择保留本地修改或重新加载文件');
-      return;
+  async function saveFileContent(options) {
+    return createEditorSaveAction({
+      currentFilePathRef, currentFileContentRef, currentFileHashRef, savedFileContentRef,
+      isTextFileRef, externalFileConflictRef, saveRequestRef,
+      setIsSavingFile, setErrorMessage, setEditorStatusMessage, setSavedFileContent,
+      setCurrentFileHash, setCurrentFileVersionId, setOpenTabs, setExternalFileConflict, loadTree,
+    })(options);
+  }
+
+  async function prepareCurrentFileForAgent({ path, content }) {
+    const matches = () => currentFilePathRef.current === path && currentFileContentRef.current === content
+      && isTextFileRef.current && !externalFileConflictRef.current;
+    if (!matches()) throw new Error('文件已变化或存在保存冲突，请先处理后再修复。');
+    await saveFileContent({ auto: true });
+    if (!matches() || savedFileContentRef.current !== content) {
+      throw new Error('未能保存当前版本，已停止发送修复请求。');
     }
-    setIsSavingFile(true);
-    setErrorMessage?.('');
-    setEditorStatusMessage('');
-    try {
-      const result = await apiPost('/api/files/write', {
-        path,
-        content,
-      });
-      if (currentFilePathRef.current === path) {
-        setSavedFileContent(content);
-        setCurrentFileHash(result.hash || '');
-        setCurrentFileVersionId(result.version_id || '');
-        setEditorStatusMessage('');
-      }
-      setOpenTabs((current) =>
-        current.map((tab) =>
-          tab.path === path
-            ? {
-                ...tab,
-                content,
-                savedContent: content,
-                hash: result.hash || '',
-                versionId: result.version_id || '',
-                statusMessage: '',
-              }
-            : tab
-        )
-      );
-      await loadTree?.();
-    } catch (error) {
-      console.error('saveCurrentFile failed', error);
-      setErrorMessage?.(error.message);
-      setEditorStatusMessage(auto ? '保存失败' : '');
-      throw error;
-    } finally {
-      setIsSavingFile(false);
-    }
+    return { path, hash: currentFileHashRef.current };
   }
 
   function closeCurrentFile() {
     editorLoadRequestRef.current += 1;
+    currentFilePathRef.current = '';
+    activeTabPathRef.current = '';
     setCurrentFilePath('');
     setCurrentFileContent('');
     setSavedFileContent('');
@@ -347,7 +336,9 @@ export default function useEditorTabs({
 
   function keepLocalFileChanges() {
     if (!externalFileConflict) return;
-    setExternalFileConflict(null);
+    const conflict = { ...externalFileConflict, keepLocal: true, message: '已保留本地修改；如需覆盖磁盘版本，请手动保存。' };
+    externalFileConflictRef.current = conflict;
+    setExternalFileConflict(conflict);
     setEditorStatusMessage('已保留本地修改；如需写回磁盘，请手动保存。');
     setErrorMessage?.('');
   }
@@ -367,6 +358,7 @@ export default function useEditorTabs({
     clearPathState,
     refreshWorkspaceAfterAssistantTools,
   } = createEditorToolRefreshActions({
+    openTabSnapshot,
     closeCurrentFile,
     currentFilePathRef,
     isDirtyRef,
@@ -399,6 +391,8 @@ export default function useEditorTabs({
     editorStatusMessage,
     externalFileConflict,
     flushAutoSave,
+    documentMode: documentModes[currentFilePath] || 'rich',
+    setDocumentMode: mode => setDocumentModes(current => ({ ...current, [currentFilePath]: mode })),
     getTabSnapshot,
     isDirty,
     isDirtyRef,
@@ -410,6 +404,7 @@ export default function useEditorTabs({
     openFile,
     openTabSnapshot,
     openTabs,
+    prepareCurrentFileForAgent,
     refreshWorkspaceAfterAssistantTools,
     reloadCurrentFileFromConflict,
     reorderTab,

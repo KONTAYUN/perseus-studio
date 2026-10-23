@@ -35,3 +35,6 @@ docker compose up -d
 
 - Do not run `docker compose down -v` unless you intentionally want to remove Docker volumes.
 - The default compose file bind-mounts `./data:/data`, so normal backups can use regular filesystem copies.
+- New versions reserve the database and user-data root with retained `.server.lock` files. Do not delete these to bypass an active owner. Lock ownership is released by the OS when the process exits; copied lock-file bytes do not retain the old process lock.
+- Include each user's `.command-home` in full data backups if command-specific configuration matters. Never treat these homes as a sandbox or a place to copy server credentials.
+- File-version and reversal-journal records live in SQLite; restoring only files or only the database can invalidate safe reversal. Restore a matched data directory with the app stopped, and verify login, workspace content, trash restoration, and `/api/ready` before accepting new work.

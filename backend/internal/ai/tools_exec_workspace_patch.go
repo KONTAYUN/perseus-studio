@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"os"
 	"strings"
+	"webide-backend/internal/failure"
 
 	"webide-backend/internal/workspace"
 )
@@ -40,6 +41,8 @@ type workspacePatchHunk struct {
 type workspacePatchApplyResult struct {
 	Path         string
 	ChangedPaths []string
+	Moved        []WorkspacePathMove
+	Changes      []workspace.FileChange
 	Hash         string
 	VersionID    string
 	Size         int64
@@ -105,11 +108,13 @@ type plannedWorkspacePatchWrite struct {
 type plannedWorkspacePatchDelete struct {
 	path    string
 	trashed string
+	hash    string
 }
 
 type plannedWorkspacePatchMove struct {
 	oldPath string
 	newPath string
+	hash    string
 }
 
 func (s *Service) execApplyWorkspacePatch(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
@@ -122,7 +127,7 @@ func (s *Service) execApplyWorkspacePatch(ctx context.Context, userID, arguments
 		Transport string `json:"transport"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在编辑文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在编辑文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	patchText := strings.TrimSpace(args.Patch)
 	if patchText == "" {
@@ -134,10 +139,14 @@ func (s *Service) execApplyWorkspacePatch(ctx context.Context, userID, arguments
 			"error":               err.Error(),
 			"applied":             false,
 			"files_changed":       false,
-			"transport":           "assistant_text_patch",
+			"transport":           args.Transport,
 			"failure_stage":       "patch_apply_verification",
-			"recovery_hint":       "The patch was captured, but verification failed before writing. Read the target file/range again and submit a corrected *** Begin Patch text patch before claiming completion.",
+			"recovery_hint":       toolFailureRecoveryHint("apply_workspace_patch", err),
 			"unapplied_patch_sha": hashWorkspaceText(patchText),
+		}
+		if code := failure.Code(err); code == "workspace_patch_commit_failed" || code == "local_persistence_failure" || code == "workspace_patch_recovery_conflict" {
+			delete(payload, "files_changed")
+			payload["side_effect_state"] = "requires_inspection"
 		}
 		if paths := workspacePatchCandidatePaths(patchText); len(paths) > 0 {
 			payload["patch_paths"] = paths
@@ -190,6 +199,8 @@ func (s *Service) execApplyWorkspacePatch(ctx context.Context, userID, arguments
 		"operation":     "apply_patch",
 		"path":          result.Path,
 		"changed_paths": result.ChangedPaths,
+		"moved":         result.Moved,
+		"changes":       result.Changes,
 		"hash":          result.Hash,
 		"version_id":    result.VersionID,
 		"size":          result.Size,
@@ -215,6 +226,11 @@ func errorAsWorkspacePatchApplyError(err error, target *workspacePatchApplyError
 }
 
 func applyWorkspacePatch(ctx context.Context, files *workspace.Service, patchText string) (workspacePatchApplyResult, error) {
+	unlock := files.LockPatchExecution()
+	defer unlock()
+	if err := files.RecoverPendingPatches(ctx); err != nil {
+		return workspacePatchApplyResult{}, err
+	}
 	patch, err := parseWorkspacePatch(patchText)
 	if err != nil {
 		return workspacePatchApplyResult{}, err
@@ -232,8 +248,17 @@ func applyWorkspacePatch(ctx context.Context, files *workspace.Service, patchTex
 
 	for opIndex, op := range patch.Operations {
 		operationIndex := opIndex + 1
-		path := strings.TrimSpace(op.Path)
+		path, err := files.NormalizePath(strings.TrimSpace(op.Path))
+		if err != nil {
+			return workspacePatchApplyResult{}, err
+		}
 		movePath := strings.TrimSpace(op.MovePath)
+		if movePath != "" {
+			movePath, err = files.NormalizePath(movePath)
+			if err != nil {
+				return workspacePatchApplyResult{}, err
+			}
+		}
 		if path == "" {
 			return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: operation %d missing path", operationIndex), "", operationIndex, 0, "operation missing path", nil)
 		}
@@ -259,14 +284,18 @@ func applyWorkspacePatch(ctx context.Context, files *workspace.Service, patchTex
 			if !workspace.IsSupportedTextPath(movePath) {
 				return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: unsupported move target file type for %q", movePath), movePath, operationIndex, 0, "unsupported move target file type", nil)
 			}
-			if _, err := files.ReadFile(movePath); err == nil {
+			if _, err := files.StatPath(movePath); err == nil {
 				return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: move target already exists: %s", movePath), movePath, operationIndex, 0, "move target already exists", nil)
+			} else if !os.IsNotExist(err) {
+				return workspacePatchApplyResult{}, err
 			}
 		}
 		switch op.Kind {
 		case workspacePatchAdd:
-			if _, err := files.ReadFile(path); err == nil {
+			if _, err := files.StatPath(path); err == nil {
 				return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: add file already exists: %s", path), path, operationIndex, 0, "add file already exists", nil)
+			} else if !os.IsNotExist(err) {
+				return workspacePatchApplyResult{}, err
 			}
 			writes = append(writes, plannedWorkspacePatchWrite{path: path, content: strings.Join(op.Lines, ""), create: true})
 			added++
@@ -287,130 +316,23 @@ func applyWorkspacePatch(ctx context.Context, files *workspace.Service, patchTex
 			}
 			writes = append(writes, plannedWorkspacePatchWrite{path: path, content: next, oldContent: read.Content})
 			if movePath != "" && movePath != path {
-				moves = append(moves, plannedWorkspacePatchMove{oldPath: path, newPath: movePath})
+				moves = append(moves, plannedWorkspacePatchMove{oldPath: path, newPath: movePath, hash: hashWorkspaceText(next)})
 			}
 			updated++
 		case workspacePatchDelete:
 			if movePath != "" {
 				return workspacePatchApplyResult{}, patchApplyError("patch apply failed: delete operation must not include move target", path, operationIndex, 0, "delete operation must not include move target", nil)
 			}
-			if _, err := files.ReadFile(path); err != nil {
+			read, err := files.ReadFile(path)
+			if err != nil {
 				return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: delete file not readable %q: %v", path, err), path, operationIndex, 0, "delete file not readable", nil)
 			}
-			deletes = append(deletes, plannedWorkspacePatchDelete{path: path})
+			deletes = append(deletes, plannedWorkspacePatchDelete{path: path, hash: read.Hash})
 			deleted++
 		default:
 			return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: unsupported operation for %q", path), path, operationIndex, 0, "unsupported operation", nil)
 		}
 	}
 
-	var changedPaths []string
-	var primaryPath, primaryHash, primaryVersion string
-	var primarySize int64
-	totalLines, totalChars := 0, 0
-	appliedWrites := make([]plannedWorkspacePatchWrite, 0, len(writes))
-	appliedMoves := make([]plannedWorkspacePatchMove, 0, len(moves))
-	for _, item := range writes {
-		var result workspace.FileWriteResult
-		var err error
-		if item.create {
-			result, err = files.CreateTextFile(ctx, item.path, item.content, "ai_apply_patch")
-		} else {
-			result, err = files.WriteExistingTextFile(ctx, item.path, item.content, "ai_apply_patch")
-		}
-		if err != nil {
-			rollbackWorkspacePatchWrites(ctx, files, appliedWrites)
-			return workspacePatchApplyResult{}, fmt.Errorf("patch apply failed: write %q: %w", item.path, err)
-		}
-		appliedWrites = append(appliedWrites, item)
-		if primaryPath == "" {
-			primaryPath = result.Path
-			primaryHash = result.Hash
-			primaryVersion = result.VersionID
-			primarySize = result.Size
-		}
-		changedPaths = append(changedPaths, result.ChangedPaths...)
-		totalLines += countWorkspaceTextLines(item.content)
-		totalChars += len([]rune(item.content))
-	}
-	for _, item := range moves {
-		result, err := files.Rename(item.oldPath, item.newPath)
-		if err != nil {
-			rollbackWorkspacePatchMoves(files, appliedMoves)
-			rollbackWorkspacePatchWrites(ctx, files, appliedWrites)
-			return workspacePatchApplyResult{}, fmt.Errorf("patch apply failed: move %q to %q: %w", item.oldPath, item.newPath, err)
-		}
-		appliedMoves = append(appliedMoves, item)
-		if primaryPath == item.oldPath {
-			primaryPath = result["new_path"]
-		}
-		changedPaths = append(changedPaths, result["old_path"], result["new_path"])
-	}
-	for _, item := range deletes {
-		result, err := files.MoveToTrash(item.path)
-		if err != nil {
-			rollbackWorkspacePatchDeletes(files, deletes)
-			rollbackWorkspacePatchMoves(files, appliedMoves)
-			rollbackWorkspacePatchWrites(ctx, files, appliedWrites)
-			return workspacePatchApplyResult{}, fmt.Errorf("patch apply failed: delete %q: %w", item.path, err)
-		}
-		for index := range deletes {
-			if deletes[index].path == item.path {
-				deletes[index].trashed = result.NewPath
-				break
-			}
-		}
-		if primaryPath == "" {
-			primaryPath = result.OldPath
-		}
-		changedPaths = append(changedPaths, result.ChangedPaths...)
-	}
-	changedPaths = uniqueNonEmptyStrings(changedPaths)
-	sort.Strings(changedPaths)
-	if primaryPath == "" && len(changedPaths) > 0 {
-		primaryPath = changedPaths[0]
-	}
-	summary := workspacePatchDiffSummary(added, updated, deleted, changedPaths)
-	return workspacePatchApplyResult{
-		Path:         primaryPath,
-		ChangedPaths: changedPaths,
-		Hash:         primaryHash,
-		VersionID:    primaryVersion,
-		Size:         primarySize,
-		LineCount:    totalLines,
-		CharCount:    totalChars,
-		Added:        added,
-		Updated:      updated,
-		Deleted:      deleted,
-		DiffSummary:  summary,
-	}, nil
-}
-
-func rollbackWorkspacePatchMoves(files *workspace.Service, moves []plannedWorkspacePatchMove) {
-	for index := len(moves) - 1; index >= 0; index-- {
-		item := moves[index]
-		_, _ = files.Rename(item.newPath, item.oldPath)
-	}
-}
-
-func rollbackWorkspacePatchWrites(ctx context.Context, files *workspace.Service, writes []plannedWorkspacePatchWrite) {
-	for index := len(writes) - 1; index >= 0; index-- {
-		item := writes[index]
-		if item.create {
-			_, _ = files.DeleteTrashItem(item.path)
-			_, _ = files.Delete(item.path)
-			continue
-		}
-		_, _ = files.WriteExistingTextFile(ctx, item.path, item.oldContent, "ai_apply_patch_rollback")
-	}
-}
-
-func rollbackWorkspacePatchDeletes(files *workspace.Service, deletes []plannedWorkspacePatchDelete) {
-	for index := len(deletes) - 1; index >= 0; index-- {
-		item := deletes[index]
-		if strings.TrimSpace(item.trashed) == "" {
-			continue
-		}
-		_, _ = files.RestoreTrashItem(item.trashed, false)
-	}
+	return commitWorkspacePatch(ctx, files, writes, moves, deletes, added, updated, deleted)
 }

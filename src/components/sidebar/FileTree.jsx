@@ -9,8 +9,7 @@ export default function FileTree({ items, depth = 0, ide }) {
     const showInsertBefore = indicator?.position === 'before';
     const showInsertAfter = indicator?.position === 'after';
     const isInlineRenaming = ide.inlineRenamePath === item.path;
-    const isTextFile = item.type === 'file' && ide.isTextPath(item.path);
-    const actionCount = item.type === 'folder' ? 5 : isTextFile ? 3 : 2;
+    const actionCount = item.type === 'folder' ? 5 : 3;
     const actionWidth = actionCount * 20 + Math.max(0, actionCount - 1) * 4 + 2;
 
     const setInsertionIndicator = (position) => {
@@ -115,14 +114,18 @@ export default function FileTree({ items, depth = 0, ide }) {
           if (sourcePath) {
             e.preventDefault();
             e.stopPropagation();
-            const dropIndicator = ide.fileDropIndicator;
+            // Hover state is only a preview: React may not have committed the
+            // final dragover before drop. Use this event's position and source.
+            const position = getFileTreeDropZone(e.clientY, e.currentTarget.getBoundingClientRect(), item.type);
+            const siblings = items.filter((candidate) => candidate.path !== sourcePath);
+            const targetIndex = siblings.findIndex((candidate) => candidate.path === item.path);
             ide.resetFileDragState();
-            if (dropIndicator?.targetPath === item.path && (dropIndicator.position === 'before' || dropIndicator.position === 'after')) {
+            if (targetIndex >= 0 && (position === 'before' || position === 'after')) {
               ide.reorderPath({
                 sourcePath,
-                targetParentPath: dropIndicator.parentPath,
-                previousPath: dropIndicator.previousPath,
-                nextPath: dropIndicator.nextPath,
+                targetParentPath: getParentPath(item.path),
+                previousPath: position === 'before' ? siblings[targetIndex - 1]?.path || '' : item.path,
+                nextPath: position === 'before' ? item.path : siblings[targetIndex + 1]?.path || '',
               }).catch((error) => {
                 console.error(error);
               });
@@ -268,7 +271,7 @@ export default function FileTree({ items, depth = 0, ide }) {
             >
               <Pencil size={12} />
             </button>
-            {isTextFile && (
+            {item.type === 'file' && (
               <button
                 data-testid={`download-${item.path}`}
                 onMouseDown={(e) => e.stopPropagation()}

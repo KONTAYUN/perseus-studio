@@ -9,16 +9,20 @@ import (
 	"time"
 
 	"webide-backend/internal/ai"
+	"webide-backend/internal/failure"
 	"webide-backend/internal/store"
 )
 
-func (s *Server) executeConversationRun(userID, userRole, conversationID, userMessageID, modelProviderID, content, attachmentsJSON string, attachmentPayloads []ai.AttachmentPayload, thinkingMode, runID string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	s.registerRunCancel(runID, cancel)
-	defer func() {
-		cancel()
-		s.unregisterRunCancel(runID)
-	}()
+func (s *Server) executeConversationRun(ctx context.Context, userID, userRole, conversationID, userMessageID, modelProviderID, content, attachmentsJSON string, attachmentPayloads []ai.AttachmentPayload, thinkingMode, runID string) {
+	if ctx.Err() != nil {
+		return
+	}
+	ctx, stopExecution := context.WithCancelCause(ctx)
+	defer stopExecution(nil)
+	run, err := s.runs.GetRun(ctx, userID, runID)
+	if err != nil || run.Status != store.AgentRunQueued {
+		return
+	}
 	if _, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunRunning, "calling_model", store.UpdateAgentRunInput{SetStartedAt: true}); err != nil {
 		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, time.Now())
 		return
@@ -51,7 +55,17 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			log.Printf("[agent_run] persistence canceled conversation=%s run=%s stage=%s error=%v", conversationID, runID, stage, err)
 			return
 		}
-		wrapped := fmt.Errorf("%s: %w", stage, err)
+		wrapped := failure.New("local_run_persistence", fmt.Sprintf("%s: %v", stage, err), err)
+		persistenceMu.Lock()
+		first := persistenceErr == nil
+		if first {
+			persistenceErr = wrapped
+		}
+		persistenceMu.Unlock()
+		stopExecution(wrapped)
+		if !first {
+			return
+		}
 		log.Printf("[agent_run] persistence failed conversation=%s run=%s stage=%s error=%v", conversationID, runID, stage, err)
 		if s.diagnostics != nil {
 			if item, diagErr := s.diagnostics.Append(context.Background(), store.DiagnosticLogInput{
@@ -67,10 +81,9 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 			}
 		}
 		persistenceMu.Lock()
-		if persistenceErr == nil {
-			persistenceErr = wrapped
-		}
+		persistenceErr = wrapped
 		persistenceMu.Unlock()
+		stopExecution(wrapped)
 	}
 	getPersistenceErr := func() error {
 		persistenceMu.Lock()
@@ -397,12 +410,12 @@ func (s *Server) executeConversationRun(userID, userRole, conversationID, userMe
 		OnCompletionResultDelta:   appendCompletionResultDelta,
 		OnCompletionResultDiscard: discardCompletionResultPreview,
 	})
-	if err != nil {
-		s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
+	if persistErr := getPersistenceErr(); persistErr != nil {
+		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, persistErr, runStartedAt)
 		return
 	}
-	if err := getPersistenceErr(); err != nil {
-		s.failConversationRunStartedAt(context.Background(), userID, conversationID, userMessageID, runID, err, runStartedAt)
+	if err != nil {
+		s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
 

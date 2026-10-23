@@ -2,7 +2,7 @@ import React from 'react';
 import AppHeader from './components/layout/AppHeader';
 import AppDialog, { useAppDialog } from './components/common/AppDialog';
 import MainPanels from './components/layout/MainPanels';
-import SettingsModal from './components/settings/SettingsModal';
+import SettingsWorkspace from './components/settings/SettingsWorkspace';
 import TaskPanel from './components/tasks/TaskPanel';
 import { apiGet, apiPost } from './api/client';
 import useIdeState from './hooks/useIdeState';
@@ -12,6 +12,7 @@ import { Button, Input } from './components/ui';
 export default function App() {
   const tasksRef = React.useRef(null);
   const ideRef = React.useRef(null);
+  const settingsOpener = React.useRef(null);
   const [auth, setAuth] = React.useState({ loading: true, authenticated: false, user: null, hasUsers: false, registrationOpen: true });
   const [loginUsername, setLoginUsername] = React.useState('');
   const [loginPassword, setLoginPassword] = React.useState('');
@@ -148,20 +149,7 @@ export default function App() {
         ide.isDarkMode ? 'dark bg-[#121212] text-gray-200' : 'bg-[#F5F5F7] text-gray-800'
       }`}
     >
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.4); border-radius: 10px; }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(107, 114, 128, 0.4); }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(107, 114, 128, 0.7); }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.7); }
-        .scrollbar-rounded-clip {
-          clip-path: inset(0 round 0 0 14px 14px);
-          scrollbar-gutter: stable;
-        }
-        .editor-panel-root { container-type: inline-size; }
-      `}</style>
-
+      <div className="flex min-h-0 flex-1 flex-col" hidden={ide.isSettingsOpen} inert={ide.isSettingsOpen ? '' : undefined} style={ide.isSettingsOpen ? { display: 'none' } : undefined}>
       <AppHeader
         isDarkMode={ide.isDarkMode}
         layoutColumns={ide.layoutColumns}
@@ -169,7 +157,7 @@ export default function App() {
         onAddPanel={ide.addPanel}
         onCloseDraggedPanel={ide.closeDraggedPanel}
         onPanelTrashOver={ide.setIsPanelTrashOver}
-        onOpenSettings={isAdmin ? () => ide.setIsSettingsOpen(true) : undefined}
+        onOpenSettings={isAdmin ? () => { settingsOpener.current = document.activeElement; ide.setIsSettingsOpen(true); } : undefined}
         onOpenTasks={tasks.openTaskPanel}
         onToggleDarkMode={() => ide.setIsDarkMode((value) => !value)}
         onLogout={handleLogout}
@@ -184,12 +172,16 @@ export default function App() {
       />
 
       <MainPanels ide={{ ...ide, tasks }} />
+      <TaskPanel tasks={tasks} />
+      </div>
 
       {isAdmin && ide.isSettingsOpen && (
-        <SettingsModal ide={ide} dialog={appDialog.api} onClose={() => ide.setIsSettingsOpen(false)} currentUser={auth.user} />
+        <SettingsWorkspace ide={ide} dialog={appDialog.api} onClose={() => {
+          ide.setIsSettingsOpen(false);
+          requestAnimationFrame(() => settingsOpener.current?.isConnected && settingsOpener.current.focus());
+        }} currentUser={auth.user} />
       )}
 
-      <TaskPanel tasks={tasks} />
       <AppDialog dialog={appDialog.dialog} onClose={appDialog.close} />
     </div>
   );

@@ -3,55 +3,39 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
 
-func (s *TaskStore) RequeueRunningTasks(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, user_id FROM tasks WHERE status = ?`, TaskRunning)
-	if err != nil {
-		return err
-	}
-
-	type taskRef struct {
-		id     string
-		userID string
-	}
-	var refs []taskRef
-	for rows.Next() {
-		var ref taskRef
-		if err := rows.Scan(&ref.id, &ref.userID); err != nil {
-			return err
-		}
-		refs = append(refs, ref)
-	}
-	rows.Close()
-
-	_, err = s.db.ExecContext(ctx, `
-UPDATE tasks
-SET status = ?, worker_id = NULL, started_at = NULL, progress_stage = 'requeued', progress_message = 'service restarted, task requeued'
-WHERE status = ?
-`, TaskPending, TaskRunning)
-	if err != nil {
-		return err
-	}
-
-	for _, ref := range refs {
-		if _, err := s.AppendLog(ctx, ref.userID, ref.id, "system", "service restarted, task requeued"); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
-}
-
 func (s *TaskStore) CreateTask(ctx context.Context, input CreateTaskInput) (Task, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, err
+	}
+	defer tx.Rollback()
+	if input.Type == "ai_agent" {
+		var payload struct {
+			ConversationID string `json:"conversation_id"`
+		}
+		if err := json.Unmarshal([]byte(input.PayloadJSON), &payload); err != nil {
+			return Task{}, err
+		}
+		var id string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM conversations WHERE id = ? AND user_id = ?`, payload.ConversationID, input.UserID).Scan(&id); err != nil {
+			return Task{}, err
+		}
+	}
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO tasks (
   id, user_id, type, status, title, payload_json, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?)
 `, input.ID, input.UserID, input.Type, TaskPending, input.Title, input.PayloadJSON, now)
 	if err != nil {
+		return Task{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Task{}, err
 	}
 	return s.GetTask(ctx, input.UserID, input.ID)

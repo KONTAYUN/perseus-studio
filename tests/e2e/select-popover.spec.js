@@ -10,6 +10,8 @@ async function login(page) {
 
 async function openSettings(page) {
   await page.getByTestId('settings-button').click();
+  await page.getByTestId('model-add-button').click();
+  await page.locator('summary').filter({ hasText: '高级设置' }).click();
   await expect(page.getByTestId('model-name-input')).toBeVisible();
 }
 

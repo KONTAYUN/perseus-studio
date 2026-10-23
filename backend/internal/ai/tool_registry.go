@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"webide-backend/internal/failure"
 )
 
 func parseBackgroundTaskRequest(argumentsJSON, fallbackGoal string) (BackgroundTaskRequest, error) {
@@ -33,6 +34,47 @@ func parseBackgroundTaskRequest(argumentsJSON, fallbackGoal string) (BackgroundT
 }
 
 func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, opts RunOptions) (string, string, string, string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", "", "", "", err
+	}
+	if name == "run_workspace_command" && !toolVisibleForRole(name, opts.UserRole) {
+		return "", "", "", "", failure.New("command_disabled", "Command execution requires explicit trusted_host mode and administrator role", nil)
+	}
+	if opts.AllowedWorkspacePaths != nil {
+		r := &agentRuntime{opts: opts}
+		if reason := r.validateWorkspacePathScope(agentToolCall{Name: name, ArgumentsJSON: argumentsJSON}); reason != "" {
+			return "", "", "", "", failure.New("workspace_scope_rejected", reason, nil)
+		}
+	}
+	if (isWorkspaceMutationTool(name) && name != "apply_workspace_patch") || name == "run_workspace_command" {
+		files, err := s.factory.Workspace(opts.UserID)
+		if err != nil {
+			return "", "", "", "", err
+		}
+		unlock := files.LockPatchExecution()
+		defer unlock()
+		if err = files.RecoverPendingPatches(ctx); err != nil {
+			return "", "", "", "", err
+		}
+		if opts.AllowedWorkspacePaths != nil && name == "manage_workspace_path" {
+			var args struct {
+				Action string `json:"action"`
+				Path   string `json:"path"`
+			}
+			if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+				return "", "", "", "", failure.New("workspace_scope_rejected", "Invalid scoped path operation", err)
+			}
+			if strings.ToLower(strings.TrimSpace(args.Action)) != "mkdir" {
+				info, statErr := files.StatPath(args.Path)
+				if statErr != nil {
+					return "", "", "", "", statErr
+				}
+				if info.Type == "folder" {
+					return "", "", "", "", failure.New("workspace_scope_rejected", "Recursive directory mutations cannot enforce an exact-file scope", nil)
+				}
+			}
+		}
+	}
 	switch name {
 	case "attempt_completion":
 		return execAttemptCompletion(argumentsJSON)
@@ -67,7 +109,7 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 	case "organize_workspace_matches":
 		return s.execOrganizeWorkspaceMatches(ctx, opts.UserID, argumentsJSON)
 	case "list_workspace_files", "read_workspace_file", "create_workspace_file", "write_workspace_file", "mkdir_workspace", "rename_workspace_path", "move_workspace_path", "delete_workspace_path":
-		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, a *** Begin Patch text patch, manage_workspace_path, or organize_workspace_matches", name)
+		return "", "", "正在使用工作区工具...", "", fmt.Errorf("legacy workspace tool %s has been replaced; use inspect_workspace, read_workspace_text, apply_workspace_patch, manage_workspace_path, or organize_workspace_matches", name)
 	case "run_workspace_command":
 		return s.execRunWorkspaceCommand(ctx, opts.UserID, argumentsJSON)
 	case "perseus_search_web", "web_search":

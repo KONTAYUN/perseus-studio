@@ -14,7 +14,7 @@ export default function PendingRunMessagePanel({
     <div className="pending-run-message-panel motion-popover pointer-events-auto mb-3">
       <div className="min-w-0 flex-1">
         <div className="text-[11px] font-bold uppercase tracking-wide text-blue-500/80 dark:text-blue-200/80">
-          当前任务结束后自动发送
+          {['failed', 'canceled'].includes(message.latestStatus) ? '上一轮已暂停，继续任务后自动发送' : '当前任务结束后自动发送'}
         </div>
         <div className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm font-semibold leading-6 text-gray-800 dark:text-gray-100 custom-scrollbar">
           {message.content}

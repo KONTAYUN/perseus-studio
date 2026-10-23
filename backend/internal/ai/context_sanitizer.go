@@ -30,6 +30,7 @@ func sanitizeConversationMessages(messages []store.Message, profile providerRunt
 			limit = profile.MaxRecentMessageRunes
 		}
 		items[index].Content = truncateWithContextNote(items[index].Content, limit, "message content")
+		items[index].AttachmentPayloadsJSON = PersistedAttachmentPayloads(sanitizeAttachmentPayloads(StoredMessageAttachments(items[index]), profile))
 	}
 	if start > 0 && len(items) > 0 {
 		prefix := fmt.Sprintf("[已自动省略 %d 条较早历史消息，以降低上下文噪声；如需旧内容，请让用户重新引用或说明。]\n\n", start)

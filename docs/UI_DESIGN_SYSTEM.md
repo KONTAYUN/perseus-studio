@@ -145,6 +145,8 @@ Rules:
 
 ## Motion Rules
 
+2026-10 motion consolidation: shared tokens use 120ms exit, 160ms controls, 180ms popovers/messages, 220ms modals, and 240ms panel movement. These replace the historical longer timing ranges below. Panel geometry is committed once; `usePanelMotion` exclusively owns cancellable position animation, and panel focus decoration remains attached to the surface. No animation bookkeeping or timers may run during React render. Shared anchored overlays transition from their actual trigger origin, preserve exit presence, and use layout dimensions rather than transformed dimensions for positioning. Settings animate at the container level without staggered child entrances. CSS and JavaScript both respect `prefers-reduced-motion`.
+
 Motion must be predictable and centered.
 
 - Default duration for small controls: about `180ms`.
@@ -450,3 +452,25 @@ The current frontend is not fully migrated to this system. Improve it gradually:
 3. Replace duplicated icon buttons, text buttons, inputs, selects, popovers, and dialog actions with shared primitives.
 4. Reduce large inline Tailwind strings in business components.
 5. Keep component-specific exceptions documented in this file and reflected in `scripts/check-ui-standards.mjs`.
+
+
+Change review uses an inline, bounded two-column source preview (stacked on narrow screens), shared Button controls, explicit revert confirmation, and dark-mode parity. It opens without entry animation, keeps the surrounding message stable, and never submits client-supplied snapshot content.
+
+## Markdown and Document Editing
+
+Assistant messages use the shared `MarkdownContent` renderer. User input and error messages keep their literal text. Typography, lists, tables and code fences are scoped under `.markdown-content`; never apply prose styling globally. Code fences have a compact language label, a shared copy button with success/failure feedback, preserved whitespace and horizontal scrolling. Links reject executable schemes; raw HTML is not executed.
+
+Markdown files default to a rich document surface. The editor header uses one shared IconButton to switch rich/source modes, with its current mode and destination in the hover title and accessible label. Do not show editor download or segmented mode buttons; tree download remains available. Markdown is the persisted format in both views; simply opening or switching modes must not trigger a save.
+
+Suspected format problems add an amber warning icon beside the mode control. Its anchored confirmation lists line-numbered hints and explains possible false positives. Only the explicit repair action submits a minimal-formatting request to the current chat, after saving and revalidating the file. Missing models and file conflicts explain why repair is unavailable. Keep composer drafts/attachments untouched. No automatic rewrite or automatic Agent invocation during detection.
+
+Scrollbar styling is centralized in `styles/utilities.css`, covers app content plus portalled menus/dialogs, and supports both color themes and forced colors. Scroll tracks/corners remain transparent, thumbs are thin/rounded and native arrow buttons are hidden. Do not require every new scroll container to remember an opt-in class. Preserve hidden tab-strip scrollbars and composer overrides.
+
+The text selection toolbar floats above the selection and preserves it when clicking format buttons. It offers bold, italic, strikethrough, inline code, links and clear marks. Clamp its position to the viewport; link inputs keep keyboard focus and validate URLs. The six-dot control sits in the active paragraph's left gutter and opens a shared anchored popover for headings, lists, task lists, quote, code, rules and tables. Its table actions appear only inside a table. Task checkboxes and their first text line must share a row, including after checked-state updates.
+
+Use the existing panel surfaces, focus colors, control radii and dark-mode palette. Document text does not animate. Floating controls follow scroll/selection changes without moving document content. Balanced single-line HTML spans preserve their wrappers and allow editing child text/marks; imported style/event attributes stay inert and can be adjusted in source mode. Other unsupported Markdown extensions use a clearly labeled preview/source fallback; do not silently strip them during formatting. Source mode remains available for exact syntax editing. Display mode belongs to editor tab state so a layout switch does not reset it.
+
+
+## Model discovery quick add
+
+Each discovered model has a persistent shared IconButton on the right: plus, busy spinner, then a disabled check with an accessible added label. Keep a separate text button for filling the manual/test form; never nest the plus inside it. Direct add preserves the form, fetched list and default model. It reuses current connection/context settings; existing stored keys are copied only inside the admin API. Adding is serialized to prevent duplicate rapid clicks, and failures leave a visible retry action. Changing connection parameters discards stale discovery results. The row surface belongs to settings-discovered-model-row in settings.css, with light/dark parity; no extra list re-entry animation on success.

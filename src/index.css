@@ -4,9 +4,12 @@
 @import './styles/motion.css';
 @import './styles/controls.css';
 @import './styles/chat.css';
+@import './styles/change-review.css';
 @import './styles/chat-composer.css';
 @import './styles/chat-composer-queue.css';
 @import './styles/editor.css';
+@import './styles/markdown.css';
+@import './styles/rich-editor.css';
 @import './styles/file-tree.css';
 @import './styles/settings.css';
 @import './styles/utilities.css';

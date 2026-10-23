@@ -9,20 +9,20 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
 )
 
 func (s *Service) RunCommand(ctx context.Context, command, cwd string, timeoutSec int) (CommandResult, error) {
+	if !TrustedHostCommandsEnabled() {
+		return CommandResult{}, commandDisabledError()
+	}
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return CommandResult{}, fmt.Errorf("command is required")
 	}
-	if err := validateSafeCommand(command); err != nil {
-		return CommandResult{}, err
-	}
+
 	if timeoutSec <= 0 {
 		timeoutSec = 120
 	}
@@ -46,23 +46,30 @@ func (s *Service) RunCommand(ctx context.Context, command, cwd string, timeoutSe
 	}
 
 	startedAt := time.Now().UTC()
-	before, err := s.commandWorkspaceSnapshot()
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+	before, err := s.commandWorkspaceSnapshotContext(runCtx)
 	if err != nil {
 		return CommandResult{}, err
 	}
-	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
-	defer cancel()
 
 	cmd := shellCommand(runCtx, command)
 	cmd.Dir = absCwd
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	cmd.Env, err = s.commandEnvironment()
+	if err != nil {
+		return CommandResult{}, err
+	}
+	var stdout boundedCommandOutput
+	var stderr boundedCommandOutput
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = 2 * time.Second
 
 	err = cmd.Run()
 	finishedAt := time.Now().UTC()
-	after, snapshotErr := s.commandWorkspaceSnapshot()
+	scanCtx, scanCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	after, snapshotErr := s.commandWorkspaceSnapshotContext(scanCtx)
+	scanCancel()
 	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded)
 	exitCode := 0
 	if timedOut {
@@ -74,10 +81,25 @@ func (s *Service) RunCommand(ctx context.Context, command, cwd string, timeoutSe
 			return CommandResult{}, err
 		}
 	}
-	if snapshotErr != nil {
-		return CommandResult{}, snapshotErr
+
+	var changedPaths []string
+	if snapshotErr == nil {
+		changedPaths = diffCommandWorkspaceSnapshots(before, after)
 	}
-	changedPaths := diffCommandWorkspaceSnapshots(before, after)
+	outcome := "success"
+	if exitCode != 0 {
+		outcome = "failed"
+	}
+	if timedOut {
+		outcome = "timed_out"
+	}
+	if errors.Is(runCtx.Err(), context.Canceled) {
+		outcome = "canceled"
+	}
+	observationError := ""
+	if snapshotErr != nil {
+		observationError = snapshotErr.Error()
+	}
 	workspaceMutation := len(changedPaths) > 0
 	hash := ""
 	if workspaceMutation {
@@ -85,17 +107,20 @@ func (s *Service) RunCommand(ctx context.Context, command, cwd string, timeoutSe
 	}
 
 	return CommandResult{
-		Command:           command,
-		Cwd:               cleanCwd,
-		Stdout:            truncateCommandOutput(stdout.String()),
-		Stderr:            truncateCommandOutput(stderr.String()),
-		ExitCode:          exitCode,
-		TimedOut:          timedOut,
-		StartedAt:         startedAt,
-		FinishedAt:        finishedAt,
-		ChangedPaths:      changedPaths,
-		WorkspaceMutation: workspaceMutation,
-		Hash:              hash,
+		ExecutionOutcome:    outcome,
+		ObservationComplete: snapshotErr == nil,
+		ObservationError:    observationError,
+		Command:             command,
+		Cwd:                 cleanCwd,
+		Stdout:              truncateCommandOutput(stdout.String()),
+		Stderr:              truncateCommandOutput(stderr.String()),
+		ExitCode:            exitCode,
+		TimedOut:            timedOut,
+		StartedAt:           startedAt,
+		FinishedAt:          finishedAt,
+		ChangedPaths:        changedPaths,
+		WorkspaceMutation:   workspaceMutation,
+		Hash:                hash,
 	}, nil
 }
 
@@ -122,50 +147,14 @@ func hashCommandChangedPaths(paths []string, snapshot commandWorkspaceSnapshot) 
 }
 
 func shellCommand(ctx context.Context, command string) *exec.Cmd {
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		return exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", command)
+		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	}
-	return exec.CommandContext(ctx, "/bin/sh", "-c", command)
-}
-
-func validateSafeCommand(command string) error {
-	normalized := strings.ToLower(command)
-	normalized = strings.Join(strings.Fields(normalized), " ")
-	dangerousContains := []string{
-		"mkfs",
-		"shutdown",
-		"reboot",
-		"systemctl",
-		"service ",
-		"docker",
-		"ssh",
-		"scp",
-		"sudo",
-	}
-	for _, fragment := range dangerousContains {
-		if strings.Contains(normalized, fragment) {
-			return fmt.Errorf("command rejected by safety policy: %s", strings.TrimSpace(fragment))
-		}
-	}
-
-	dangerousPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`\brm\s+-[^\s]*r[^\s]*f[^\s]*(?:\s+--)?\s+/`),
-		regexp.MustCompile(`\brm\s+-[^\s]*r[^\s]*f[^\s]*(?:\s+--)?\s+\*`),
-		regexp.MustCompile(`\bcurl\b.*\|\s*bash\b`),
-		regexp.MustCompile(`\bwget\b.*\|\s*bash\b`),
-		regexp.MustCompile(`\bchmod\s+-r\s+/`),
-		regexp.MustCompile(`\bchown\s+-r\s+/`),
-		regexp.MustCompile(`\bdd\b`),
-		regexp.MustCompile(`\bapt(?:-get)?\b`),
-		regexp.MustCompile(`\byum\b`),
-		regexp.MustCompile(`\bpacman\b`),
-	}
-	for _, pattern := range dangerousPatterns {
-		if pattern.MatchString(normalized) {
-			return fmt.Errorf("command rejected by safety policy")
-		}
-	}
-	return nil
+	configureCommandCancellation(cmd)
+	return cmd
 }
 
 func truncateCommandOutput(value string) string {
@@ -175,4 +164,31 @@ func truncateCommandOutput(value string) string {
 		return value
 	}
 	return string(runes[:maxRunes]) + "\n...[output truncated]"
+}
+
+// Cap output while draining the process pipes. Truncating after Run returns
+// still lets an unbounded command exhaust the server's memory.
+type boundedCommandOutput struct {
+	buffer    bytes.Buffer
+	truncated bool
+}
+
+func (b *boundedCommandOutput) Write(p []byte) (int, error) {
+	const maxBytes = 80000
+	n := len(p)
+	remaining := maxBytes - b.buffer.Len()
+	if len(p) > remaining {
+		p = p[:remaining]
+		b.truncated = true
+	}
+	_, _ = b.buffer.Write(p)
+	return n, nil
+}
+
+func (b *boundedCommandOutput) String() string {
+	text := b.buffer.String()
+	if b.truncated {
+		text += "\n...[output truncated]"
+	}
+	return text
 }

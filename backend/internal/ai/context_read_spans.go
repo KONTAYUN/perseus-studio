@@ -180,7 +180,7 @@ func compactBatchReadItemsStaleAfterMutation(result *TranscriptToolResult, mutat
 	payload["items"] = rawItems
 	payload["stale_paths"] = stalePaths
 	payload["model_view"] = "Some batch read items are stale after later file changes; unaffected items remain available."
-	raw, err := json.Marshal(payload)
+	raw, err := marshalModelJSON(payload)
 	if err != nil {
 		return false, nil
 	}
@@ -220,7 +220,7 @@ func compactReadResultForPayload(result *TranscriptToolResult) bool {
 	}
 	payload["provider_context_reference"] = true
 	payload["model_view"] = "Read path and line-range metadata remains available. Use preserved recent reads when available; call read_workspace_text/read_workspace_files with the specific path and range only when exact text is missing."
-	raw, err := json.Marshal(payload)
+	raw, err := marshalModelJSON(payload)
 	if err != nil {
 		return false
 	}

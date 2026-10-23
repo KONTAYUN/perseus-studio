@@ -46,11 +46,11 @@ type ProviderMessageBuildResult struct {
 }
 
 type ProviderContinuationSummary struct {
-	SuccessfulTools  []string
-	FailedTools      []string
-	ReadPaths        []string
-	ChangedPaths     []string
-	Failures         []string
+	SuccessfulTools []string
+	FailedTools     []string
+	ReadPaths       []string
+	ChangedPaths    []string
+	Failures        []string
 }
 
 func (b ProviderMessageBuilder) Build(input ProviderMessageBuildInput) ProviderMessageBuildResult {

@@ -1,8 +1,11 @@
 package workspace
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,12 +23,33 @@ type commandSnapshotEntry struct {
 type commandWorkspaceSnapshot map[string]commandSnapshotEntry
 
 func (s *Service) commandWorkspaceSnapshot() (commandWorkspaceSnapshot, error) {
+	return s.commandWorkspaceSnapshotContext(context.Background())
+}
+
+func (s *Service) commandWorkspaceSnapshotContext(ctx context.Context) (commandWorkspaceSnapshot, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	const maxFiles = 10000
+	const maxBytes int64 = 256 << 20
+	var totalBytes int64
 	snapshot := commandWorkspaceSnapshot{}
 	err := filepath.WalkDir(s.rootAbs, func(absPath string, entry os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if len(snapshot) >= maxFiles {
+			return fmt.Errorf("command observation exceeds file budget (%d)", maxFiles)
+		}
 		if walkErr != nil {
 			return walkErr
 		}
 		if absPath == s.rootAbs {
+			return nil
+		}
+		if entry.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 || (!entry.IsDir() && !entry.Type().IsRegular()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(s.rootAbs, absPath)
@@ -55,7 +79,14 @@ func (s *Service) commandWorkspaceSnapshot() (commandWorkspaceSnapshot, error) {
 			item.Type = "folder"
 			item.Size = 0
 		} else {
-			item.Hash = hashFileForCommandSnapshot(absPath)
+			totalBytes += info.Size()
+			if totalBytes > maxBytes {
+				return fmt.Errorf("command observation exceeds byte budget (%d)", maxBytes)
+			}
+			item.Hash, err = hashFileForCommandSnapshot(ctx, absPath, maxBytes-totalBytes+info.Size())
+			if err != nil {
+				return err
+			}
 		}
 		snapshot[relPath] = item
 		return nil
@@ -66,13 +97,22 @@ func (s *Service) commandWorkspaceSnapshot() (commandWorkspaceSnapshot, error) {
 	return snapshot, nil
 }
 
-func hashFileForCommandSnapshot(path string) string {
-	raw, err := os.ReadFile(path)
+func hashFileForCommandSnapshot(ctx context.Context, path string, limit int64) (string, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+	defer file.Close()
+	hash := sha256.New()
+	reader := &commandSnapshotReader{ctx: ctx, reader: io.LimitReader(file, limit+1)}
+	n, err := io.Copy(hash, reader)
+	if err != nil {
+		return "", err
+	}
+	if n > limit {
+		return "", fmt.Errorf("command observation file grew beyond byte budget")
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func diffCommandWorkspaceSnapshots(before, after commandWorkspaceSnapshot) []string {
@@ -118,4 +158,16 @@ func sortedCommandChangedPaths(changed map[string]bool) []string {
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+type commandSnapshotReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *commandSnapshotReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }

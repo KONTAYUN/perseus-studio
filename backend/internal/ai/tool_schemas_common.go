@@ -19,9 +19,6 @@ func openAIToolsForLoadedToolsetsWithNativePatch(loaded map[string]bool, include
 			tools = append(tools, tool)
 		}
 	}
-	if nativePatch && normalizeModelActionLoadedToolsets(loaded)["workspace"] {
-		tools = append(tools, openAIWorkspaceToolByName("apply_workspace_patch"))
-	}
 	return tools
 }
 

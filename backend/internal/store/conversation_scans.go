@@ -33,7 +33,7 @@ func nullTime(value time.Time) any {
 
 func scanMessage(s scanner) (Message, error) {
 	var item Message
-	err := s.Scan(&item.ID, &item.UserID, &item.ConversationID, &item.Role, &item.Content, &item.AttachmentsJSON, &item.Status, &item.SegmentIndex, &item.MetaJSON, &item.CreatedAt, &item.UpdatedAt)
+	err := s.Scan(&item.ID, &item.UserID, &item.ConversationID, &item.Role, &item.Content, &item.AttachmentsJSON, &item.Status, &item.SegmentIndex, &item.MetaJSON, &item.CreatedAt, &item.UpdatedAt, &item.AttachmentPayloadsJSON)
 	item.Attachments = json.RawMessage(item.AttachmentsJSON)
 	if len(item.Attachments) == 0 {
 		item.Attachments = json.RawMessage("[]")

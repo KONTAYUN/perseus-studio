@@ -11,28 +11,37 @@ import (
 	"webide-backend/internal/workspace"
 )
 
-func (m *Manager) failAIAgentTask(ctx context.Context, userID, taskID, conversationID, errText string) {
+func (m *Manager) failAIAgentTask(ctx context.Context, userID, taskID string, payload AIAgentPayload, model ai.ModelIdentity, errText string) {
+	conversationID := payload.ConversationID
 	m.logAndPublish(ctx, userID, taskID, "error", errText)
 	if m.diagnostics != nil {
 		_, _ = m.diagnostics.Append(ctx, store.DiagnosticLogInput{
-			UserID:         userID,
-			ConversationID: conversationID,
-			TaskID:         taskID,
-			Stage:          "background_task_failed",
-			Level:          "error",
-			ErrorMessage:   errText,
+			UserID:          userID,
+			ConversationID:  conversationID,
+			TaskID:          taskID,
+			MessageID:       payload.UserMessageID,
+			ModelProviderID: model.ProviderID,
+			ModelName:       model.ProviderName,
+			ProviderName:    model.ProviderName,
+			ModelID:         model.ModelID,
+			Protocol:        model.Protocol,
+			Stage:           "background_task_failed",
+			Level:           "error",
+			ErrorMessage:    errText,
 		})
 	}
 	if conversationID != "" {
-		_, _ = m.conversations.AppendMessage(ctx, userID, conversationID, "assistant", "后台任务失败："+errText, "[]")
+		meta, _ := json.Marshal(map[string]any{"kind": "background_task_result", "task_id": taskID, "execution_status": "failed"})
+		_, _ = m.conversations.AppendMessageWithMeta(ctx, store.MessageInput{UserID: userID, ConversationID: conversationID,
+			Role: "assistant", Content: "后台任务失败：" + errText, AttachmentsJSON: "[]", Status: "final", MetaJSON: string(meta)})
 	}
 	m.finishTask(ctx, taskID, store.TaskFailed, "failed", errText, nil, &errText)
 }
 
 type validationResult struct {
-	OK           bool
-	Missing      []string
-	MissingKinds []string
+	OK           bool     `json:"ok"`
+	Missing      []string `json:"missing,omitempty"`
+	MissingKinds []string `json:"missing_kinds,omitempty"`
 }
 
 const (
@@ -55,42 +64,6 @@ func (m *Manager) logPlan(ctx context.Context, userID, taskID string, payload AI
 	for index, output := range payload.ExpectedOutputs {
 		m.logAndPublish(ctx, userID, taskID, "info", fmt.Sprintf("expected output %d: %s %s %s", index+1, output.Type, output.Path, output.Description))
 	}
-}
-
-func (m *Manager) runAIAgentOnce(ctx context.Context, userID, taskID string, payload AIAgentPayload, prompt string, forceTool string) (ai.Reply, error) {
-	messages := []store.Message{{
-		ID:             payload.UserMessageID,
-		ConversationID: payload.ConversationID,
-		Role:           "user",
-		Content:        prompt,
-	}}
-	return m.ai.GenerateTaskReply(ctx, payload.ConversationID, payload.UserMessageID, payload.ModelProviderID, messages, nil, ai.RunOptions{
-		UserID:    userID,
-		UserRole:  payload.UserRole,
-		TaskID:    taskID,
-		ForceTool: forceTool,
-		Log: func(level, message string) {
-			m.logAndPublish(ctx, userID, taskID, level, message)
-			if strings.HasPrefix(message, "tool call started") {
-				m.updateAndPublish(ctx, taskID, store.TaskRunning, "tool_call", message)
-			}
-		},
-		Event: func(eventType, level string, payload map[string]any) {
-			message := taskAgentEventMessage(eventType, payload)
-			if message == "" {
-				return
-			}
-			m.logAndPublish(ctx, userID, taskID, level, message)
-			switch eventType {
-			case "tool_call_started":
-				m.updateAndPublish(ctx, taskID, store.TaskRunning, "tool_call", message)
-			case "completion_rejected":
-				m.updateAndPublish(ctx, taskID, store.TaskRunning, "repair", message)
-			case "model_message_started":
-				m.updateAndPublish(ctx, taskID, store.TaskRunning, "calling_model", message)
-			}
-		},
-	})
 }
 
 func taskAgentEventMessage(eventType string, payload map[string]any) string {
@@ -151,10 +124,10 @@ func (m *Manager) executionPrompt(payload AIAgentPayload) string {
 - 如果预期产物包含 file，必须实际创建或写入该 workspace 相对路径；不要只口头说明。
 - 如果没有明确文件路径，请为报告/Markdown 选择一个简洁中文或英文文件名，放在 workspace 根目录。
 - 修改已有文件前优先 read_workspace_text；需要项目结构时先 inspect_workspace。
-- 文件内容变更统一直接输出以 *** Begin Patch 开始、*** End Patch 结束的 patch 块；系统会把它当作 workspace patch 执行并校验写入，不要把 patch 内容当成最终回复。
+- 文件内容变更须调用编辑工具：%s
 - 命令只在构建、测试、检查、批处理或脚本执行需要时使用；命令失败要说明关键错误。
 - 使用联网资料时，最终内容里保留来源 URL。
-- 完成前确保预期文件真实存在且非空；完成后调用 attempt_completion，用中文简短总结实际产物。`, goal, payload.UserMessage, string(rawOutputs), string(rawSteps))
+- 完成前回读预期文件，确保真实存在且非空；完成后调用 attempt_completion，用中文简短总结实际产物。`, goal, payload.UserMessage, string(rawOutputs), string(rawSteps), ai.WorkspacePatchExecutionRule)
 }
 
 func (m *Manager) repairPrompt(payload AIAgentPayload, missing []string, round int) string {
@@ -167,7 +140,8 @@ func (m *Manager) repairPrompt(payload AIAgentPayload, missing []string, round i
 预期产物 JSON：
 %s
 
-请只补做缺失项。若缺少文件，必须实际创建或写入 workspace 文件；文件内容变更统一直接输出以 *** Begin Patch 开始、*** End Patch 结束的 patch 块让系统执行。如果写入失败，要基于工具错误继续修复或明确失败，不要只回复说明。`, round, strings.Join(missing, "\n"), string(rawOutputs))
+请只补做缺失项。若缺少文件，必须实际创建或写入 workspace 文件。%s
+写入后回读核验。如果写入失败，要基于工具错误继续修复或明确失败，不要只回复说明。`, round, strings.Join(missing, "\n"), string(rawOutputs), ai.WorkspacePatchExecutionRule)
 }
 
 func (m *Manager) validateOutputs(ctx context.Context, payload AIAgentPayload, reply ai.Reply, files *workspace.Service) validationResult {

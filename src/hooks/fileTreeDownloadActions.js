@@ -3,7 +3,7 @@ import {
   downloadBlob,
   downloadText,
   handleDownloadDragStart,
-  readTextFileForDownload,
+  readFileForDownload,
 } from './fileTreeDownloadUtils';
 
 export function createFileTreeDownloadActions({
@@ -21,8 +21,8 @@ export function createFileTreeDownloadActions({
 
   async function downloadFile(path) {
     try {
-      const file = await readTextFileForDownload(path);
-      downloadText(file.path, file.content);
+      const file = await readFileForDownload(path);
+      downloadBlob(path.split('/').pop() || 'download', file);
     } catch (error) {
       console.error('downloadFile failed', error);
       setErrorMessage(error.message);
@@ -60,11 +60,8 @@ export function createFileTreeDownloadActions({
   async function downloadPathsAsZip(items, fileName) {
     setErrorMessage('');
     try {
-      const { blob, skippedCount } = await buildZipDownloadBlob(items, treeData);
+      const { blob } = await buildZipDownloadBlob(items, treeData);
       downloadBlob(fileName, blob);
-      if (skippedCount > 0) {
-        setErrorMessage(`已跳过 ${skippedCount} 个暂不支持的二进制/图片文件`);
-      }
     } catch (error) {
       console.error('downloadPathsAsZip failed', error);
       setErrorMessage(error.message);

@@ -1,9 +1,12 @@
+import TaskAttachmentStatus from './TaskAttachmentStatus.jsx';
 import React from 'react';
 import { Copy, GitBranch, RefreshCw, Trash2 } from 'lucide-react';
 import { completedActionItems, latestLiveProgressItem, loadingStatusDisplayText, loadingStatusReserveText, visibleMessageAttachments, shouldReserveMessageFooter } from './chatUtils';
 import { Button, IconButton } from '../ui';
 import { RUN_STEER_STATUS, runSteerStatusLabel } from '../../hooks/chatSteerItems';
 import EmptyChatState from './EmptyChatState';
+import WorkspaceChangeReview from './WorkspaceChangeReview.jsx';
+import MarkdownContent from '../markdown/MarkdownContent.jsx';
 
 const STEER_FAILURE_BUTTON_CLASS = 'border-white/20 bg-white/10 text-blue-50 hover:bg-white/15 hover:text-white dark:border-white/15 dark:bg-white/10';
 
@@ -105,12 +108,17 @@ function MessageBubble({ message, ide, canRegenerate }) {
           {showLoadingOnly ? (
             <LoadingStateBubble message={message} fallbackText={message.content} />
           ) : (
-            <div className={`min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${message.error ? 'break-all' : ''}`}>
-              {message.content}
-            </div>
+            message.role === 'assistant' && !message.error ? (
+              <MarkdownContent content={message.content || ''} />
+            ) : (
+              <div className={`min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${message.error ? 'break-all' : ''}`}>
+                {message.content}
+              </div>
+            )
           )}
           {!showLoadingOnly && message.pending && <LiveProgressLine message={message} />}
           {actionItems.length > 0 && <CompletedActionItems items={actionItems} />}
+          {!message.pending && message.role === 'assistant' && <WorkspaceChangeReview message={message} ide={ide} />}
           {isSteerMessage && message.status === RUN_STEER_STATUS.failed && (
             <SteerFailureActions message={message} ide={ide} />
           )}
@@ -133,7 +141,7 @@ function MessageBubble({ message, ide, canRegenerate }) {
         </div>
         {shouldShowFooterGap && (
           <div
-            className={`message-actions pointer-events-none mt-1 flex h-5 max-w-full items-center gap-1 overflow-hidden opacity-0 transition-opacity duration-200 ease-apple group-hover/message:pointer-events-auto group-hover/message:opacity-100 ${
+            className={`message-actions mt-1 flex h-5 max-w-full items-center gap-1 overflow-hidden opacity-0 transition-opacity duration-200 ease-apple group-hover/message:opacity-100 focus-within:opacity-100 ${
               message.role === 'user' ? 'mr-2' : 'ml-2'
             }`}
           >
@@ -358,7 +366,7 @@ function MessageAttachmentBadges({ attachments, message, ide }) {
         >
           <div className="text-xs font-bold text-blue-500">已创建后台任务</div>
           <div className="mt-1 truncate text-sm font-semibold">{item.title || 'AI 后台任务'}</div>
-          <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">状态：{item.status || 'pending'}</div>
+          <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400"><TaskAttachmentStatus taskId={item.task_id} tasks={ide.tasks?.tasks} /></div>
           <Button
             onClick={(e) => {
               e.stopPropagation();

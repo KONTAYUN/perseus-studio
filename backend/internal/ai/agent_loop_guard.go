@@ -2,6 +2,7 @@ package ai
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -14,7 +15,8 @@ func (r *agentRuntime) recordLoopGuardAction(call agentToolCall, isError bool, e
 	if r == nil {
 		return
 	}
-	key := loopGuardActionKey(call, isError, event)
+	digest := semanticToolResultDigest(event, result)
+	key := loopGuardActionKey(call, isError, event) + "\x00" + digest
 	if key != "" && key == r.loopGuard.LastActionKey {
 		r.loopGuard.RepeatedActionCount++
 	} else {
@@ -23,6 +25,12 @@ func (r *agentRuntime) recordLoopGuardAction(call agentToolCall, isError bool, e
 	}
 	if call.Name == "attempt_completion" && isError {
 		r.loopGuard.TerminalRejectionCount++
+	}
+	if !isError && event.Status == "success" {
+		if r.loopGuard.Observations == nil {
+			r.loopGuard.Observations = map[string]string{}
+		}
+		r.loopGuard.Observations[call.Name+":"+firstNonEmpty(event.Path, event.TargetSummary)] = digest
 	}
 	fingerprint := r.progressFingerprint()
 	if fingerprint == r.loopGuard.LastProgressFingerprint {
@@ -55,7 +63,16 @@ func (r *agentRuntime) progressFingerprint() string {
 	if r == nil {
 		return ""
 	}
-	return strings.Join(r.verifiedWorkspaceChangedPaths(), "|") + "::" + strings.Join(r.actionProgress.ConditionSatisfiedPaths, "|")
+	keys := make([]string, 0, len(r.loopGuard.Observations))
+	for key := range r.loopGuard.Observations {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	values := []string{strings.Join(r.verifiedWorkspaceChangedPaths(), "|"), strings.Join(r.actionProgress.ConditionSatisfiedPaths, "|")}
+	for _, key := range keys {
+		values = append(values, key+"="+r.loopGuard.Observations[key])
+	}
+	return strings.Join(values, "::")
 }
 
 func (r *agentRuntime) loopGuardTriggered() (LoopGuardObservation, bool, bool) {
@@ -71,7 +88,7 @@ func (r *agentRuntime) loopGuardTriggered() (LoopGuardObservation, bool, bool) {
 		reason = "repeated_action_without_progress"
 	case r.loopGuard.NoProgressRoundCount >= agentLoopGuardWarnThreshold && state.RequiresWorkspaceMutation && !state.HasVerifiedMutation:
 		reason = "workspace_action_without_semantic_progress"
-	case r.loopGuard.RepeatedActionCount >= agentLoopGuardStopThreshold && !state.HasVerifiedMutation:
+	case r.loopGuard.RepeatedActionCount >= agentLoopGuardStopThreshold:
 		reason = "repeated_tool_action_without_progress"
 	}
 	if reason == "" {

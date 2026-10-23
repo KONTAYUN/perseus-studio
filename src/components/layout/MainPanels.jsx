@@ -12,7 +12,6 @@ import {
   PANEL_GAP,
 } from './mainPanels/panelWidthUtils';
 import { useMeasuredMainWidth } from './mainPanels/useMeasuredMainWidth';
-import { usePanelActiveGlow } from './mainPanels/usePanelActiveGlow.jsx';
 import { usePanelMotion } from './mainPanels/usePanelMotion';
 
 function getPanelContent(panel, ide) {
@@ -32,8 +31,6 @@ export default function MainPanels({ ide }) {
   const centerSinglePanel = isCenteredSingleChatPanel(visiblePanels);
   const contentWidth = Math.max(0, mainWidth - MAIN_HORIZONTAL_PADDING);
   const isResizing = ide.dragType === 'resize';
-  const isReordering = ide.dragType === 'reorder';
-  const isReorderMotion = isReordering || ide.layoutAnimationAction?.kind === 'reorder';
   const displayWidths = useMemo(
     () => calculateDisplayWidths({
       mainWidth,
@@ -43,17 +40,7 @@ export default function MainPanels({ ide }) {
     }),
     [ide.widths, mainWidth, visiblePanels]
   );
-  const activeGlowPortal = usePanelActiveGlow({
-    activePanel: ide.activePanel,
-    displayWidths,
-    dragType: ide.dragType,
-    draggingPanelId: ide.draggingPanelId,
-    isDraggingMode: ide.isDraggingMode,
-    layoutAnimationAction: ide.layoutAnimationAction,
-    mainWidth,
-    visiblePanels,
-  });
-  const { getPanelIntroState } = usePanelMotion({
+  usePanelMotion({
     displayWidths,
     draggingPanelId: ide.draggingPanelId,
     isDraggingMode: ide.isDraggingMode,
@@ -67,10 +54,9 @@ export default function MainPanels({ ide }) {
 
   return (
     <>
-      {activeGlowPortal}
       <main
         ref={mainRef}
-        className="flex-1 flex overflow-hidden p-3 relative z-10"
+        className="flex-1 flex overflow-x-auto overflow-y-hidden p-3 relative z-10"
         onClick={(e) => e.target.tagName === 'MAIN' && ide.setActivePanel('none')}
       >
         {ide.isDraggingMode && (
@@ -99,7 +85,6 @@ export default function MainPanels({ ide }) {
           const hasOpenFloatingMenu =
             (panel.type === 'chat' && (ide.isModelMenuOpen || ide.isConversationMenuOpen)) ||
             (panel.type === 'fileTree' && ide.isAddMenuOpen);
-          const { isOpeningPanel, shouldIntro } = getPanelIntroState(id);
 
           return (
             <PanelWrapper
@@ -108,13 +93,9 @@ export default function MainPanels({ ide }) {
               hasOpenFloatingMenu={hasOpenFloatingMenu}
               ide={ide}
               index={index}
-              isOpeningPanel={isOpeningPanel}
-              isReorderMotion={isReorderMotion}
-              isResizing={isResizing}
               nextPanel={nextPanel}
               panel={panel}
               panelWidth={panelWidth}
-              shouldIntro={shouldIntro}
               showResizer={showResizer}
             >
               {getPanelContent(panel, ide)}

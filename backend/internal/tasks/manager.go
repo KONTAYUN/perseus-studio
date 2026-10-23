@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"webide-backend/internal/ai"
+	"webide-backend/internal/runqueue"
 	"webide-backend/internal/store"
 	"webide-backend/internal/usersvc"
 )
@@ -18,6 +19,7 @@ type Config struct {
 }
 
 type Manager struct {
+	scheduler     *runqueue.Manager
 	store         *store.TaskStore
 	conversations *store.ConversationStore
 	diagnostics   *store.DiagnosticStore
@@ -36,6 +38,7 @@ type MockPayload struct {
 }
 
 type AIAgentPayload struct {
+	SourceRunID     string              `json:"source_run_id,omitempty"`
 	ConversationID  string              `json:"conversation_id"`
 	UserMessageID   string              `json:"user_message_id"`
 	UserMessage     string              `json:"user_message"`
@@ -49,14 +52,14 @@ type AIAgentPayload struct {
 	SuggestedSteps  []string            `json:"suggested_steps"`
 }
 
-func NewManager(taskStore *store.TaskStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, aiService *ai.Service, factory *usersvc.Factory, broker *Broker, cfg Config) *Manager {
+func NewManager(taskStore *store.TaskStore, conversationStore *store.ConversationStore, diagnosticStore *store.DiagnosticStore, aiService *ai.Service, factory *usersvc.Factory, broker *Broker, cfg Config, schedulers ...*runqueue.Manager) *Manager {
 	if cfg.WorkerCount <= 0 {
 		cfg.WorkerCount = 2
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 1500 * time.Millisecond
 	}
-	return &Manager{
+	m := &Manager{
 		store:         taskStore,
 		conversations: conversationStore,
 		diagnostics:   diagnosticStore,
@@ -65,6 +68,10 @@ func NewManager(taskStore *store.TaskStore, conversationStore *store.Conversatio
 		broker:        broker,
 		cfg:           cfg,
 	}
+	if len(schedulers) > 0 {
+		m.scheduler = schedulers[0]
+	}
+	return m
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -104,6 +111,6 @@ func (m *Manager) runWorker(ctx context.Context, workerID string) {
 		}
 
 		m.publishTask(ctx, task.ID)
-		m.executeTask(ctx, *task, workerID)
+		m.executeScheduledTask(ctx, *task, workerID)
 	}
 }

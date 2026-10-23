@@ -194,6 +194,8 @@ export default function AppHeader({
 
         <button
           onClick={onToggleDarkMode}
+          aria-label={isDarkMode ? '切换浅色模式' : '切换深色模式'}
+          title={isDarkMode ? '切换浅色模式' : '切换深色模式'}
           className="motion-button ui-icon-button h-9 w-9"
         >
           {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
@@ -202,6 +204,8 @@ export default function AppHeader({
         {showSettings && (
           <button
             data-testid="settings-button"
+            aria-label="设置"
+            title="设置"
             onClick={onOpenSettings}
             className="motion-button ui-icon-button h-9 w-9"
           >

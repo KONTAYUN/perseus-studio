@@ -22,12 +22,23 @@ func (s *Server) handleModelProviders(w http.ResponseWriter, r *http.Request) {
 		if !s.requireAdminOrWriteForbidden(w, r) {
 			return
 		}
-		var req store.ModelProviderInput
+		var req struct {
+			store.ModelProviderInput
+			CredentialProviderID string `json:"credential_provider_id"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid json body")
 			return
 		}
-		item, err := s.configs.CreateModelProvider(r.Context(), user.UserID, req)
+		if req.APIKey == "" && req.CredentialProviderID != "" {
+			existing, err := s.configs.GetModelProviderAny(r.Context(), req.CredentialProviderID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "保存的凭据不可用，请重新选择模型配置或输入 API Key")
+				return
+			}
+			req.APIKey = existing.APIKey
+		}
+		item, err := s.configs.CreateModelProvider(r.Context(), user.UserID, req.ModelProviderInput)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

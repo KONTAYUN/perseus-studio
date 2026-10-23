@@ -18,12 +18,14 @@ import (
 	openaisdk "github.com/openai/openai-go"
 	openaioption "github.com/openai/openai-go/option"
 
+	"webide-backend/internal/failure"
 	"webide-backend/internal/store"
 )
 
 const providerSDKMaxRetries = 0
 
 func (s *Service) openAISDKPostRaw(ctx context.Context, provider store.ModelProvider, path string, payload map[string]any, opts RunOptions, stage string, summary *ProviderRequestSummary) (*http.Response, error) {
+	payload = normalizeOpenAIProviderPayload(provider, payload)
 	policy := currentProviderRetryPolicy()
 	if summary != nil {
 		summary.ProviderRetryPolicy = policy.diagnosticMap()
@@ -218,6 +220,11 @@ func runSDKAttempt(req *http.Request, next func(*http.Request) (*http.Response, 
 	var lastResp *http.Response
 	var lastErr error
 	for {
+		if req != nil {
+			if err := admitProviderRequest(req.Context()); err != nil {
+				return nil, err
+			}
+		}
 		if req != nil && req.GetBody != nil {
 			body, err := req.GetBody()
 			if err != nil {
@@ -258,6 +265,12 @@ func runSDKAttempt(req *http.Request, next func(*http.Request) (*http.Response, 
 			return resp, err
 		}
 		delay, retryAfter := providerRetryDelay(policy, attempt, resp)
+		if req != nil {
+			if deadline, ok := req.Context().Deadline(); ok && delay > time.Until(deadline) {
+				discardRetryResponse(resp)
+				return nil, failure.New("provider_retry_wait_exceeds_run_budget", "供应商要求的等待时间超过本轮剩余预算；已停止，未提前重试", nil)
+			}
+		}
 		if summary != nil {
 			summary.RetryAfterMS = retryAfter.Milliseconds()
 		}

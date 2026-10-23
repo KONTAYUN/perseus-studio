@@ -3,12 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"webide-backend/internal/failure"
 	"webide-backend/internal/store"
 	"webide-backend/internal/tasks"
 )
@@ -141,7 +141,7 @@ func TestFailConversationRunCreatesDiagnosticForLocalRunFailure(t *testing.T) {
 		runBroker:   tasks.NewBroker(),
 	}
 
-	server.failConversationRunStartedAt(context.Background(), "user-1", "conv-1", "msg-1", run.ID, errors.New("模型没有返回可执行工具调用或 attempt_completion，workspace 任务未执行完成"), time.Now().Add(-2*time.Second))
+	server.failConversationRunStartedAt(context.Background(), "user-1", "conv-1", "msg-1", run.ID, failure.New("agent_runtime_action_failed", "模型没有返回可执行工具调用或 attempt_completion，workspace 任务未执行完成", nil), time.Now().Add(-2*time.Second))
 
 	updated, err := runs.GetRun(context.Background(), "user-1", run.ID)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestFailConversationRunCreatesDiagnosticForLocalRunFailure(t *testing.T) {
 	if err := json.Unmarshal([]byte(logs[0].RequestSummary), &summary); err != nil {
 		t.Fatalf("invalid request summary: %v", err)
 	}
-	if summary["failure_class"] != "agent_runtime_no_tool_completion" || summary["run_stage"] != "calling_model" {
+	if summary["failure_class"] != "agent_runtime_action_failed" || summary["run_stage"] != "calling_model" {
 		t.Fatalf("unexpected summary: %#v", summary)
 	}
 }

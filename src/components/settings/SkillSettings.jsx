@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSettingsGuard } from './SettingsNavigation';
 import { ArrowLeft, Check, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import {
   Badge,
@@ -20,6 +21,15 @@ export default function SkillSettings({ ide, dialog, onBack }) {
   const [selectedSkillDetail, setSelectedSkillDetail] = React.useState(null);
   const [skillPreview, setSkillPreview] = React.useState(null);
   const [view, setView] = React.useState('list');
+  const [busy, setBusy] = React.useState(false);
+  const locked = React.useRef(false);
+  useSettingsGuard({ dirty: Boolean(candidates), busy, discard: () => { setCandidates(null); setSelectedCandidateIds(new Set()); } });
+  const perform = async action => {
+    if (locked.current) return;
+    locked.current = true; setBusy(true);
+    try { await action(); } catch (error) { setUploadMessage(error.message || '操作失败，请重试。'); }
+    finally { locked.current = false; setBusy(false); }
+  };
   const selectedSkill = ide.skills.find((item) => item.id === selectedSkillId) || null;
 
   const openDetail = async (item) => {
@@ -114,10 +124,10 @@ export default function SkillSettings({ ide, dialog, onBack }) {
         tree={selectedSkillDetail?.tree || []}
         preview={skillPreview}
         onBack={() => setView('list')}
-        onToggle={toggleSkill}
-        onToggleVisibility={toggleVisibility}
-        onRename={renameSkill}
-        onDelete={deleteSkill}
+        onToggle={item => perform(() => toggleSkill(item))}
+        onToggleVisibility={item => perform(() => toggleVisibility(item))}
+        onRename={item => perform(() => renameSkill(item))}
+        onDelete={item => perform(() => deleteSkill(item))}
       />
     );
   }
@@ -126,17 +136,17 @@ export default function SkillSettings({ ide, dialog, onBack }) {
     <SkillsListView
       ide={ide}
       onBack={onBack}
-      onUpload={uploadSkill}
+      onUpload={file => perform(() => uploadSkill(file))}
       uploadMessage={uploadMessage}
       candidates={candidates}
       selectedCandidateIds={selectedCandidateIds}
       setSelectedCandidateIds={setSelectedCandidateIds}
-      onInstallCandidates={installCandidates}
-      onOpenDetail={openDetail}
-      onToggle={toggleSkill}
-      onToggleVisibility={toggleVisibility}
-      onRename={renameSkill}
-      onDelete={deleteSkill}
+      onInstallCandidates={() => perform(installCandidates)}
+      onOpenDetail={item => perform(() => openDetail(item))}
+      onToggle={item => perform(() => toggleSkill(item))}
+      onToggleVisibility={item => perform(() => toggleVisibility(item))}
+      onRename={item => perform(() => renameSkill(item))}
+      onDelete={item => perform(() => deleteSkill(item))}
     />
   );
 }
@@ -159,9 +169,9 @@ function SkillsListView({
   return (
     <SettingsSection className="settings-view-enter">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+        {onBack ? <Button type="button" variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft size={16} /> Skills
-        </Button>
+        </Button> : <h2 className="text-sm font-semibold">已安装的 Skills</h2>}
         <Button as="label" variant="primary" size="md" className="cursor-pointer">
           <input
             type="file"

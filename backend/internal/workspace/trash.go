@@ -9,10 +9,18 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"webide-backend/internal/idgen"
 )
 
 func (s *Service) MoveToTrash(path string) (PathChangeResult, error) {
-	if err := s.migrateLegacyTrashDir(); err != nil {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.moveToTrash(path)
+}
+
+func (s *Service) moveToTrash(path string) (PathChangeResult, error) {
+	if err := s.migrateLegacyTrashDirLocked(); err != nil {
 		return PathChangeResult{}, err
 	}
 	cleanPath, absPath, err := s.sanitizePath(path)
@@ -47,10 +55,14 @@ func (s *Service) MoveToTrash(path string) (PathChangeResult, error) {
 		return PathChangeResult{}, err
 	}
 	if err := s.recordTrashItem(cleanPath, trashPath, info); err != nil {
-		return PathChangeResult{}, err
+		return PathChangeResult{}, errors.Join(err, os.Rename(absTrashPath, absPath))
 	}
 	if err := s.removeOrderMetadataForPath(cleanPath); err != nil {
-		return PathChangeResult{}, err
+		rollbackErr := os.Rename(absTrashPath, absPath)
+		if rollbackErr == nil {
+			rollbackErr = s.deleteTrashItemRecord(trashPath)
+		}
+		return PathChangeResult{}, errors.Join(err, rollbackErr)
 	}
 
 	return PathChangeResult{
@@ -61,48 +73,6 @@ func (s *Service) MoveToTrash(path string) (PathChangeResult, error) {
 	}, nil
 }
 
-func (s *Service) migrateLegacyTrashDir() error {
-	legacyAbs := filepath.Join(s.rootAbs, LegacyTrashDirName)
-	currentAbs := filepath.Join(s.rootAbs, TrashDirName)
-
-	legacyInfo, err := os.Stat(legacyAbs)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	if !legacyInfo.IsDir() {
-		return nil
-	}
-
-	currentInfo, err := os.Stat(currentAbs)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return movePathWithFallback(legacyAbs, currentAbs)
-		}
-		return err
-	}
-	if !currentInfo.IsDir() {
-		return fmt.Errorf("%s exists but is not a folder", TrashDirName)
-	}
-
-	entries, err := os.ReadDir(legacyAbs)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		targetName, err := uniqueTrashName(currentAbs, entry.Name())
-		if err != nil {
-			return err
-		}
-		if err := movePathWithFallback(filepath.Join(legacyAbs, entry.Name()), filepath.Join(currentAbs, targetName)); err != nil {
-			return err
-		}
-	}
-	return os.Remove(legacyAbs)
-}
-
 func (s *Service) recordTrashItem(originalPath, trashPath string, info os.FileInfo) error {
 	itemType := "file"
 	size := info.Size()
@@ -111,14 +81,18 @@ func (s *Service) recordTrashItem(originalPath, trashPath string, info os.FileIn
 		size = 0
 	}
 	_, err := s.db.Exec(`
-INSERT OR REPLACE INTO trash_items (id, user_id, original_path, trash_path, type, size_bytes, deleted_at)
+INSERT INTO trash_items (id, user_id, original_path, trash_path, type, size_bytes, deleted_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
-`, trashPath, s.userID, originalPath, trashPath, itemType, size, time.Now().UTC())
+ON CONFLICT(user_id, trash_path) DO UPDATE SET original_path = excluded.original_path,
+  type = excluded.type, size_bytes = excluded.size_bytes, deleted_at = excluded.deleted_at
+`, idgen.New("trash"), s.userID, originalPath, trashPath, itemType, size, time.Now().UTC())
 	return err
 }
 
 func (s *Service) TrashItems() ([]TrashItem, error) {
-	if err := s.migrateLegacyTrashDir(); err != nil {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.migrateLegacyTrashDirLocked(); err != nil {
 		return nil, err
 	}
 	trashAbs := filepath.Join(s.rootAbs, TrashDirName)
@@ -177,7 +151,13 @@ func (s *Service) TrashItems() ([]TrashItem, error) {
 }
 
 func (s *Service) RestoreTrashItem(trashPath string, overwrite bool) (PathChangeResult, error) {
-	if err := s.migrateLegacyTrashDir(); err != nil {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.restoreTrashItem(trashPath, overwrite)
+}
+
+func (s *Service) restoreTrashItem(trashPath string, overwrite bool) (PathChangeResult, error) {
+	if err := s.migrateLegacyTrashDirLocked(); err != nil {
 		return PathChangeResult{}, err
 	}
 	cleanTrashPath, absTrashPath, err := s.sanitizePath(trashPath)
@@ -207,24 +187,43 @@ func (s *Service) RestoreTrashItem(trashPath string, overwrite bool) (PathChange
 		return PathChangeResult{}, ErrInvalidPath
 	}
 
+	var backup PathChangeResult
 	if _, err := os.Stat(absOriginalPath); err == nil {
 		if !overwrite {
 			return PathChangeResult{}, ErrPathExists
 		}
-		if err := os.RemoveAll(absOriginalPath); err != nil {
+		backup, err = s.moveToTrash(cleanOriginalPath)
+		if err != nil {
 			return PathChangeResult{}, err
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return PathChangeResult{}, err
 	}
+	rollbackBackup := func() error {
+		if backup.NewPath == "" {
+			return nil
+		}
+		_, absBackup, err := s.sanitizePath(backup.NewPath)
+		if err == nil {
+			err = os.Rename(absBackup, absOriginalPath)
+		}
+		if err == nil {
+			err = s.deleteTrashItemRecord(backup.NewPath)
+		}
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(absOriginalPath), 0o755); err != nil {
-		return PathChangeResult{}, err
+		return PathChangeResult{}, errors.Join(err, rollbackBackup())
 	}
 	if err := movePathWithFallback(absTrashPath, absOriginalPath); err != nil {
-		return PathChangeResult{}, err
+		return PathChangeResult{}, errors.Join(err, rollbackBackup())
 	}
 	if err := s.deleteTrashItemRecord(cleanTrashPath); err != nil {
-		return PathChangeResult{}, err
+		rollbackErr := os.Rename(absOriginalPath, absTrashPath)
+		if rollbackErr == nil {
+			rollbackErr = rollbackBackup()
+		}
+		return PathChangeResult{}, errors.Join(err, rollbackErr)
 	}
 	return PathChangeResult{
 		Path:         cleanOriginalPath,
@@ -235,7 +234,9 @@ func (s *Service) RestoreTrashItem(trashPath string, overwrite bool) (PathChange
 }
 
 func (s *Service) DeleteTrashItem(trashPath string) (map[string]any, error) {
-	if err := s.migrateLegacyTrashDir(); err != nil {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.migrateLegacyTrashDirLocked(); err != nil {
 		return nil, err
 	}
 	cleanTrashPath, absTrashPath, err := s.sanitizePath(trashPath)
@@ -330,7 +331,9 @@ func IsLegacyTrashPath(path string) bool {
 }
 
 func (s *Service) EmptyTrash() (map[string]any, error) {
-	if err := s.migrateLegacyTrashDir(); err != nil {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.migrateLegacyTrashDirLocked(); err != nil {
 		return nil, err
 	}
 	cleanPath, trashAbs, err := s.sanitizePath(TrashDirName)
@@ -379,7 +382,7 @@ func uniqueTrashName(trashAbs, baseName string) (string, error) {
 			return "", err
 		}
 
-		timestamp := time.Now().UTC().Format("20060102-150405.000")
+		timestamp := fmt.Sprintf("%s-%d", time.Now().UTC().Format("20060102-150405.000000000"), attempt)
 		ext := filepath.Ext(baseName)
 		nameOnly := strings.TrimSuffix(baseName, ext)
 		if ext == "" {

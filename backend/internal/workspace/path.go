@@ -3,6 +3,7 @@ package workspace
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -11,7 +12,7 @@ func sanitizeLeafName(value string) (string, error) {
 	if filepath.IsAbs(value) {
 		return "", ErrInvalidPath
 	}
-	clean := filepath.Clean(strings.ReplaceAll(strings.TrimSpace(value), "\\", "/"))
+	clean := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")))
 	if clean == "" || clean == "." || clean == ".." {
 		return "", ErrInvalidPath
 	}
@@ -33,10 +34,25 @@ func (s *Service) sanitizePath(path string) (string, string, error) {
 	if path == "" {
 		return "", "", ErrInvalidPath
 	}
-	return s.sanitizeOptionalPath(path)
+	clean, abs, err := s.sanitizeOptionalPath(path)
+	if err == nil && clean == "" {
+		return "", "", ErrInvalidPath
+	}
+	return clean, abs, err
+}
+
+// NormalizePath validates a workspace path before a multi-file operation starts.
+func (s *Service) NormalizePath(path string) (string, error) {
+	clean, _, err := s.sanitizePath(path)
+	return clean, err
 }
 
 func (s *Service) sanitizeOptionalPath(path string) (string, string, error) {
+	// Colons include Windows drive-relative paths and NTFS alternate streams.
+	// Use one portable path contract on every host.
+	if strings.Contains(path, ":") || strings.ContainsRune(path, '\x00') {
+		return "", "", ErrInvalidPath
+	}
 	if filepath.IsAbs(path) {
 		return "", "", ErrInvalidPath
 	}
@@ -59,6 +75,23 @@ func (s *Service) sanitizeOptionalPath(path string) (string, string, error) {
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", "", ErrPathEscape
+	}
+	// Lexical containment alone does not stop links/junctions from reaching
+	// another user's files. Reject linked components, including existing parents
+	// of paths that are about to be created.
+	probe := s.rootAbs
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		probe = filepath.Join(probe, part)
+		info, err := os.Lstat(probe)
+		if errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		if err != nil {
+			return "", "", err
+		}
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return "", "", ErrPathEscape
+		}
 	}
 	return filepath.ToSlash(clean), absPath, nil
 }

@@ -6,13 +6,9 @@ export default function PanelWrapper({
   hasOpenFloatingMenu,
   ide,
   index,
-  isOpeningPanel,
-  isReorderMotion,
-  isResizing,
   nextPanel,
   panel,
   panelWidth,
-  shouldIntro,
   showResizer,
 }) {
   const id = panel.id;
@@ -21,29 +17,18 @@ export default function PanelWrapper({
     <div
       key={id}
       id={`panel-wrapper-${id}`}
-      className={`panel-wrapper relative flex h-full min-w-0 will-change-[transform,opacity] ${
-        isOpeningPanel || shouldIntro ? 'overflow-hidden' : 'overflow-visible'
-      } ${
-        isResizing ? '' : 'transition-[width,opacity,margin-right]'
-      }`}
+      className="panel-wrapper relative flex h-full min-w-0 overflow-visible"
       style={{
-        width: `${isOpeningPanel ? 0 : panelWidth}px`,
+        width: `${panelWidth}px`,
         flex: 'none',
-        opacity: isOpeningPanel ? 0 : ide.draggingPanelId === id ? 0.55 : 1,
-        transform: ide.draggingPanelId === id
-          ? 'scale(0.985) translateY(2px)'
-          : 'scale(1) translateY(0)',
-        marginRight: showResizer && !isOpeningPanel ? '12px' : '0px',
+        opacity: ide.draggingPanelId === id ? 0.55 : 1,
+        marginRight: showResizer ? '12px' : '0px',
         zIndex:
           hasOpenFloatingMenu
             ? 90
             : ide.activePanel === id || (ide.activePanel === 'chat-input' && id === 'chat')
             ? 40
             : 10 - index,
-        transitionDuration: isResizing ? '0ms' : isReorderMotion ? '280ms' : '760ms',
-        transitionTimingFunction: isReorderMotion
-          ? 'cubic-bezier(0.18, 0.86, 0.28, 1)'
-          : 'cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
       {ide.dragType === 'reorder' && ide.draggingPanelId !== id && (
@@ -57,12 +42,7 @@ export default function PanelWrapper({
         />
       )}
 
-      <div
-        className={`h-full w-full min-w-0 ${
-          shouldIntro ? 'animate-panel-appear' : ''
-        }`}
-        style={shouldIntro ? { animationDelay: `${Math.min(120, index * 36)}ms` } : undefined}
-      >
+      <div className="h-full w-full min-w-0">
         {children}
       </div>
 

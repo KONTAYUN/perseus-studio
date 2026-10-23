@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"webide-backend/internal/skills"
 	"webide-backend/internal/store"
@@ -51,6 +53,12 @@ func (f *Factory) Workspace(userID string) (*workspace.Service, error) {
 	}
 	if err := svc.EnsureWorkspace(); err != nil {
 		return nil, fmt.Errorf("ensure workspace: %w", err)
+	}
+	recoveryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	recoveryErr := svc.RecoverPendingPatches(recoveryCtx)
+	cancel()
+	if recoveryErr != nil {
+		log.Printf("[workspace] pending patch recovery requires inspection user=%s error=%v", userID, recoveryErr)
 	}
 	f.workspaces[userID] = svc
 	return svc, nil

@@ -78,6 +78,8 @@ func (s *Server) handleTaskRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch parts[1] {
+	case "events":
+		s.handleTaskEvents(w, r, taskID)
 	case "logs":
 		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
@@ -96,7 +98,11 @@ func (s *Server) handleTaskRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 		task, err := s.store.RequestCancel(r.Context(), user.UserID, taskID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			status := http.StatusInternalServerError
+			if tasks.IsNotFound(err) {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err.Error())
 			return
 		}
 		logItem, err := s.store.AppendLog(r.Context(), user.UserID, taskID, "warn", "cancel requested")

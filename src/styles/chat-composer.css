@@ -108,7 +108,7 @@
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: rgb(148 163 184 / 0.72) transparent;
-  transition: height 200ms var(--ease-apple);
+  /* Text input height follows content immediately; streaming scroll owns anchoring. */
 }
 
 .composer-textarea::-webkit-scrollbar {

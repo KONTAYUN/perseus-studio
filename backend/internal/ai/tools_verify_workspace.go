@@ -36,6 +36,9 @@ func (s *Service) verifyToolResult(ctx context.Context, toolName, resultJSON str
 	if err := json.Unmarshal([]byte(resultJSON), &meta); err != nil {
 		return ToolVerification{Status: "failed", Message: "tool result was not valid JSON"}
 	}
+	if toolName == "apply_workspace_patch" {
+		return verifyWorkspacePatchChanges(files, resultJSON)
+	}
 
 	if isWorkspaceContentMutationTool(toolName) {
 		path := firstNonEmpty(meta.Path, meta.NewPath)
@@ -43,33 +46,7 @@ func (s *Service) verifyToolResult(ctx context.Context, toolName, resultJSON str
 			return ToolVerification{Status: "failed", Message: "tool result did not include file path"}
 		}
 		read, err := files.ReadFile(path)
-		if err != nil && toolName == "apply_workspace_patch" {
-			var patchMeta struct {
-				ChangedPaths []string `json:"changed_paths"`
-			}
-			_ = json.Unmarshal([]byte(resultJSON), &patchMeta)
-			for _, candidate := range patchMeta.ChangedPaths {
-				if strings.TrimSpace(candidate) == "" || candidate == path {
-					continue
-				}
-				if nextRead, nextErr := files.ReadFile(candidate); nextErr == nil {
-					read = nextRead
-					err = nil
-					path = candidate
-					break
-				}
-			}
-		}
 		if err != nil {
-			if toolName == "apply_workspace_patch" {
-				var patchMeta struct {
-					ChangedPaths []string `json:"changed_paths"`
-				}
-				_ = json.Unmarshal([]byte(resultJSON), &patchMeta)
-				if len(patchMeta.ChangedPaths) > 0 {
-					return ToolVerification{Status: "verified", Message: "patch changed paths recorded; primary path may have been moved to trash", Path: path}
-				}
-			}
 			return ToolVerification{Status: "failed", Message: fmt.Sprintf("file is not readable after write: %v", err), Path: path}
 		}
 		if meta.Hash != "" && read.Hash != meta.Hash {

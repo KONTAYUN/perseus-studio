@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 )
@@ -43,11 +44,24 @@ func truncateRunesWithFlag(value string, limit int) (string, bool) {
 }
 
 func mustJSON(value any) string {
-	raw, err := json.Marshal(value)
+	raw, err := marshalModelJSON(value)
 	if err != nil {
 		return `{"error":"failed to encode tool result"}`
 	}
 	return string(raw)
+}
+
+// Tool JSON is a text message inside a provider request, never an HTML script.
+// Keep source &, < and > readable; the outer request encoder still escapes its
+// envelope. Do not unescape strings afterward: literal file escapes must survive.
+func marshalModelJSON(value any) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buffer.Bytes(), []byte{'\n'}), nil
 }
 
 func truncate(text string, limit int) string {

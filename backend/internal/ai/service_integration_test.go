@@ -43,7 +43,7 @@ func TestGenerateReplyOpenAICreateFileAfterReminder(t *testing.T) {
 		case 2:
 			assertOpenAIWorkspaceToolsLoaded(t, payload)
 			assertWorkspaceToolsetResultSupportsPatchEditing(t, lastOpenAIToolContent(t, payload))
-			writeOpenAIText(t, w, "```text\n*** Begin Patch\n*** Add File: ai-test.txt\n+hello from ai\n*** End Patch\n```")
+			writeOpenAIToolCall(t, w, "structured_patch", "apply_workspace_patch", mustJSON(map[string]any{"patch": "*** Begin Patch\n*** Add File: ai-test.txt\n+hello from ai\n*** End Patch"}))
 		case 3:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已创建 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
@@ -212,13 +212,14 @@ func TestAgentBudgetExhaustionRequestsNoToolSummaryAndResetsCheckpointBudget(t *
 		t.Fatalf("CreateRun returned error: %v", err)
 	}
 	provider := store.ModelProvider{
-		ID:       "provider_budget_test",
-		Name:     "Budget Test",
-		Protocol: "openai",
-		BaseURL:  server.URL,
-		APIKey:   "test-key",
-		ModelID:  "gpt-test",
-		Enabled:  true,
+		ID:                "provider_budget_test",
+		Name:              "Budget Test",
+		Protocol:          "openai",
+		SystemMessageMode: "multiple",
+		BaseURL:           server.URL,
+		APIKey:            "test-key",
+		ModelID:           "gpt-test",
+		Enabled:           true,
 	}
 	runtime := &agentRuntime{
 		service:          env.service,
@@ -310,13 +311,14 @@ func TestAgentBudgetExhaustionCanTriggerOnToolCallLimit(t *testing.T) {
 		t.Fatalf("CreateRun returned error: %v", err)
 	}
 	provider := store.ModelProvider{
-		ID:       "provider_budget_tools_test",
-		Name:     "Budget Tool Test",
-		Protocol: "openai",
-		BaseURL:  server.URL,
-		APIKey:   "test-key",
-		ModelID:  "gpt-test",
-		Enabled:  true,
+		ID:                "provider_budget_tools_test",
+		Name:              "Budget Tool Test",
+		Protocol:          "openai",
+		SystemMessageMode: "multiple",
+		BaseURL:           server.URL,
+		APIKey:            "test-key",
+		ModelID:           "gpt-test",
+		Enabled:           true,
 	}
 	runtime := &agentRuntime{
 		service:          env.service,
@@ -507,13 +509,14 @@ func TestAgentAppliesPendingSteerBeforeNextModelTurn(t *testing.T) {
 	}
 
 	provider := store.ModelProvider{
-		ID:       "provider_steer_test",
-		Name:     "Steer Test",
-		Protocol: "openai",
-		BaseURL:  server.URL,
-		APIKey:   "test-key",
-		ModelID:  "gpt-test",
-		Enabled:  true,
+		ID:                "provider_steer_test",
+		Name:              "Steer Test",
+		Protocol:          "openai",
+		SystemMessageMode: "multiple",
+		BaseURL:           server.URL,
+		APIKey:            "test-key",
+		ModelID:           "gpt-test",
+		Enabled:           true,
 	}
 	runtime := &agentRuntime{
 		service:          env.service,
@@ -653,13 +656,14 @@ func TestAgentSkipsCanceledPendingSteer(t *testing.T) {
 	}
 
 	provider := store.ModelProvider{
-		ID:       "provider_steer_cancel_test",
-		Name:     "Steer Cancel Test",
-		Protocol: "openai",
-		BaseURL:  server.URL,
-		APIKey:   "test-key",
-		ModelID:  "gpt-test",
-		Enabled:  true,
+		ID:                "provider_steer_cancel_test",
+		Name:              "Steer Cancel Test",
+		Protocol:          "openai",
+		SystemMessageMode: "multiple",
+		BaseURL:           server.URL,
+		APIKey:            "test-key",
+		ModelID:           "gpt-test",
+		Enabled:           true,
 	}
 	runtime := &agentRuntime{
 		service:          env.service,
@@ -1137,7 +1141,7 @@ func TestGenerateReplyOpenAIWriteExistingFile(t *testing.T) {
 			handleOpenAIWorkspaceToolsetLoad(t, w, payload, "load_workspace_1")
 		case 2:
 			assertOpenAIWorkspaceToolsLoaded(t, payload)
-			writeOpenAIText(t, w, "```text\n*** Begin Patch\n*** Update File: ai-test.txt\n@@\n-before\n+after\n*** End Patch\n```")
+			writeOpenAIToolCall(t, w, "structured_patch", "apply_workspace_patch", mustJSON(map[string]any{"patch": "*** Begin Patch\n*** Update File: ai-test.txt\n@@\n-before\n+after\n*** End Patch"}))
 		case 3:
 			writeOpenAIToolCall(t, w, "call_done_1", "attempt_completion", `{"result":"已修改 ai-test.txt。","changed_paths":["ai-test.txt"]}`)
 		default:
@@ -1586,13 +1590,14 @@ func TestGenerateReplyOpenAIWorkspaceReferencePlainTextDoesNotFinishEarly(t *tes
 	defer server.Close()
 
 	provider, err := env.configs.CreateModelProvider(ctx, testUserID, store.ModelProviderInput{
-		Name:       "Test OpenAI",
-		Visibility: store.ResourceVisibilityPublic,
-		Protocol:   "openai",
-		BaseURL:    server.URL,
-		APIKey:     "test-key",
-		ModelID:    "gpt-test",
-		Enabled:    true,
+		Name:              "Test OpenAI",
+		Visibility:        store.ResourceVisibilityPublic,
+		Protocol:          "openai",
+		SystemMessageMode: "multiple",
+		BaseURL:           server.URL,
+		APIKey:            "test-key",
+		ModelID:           "gpt-test",
+		Enabled:           true,
 	})
 	if err != nil {
 		t.Fatalf("CreateModelProvider returned error: %v", err)
@@ -1632,184 +1637,12 @@ func TestGenerateReplyOpenAIWorkspaceReferencePlainTextDoesNotFinishEarly(t *tes
 	}
 }
 
-func TestGenerateReplyOpenAIReadOnlyThenPlanningTextMustUseCompletionAction(t *testing.T) {
-	env := newTestAIEnv(t)
-	ctx := context.Background()
-
-	for _, item := range []struct {
-		path    string
-		content string
-	}{
-		{"project/a.md", "旧设定 A\n"},
-		{"project/b.md", "旧设定 B\n"},
-		{"project/c.md", "旧设定 C\n"},
-	} {
-		if _, err := env.files.CreateFile(ctx, item.path, item.content); err != nil {
-			t.Fatalf("CreateFile(%s) returned error: %v", item.path, err)
-		}
-	}
-
-	var requestCount atomic.Int32
-	var streamed strings.Builder
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll returned error: %v", err)
-		}
-
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("invalid request payload: %v", err)
-		}
-
-		switch count := requestCount.Add(1); count {
-		case 1:
-			assertOpenAIWorkspaceToolsLoaded(t, payload)
-			writeOpenAIToolCall(t, w, "read_many_1", "read_workspace_files", `{"paths":["project/a.md","project/b.md","project/c.md"],"start_line":1,"end_line":200}`)
-		case 2:
-			assertOpenAIToolChoiceAuto(t, payload)
-			writeOpenAIStreamText(t, w, "我已经读完三份文档，接下来会用补丁整体重写。")
-		case 3:
-			assertOpenAIToolChoiceAuto(t, payload)
-			assertLastUserActionRejected(t, payload, "action_rejected")
-			writeOpenAIToolCall(t, w, "done_1", "attempt_completion", `{"result":"已读取三份文档，但尚未修改文件。需要继续执行真实编辑动作。","failed_items":["project/a.md","project/b.md","project/c.md"]}`)
-		case 4:
-			assertOpenAIToolChoiceAuto(t, payload)
-			assertOpenAIHasActionRejectedReason(t, payload, "没有对应的工具失败结果")
-			writeOpenAIStreamText(t, w, "*** Begin Patch\n*** Update File: project/a.md\n@@\n-旧设定 A\n+轻爽版 A\n*** Update File: project/b.md\n@@\n-旧设定 B\n+轻爽版 B\n*** Update File: project/c.md\n@@\n-旧设定 C\n+轻爽版 C\n*** End Patch")
-		case 5:
-			assertOpenAIToolChoiceAuto(t, payload)
-			writeOpenAIToolCall(t, w, "done_2", "attempt_completion", `{"result":"已把三份文档改成轻爽版。","changed_paths":["project/a.md","project/b.md","project/c.md"]}`)
-		default:
-			t.Fatalf("unexpected request count: %d", count)
-		}
-	}))
-	defer server.Close()
-
-	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "把这三份文档改成轻爽版")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{
-		{Kind: "workspace_file", Path: "project/a.md"},
-		{Kind: "workspace_file", Path: "project/b.md"},
-		{Kind: "workspace_file", Path: "project/c.md"},
-	}, RunOptions{
-		UserID: testUserID,
-		Event: func(eventType, _ string, payload map[string]any) {
-			if eventType == "model_delta" {
-				if text, _ := payload["text"].(string); text != "" {
-					streamed.WriteString(text)
-				}
-			}
-		},
-	})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
-	}
-	if requestCount.Load() != 5 {
-		t.Fatalf("expected read, rejected planning text, rejected false completion, patch, and completion action, got %d", requestCount.Load())
-	}
-	if strings.Contains(streamed.String(), "接下来会用补丁") {
-		t.Fatalf("rejected planning text leaked to user stream: %q", streamed.String())
-	}
-	if !strings.Contains(reply.Content, "轻爽版") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
-	}
-	for _, item := range []struct {
-		path string
-		want string
-	}{
-		{"project/a.md", "轻爽版 A\n"},
-		{"project/b.md", "轻爽版 B\n"},
-		{"project/c.md", "轻爽版 C\n"},
-	} {
-		read, err := env.files.ReadFile(item.path)
-		if err != nil || read.Content != item.want {
-			t.Fatalf("expected %s to be patched, got content=%q err=%v", item.path, read.Content, err)
-		}
-	}
-	assertToolCallRecord(t, env, "apply_workspace_patch", "success")
+func TestGenerateReplyOpenAIReadOnlyCanReportPartial(t *testing.T) {
+	runAuditScenario(t, "read_partial")
 }
 
-func TestGenerateReplyOpenAIRejectsCompletionThatLeaksPatchProtocol(t *testing.T) {
-	env := newTestAIEnv(t)
-	ctx := context.Background()
-
-	if _, err := env.files.CreateFile(ctx, "project/draft.md", "旧内容\n"); err != nil {
-		t.Fatalf("CreateFile returned error: %v", err)
-	}
-
-	var requestCount atomic.Int32
-	var streamed strings.Builder
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll returned error: %v", err)
-		}
-
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("invalid request payload: %v", err)
-		}
-
-		switch count := requestCount.Add(1); count {
-		case 1:
-			assertOpenAIWorkspaceToolsLoaded(t, payload)
-			writeOpenAIToolCall(t, w, "read_1", "read_workspace_text", `{"path":"project/draft.md","start_line":1,"end_line":50}`)
-		case 2:
-			assertOpenAIToolChoiceAuto(t, payload)
-			writeOpenAIToolCall(t, w, "bad_done_1", "attempt_completion", `{"result":"还需要继续用 *** Begin Patch / *** End Patch 补丁协议实际修改 project/draft.md。","failed_items":["project/draft.md"]}`)
-		case 3:
-			assertOpenAIToolChoiceAuto(t, payload)
-			if content := lastOpenAIToolContent(t, payload); !strings.Contains(content, "最终用户可见答复") {
-				t.Fatalf("expected rejected completion tool result, got %s", content)
-			}
-			writeOpenAIToolCall(t, w, "good_done_1", "attempt_completion", `{"result":"已读取 project/draft.md，但尚未修改文件；本轮没有可验证的文件变更。","failed_items":["project/draft.md"]}`)
-		case 4:
-			assertOpenAIToolChoiceAuto(t, payload)
-			if content := lastOpenAIToolContent(t, payload); !strings.Contains(content, "没有对应的工具失败结果") {
-				t.Fatalf("expected missing failed observation rejection, got %s", content)
-			}
-			writeOpenAIStreamText(t, w, "*** Begin Patch\n*** Update File: project/draft.md\n@@\n-旧内容\n+新内容\n*** End Patch")
-		case 5:
-			assertOpenAIToolChoiceAuto(t, payload)
-			writeOpenAIToolCall(t, w, "done_2", "attempt_completion", `{"result":"已修改 project/draft.md。","changed_paths":["project/draft.md"]}`)
-		default:
-			t.Fatalf("unexpected request count: %d", count)
-		}
-	}))
-	defer server.Close()
-
-	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "改写 project/draft.md")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, []AttachmentPayload{
-		{Kind: "workspace_file", Path: "project/draft.md"},
-	}, RunOptions{
-		UserID: testUserID,
-		Event: func(eventType, _ string, payload map[string]any) {
-			if eventType == "model_delta" {
-				if text, _ := payload["text"].(string); text != "" {
-					streamed.WriteString(text)
-				}
-			}
-		},
-	})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
-	}
-	if requestCount.Load() != 5 {
-		t.Fatalf("expected read, rejected protocol completion, rejected false completion, patch, and clean completion, got %d", requestCount.Load())
-	}
-	if strings.Contains(streamed.String(), "*** Begin Patch") || strings.Contains(streamed.String(), "补丁协议") {
-		t.Fatalf("rejected internal protocol completion leaked to stream: %q", streamed.String())
-	}
-	if strings.Contains(reply.Content, "*** Begin Patch") || !strings.Contains(reply.Content, "已修改 project/draft.md") {
-		t.Fatalf("unexpected reply content: %q", reply.Content)
-	}
-	read, err := env.files.ReadFile("project/draft.md")
-	if err != nil || read.Content != "新内容\n" {
-		t.Fatalf("expected patched draft, content=%q err=%v", read.Content, err)
-	}
-	assertToolCallRecord(t, env, "apply_workspace_patch", "success")
+func TestGenerateReplyOpenAIAllowsProtocolExplanationInCompletion(t *testing.T) {
+	runAuditScenario(t, "read_partial")
 }
 
 func TestGenerateReplySuppressesActionPreamblesAndEmitsFinalSegment(t *testing.T) {
@@ -3116,7 +2949,7 @@ func TestGenerateReplyAnthropicIncompleteToolArgumentsDiagnosticNamesTool(t *tes
 	if call.TargetSummary != "机甲少女/机甲少女11-22集修改版.txt" {
 		t.Fatalf("expected target path in diagnostic, got %#v", call)
 	}
-	if call.ArgumentsJSONValid || call.ArgumentsJSONError == "" || !call.LooksLikeLongWrite || call.RecommendedTool != "assistant_text_patch" {
+	if call.ArgumentsJSONValid || call.ArgumentsJSONError == "" || !call.LooksLikeLongWrite || call.RecommendedTool != "apply_workspace_patch" {
 		t.Fatalf("expected invalid long-write details, got %#v", call)
 	}
 }
@@ -3134,7 +2967,7 @@ func TestGenerateReplyCapturesTextPatchWithoutStreamingPatchToClient(t *testing.
 		case 1:
 			writeOpenAIToolCall(t, w, "load_workspace", "load_perseus_toolset", `{"toolset":"workspace"}`)
 		case 2:
-			writeOpenAIStreamText(t, w, "我来创建文件。\n\n*** Begin Patch\n*** Add File: patch-output.md\n+hello\n*** End Patch\n\n已写入，继续检查。")
+			writeOpenAIToolCall(t, w, "structured_patch", "apply_workspace_patch", mustJSON(map[string]any{"patch": "*** Begin Patch\n*** Add File: patch-output.md\n+hello\n*** End Patch"}))
 		case 3:
 			writeOpenAIToolCall(t, w, "done_patch_output", "attempt_completion", `{"result":"已创建 patch-output.md。","changed_paths":["patch-output.md"]}`)
 		default:
@@ -3235,73 +3068,8 @@ func TestGenerateReplyUsesNativePatchToolWhenProviderCapabilityEnabled(t *testin
 	}
 }
 
-func TestGenerateReplyRejectsNoWriteChannelCompletionAfterExistingFolderMkdir(t *testing.T) {
-	env := newTestAIEnv(t)
-	ctx := context.Background()
-	if _, err := env.files.MkdirNew("向北方/修改版3"); err != nil {
-		t.Fatalf("MkdirNew returned error: %v", err)
-	}
-
-	var requestCount atomic.Int32
-	var rejectedPayloads []map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		_, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "text/event-stream")
-		switch requestCount.Add(1) {
-		case 1:
-			writeOpenAIToolCall(t, w, "load_workspace", "load_perseus_toolset", `{"toolset":"workspace"}`)
-		case 2:
-			writeOpenAIToolCall(t, w, "find_project", "find_workspace_files", `{"query":"向北方","pattern":"","max_results":50}`)
-		case 3:
-			writeOpenAIToolCall(t, w, "mkdir_existing", "manage_workspace_path", `{"action":"mkdir","path":"向北方/修改版3"}`)
-		case 4:
-			writeOpenAIToolCall(t, w, "bad_done", "attempt_completion", `{"result":"抱歉，这轮没有成功把大纲写进文件里。已确认目标目录存在，但当前可用工具里没有完成文本文件写入的执行通道。","failed_items":["向北方/修改版3/向北方_10集大纲.txt"]}`)
-		case 5:
-			writeOpenAIStreamText(t, w, "*** Begin Patch\n*** Add File: 向北方/修改版3/向北方_10集大纲.txt\n+恐怖元素版大纲\n*** End Patch")
-		case 6:
-			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建大纲文件。","changed_paths":["向北方/修改版3/向北方_10集大纲.txt"]}`)
-		default:
-			t.Fatalf("unexpected request %d", requestCount.Load())
-		}
-	}))
-	defer server.Close()
-
-	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "还是得新建一个文件写进去，不要发在聊天里面")
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
-		UserID: testUserID,
-		Event: func(eventType, _ string, payload map[string]any) {
-			if eventType == "completion_rejected" {
-				rejectedPayloads = append(rejectedPayloads, payload)
-			}
-		},
-	})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
-	}
-	if requestCount.Load() != 6 {
-		t.Fatalf("expected model to continue after rejected completion, requests=%d reply=%#v", requestCount.Load(), reply)
-	}
-	if len(rejectedPayloads) == 0 {
-		t.Fatalf("expected no-write-channel completion to be rejected")
-	}
-	if strings.Contains(fmt.Sprint(rejectedPayloads), "上一项可恢复工具调用失败") {
-		t.Fatalf("existing folder should be treated as condition_satisfied, not blocking failure: %#v", rejectedPayloads)
-	}
-	read, err := env.files.ReadFile("向北方/修改版3/向北方_10集大纲.txt")
-	if err != nil || read.Content != "恐怖元素版大纲\n" {
-		t.Fatalf("expected file to be written after corrective patch, content=%q err=%v", read.Content, err)
-	}
-	if !strings.Contains(reply.Content, "已创建大纲文件") {
-		t.Fatalf("unexpected reply: %#v", reply)
-	}
-	var existingResult string
-	if err := env.db.QueryRowContext(ctx, `SELECT result_json FROM tool_calls WHERE conversation_id = ? AND tool_name = 'manage_workspace_path' AND status = 'failed'`, conversation.ID).Scan(&existingResult); err != nil {
-		t.Fatalf("expected failed manage_workspace_path ledger row: %v", err)
-	}
-	if !strings.Contains(existingResult, `"ok":false`) || !strings.Contains(existingResult, `"status":"failed"`) || strings.Contains(existingResult, `"changed_paths"`) {
-		t.Fatalf("existing-folder observation should be failed without changed_paths, got %s", existingResult)
-	}
+func TestGenerateReplyAllowsPartialAfterToolFailure(t *testing.T) {
+	runAuditScenario(t, "partial")
 }
 
 func TestGenerateReplyRecoversPrematureCompletionWithPatchActionObservation(t *testing.T) {
@@ -3338,7 +3106,7 @@ func TestGenerateReplyRecoversPrematureCompletionWithPatchActionObservation(t *t
 			if rawObservation["status"] != "action_rejected" || rawObservation["required_next_action"] != "apply_workspace_patch" {
 				t.Fatalf("expected patch required action observation, got %#v", observation)
 			}
-			writeOpenAIStreamText(t, w, "*** Begin Patch\n*** Add File: 人间烟火系统：开局一个盒饭摊/开局版本对比.md\n+# 开局版本对比\n+\n+盒饭摊版本。\n*** End Patch")
+			writeOpenAIToolCall(t, w, "structured_patch", "apply_workspace_patch", mustJSON(map[string]any{"patch": "*** Begin Patch\n*** Add File: 人间烟火系统：开局一个盒饭摊/开局版本对比.md\n+# 开局版本对比\n+\n+盒饭摊版本。\n*** End Patch"}))
 		case 4:
 			writeOpenAIToolCall(t, w, "done", "attempt_completion", `{"result":"已创建开局版本对比.md。"}`)
 		default:
@@ -3366,92 +3134,8 @@ func TestGenerateReplyRecoversPrematureCompletionWithPatchActionObservation(t *t
 	}
 }
 
-func TestGenerateReplyCapturesMixedTextPatchAndJSONToolCallAsPatchAction(t *testing.T) {
-	env := newTestAIEnv(t)
-	ctx := context.Background()
-	if _, err := env.files.CreateTextFile(ctx, "mixed.md", "old\n", "test"); err != nil {
-		t.Fatalf("CreateTextFile returned error: %v", err)
-	}
-
-	var requestCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		_, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "text/event-stream")
-		switch requestCount.Add(1) {
-		case 1:
-			writeOpenAIToolCall(t, w, "load_workspace", "load_perseus_toolset", `{"toolset":"workspace"}`)
-		case 2:
-			writeOpenAIStreamTextAndToolCall(t, w, "*** Begin Patch\n*** Update File: mixed.md\n@@\n-old\n+new\n*** End Patch", "call_search", "search_workspace_text", `{"query":"old"}`)
-		case 3:
-			writeOpenAIToolCall(t, w, "done_mixed", "attempt_completion", `{"result":"已修改 mixed.md。","changed_paths":["mixed.md"]}`)
-		default:
-			t.Fatalf("unexpected request %d", requestCount.Load())
-		}
-	}))
-	defer server.Close()
-
-	provider, conversation, userMessage, messages := prepareOpenAIConversation(t, ctx, env, server.URL, "修改 mixed.md")
-	var streamed []string
-	var capturedPayloads []map[string]any
-	reply, err := env.service.GenerateReply(ctx, conversation.ID, userMessage.ID, provider.ID, messages, nil, RunOptions{
-		UserID: testUserID,
-		Event: func(eventType, _ string, payload map[string]any) {
-			if eventType == "model_delta" {
-				if text, _ := payload["text"].(string); text != "" {
-					streamed = append(streamed, text)
-				}
-			}
-			if eventType == "assistant_text_patch_captured" {
-				copied := map[string]any{}
-				for key, value := range payload {
-					copied[key] = value
-				}
-				capturedPayloads = append(capturedPayloads, copied)
-			}
-		},
-	})
-	if err != nil {
-		t.Fatalf("GenerateReply returned error: %v", err)
-	}
-	if strings.Contains(strings.Join(streamed, ""), "*** Begin Patch") {
-		t.Fatalf("mixed patch leaked to streamed model deltas: %#v", streamed)
-	}
-	read, err := env.files.ReadFile("mixed.md")
-	if err != nil || read.Content != "new\n" {
-		t.Fatalf("expected patch-updated file, content=%q err=%v", read.Content, err)
-	}
-	var searchCalls int
-	if err := env.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tool_calls WHERE conversation_id = ? AND tool_name = 'search_workspace_text'`, conversation.ID).Scan(&searchCalls); err != nil {
-		t.Fatalf("QueryRowContext returned error: %v", err)
-	}
-	if searchCalls != 0 {
-		t.Fatalf("mixed JSON tool call should not execute before patch action, got %d search calls", searchCalls)
-	}
-	if len(reply.ToolEvents) < 2 || reply.ToolEvents[1].ToolName != "apply_workspace_patch" {
-		t.Fatalf("expected internal patch tool event after loader, got %#v", reply.ToolEvents)
-	}
-	if len(capturedPayloads) != 1 {
-		t.Fatalf("expected one patch capture lifecycle event, got %#v", capturedPayloads)
-	}
-	if got, _ := capturedPayloads[0]["discarded_tool_calls"].(int); got != 1 {
-		t.Fatalf("expected discarded mixed tool call diagnostic, got %#v", capturedPayloads[0])
-	}
-	if got, _ := capturedPayloads[0]["patch_chars"].(int); got <= 0 {
-		t.Fatalf("expected real patch char diagnostic, got %#v", capturedPayloads[0])
-	}
-	if got, _ := capturedPayloads[0]["patch_block_count"].(int); got != 1 {
-		t.Fatalf("expected one captured patch block, got %#v", capturedPayloads[0])
-	}
-	if got, _ := capturedPayloads[0]["patch_sha"].(string); got == "" {
-		t.Fatalf("expected patch sha diagnostic, got %#v", capturedPayloads[0])
-	}
-	if !containsAnyPath(capturedPayloads[0]["detected_paths"], "mixed.md") {
-		t.Fatalf("expected detected patch path, got %#v", capturedPayloads[0])
-	}
-	if !strings.Contains(reply.Content, "mixed.md") {
-		t.Fatalf("unexpected reply: %#v", reply)
-	}
+func TestGenerateReplyPreservesStructuredCallAlongsideProsePatch(t *testing.T) {
+	runAuditScenario(t, "mixed")
 }
 
 func TestGenerateReplyStreamsAttemptCompletionPreviewWithoutDuplicateModelCompletion(t *testing.T) {
@@ -3731,14 +3415,15 @@ func prepareOpenAIConversation(t *testing.T, ctx context.Context, env *testAIEnv
 	t.Helper()
 
 	provider, err := env.configs.CreateModelProvider(ctx, testUserID, store.ModelProviderInput{
-		Name:       "Test OpenAI",
-		Visibility: store.ResourceVisibilityPublic,
-		Protocol:   "openai",
-		BaseURL:    baseURL,
-		APIKey:     "test-key",
-		ModelID:    "test-model",
-		Enabled:    true,
-		IsDefault:  true,
+		Name:              "Test OpenAI",
+		Visibility:        store.ResourceVisibilityPublic,
+		Protocol:          "openai",
+		SystemMessageMode: "multiple",
+		BaseURL:           baseURL,
+		APIKey:            "test-key",
+		ModelID:           "test-model",
+		Enabled:           true,
+		IsDefault:         true,
 	})
 	if err != nil {
 		t.Fatalf("CreateModelProvider returned error: %v", err)
@@ -3825,7 +3510,7 @@ func assertOpenAIWorkspaceToolsLoaded(t *testing.T, payload map[string]any) {
 			t.Fatalf("tool %q missing from payload: %#v", expected, names)
 		}
 	}
-	for _, unexpected := range []string{"apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write"} {
+	for _, unexpected := range []string{"edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write"} {
 		if names[unexpected] {
 			t.Fatalf("old write tool %q should not be model-visible: %#v", unexpected, names)
 		}
@@ -3857,11 +3542,11 @@ func assertOpenAIActionManifestIncludesPatch(t *testing.T, payload map[string]an
 	if manifestPayload == nil {
 		t.Fatalf("action manifest anchor missing from payload messages: %#v", rawMessages)
 	}
-	textActions, _ := manifestPayload["text_actions"].([]any)
+	textActions, _ := manifestPayload["json_tools"].([]any)
 	foundPatch := false
 	for _, raw := range textActions {
 		action, _ := raw.(map[string]any)
-		if action["name"] == "apply_workspace_patch" && action["transport"] == "assistant_text_patch" {
+		if action["name"] == "apply_workspace_patch" && action["transport"] == "json" {
 			foundPatch = true
 		}
 	}
@@ -3891,7 +3576,6 @@ func assertOnlyCoreToolsLoaded(t *testing.T, payload map[string]any) {
 		}
 	}
 	for _, unexpected := range []string{
-		"apply_workspace_patch",
 		"edit_workspace_text",
 		"replace_workspace_lines",
 		"save_workspace_file",
@@ -3930,8 +3614,8 @@ func assertOpenAISystemPromptSupportsWrite(t *testing.T, payload map[string]any)
 		"attempt_completion 是终止动作，不能创建、修改、移动或删除文件",
 		"当前文件上下文和编辑器面板上下文只是 metadata",
 		"find_workspace_files 按名称/路径/glob 找文件",
-		"改文件统一直接输出以 *** Begin Patch 开始、*** End Patch 结束的 patch 块",
-		"任何文件内容变更都使用 *** Begin Patch / *** End Patch patch 块表达，这是唯一的文件内容编辑动作",
+		"改文件优先调用 apply_workspace_patch",
+		"任何文件内容变更都使用 *** Begin Patch / *** End Patch patch 块表达",
 		"run_workspace_command 在 workspace 内运行命令",
 		"不可以永久删除文件",
 		"不可以访问 workspace 之外的路径",
@@ -3950,7 +3634,7 @@ func assertOpenAIToolsetLoaderPresent(t *testing.T, payload map[string]any) {
 			t.Fatalf("expected %q in agent tool payload, got %#v", expected, names)
 		}
 	}
-	for _, unexpected := range []string{"apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write"} {
+	for _, unexpected := range []string{"edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write"} {
 		if names[unexpected] {
 			t.Fatalf("old write tool %q should not be registered in payload, got %#v", unexpected, names)
 		}
@@ -4261,19 +3945,19 @@ func assertWorkspaceToolsetResultSupportsPatchEditing(t *testing.T, content stri
 			t.Fatalf("toolset result missing %s list: %#v", key, result)
 		}
 		for _, raw := range rawTools {
-			if raw == "attempt_completion" || raw == "apply_workspace_patch" || raw == "save_workspace_file" || raw == "write_workspace_chunk" {
+			if raw == "attempt_completion" || raw == "save_workspace_file" || raw == "write_workspace_chunk" {
 				t.Fatalf("workspace text edit protocol must not be exposed as a JSON tool in %s: %#v", key, rawTools)
 			}
 		}
 	}
-	textActions, ok := result["text_actions"].([]any)
+	textActions, ok := result["json_tools"].([]any)
 	if !ok {
 		t.Fatalf("toolset result missing text_actions: %#v", result)
 	}
 	foundPatchAction := false
 	for _, raw := range textActions {
 		action, _ := raw.(map[string]any)
-		if action["name"] == "apply_workspace_patch" && action["transport"] == "assistant_text_patch" {
+		if raw == "apply_workspace_patch" || (action["name"] == "apply_workspace_patch" && action["transport"] == "json") {
 			foundPatchAction = true
 		}
 	}
@@ -4299,14 +3983,14 @@ func assertWorkspaceToolsetResultSupportsPatchEditing(t *testing.T, content stri
 		t.Fatalf("toolset result missing capabilities: %#v", result)
 	}
 	editing, ok := capabilities["file_content_editing"].(map[string]any)
-	if !ok || editing["available"] != true || editing["transport"] != "assistant_text_patch" {
-		t.Fatalf("toolset result missing assistant text patch editing capability: %#v", result)
+	if !ok || editing["available"] != true || editing["transport"] != "json" {
+		t.Fatalf("toolset result missing JSON editing capability and text fallback: %#v", result)
 	}
 	if strings.TrimSpace(fmt.Sprint(result["tool_manifest_digest"])) == "" {
 		t.Fatalf("toolset result missing manifest digest: %#v", result)
 	}
 	instruction, _ := result["instruction"].(string)
-	for _, fragment := range []string{"text_actions", "apply_workspace_patch", "*** Begin Patch", "*** End Patch", "attempt_completion cannot create or modify files"} {
+	for _, fragment := range []string{"apply_workspace_patch", "*** Begin Patch", "*** End Patch", "attempt_completion cannot create or modify files"} {
 		if !strings.Contains(instruction, fragment) {
 			t.Fatalf("toolset instruction missing %q: %s", fragment, instruction)
 		}

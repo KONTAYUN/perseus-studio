@@ -105,7 +105,7 @@ export default function ConversationMenu({ ide, onRenameConversation, variant = 
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onRenameConversation(conversation);
+                        onRenameConversation(conversation, conversationButtonRef.current);
                       }}
                       className="motion-button ui-icon-button h-7 w-7 opacity-0 group-hover:opacity-100"
                       title="重命名会话"

@@ -37,7 +37,7 @@ func openAIWorkspaceToolByName(name string) map[string]any {
 	case "organize_workspace_matches":
 		return openAIFunctionTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
 	case "apply_workspace_patch":
-		return openAIFunctionTool(name, "Apply one complete workspace patch to create, update, delete, or move text files. Use this as the primary file content editing action. The backend parses, verifies, and applies the patch atomically.", workspacePatchParams())
+		return openAIFunctionTool(name, "Apply one complete workspace patch to create, update, delete, or move text files. Use this as the primary file content editing action. The backend parses, verifies, and applies the patch with exact matching, per-file conflict checks and a durable recovery plan.", workspacePatchParams())
 	default:
 		return nil
 	}
@@ -59,6 +59,8 @@ func anthropicWorkspaceToolByName(name string) map[string]any {
 		return anthropicTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams())
 	case "organize_workspace_matches":
 		return anthropicTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
+	case "apply_workspace_patch":
+		return anthropicTool(name, "Apply a workspace patch to create, update, delete, or move text files. Read existing files first. The backend validates the patch and verifies the resulting files.", workspacePatchParams())
 	default:
 		return nil
 	}
@@ -208,7 +210,7 @@ func workspacePatchParams() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Text patch beginning with *** Begin Patch and ending with *** End Patch. New model turns should output patch blocks directly in assistant text so the backend can capture and verify them.",
+				"description": "Complete patch: *** Begin Patch\n*** Add File: path\n+new line\n*** End Patch. To edit: *** Update File: path\n@@\n unchanged context\n-old line\n+new line. Context lines start with a space, removed lines with -, added lines with +. Use exact file text without read-tool line numbers. Optional *** Move to: new/path after Update File moves the file. *** Delete File: path moves it to trash. Always end with *** End Patch. " + WorkspacePatchExecutionRule,
 			},
 		},
 	}

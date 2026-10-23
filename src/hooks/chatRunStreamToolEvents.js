@@ -11,6 +11,7 @@ export function toolEventFromPayload(payload = {}, eventType = '') {
     new_path: payload.new_path || '',
     changed_paths: Array.isArray(payload.changed_paths) ? payload.changed_paths : [],
     moved: Array.isArray(payload.moved) ? payload.moved : [],
+    changes: Array.isArray(payload.changes) ? payload.changes : [],
     operation: payload.operation || '',
     operation_hash: payload.operation_hash || '',
     hash: payload.hash || '',

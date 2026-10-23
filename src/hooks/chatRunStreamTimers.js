@@ -23,6 +23,12 @@ export function stopInterval(timer) {
   }
 }
 
+export function stopDelay(timer) {
+  if (timer == null) return;
+  const clearer = globalThis.window?.clearTimeout || globalThis.clearTimeout;
+  if (typeof clearer === 'function') clearer(timer);
+}
+
 export function wait(delay) {
   return new Promise((resolve) => scheduleDelay(resolve, delay));
 }

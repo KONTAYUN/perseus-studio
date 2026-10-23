@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"net/url"
 	"strings"
 
 	"webide-backend/internal/store"
@@ -11,15 +10,10 @@ func providerNativePatchCapability(provider store.ModelProvider) ProviderNativeP
 	if provider.NativePatchToolEnabled {
 		return ProviderNativePatchEnabled
 	}
-	if strings.ToLower(strings.TrimSpace(provider.Protocol)) != string(agentProtocolOpenAI) {
-		return ProviderNativePatchDisabled
-	}
-	parsed, err := url.Parse(strings.TrimSpace(provider.BaseURL))
-	if err != nil {
-		return ProviderNativePatchDisabled
-	}
-	host := strings.ToLower(parsed.Hostname())
-	if host == "api.openai.com" {
+	// This is an ordinary function tool on both protocols, with no provider-
+	// specific API extension. Compatible endpoints need the same write channel.
+	switch strings.ToLower(strings.TrimSpace(provider.Protocol)) {
+	case "", string(agentProtocolOpenAI), string(agentProtocolAnthropic):
 		return ProviderNativePatchEnabled
 	}
 	return ProviderNativePatchDisabled

@@ -5,10 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"webide-backend/internal/failure"
 
 	"webide-backend/internal/idgen"
 )
@@ -35,10 +35,17 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 		if err != nil {
 			return Reply{}, err
 		}
-		prePatchPublicStreamed := turn.PublicTextStreamed
-		prePatchPublicContent := turn.PublicStreamedContent
 		classification := ModelResponseDispatcher{}.Classify(turn)
 		turn = classification.Turn
+		if r.opts.TaskID != "" {
+			// Keep the returned text even when action dispatch intentionally holds
+			// its preamble or rejects a plain-text completion. This is audit data,
+			// not a request to expose tool syntax as a chat message.
+			emitToolLifecycleEvent(r.opts, "model_response_observed", "info", map[string]any{
+				"round": round + 1, "kind": string(classification.Kind),
+				"content": turn.Content, "finish_reason": turn.FinishReason,
+			})
+		}
 		emitToolLifecycleEvent(r.opts, "model_response_classified", "info", map[string]any{
 			"round":         round + 1,
 			"kind":          string(classification.Kind),
@@ -46,28 +53,6 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 			"mode":          string(r.executionMode()),
 			"finish_reason": turn.FinishReason,
 		})
-		if classification.Kind == ModelResponseTextPatchAction {
-			if prePatchPublicStreamed && strings.TrimSpace(prePatchPublicContent) != strings.TrimSpace(turn.PublicStreamedContent) {
-				r.discardActiveAssistantMessage("assistant_text_patch_reconciled")
-			}
-			patchText := ""
-			if len(turn.ToolCalls) > 0 {
-				patchText = turn.ToolCalls[0].PatchText
-			}
-			emitToolLifecycleEvent(r.opts, "assistant_text_patch_captured", "info", map[string]any{
-				"round":                round + 1,
-				"tool_name":            "apply_workspace_patch",
-				"status_kind":          manifestStatusKind("apply_workspace_patch"),
-				"transport":            "assistant_text_patch",
-				"patch_chars":          len([]rune(patchText)),
-				"patch_sha":            hashWorkspaceText(patchText),
-				"patch_block_count":    countWorkspacePatchBlocks(patchText),
-				"detected_paths":       workspacePatchCandidatePathsLoose(patchText),
-				"discarded_tool_calls": classification.Patch.DiscardedToolCalls,
-				"discarded_tool_names": classification.Patch.DiscardedToolNames,
-				"action_boundary":      "assistant_text_patch_supersedes_json_tool_calls",
-			})
-		}
 		r.lastProviderFinishReason = turn.FinishReason
 		if len(turn.ToolCalls) == 0 {
 			contentPolicy := r.contentOnlyCompletionPolicy(turn)
@@ -137,7 +122,7 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 			}
 			if strings.TrimSpace(r.completedContent) != "" {
 				r.emitCheckpointRecoveryCompleted()
-				return Reply{Content: r.completedContent, ToolEvents: r.events}, nil
+				return Reply{Content: r.completedContent, ToolEvents: r.events, Outcome: r.completedOutcome}, nil
 			}
 		}
 		if r.appendLoopGuardObservation("tool_turn") {
@@ -255,12 +240,12 @@ func (r *agentRuntime) correctiveMessage(content string) string {
 }
 
 func (r *agentRuntime) fail(message string, cause error) (Reply, error) {
-	err := errors.New(message)
+	var err error = failure.New("agent_runtime_action_failed", message, nil)
 	if cause != nil {
-		err = fmt.Errorf("%s: %w", message, cause)
+		err = failure.New(firstNonEmpty(failure.Code(cause), "agent_runtime_action_failed"), message, cause)
 	}
 	log.Printf("[ai] agent runtime failed conversation=%s provider=%s model=%s finish_reason=%s empty=%v error=%v", r.conversationID, r.provider.Name, r.provider.ModelID, r.lastProviderFinishReason, r.lastProviderEmptyResponse, err)
-	emitToolLifecycleEvent(r.opts, "run_failed", "error", map[string]any{
+	emitToolLifecycleEvent(r.opts, "agent_execution_failed", "error", map[string]any{
 		"error":         err.Error(),
 		"provider":      r.provider.Name,
 		"model":         r.provider.ModelID,
@@ -271,8 +256,13 @@ func (r *agentRuntime) fail(message string, cause error) (Reply, error) {
 }
 
 func (r *agentRuntime) recordToolError(toolName, argumentsJSON, message string) {
+	r.recordToolFailure(toolName, argumentsJSON, failure.New("tool_invalid_arguments", message, nil))
+}
+
+func (r *agentRuntime) recordToolFailure(toolName, argumentsJSON string, err error) {
+	message := err.Error()
 	r.lastToolFailed = true
-	failureClass := toolFailureClass(toolName, fmt.Errorf("%s", message))
+	failureClass := toolFailureClass(toolName, err)
 	r.lastToolFailure = runtimeToolFailure{
 		ToolName:     strings.TrimSpace(toolName),
 		Message:      strings.TrimSpace(message),
@@ -281,7 +271,7 @@ func (r *agentRuntime) recordToolError(toolName, argumentsJSON, message string) 
 		Mutation:     isWorkspaceMutationTool(toolName) || (toolName == "run_workspace_command" && strings.TrimSpace(argumentsJSON) != ""),
 		Recoverable:  toolFailureRecoverableByModel(failureClass),
 	}
-	r.recordConditionSatisfiedFromToolError(toolName, argumentsJSON, message)
+	r.recordConditionSatisfiedFromToolError(toolName, argumentsJSON, err)
 	r.consecutiveToolErrors++
 	key := repeatedToolErrorKey(toolName, argumentsJSON, message)
 	if key != "" && key == r.repeatedToolErrorKey {
@@ -318,6 +308,9 @@ func repeatedToolErrorKey(toolName, argumentsJSON, message string) string {
 }
 
 func (r *agentRuntime) repeatedToolErrorMessage() string {
+	if r.lastToolFailure.FailureClass == "workspace_patch_apply_failed" {
+		return fmt.Sprintf("文件修改补丁校验失败（与当前原文不匹配或补丁格式有误），工具调用连续失败 %d 次，本轮已暂停。请重新读取目标内容并修正补丁后重试。", r.consecutiveToolErrors)
+	}
 	if r.repeatedToolErrorCount >= agentMaxConsecutiveToolErrs {
 		return fmt.Sprintf("同一个工具调用连续失败 %d 次，已停止继续重试，避免重复写入错误日志。请检查模型供应商的工具调用参数输出是否完整。", r.repeatedToolErrorCount)
 	}

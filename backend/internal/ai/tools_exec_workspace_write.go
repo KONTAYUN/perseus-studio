@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"webide-backend/internal/failure"
 
 	"webide-backend/internal/workspace"
 )
@@ -22,7 +23,7 @@ func (s *Service) execSaveWorkspaceFile(ctx context.Context, userID, argumentsJS
 		Mode    string `json:"mode"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在编辑文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在编辑文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	if len([]rune(args.Content)) > recommendedWorkspaceChunkChars {
 		return "", "", "正在编辑文件...", args.Path, fmt.Errorf("invalid tool arguments: compatibility save content exceeds %d characters; submit the file change as a *** Begin Patch text patch", recommendedWorkspaceChunkChars)
@@ -73,7 +74,7 @@ func (s *Service) execWriteWorkspaceChunk(ctx context.Context, userID, arguments
 		ChunkIndex int    `json:"chunk_index"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在编辑文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在编辑文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	if len([]rune(args.Content)) > recommendedWorkspaceChunkChars {
 		return "", "", "正在编辑文件...", args.Path, fmt.Errorf("invalid tool arguments: compatibility write content exceeds %d characters", recommendedWorkspaceChunkChars)
@@ -139,7 +140,7 @@ func (s *Service) execFinalizeWorkspaceWrite(ctx context.Context, userID, argume
 		FinalHash      string `json:"final_hash"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在校验文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在校验文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	if args.ExpectedChunks <= 0 {
 		return "", "", "正在校验文件...", args.Path, fmt.Errorf("invalid tool arguments: expected_chunks must be a positive integer")
@@ -234,7 +235,7 @@ func (s *Service) execEditWorkspaceText(ctx context.Context, userID, argumentsJS
 		ReplaceAll bool   `json:"replace_all"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在编辑文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在编辑文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	result, err := files.EditTextFileSmart(ctx, args.Path, args.OldText, args.NewText, "ai_edit", args.ReplaceAll)
 	if err != nil {
@@ -267,7 +268,7 @@ func (s *Service) execReplaceWorkspaceLines(ctx context.Context, userID, argumen
 		NewText   string `json:"new_text"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在编辑文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在编辑文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	result, err := files.ReplaceTextFileLines(ctx, args.Path, args.StartLine, args.EndLine, args.NewText, "ai_line_replace")
 	if err != nil {

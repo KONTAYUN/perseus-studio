@@ -19,7 +19,7 @@ func summarizeProviderContext(protocol string, messages []map[string]any, transc
 		Round:                   round,
 		Protocol:                protocol,
 		ToolManifestDigest:      toolManifestDigest(),
-		InternalEditProtocol:    string(ToolTransportAssistantTextPatch),
+		InternalEditProtocol:    string(ToolTransportJSON),
 		PayloadSoftBudgetBytes:  profile.PayloadSoftBudgetBytes,
 		PayloadHardBudgetBytes:  profile.PayloadHardBudgetBytes,
 		MessageCount:            len(messages),

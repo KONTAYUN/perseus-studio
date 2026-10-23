@@ -1,6 +1,8 @@
 import React from 'react';
 import { ArrowLeft, Ban, CheckCircle, KeyRound, Plus, ShieldCheck, Trash2, UserCheck, Users } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../../api/client';
+import { useSettingsGuard } from './SettingsNavigation';
+import SettingsRowMenu from './SettingsRowMenu';
 import {
   Badge,
   Button,
@@ -28,6 +30,12 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
   const [isCreating, setIsCreating] = React.useState(false);
   const [resetPasswordId, setResetPasswordId] = React.useState('');
   const [newPassword, setNewPassword] = React.useState('');
+  const [showCreate, setShowCreate] = React.useState(false);
+  const [isResetting, setIsResetting] = React.useState(false);
+  const submitting = React.useRef(false);
+  const discard = () => { setCreateForm({ username: '', password: '', role: 'user' }); setNewPassword(''); setResetPasswordId(''); };
+  const navigation = useSettingsGuard({ dirty: Boolean(newPassword) || (showCreate && Boolean(createForm.username || createForm.password || createForm.role !== 'user')),
+    busy: isCreating || isResetting, discard });
 
   const loadData = React.useCallback(async () => {
     try {
@@ -49,17 +57,20 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
 
   async function handleCreateUser(e) {
     e.preventDefault();
-    if (!createForm.username.trim() || !createForm.password.trim()) return;
+    if (submitting.current || !createForm.username.trim() || !createForm.password.trim()) return;
+    submitting.current = true;
     setIsCreating(true);
     setError('');
     try {
       await apiPost('/api/admin/users', createForm);
       setCreateForm({ username: '', password: '', role: 'user' });
+      setShowCreate(false);
       await loadData();
     } catch (err) {
       setError(err.message);
     } finally {
       setIsCreating(false);
+      submitting.current = false;
     }
   }
 
@@ -106,7 +117,8 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
   }
 
   async function handleResetPassword(userId) {
-    if (!newPassword.trim()) return;
+    if (submitting.current || !newPassword.trim()) return;
+    submitting.current = true; setIsResetting(true);
     setError('');
     try {
       await apiPost('/api/admin/users/' + encodeURIComponent(userId) + '/reset-password', { password: newPassword });
@@ -114,7 +126,7 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
       setNewPassword('');
     } catch (err) {
       setError(err.message);
-    }
+    } finally { submitting.current = false; setIsResetting(false); }
   }
 
   async function handleDeleteUser(user) {
@@ -167,7 +179,7 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
 
   return (
     <SettingsSection className="settings-view-enter">
-      <Button
+      {onBack && <Button
         type="button"
         variant="ghost"
         size="xs"
@@ -175,9 +187,11 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
         className="mb-5 px-2 py-1 text-gray-400"
       >
         <ArrowLeft size={14} /> 返回设置
-      </Button>
+      </Button>}
 
-      <SectionTitle icon={<Users size={15} />} title="用户管理" description="管理系统用户、角色和注册设置。" />
+      <div className="settings-list-toolbar"><h2 className="text-sm font-semibold">{showCreate ? '创建用户' : '系统用户'}</h2>
+        {!showCreate && <Button onClick={() => navigation.attemptLeave(() => setShowCreate(true))}><Plus size={15} />创建用户</Button>}
+      </div>
 
       {error && (
         <div className="settings-expand-enter mb-4 rounded-xl bg-red-50 px-4 py-2.5 text-xs font-bold text-red-600 dark:bg-red-500/10 dark:text-red-300">
@@ -185,7 +199,7 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
         </div>
       )}
 
-      <div className="settings-card mb-5 space-y-4 rounded-2xl border border-gray-100 bg-white/80 p-4 dark:border-white/10 dark:bg-[#2C2C2E]/75">
+      {!showCreate && <div className="settings-card mb-5 space-y-4 rounded-2xl border border-gray-100 bg-white/80 p-4 dark:border-white/10 dark:bg-[#2C2C2E]/75">
         <div className="flex items-center justify-between gap-4">
           <div>
             <div className="text-sm font-bold text-gray-800 dark:text-gray-100">允许新用户注册</div>
@@ -211,13 +225,13 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
             </Select>
           </Field>
         </div>
-      </div>
+      </div>}
 
-      <div className="mb-3 text-xs font-bold text-gray-500 dark:text-gray-400">
+      {!showCreate && <div className="mb-3 text-xs font-bold text-gray-500 dark:text-gray-400">
         所有用户 ({users.length})
-      </div>
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] items-start">
-        <div className="space-y-3">
+      </div>}
+      <div>
+        {!showCreate && <div className="space-y-3">
           {users.length === 0 && <EmptyCard text="暂无用户。" />}
           {users.map((user) => (
             <ProviderCard key={user.id}>
@@ -254,7 +268,7 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
                     </Button>
                     <Button
                       type="button"
-                      onClick={() => { setResetPasswordId(''); setNewPassword(''); }}
+                      onClick={() => navigation.attemptLeave(() => { setResetPasswordId(''); setNewPassword(''); })}
                       variant="ghost"
                       size="xs"
                       className="px-2 py-1 text-gray-400"
@@ -264,50 +278,20 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
                   </form>
                 )}
               </div>
-              <CardActions>
-                <IconButton
-                  title={user.role === 'admin' ? '降级为用户' : '提升为管理员'}
-                  onClick={() => handleToggleRole(user)}
-                  disabled={isSelf(user)}
-                >
-                  <ShieldCheck size={15} />
-                </IconButton>
-                <IconButton
-                  title={user.role === 'pending' ? '激活为用户' : '设为待激活'}
-                  onClick={() => handleChangeRole(user, user.role === 'pending' ? 'user' : 'pending')}
-                  disabled={isSelf(user)}
-                >
-                  <UserCheck size={15} />
-                </IconButton>
-                <IconButton
-                  title={user.disabled ? '启用用户' : '禁用用户'}
-                  onClick={() => handleToggleDisabled(user)}
-                  disabled={isSelf(user)}
-                >
-                  {user.disabled ? <CheckCircle size={15} /> : <Ban size={15} />}
-                </IconButton>
-                <IconButton
-                  title="重置密码"
-                  onClick={() => { setResetPasswordId(user.id); setNewPassword(''); }}
-                >
-                  <KeyRound size={15} />
-                </IconButton>
-                <IconButton
-                  title="删除用户"
-                  onClick={() => handleDeleteUser(user)}
-                  danger
-                  disabled={isSelf(user)}
-                >
-                  <Trash2 size={15} />
-                </IconButton>
-              </CardActions>
+              <SettingsRowMenu label={`管理用户 ${user.username}`} text="管理" actions={[
+                { label: user.role === 'admin' ? '降级为用户' : '提升为管理员', disabled: isSelf(user), run: () => handleToggleRole(user) },
+                { label: user.role === 'pending' ? '激活为用户' : '设为待激活', disabled: isSelf(user), run: () => handleChangeRole(user, user.role === 'pending' ? 'user' : 'pending') },
+                { label: user.disabled ? '启用用户' : '禁用用户', disabled: isSelf(user), run: () => handleToggleDisabled(user) },
+                { label: '重置密码', run: () => navigation.attemptLeave(() => { setResetPasswordId(user.id); setNewPassword(''); }) },
+                { label: '删除用户', danger: true, disabled: isSelf(user), run: () => handleDeleteUser(user) },
+              ]} />
             </ProviderCard>
           ))}
-        </div>
+        </div>}
 
-        <div className="settings-card h-fit rounded-2xl border border-gray-100 bg-white/80 p-5 dark:border-white/10 dark:bg-[#2C2C2E]/75">
-          <FormHeader title="创建用户" />
+        {showCreate && <div className="settings-editor">
           <form onSubmit={handleCreateUser}>
+            <fieldset disabled={isCreating}>
             <Field label="用户名">
               <Input
                 type="text"
@@ -336,17 +320,16 @@ export default function UserManagement({ dialog, onBack, currentUser }) {
                 <option value="admin">管理员</option>
               </Select>
             </Field>
-            <Button
-              type="submit"
-              disabled={isCreating}
-              className="mt-5"
-              fullWidth
-            >
+            </fieldset>
+            <div className="settings-form-actions">
+            <Button variant="secondary" disabled={isCreating} onClick={() => navigation.attemptLeave(() => { discard(); setShowCreate(false); })}>取消</Button>
+            <Button type="submit" disabled={isCreating}>
               <Plus size={15} />
               {isCreating ? '创建中...' : '创建用户'}
             </Button>
+            </div>
           </form>
-        </div>
+        </div>}
       </div>
     </SettingsSection>
   );

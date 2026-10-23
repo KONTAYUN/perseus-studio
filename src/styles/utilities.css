@@ -9,3 +9,25 @@ input[type='number']::-webkit-inner-spin-button {
   appearance: none;
   -webkit-appearance: none;
 }
+
+/* Include portalled menus/dialogs as well as every app scroll surface. Keep the
+   selector weak so intentional hidden tabs and composer sizing still win. */
+:where(.app-shell, .app-shell *, .ui-popover-surface, .ui-popover-surface *, .modal-backdrop, .modal-backdrop *) {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+}
+:where(.dark .app-shell, .dark .app-shell *, .dark .ui-popover-surface, .dark .ui-popover-surface *, .dark .modal-backdrop, .dark .modal-backdrop *) {
+  scrollbar-color: rgb(148 163 184 / 0.4) transparent;
+}
+:where(.app-shell, .app-shell *, .ui-popover-surface, .ui-popover-surface *, .modal-backdrop, .modal-backdrop *)::-webkit-scrollbar { width: 6px; height: 6px; }
+:where(.app-shell, .app-shell *, .ui-popover-surface, .ui-popover-surface *, .modal-backdrop, .modal-backdrop *)::-webkit-scrollbar-track { background: transparent; }
+:where(.app-shell, .app-shell *, .ui-popover-surface, .ui-popover-surface *, .modal-backdrop, .modal-backdrop *)::-webkit-scrollbar-thumb {
+  border-radius: 10px; background: rgb(148 163 184 / 0.5);
+}
+:where(.app-shell, .app-shell *, .ui-popover-surface, .ui-popover-surface *, .modal-backdrop, .modal-backdrop *)::-webkit-scrollbar-thumb:hover { background: rgb(148 163 184 / 0.75); }
+:where(.app-shell, .app-shell *, .ui-popover-surface, .ui-popover-surface *, .modal-backdrop, .modal-backdrop *)::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+:where(.app-shell, .app-shell *, .ui-popover-surface, .ui-popover-surface *, .modal-backdrop, .modal-backdrop *)::-webkit-scrollbar-corner { background: transparent; }
+.scrollbar-rounded-clip { clip-path: inset(0 round 0 0 14px 14px); scrollbar-gutter: stable; }
+@media (forced-colors: active) {
+  :where(.app-shell, .app-shell *, .ui-popover-surface, .ui-popover-surface *, .modal-backdrop, .modal-backdrop *) { scrollbar-color: auto; }
+}

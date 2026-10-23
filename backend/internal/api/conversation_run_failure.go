@@ -2,9 +2,10 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log"
-	"strings"
 	"time"
+	"webide-backend/internal/failure"
 
 	"webide-backend/internal/ai"
 	"webide-backend/internal/store"
@@ -21,13 +22,9 @@ func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conve
 	}
 	status := store.AgentRunFailed
 	stage := "failed"
-	eventType := "run_failed"
-	level := "error"
-	if ctx.Err() != nil || strings.Contains(strings.ToLower(message), "context canceled") {
+	if failure.Code(err) == "" && (errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled)) {
 		status = store.AgentRunCanceled
 		stage = "canceled"
-		eventType = "run_canceled"
-		level = "warn"
 		message = "执行已取消"
 	}
 	diagnosticID := ""
@@ -56,26 +53,10 @@ func (s *Server) failConversationRunStartedAt(ctx context.Context, userID, conve
 			log.Printf("[agent_run] append diagnostic event failed run=%s diagnostic=%s error=%v", runID, diagnosticID, err)
 		}
 	}
-	if _, err := s.appendRunEventStrict(eventCtx, store.AgentEventInput{
-		RunID:          runID,
-		UserID:         userID,
-		ConversationID: conversationID,
-		MessageID:      messageID,
-		Type:           eventType,
-		Level:          level,
-		Payload: map[string]any{
-			"error":             message,
-			"diagnostic_log_id": diagnosticID,
-		},
-	}); err != nil {
-		log.Printf("[agent_run] append failure event failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
-	}
-	if _, err := s.publishRunStrict(context.Background(), userID, runID, status, stage, store.UpdateAgentRunInput{
-		ErrorMessage:    &message,
-		DiagnosticLogID: diagnosticID,
-		SetCompletedAt:  true,
-	}); err != nil {
-		log.Printf("[agent_run] publish failure state failed run=%s status=%s stage=%s error=%v", runID, status, stage, err)
+	if err := s.failRunStrict(context.Background(), userID, runID, status, stage, store.UpdateAgentRunInput{
+		ErrorMessage: &message, DiagnosticLogID: diagnosticID, SetCompletedAt: true,
+	}, map[string]any{"error": message, "failure_class": localRunFailureClass(err), "diagnostic_log_id": diagnosticID}); err != nil {
+		log.Printf("[agent_run] commit failure failed run=%s status=%s error=%v", runID, status, err)
 	}
 }
 
@@ -95,21 +76,7 @@ func (s *Server) completeConversationRunWithBudgetExhaustion(ctx context.Context
 		payload["tool_calls"] = reply.Budget.ToolCalls
 		payload["max_tool_calls"] = reply.Budget.MaxToolCalls
 	}
-	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
-		RunID:          runID,
-		UserID:         userID,
-		ConversationID: conversationID,
-		MessageID:      assistantMessage.ID,
-		Type:           "run_failed",
-		Level:          "warn",
-		Payload:        payload,
-	}); err != nil {
-		return err
-	}
-	_, err := s.publishRunStrict(ctx, userID, runID, store.AgentRunFailed, "budget_exhausted", store.UpdateAgentRunInput{
-		ErrorMessage:       &message,
-		AssistantMessageID: assistantMessage.ID,
-		SetCompletedAt:     true,
-	})
-	return err
+	return s.failRunStrict(ctx, userID, runID, store.AgentRunFailed, "budget_exhausted", store.UpdateAgentRunInput{
+		ErrorMessage: &message, AssistantMessageID: assistantMessage.ID, SetCompletedAt: true,
+	}, payload)
 }

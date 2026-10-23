@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"webide-backend/internal/failure"
 )
 
 func (s *Service) execMkdirWorkspace(ctx context.Context, userID, argumentsJSON string) (string, string, string, string, error) {
@@ -16,7 +17,7 @@ func (s *Service) execMkdirWorkspace(ctx context.Context, userID, argumentsJSON 
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在创建文件夹...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在创建文件夹...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	result, err := files.MkdirNew(args.Path)
 	if err != nil {
@@ -36,7 +37,7 @@ func (s *Service) execRenameWorkspacePath(ctx context.Context, userID, arguments
 		NewName string `json:"new_name"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在重命名...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在重命名...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	result, err := files.RenameWithNewName(args.OldPath, args.NewName)
 	if err != nil {
@@ -56,7 +57,7 @@ func (s *Service) execMoveWorkspacePath(ctx context.Context, userID, argumentsJS
 		NewParentPath string `json:"new_parent_path"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在移动...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在移动...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	result, err := files.MovePath(args.OldPath, args.NewParentPath)
 	if err != nil {
@@ -78,7 +79,7 @@ func (s *Service) execManageWorkspacePath(ctx context.Context, userID, arguments
 		NewParentPath string `json:"new_parent_path"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在管理路径...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在管理路径...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	switch strings.ToLower(strings.TrimSpace(args.Action)) {
 	case "mkdir":
@@ -180,7 +181,7 @@ func (s *Service) execDeleteWorkspacePath(ctx context.Context, userID, arguments
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在删除到回收站...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在删除到回收站...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	result, err := files.MoveToTrash(args.Path)
 	if err != nil {

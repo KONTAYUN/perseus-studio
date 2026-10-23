@@ -34,7 +34,7 @@ func (s *Service) debugOpenAIToolTest(ctx context.Context, provider store.ModelP
 		provider.Name, provider.Protocol, provider.BaseURL, provider.ModelID, len(toolNames), strings.Join(toolNames, ","), toolChoice,
 	)
 
-	raw, _ := json.Marshal(payload)
+	raw, _ := json.Marshal(normalizeOpenAIProviderPayload(provider, payload))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIChatEndpoint(provider.BaseURL), bytes.NewReader(raw))
 	if err != nil {
 		return DebugToolTestResult{}, err

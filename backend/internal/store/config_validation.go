@@ -20,6 +20,9 @@ func NormalizeResourceVisibility(value string) string {
 }
 
 func validateModelProvider(input ModelProviderInput, requireKey bool) error {
+	if input.SystemMessageMode != "" && input.SystemMessageMode != "single" && input.SystemMessageMode != "multiple" {
+		return fmt.Errorf("system_message_mode must be single or multiple")
+	}
 	if strings.TrimSpace(input.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
@@ -100,12 +103,14 @@ func scanModelProvider(s scanner) (ModelProvider, error) {
 		&item.CompactReservedTokens,
 		&pruneToolOutputsEnabled,
 		&nativePatchToolEnabled,
+		&item.SystemMessageMode,
 		&item.ReasoningCapability,
 		&item.ReasoningCapabilitySource,
 		&item.ReasoningProfileLevels,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	)
+	item.SystemMessageMode = NormalizeSystemMessageMode(item.SystemMessageMode)
 	item.Enabled = enabled == 1
 	item.IsDefault = isDefault == 1
 	item.Visibility = NormalizeResourceVisibility(item.Visibility)

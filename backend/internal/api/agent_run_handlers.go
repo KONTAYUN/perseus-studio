@@ -24,6 +24,20 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 	user := MustUserFromContext(r.Context())
 	path := strings.TrimPrefix(r.URL.Path, "/api/agent-runs/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 2 && parts[0] == "by-request" && r.Method == http.MethodGet {
+		run, err := s.runs.RunByRequestID(r.Context(), user.UserID, parts[1])
+		if err != nil {
+			writeError(w, http.StatusNotFound, "request not found")
+			return
+		}
+		message, err := s.conversations.GetMessage(r.Context(), user.UserID, run.UserMessageID.String)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "request message not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"run": run, "user_message": message, "conversation": map[string]string{"id": run.ConversationID}})
+		return
+	}
 	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
@@ -65,7 +79,7 @@ func (s *Server) handleAgentRunRoutes(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		run, event, err := s.resumeAgentRun(r.Context(), user.UserID, runID)
+		run, event, err := s.resumeAgentRun(r.Context(), user.UserID, runID, r.Header.Get("Idempotency-Key"))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -149,13 +163,23 @@ func contentPreview(content string, maxRunes int) string {
 	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
 }
 
-func (s *Server) resumeAgentRun(ctx context.Context, userID, runID string) (store.AgentRun, store.AgentEvent, error) {
+func (s *Server) resumeAgentRun(ctx context.Context, userID, runID, requestID string) (store.AgentRun, store.AgentEvent, error) {
 	run, err := s.runs.GetRun(ctx, userID, runID)
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
 	}
 	if run.Status != store.AgentRunFailed && run.Status != store.AgentRunCanceled {
 		return store.AgentRun{}, store.AgentEvent{}, fmt.Errorf("only failed or canceled runs can be continued")
+	}
+	latest, err := s.runs.LatestConversationRun(ctx, userID, run.ConversationID)
+	if err != nil {
+		return store.AgentRun{}, store.AgentEvent{}, err
+	}
+	if latest.ID != runID {
+		return store.AgentRun{}, store.AgentEvent{}, fmt.Errorf("会话已有更新的任务，请继续最新一轮")
+	}
+	if s.runQueue != nil && s.runQueue.Contains(runID) {
+		return store.AgentRun{}, store.AgentEvent{}, fmt.Errorf("上次执行仍在停止，请稍后继续本轮")
 	}
 	if !run.UserMessageID.Valid || strings.TrimSpace(run.UserMessageID.String) == "" {
 		return store.AgentRun{}, store.AgentEvent{}, fmt.Errorf("run has no user message to continue")
@@ -165,27 +189,27 @@ func (s *Server) resumeAgentRun(ctx context.Context, userID, runID string) (stor
 		return store.AgentRun{}, store.AgentEvent{}, err
 	}
 	attachmentPayloads := payloadsFromStoredMessageAttachments(userMessage)
-	resumed, err := s.runs.ResumeRun(ctx, userID, runID)
+	pendingRegeneration, err := s.runs.PendingRegeneration(ctx, userID, runID)
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
 	}
-	event, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
-		RunID:          runID,
-		UserID:         userID,
-		ConversationID: run.ConversationID,
-		MessageID:      userMessage.ID,
-		Type:           "run_resumed",
-		Level:          "info",
-		Payload:        map[string]any{"message": "run resumed"},
-	})
+	resumed, event, err := s.runs.ResumeRunWithEvent(ctx, userID, runID, requestID)
 	if err != nil {
 		return store.AgentRun{}, store.AgentEvent{}, err
 	}
+	s.runBroker.Publish(runID, tasks.Event{Type: "event", Log: event})
 	user := MustUserFromContext(ctx)
 	if user.UserID == "" {
 		user.UserID = userID
 	}
-	go s.executeConversationRun(userID, user.Role, run.ConversationID, userMessage.ID, run.ModelProviderID, userMessage.Content, userMessage.AttachmentsJSON, attachmentPayloads, "", runID)
+	if pendingRegeneration != "" {
+		err = s.scheduleConversationRegeneration(userID, user.Role, run.ConversationID, userMessage, run.ModelProviderID, "", pendingRegeneration, runID)
+	} else {
+		err = s.scheduleConversationRun(userID, user.Role, run.ConversationID, userMessage.ID, run.ModelProviderID, userMessage.Content, userMessage.AttachmentsJSON, attachmentPayloads, "", runID)
+	}
+	if err != nil {
+		return store.AgentRun{}, store.AgentEvent{}, err
+	}
 	return resumed, event, nil
 }
 
@@ -227,67 +251,6 @@ func (s *Server) cancelAgentRun(ctx context.Context, userID, runID string, req c
 	return s.publishRunStrict(ctx, userID, runID, store.AgentRunCanceled, "canceled", store.UpdateAgentRunInput{SetCompletedAt: true})
 }
 
-func (s *Server) handleAgentRunStream(w http.ResponseWriter, r *http.Request, runID string) {
-	user := MustUserFromContext(r.Context())
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
-
-	run, err := s.runs.GetRun(r.Context(), user.UserID, runID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	afterSeq := int64(0)
-	if raw := strings.TrimSpace(r.URL.Query().Get("after_seq")); raw != "" {
-		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil && parsed > 0 {
-			afterSeq = parsed
-		}
-	}
-	events, err := s.runs.ListEventsAfter(r.Context(), user.UserID, runID, afterSeq)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	writeSSE(w, "run", run)
-	for _, item := range events {
-		writeSSE(w, "event", item)
-	}
-	flusher.Flush()
-
-	eventsCh, unsubscribe := s.runBroker.Subscribe(runID)
-	defer unsubscribe()
-
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case event := <-eventsCh:
-			switch event.Type {
-			case "run":
-				writeSSE(w, "run", event.Task)
-			case "event":
-				writeSSE(w, "event", event.Log)
-			}
-			flusher.Flush()
-		case <-heartbeat.C:
-			fmt.Fprint(w, ": heartbeat\n\n")
-			flusher.Flush()
-		}
-	}
-}
-
 func (s *Server) publishRun(ctx context.Context, userID, runID string, status store.AgentRunStatus, stage string, input store.UpdateAgentRunInput) store.AgentRun {
 	run, err := s.publishRunStrict(ctx, userID, runID, status, stage, input)
 	if err != nil {
@@ -322,10 +285,14 @@ func (s *Server) appendRunEventStrict(ctx context.Context, input store.AgentEven
 	return event, err
 }
 
-func (s *Server) registerRunCancel(runID string, cancel context.CancelFunc) {
+func (s *Server) registerRunCancel(runID string, cancel context.CancelFunc) bool {
 	s.runCancelMu.Lock()
 	defer s.runCancelMu.Unlock()
+	if _, exists := s.runCancels[runID]; exists {
+		return false
+	}
 	s.runCancels[runID] = &runCancelEntry{cancel: cancel}
+	return true
 }
 
 func (s *Server) unregisterRunCancel(runID string) {

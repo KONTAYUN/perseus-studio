@@ -2,12 +2,22 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"time"
 )
 
 func (s *AgentRunStore) AppendEvent(ctx context.Context, input AgentEventInput) (AgentEvent, error) {
+	if input.PendingMessageID != "" {
+		return s.appendPendingSteer(ctx, input)
+	}
+	return appendAgentEvent(ctx, s.db, input)
+}
+
+func appendAgentEvent(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, input AgentEventInput) (AgentEvent, error) {
 	now := time.Now().UTC()
 	level := strings.TrimSpace(strings.ToLower(input.Level))
 	if level == "" {
@@ -22,7 +32,7 @@ func (s *AgentRunStore) AppendEvent(ctx context.Context, input AgentEventInput) 
 		raw = []byte(`{"error":"failed to encode event payload"}`)
 	}
 	id := nextStoreID("evt", now)
-	row := s.db.QueryRowContext(ctx, `
+	row := db.QueryRowContext(ctx, `
 INSERT INTO agent_events (
   id, run_id, user_id, conversation_id, message_id, task_id, type, level, seq, payload_json, created_at
 ) VALUES (

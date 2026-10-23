@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"webide-backend/internal/workspace"
 )
 
 type ToolTransport string
@@ -109,12 +110,12 @@ var toolManifestEntries = []ToolManifestEntry{
 	{Name: "read_workspace_files", Toolset: "workspace", Group: ToolGroupRead, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已读取文件", StatusKind: "workspace_read"},
 	{Name: "manage_workspace_path", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已管理路径", StatusKind: "workspace_path"},
 	{Name: "organize_workspace_matches", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已整理文件", StatusKind: "workspace_path"},
-	{Name: "apply_workspace_patch", Toolset: "workspace", Group: ToolGroupEdit, ModelVisible: true, Mutation: true, Transport: ToolTransportAssistantTextPatch, ActionKind: ModelActionText, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch", PrimaryEditProtocol: true},
-	{Name: "edit_workspace_text", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
-	{Name: "replace_workspace_lines", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
-	{Name: "save_workspace_file", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
-	{Name: "write_workspace_chunk", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
-	{Name: "finalize_workspace_write", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "assistant_text_patch"},
+	{Name: "apply_workspace_patch", Toolset: "workspace", Group: ToolGroupEdit, ProviderVisible: true, ModelVisible: true, Mutation: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "apply_workspace_patch", PrimaryEditProtocol: true},
+	{Name: "edit_workspace_text", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "apply_workspace_patch"},
+	{Name: "replace_workspace_lines", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "apply_workspace_patch"},
+	{Name: "save_workspace_file", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "apply_workspace_patch"},
+	{Name: "write_workspace_chunk", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "apply_workspace_patch"},
+	{Name: "finalize_workspace_write", Toolset: "workspace", Group: ToolGroupEdit, Mutation: true, LegacyCompat: true, Transport: ToolTransportLegacyCompat, Label: "已编辑文件", StatusKind: "workspace_edit", RecoveryProtocol: "apply_workspace_patch"},
 
 	{Name: "run_workspace_command", Toolset: "command", Group: ToolGroupCommand, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已运行命令", StatusKind: "command"},
 	{Name: "perseus_search_web", Toolset: "search", Group: ToolGroupWeb, ProviderVisible: true, ModelVisible: true, Transport: ToolTransportJSON, ActionKind: ModelActionJSONTool, Label: "已搜索资料", StatusKind: "web"},
@@ -193,6 +194,9 @@ func providerVisibleToolNamesForToolset(toolset, role string) []string {
 }
 
 func toolVisibleForRole(name, role string) bool {
+	if name == "run_workspace_command" {
+		return normalizeRunUserRole(role) == "admin" && workspace.TrustedHostCommandsEnabled()
+	}
 	if normalizeRunUserRole(role) == "admin" {
 		return true
 	}
@@ -215,7 +219,7 @@ func toolsetCapabilities(toolset string) map[string]any {
 		return map[string]any{
 			ToolCapabilityFileContentEditing: map[string]any{
 				"available": true,
-				"transport": string(entry.Transport),
+				"transport": string(ToolTransportJSON),
 				"syntax":    "*** Begin Patch ... *** End Patch",
 				"operations": []string{
 					"add_file",
@@ -234,7 +238,7 @@ func toolsetInstruction(toolset string) string {
 	if toolset != "workspace" {
 		return "Continue with the newly loaded JSON tools when they are needed for the user's request."
 	}
-	return "json_tools lists JSON-callable workspace tools for locating, reading, and managing paths. text_actions lists first-class non-JSON actions. File content editing uses the apply_workspace_patch text action: output one complete *** Begin Patch / *** End Patch block directly in assistant text, and the backend captures, verifies, and applies it as the workspace edit. terminal_actions lists final-only actions; attempt_completion cannot create or modify files."
+	return "json_tools lists callable workspace tools, including apply_workspace_patch for creating and editing file content. Pass a complete *** Begin Patch / *** End Patch block in its patch argument. Assistant prose is display-only. Execute edits only through the structured apply_workspace_patch tool; examples and quoted patches never execute. terminal_actions lists final-only actions; attempt_completion cannot create or modify files."
 }
 
 func providerVisibleToolNames(loaded map[string]bool, includeLoader bool, role string) []string {
@@ -326,13 +330,16 @@ func modelActionManifest(loaded map[string]bool, includeLoader bool, role string
 				Terminal:  true,
 			})
 		case ModelActionText:
+			if entry.ProviderVisible {
+				manifest.JSONTools = append(manifest.JSONTools, ModelJSONToolAction{Name: entry.Name, Toolset: entry.Toolset, Group: entry.Group, Transport: ToolTransportJSON})
+			}
 			manifest.TextActions = append(manifest.TextActions, ModelTextAction{
 				Name:      entry.Name,
 				Toolset:   entry.Toolset,
 				Group:     entry.Group,
 				Transport: entry.Transport,
 				Syntax:    textActionSyntax(entry),
-				Primary:   entry.PrimaryEditProtocol,
+				Primary:   entry.PrimaryEditProtocol && !entry.ProviderVisible,
 			})
 		default:
 			if !entry.ProviderVisible {
@@ -400,7 +407,7 @@ func modelActionRules(loaded map[string]bool) []string {
 		"Use json_tools for locating current state, reading file ranges, managing paths, asking follow-up questions, or loading optional toolsets.",
 		"Reuse current_read_working_set and recent read observations when read_content_state is available; do not reread the same current file just because current_file_context metadata is present.",
 		"Read workspace text only when exact current file content is needed and no usable recent read exists, or when the needed range is missing, truncated, stale after mutation, or outside the preserved recent context.",
-		"Use text_actions.apply_workspace_patch for any file content creation, update, delete, or move; output the complete patch block as assistant text, not JSON.",
+		"Use json_tools.apply_workspace_patch for file content creation, update, delete, or move, passing the complete patch in its patch argument. Assistant prose and code fences are display-only and never execute.",
 		"Use terminal_actions.attempt_completion only after required tool/text actions have succeeded or an unrecoverable failure is honestly reported.",
 	}
 	if loaded["workspace"] {

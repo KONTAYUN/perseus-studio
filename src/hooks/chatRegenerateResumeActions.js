@@ -1,5 +1,6 @@
-import { apiPost } from '../api/client';
-import { formatChatError } from './chatErrorUtils';
+import { createRunSubmission, submitRunRequest } from './chatRunSubmission.js';
+import { apiPost } from '../api/client.js';
+import { formatChatError } from './chatErrorUtils.js';
 import { buildAssistantRunShell, mapPendingAssistant } from './chatStateUtils.js';
 import { isWorkspaceRefreshEvent } from './ideUtils.js';
 
@@ -8,6 +9,7 @@ export function createChatRegenerateResumeActions({
   confirm,
   conversationMessages,
   currentConversationId,
+  currentConversationIdRef,
   isChatSending,
   loadConversationMessages,
   loadConversations,
@@ -21,6 +23,9 @@ export function createChatRegenerateResumeActions({
   thinkingMode,
   waitForAgentRun,
 }) {
+  const isVisible = (id) => !currentConversationIdRef || currentConversationIdRef.current === id;
+  const updateVisible = (id, update) => setConversationMessages((current) => isVisible(id) ? update(current) : current);
+
   async function regenerateLastAssistantMessage(messageID) {
     if (!currentConversationId || !messageID || isChatSending) return;
     const selectedIndex = conversationMessages.findIndex((item) => item.id === messageID);
@@ -47,11 +52,11 @@ export function createChatRegenerateResumeActions({
     setChatError('');
     setIsChatSending(true);
     const thinkingId = `temp_regenerate_${Date.now()}`;
-    const control = { abort: () => {} };
+    const control = createRunSubmission(currentConversationId);
     activeChatAbortRef.current = control;
-    setConversationMessages((current) =>
+    updateVisible(currentConversationId, (current) =>
       [
-        ...current.slice(0, Math.max(0, lastUserIndex + 1)),
+        ...current,
         buildAssistantRunShell({
           id: thinkingId,
           conversationId: currentConversationId,
@@ -63,25 +68,33 @@ export function createChatRegenerateResumeActions({
       ]
     );
     try {
-      const result = await apiPost(`/api/conversations/${encodeURIComponent(currentConversationId)}/regenerate-last`, {
+      const result = await submitRunRequest(control, (options) => apiPost(`/api/conversations/${encodeURIComponent(currentConversationId)}/regenerate-last`, {
         message_id: messageID,
         thinking_mode: thinkingMode,
-      });
+      }, options));
       if (result.run?.id) {
+        updateVisible(currentConversationId, (current) => [
+          ...current.slice(0, Math.max(0, lastUserIndex + 1)),
+          ...current.filter((item) => item.id === thinkingId),
+        ]);
         await waitForAgentRun(result.run.id, result.conversation.id, thinkingId, control);
       } else {
         await loadConversations();
-        await loadConversationMessages(result.conversation.id);
+        if (isVisible(result.conversation.id)) await loadConversationMessages(result.conversation.id);
       }
       if (result.task) {
         onTasksChanged?.(result.task);
       }
       await onAssistantToolEvents?.(result.assistant_message?.attachments || []);
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        updateVisible(currentConversationId, (current) => current.filter((item) => item.id !== thinkingId));
+        return;
+      }
       console.error('regenerateLastAssistantMessage failed', error);
       const message = formatChatError(error);
-      setChatError(message);
-      setConversationMessages((current) =>
+      if (isVisible(currentConversationId)) setChatError(message);
+      updateVisible(currentConversationId, (current) =>
         mapPendingAssistant(current, thinkingId, (item) => ({
           ...item,
           pending: false,
@@ -92,8 +105,8 @@ export function createChatRegenerateResumeActions({
     } finally {
       if (activeChatAbortRef.current === control) {
         activeChatAbortRef.current = null;
+        setIsChatSending(false);
       }
-      setIsChatSending(false);
     }
   }
 
@@ -103,7 +116,7 @@ export function createChatRegenerateResumeActions({
     setChatError('');
     setResumableRun(null);
     setIsChatSending(true);
-    setConversationMessages((current) => [
+    updateVisible(conversationID, (current) => [
       ...current,
       buildAssistantRunShell({
         id: thinkingId,
@@ -114,19 +127,23 @@ export function createChatRegenerateResumeActions({
         runId,
       }),
     ]);
-    const control = { abort: () => {} };
+    const control = createRunSubmission(conversationID);
     activeChatAbortRef.current = control;
     try {
-      const result = await apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/resume`, {});
+      const result = await submitRunRequest(control, (options) => apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/resume`, {}, options), runId);
       const afterSeq = result?.resume_event?.seq || 0;
       await waitForAgentRun(runId, conversationID, thinkingId, control, afterSeq);
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        updateVisible(conversationID, (current) => current.filter((item) => item.id !== thinkingId));
+        return;
+      }
       console.error('continueAgentRun failed', error);
       const message = formatChatError(error);
-      setChatError(message);
-      if (error?.runId) {
+      if (isVisible(conversationID)) setChatError(message);
+      if (isVisible(conversationID)) {
         setResumableRun({
-          runId: error.runId,
+          runId: error?.runId || runId,
           conversationId: error.conversationId || conversationID,
           diagnosticLogId: error.diagnosticLogId || '',
         });
@@ -135,12 +152,12 @@ export function createChatRegenerateResumeActions({
       const prefix = error?.runId
         ? (isBudgetExhausted ? '达到轮次上限，已总结当前进度，可继续本轮' : '连接中断，可继续这轮任务')
         : '继续失败';
-      setConversationMessages((current) =>
+      updateVisible(conversationID, (current) =>
         mapPendingAssistant(current, thinkingId, (item) => ({
           ...item,
           pending: false,
           error: true,
-          resumableRunId: error?.runId || '',
+          resumableRunId: error?.runId || runId,
           diagnosticLogId: error?.diagnosticLogId || '',
           content: isBudgetExhausted ? message : `${prefix}：${message}`,
         }))
@@ -148,8 +165,8 @@ export function createChatRegenerateResumeActions({
     } finally {
       if (activeChatAbortRef.current === control) {
         activeChatAbortRef.current = null;
+        setIsChatSending(false);
       }
-      setIsChatSending(false);
     }
   }
 

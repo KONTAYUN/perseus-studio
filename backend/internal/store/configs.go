@@ -7,6 +7,7 @@ import (
 )
 
 type ModelProvider struct {
+	SystemMessageMode           string          `json:"system_message_mode"`
 	ID                          string          `json:"id"`
 	UserID                      string          `json:"user_id"`
 	Name                        string          `json:"name"`
@@ -47,6 +48,7 @@ type SearchProvider struct {
 }
 
 type ModelProviderInput struct {
+	SystemMessageMode           string `json:"system_message_mode"`
 	Name                        string `json:"name"`
 	Visibility                  string `json:"visibility"`
 	Protocol                    string `json:"protocol"`
@@ -130,6 +132,7 @@ CREATE TABLE IF NOT EXISTS search_providers (
 		{"compact_reserved_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"prune_tool_outputs_enabled", "INTEGER NOT NULL DEFAULT 1"},
 		{"native_patch_tool_enabled", "INTEGER NOT NULL DEFAULT 0"},
+		{"system_message_mode", "TEXT NOT NULL DEFAULT 'single'"},
 		{"reasoning_capability", "TEXT NOT NULL DEFAULT 'auto'"},
 		{"reasoning_capability_source", "TEXT NOT NULL DEFAULT ''"},
 		{"reasoning_profile_levels", "TEXT NOT NULL DEFAULT ''"},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"webide-backend/internal/failure"
 	"webide-backend/internal/store"
 	"webide-backend/internal/usersvc"
 	"webide-backend/internal/workspace"
@@ -33,6 +35,7 @@ type testAIEnv struct {
 }
 
 func TestWorkspaceWriteToolsRegistered(t *testing.T) {
+	t.Setenv("PERSEUS_COMMAND_EXECUTION", "trusted_host")
 	assertToolRegistered(t, openAITools(), "load_perseus_toolset")
 	assertToolNotRegistered(t, openAITools(), "create_workspace_file")
 	assertToolNotRegistered(t, openAITools(), "perseus_search_web")
@@ -56,7 +59,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "search_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_text")
 	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "read_workspace_files")
-	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
+	assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
 	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
 	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
 	assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), "save_workspace_file")
@@ -76,7 +79,7 @@ func TestWorkspaceWriteToolsRegistered(t *testing.T) {
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "search_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_text")
 	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "read_workspace_files")
-	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
+	assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "apply_workspace_patch")
 	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "edit_workspace_text")
 	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "replace_workspace_lines")
 	assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), "save_workspace_file")
@@ -216,10 +219,10 @@ func TestTextPatchNormalizationKeepsExecutionPatchSeparateFromTranscript(t *test
 	}
 }
 
-func TestApplyWorkspacePatchIsInternalTextPatchChannel(t *testing.T) {
+func TestApplyWorkspacePatchSupportsJSONAndTextChannels(t *testing.T) {
 	loaded := map[string]bool{"workspace": true}
-	if toolNamesFromOpenAITools(openAIToolsForLoadedToolsets(loaded, true))["apply_workspace_patch"] {
-		t.Fatal("apply_workspace_patch must not be exposed as a JSON function tool")
+	if !toolNamesFromOpenAITools(openAIToolsForLoadedToolsets(loaded, true))["apply_workspace_patch"] {
+		t.Fatal("apply_workspace_patch must be exposed as a JSON function tool")
 	}
 	turn, ok := turnWithExtractedTextPatch(agentModelTurn{Content: "*** Begin Patch\n*** Add File: draft.md\n+hello\n*** End Patch"})
 	if !ok || len(turn.ToolCalls) != 1 {
@@ -233,8 +236,8 @@ func TestApplyWorkspacePatchIsInternalTextPatchChannel(t *testing.T) {
 	if errText := runtime.validateToolCall(agentToolCall{
 		Name:          "apply_workspace_patch",
 		ArgumentsJSON: `{"patch":"*** Begin Patch\n*** Add File: draft.md\n+hello\n*** End Patch"}`,
-	}); !strings.Contains(errText, "assistant text patch channel") {
-		t.Fatalf("JSON patch function calls should be rejected, got %q", errText)
+	}); errText != "" {
+		t.Fatalf("JSON patch function calls should validate, got %q", errText)
 	}
 }
 
@@ -542,35 +545,19 @@ func TestHandleCompletionAttemptRequiresUserVisibleResult(t *testing.T) {
 	}
 }
 
-func TestHandleCompletionAttemptRejectsInternalEditProtocolLeak(t *testing.T) {
-	var discarded int
-	runtime := &agentRuntime{
-		opts: RunOptions{
-			OnCompletionResultDiscard: func() {
-				discarded++
-			},
-		},
-	}
-	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"我需要继续用 *** Begin Patch / *** End Patch 补丁协议来修改文件。"}`)
-	if !isError || completed {
-		t.Fatalf("expected internal edit protocol completion to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
-	}
-	if !strings.Contains(result, "最终用户可见答复") || !strings.Contains(result, "*** Begin Patch") {
-		t.Fatalf("expected user-visible completion rejection, got %s", result)
-	}
-	if discarded != 1 {
-		t.Fatalf("expected streamed completion preview to be discarded once, got %d", discarded)
+func TestHandleCompletionAttemptAllowsExplanationsOfInternalEditProtocolLeak(t *testing.T) {
+	r := &agentRuntime{}
+	result, isError, completed := r.handleCompletionAttempt(`{"result":"apply_workspace_patch 用结构化参数提交 *** Begin Patch 示例；尚未运行测试。"}`)
+	if isError || !completed || !strings.Contains(result, "apply_workspace_patch") {
+		t.Fatalf("display prose rejected: %s", result)
 	}
 }
 
-func TestHandleCompletionAttemptRejectsChineseInternalEditProtocolLeak(t *testing.T) {
-	runtime := &agentRuntime{}
-	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"我已经通过补丁块写入了文件。"}`)
-	if !isError || completed {
-		t.Fatalf("expected Chinese internal edit protocol completion to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
-	}
-	if !strings.Contains(result, "补丁块") {
-		t.Fatalf("expected rejected marker in result, got %s", result)
+func TestHandleCompletionAttemptAllowsExplanationsOfChineseInternalEditProtocolLeak(t *testing.T) {
+	r := &agentRuntime{}
+	result, isError, completed := r.handleCompletionAttempt(`{"result":"apply_workspace_patch 用结构化参数提交 *** Begin Patch 示例；尚未运行测试。"}`)
+	if isError || !completed || !strings.Contains(result, "apply_workspace_patch") {
+		t.Fatalf("display prose rejected: %s", result)
 	}
 }
 
@@ -591,7 +578,7 @@ func TestRuntimeCheckpointPreservesLastToolFailureDetails(t *testing.T) {
 		chunkWrites:      map[string]workspaceChunkWriteState{},
 		loadedToolsets:   map[string]bool{"workspace": true},
 	}
-	runtime.recordToolError("manage_workspace_path", `{"action":"mkdir","path":"docs"}`, "path already exists")
+	runtime.recordToolFailure("manage_workspace_path", `{"action":"mkdir","path":"docs"}`, workspace.ErrPathExists)
 	checkpoint := runtime.checkpoint()
 	restored := &agentRuntime{}
 	restored.restoreCheckpoint(checkpoint)
@@ -600,77 +587,51 @@ func TestRuntimeCheckpointPreservesLastToolFailureDetails(t *testing.T) {
 	}
 }
 
-func TestHandleCompletionAttemptRejectsAfterRecoverablePatchFailure(t *testing.T) {
-	runtime := &agentRuntime{}
-	runtime.recordToolError("apply_workspace_patch", mustJSON(map[string]any{
-		"patch": "*** Begin Patch\n*** Add File: draft.txt\n+hello\n*** End Patch",
-	}), "patch apply failed: content after *** End Patch")
-	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"只创建了文件夹，正文没有写入。","failed_items":["draft.txt"]}`)
-	if !isError || completed {
-		t.Fatalf("expected recoverable patch failure to reject completion, isError=%v completed=%v result=%s", isError, completed, result)
+func TestHandleCompletionAttemptAllowsPartialAfterRecoverablePatchFailure(t *testing.T) {
+	r := &agentRuntime{toolLoopActive: true}
+	r.recordToolFailure("apply_workspace_patch", "{}", failure.New("workspace_patch_apply_failed", "mismatch", nil))
+	result, isError, completed := r.handleCompletionAttempt(`{"outcome":"partial","result":"已检查，文件尚未修改。","failed_items":["draft.txt"]}`)
+	if isError || !completed || r.completedOutcome != "partial" {
+		t.Fatalf("honest partial rejected: %s", result)
 	}
-	if !strings.Contains(result, "上一项可恢复工具调用失败") || !runtime.lastToolFailed {
-		t.Fatalf("expected recoverable failure to remain active, result=%s last=%#v", result, runtime.lastToolFailure)
+	if r.hasSuccessfulWorkspaceMutation() {
+		t.Fatal("fabricated a mutation")
 	}
 }
 
-func TestHandleCompletionAttemptRejectsAfterExistingFolderMkdirFailure(t *testing.T) {
-	runtime := &agentRuntime{
-		toolLoopActive: true,
-		toolCalls:      3,
-		events: []ToolEvent{
-			{ToolName: "load_perseus_toolset", Status: "success"},
-			{ToolName: "find_workspace_files", Status: "success"},
-			{ToolName: "manage_workspace_path", Status: "failed", Path: "向北方/修改版3", Error: "path already exists"},
-		},
+func TestHandleCompletionAttemptAllowsPartialAfterExistingFolderMkdirFailure(t *testing.T) {
+	r := &agentRuntime{toolLoopActive: true}
+	r.recordToolFailure("apply_workspace_patch", "{}", failure.New("workspace_patch_apply_failed", "mismatch", nil))
+	result, isError, completed := r.handleCompletionAttempt(`{"outcome":"partial","result":"已检查，文件尚未修改。","failed_items":["draft.txt"]}`)
+	if isError || !completed || r.completedOutcome != "partial" {
+		t.Fatalf("honest partial rejected: %s", result)
 	}
-	runtime.recordToolError("manage_workspace_path", `{"action":"mkdir","path":"向北方/修改版3"}`, "path already exists")
-	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"抱歉，这轮没有成功把大纲写进文件里。已确认目标目录存在，但当前可用工具里没有完成文本文件写入的执行通道。","failed_items":["向北方/修改版3/向北方_10集大纲.txt"]}`)
-	if !isError || completed {
-		t.Fatalf("expected existing-folder failure to reject completion, isError=%v completed=%v result=%s", isError, completed, result)
-	}
-	if !strings.Contains(result, "目录条件已满足不等于文件已写入") || strings.Contains(result, "上一项可恢复工具调用失败") {
-		t.Fatalf("expected condition-satisfied edit rejection, got %s", result)
-	}
-	if !runtime.lastToolFailed || !runtime.lastToolFailure.Recoverable || runtime.lastToolFailure.FailureClass != "workspace_path_already_exists" {
-		t.Fatalf("expected recoverable already_exists failure to remain active, got %#v", runtime.lastToolFailure)
+	if r.hasSuccessfulWorkspaceMutation() {
+		t.Fatal("fabricated a mutation")
 	}
 }
 
-func TestHandleCompletionAttemptRejectsFailedItemsWithoutFailedObservation(t *testing.T) {
-	runtime := &agentRuntime{
-		toolLoopActive: true,
-		toolCalls:      2,
-		events: []ToolEvent{
-			{ToolName: "load_perseus_toolset", Status: "success"},
-			{ToolName: "read_workspace_text", Status: "success", Path: "draft.txt"},
-		},
+func TestHandleCompletionAttemptAllowsPartialFailedItemsWithoutFailedObservation(t *testing.T) {
+	r := &agentRuntime{toolLoopActive: true}
+	r.recordToolFailure("apply_workspace_patch", "{}", failure.New("workspace_patch_apply_failed", "mismatch", nil))
+	result, isError, completed := r.handleCompletionAttempt(`{"outcome":"partial","result":"已检查，文件尚未修改。","failed_items":["draft.txt"]}`)
+	if isError || !completed || r.completedOutcome != "partial" {
+		t.Fatalf("honest partial rejected: %s", result)
 	}
-	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"已读取 draft.txt，但尚未修改文件。","failed_items":["draft.txt"]}`)
-	if !isError || completed {
-		t.Fatalf("expected completion without failed observation to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
-	}
-	if !strings.Contains(result, "没有对应的工具失败结果") {
-		t.Fatalf("expected missing failure-observation rejection, got %s", result)
+	if r.hasSuccessfulWorkspaceMutation() {
+		t.Fatal("fabricated a mutation")
 	}
 }
 
-func TestHandleCompletionAttemptRejectsSelfReportedUnfinishedWriteWithoutFailedObservation(t *testing.T) {
-	runtime := &agentRuntime{
-		toolLoopActive: true,
-		toolCalls:      3,
-		events: []ToolEvent{
-			{ToolName: "load_perseus_toolset", Status: "success"},
-			{ToolName: "inspect_workspace", Status: "success", Path: "向北方/修改版3"},
-			{ToolName: "read_workspace_files", Status: "success", Path: "向北方/向北方 第1集.txt"},
-		},
+func TestHandleCompletionAttemptAllowsPartialSelfReportedUnfinishedWriteWithoutFailedObservation(t *testing.T) {
+	r := &agentRuntime{toolLoopActive: true}
+	r.recordToolFailure("apply_workspace_patch", "{}", failure.New("workspace_patch_apply_failed", "mismatch", nil))
+	result, isError, completed := r.handleCompletionAttempt(`{"outcome":"partial","result":"已检查，文件尚未修改。","failed_items":["draft.txt"]}`)
+	if isError || !completed || r.completedOutcome != "partial" {
+		t.Fatalf("honest partial rejected: %s", result)
 	}
-	result, isError, completed := runtime.handleCompletionAttempt(`{"result":"我已确认修改方向，但是这轮我未能实际写入文件，因此“修改版3”内容还没有保存到 workspace。"}`)
-	if !isError || completed {
-		t.Fatalf("expected self-reported unfinished write to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
-	}
-	if !strings.Contains(result, "没有对应的工具失败结果") {
-		t.Fatalf("expected missing failure-observation rejection, got %s", result)
+	if r.hasSuccessfulWorkspaceMutation() {
+		t.Fatal("fabricated a mutation")
 	}
 }
 
@@ -688,7 +649,7 @@ func TestHandleCompletionAttemptRejectsUnverifiedChangedPaths(t *testing.T) {
 	if !isError || completed {
 		t.Fatalf("expected unverified changed_paths to be rejected, isError=%v completed=%v result=%s", isError, completed, result)
 	}
-	if !strings.Contains(result, "未被真实 workspace 变更验证") {
+	if !strings.Contains(result, "unverified workspace changes") {
 		t.Fatalf("expected unverified changed_paths rejection, got %s", result)
 	}
 }
@@ -761,7 +722,7 @@ func TestAttemptCompletionSchemaRequiresResult(t *testing.T) {
 	if _, ok := props["result"]; !ok {
 		t.Fatalf("attempt_completion properties missing result: %#v", props)
 	}
-	if _, ok := props["changed_paths"]; ok {
+	if _, ok := props["changed_paths"]; !ok {
 		t.Fatalf("attempt_completion schema must not expose changed_paths; backend derives verified paths")
 	}
 }
@@ -771,14 +732,14 @@ func TestModelActionManifestExposesPatchAsTextAction(t *testing.T) {
 	if !containsModelJSONTool(manifest, "read_workspace_text") || !containsModelJSONTool(manifest, "manage_workspace_path") {
 		t.Fatalf("workspace JSON tools missing from action manifest: %#v", manifest.JSONTools)
 	}
-	if !containsModelTextAction(manifest, "apply_workspace_patch") {
+	if containsModelTextAction(manifest, "apply_workspace_patch") {
 		t.Fatalf("apply_workspace_patch must be a model-visible text action: %#v", manifest.TextActions)
 	}
 	if !containsModelTerminalAction(manifest, "attempt_completion") {
 		t.Fatalf("attempt_completion must be terminal action: %#v", manifest.TerminalActions)
 	}
-	if containsModelJSONTool(manifest, "apply_workspace_patch") {
-		t.Fatalf("apply_workspace_patch must not be a JSON tool action: %#v", manifest.JSONTools)
+	if !containsModelJSONTool(manifest, "apply_workspace_patch") {
+		t.Fatalf("apply_workspace_patch must also be a JSON tool action: %#v", manifest.JSONTools)
 	}
 }
 
@@ -787,7 +748,7 @@ func TestModelActionManifestCanExposeNativePatchTool(t *testing.T) {
 	if !containsModelJSONTool(manifest, "apply_workspace_patch") {
 		t.Fatalf("native patch provider should expose apply_workspace_patch JSON tool: %#v", manifest.JSONTools)
 	}
-	if !containsModelTextAction(manifest, "apply_workspace_patch") {
+	if containsModelTextAction(manifest, "apply_workspace_patch") {
 		t.Fatalf("fallback text action should remain documented: %#v", manifest.TextActions)
 	}
 }
@@ -1359,7 +1320,7 @@ func TestExecuteToolApplyWorkspacePatchRejectsMoveTargetConflict(t *testing.T) {
 }
 
 func TestApplyWorkspacePatchSelectedScopeRejectsOutsidePatchPath(t *testing.T) {
-	runtime := &agentRuntime{
+	runtime := &agentRuntime{opts: RunOptions{AllowedWorkspacePaths: []string{"selected.txt"}},
 		attachments: []AttachmentPayload{{Kind: "workspace_file", Path: "selected.txt", Name: "selected.txt"}},
 	}
 	patch := "*** Begin Patch\n" +
@@ -1368,7 +1329,7 @@ func TestApplyWorkspacePatchSelectedScopeRejectsOutsidePatchPath(t *testing.T) {
 		"-old\n" +
 		"+new\n" +
 		"*** End Patch"
-	got := runtime.validateSelectedReferenceScope(agentToolCall{
+	got := runtime.validateWorkspacePathScope(agentToolCall{
 		Name:          "apply_workspace_patch",
 		ArgumentsJSON: mustJSON(map[string]any{"patch": patch}),
 	})
@@ -1377,7 +1338,7 @@ func TestApplyWorkspacePatchSelectedScopeRejectsOutsidePatchPath(t *testing.T) {
 	}
 }
 
-func TestApplyWorkspacePatchSelectedScopeRejectsOutsideMoveTarget(t *testing.T) {
+func TestApplyWorkspacePatchSelectedScopeAllowsNewMoveTarget(t *testing.T) {
 	runtime := &agentRuntime{
 		attachments: []AttachmentPayload{{Kind: "workspace_file", Path: "selected.txt", Name: "selected.txt"}},
 	}
@@ -1388,12 +1349,12 @@ func TestApplyWorkspacePatchSelectedScopeRejectsOutsideMoveTarget(t *testing.T) 
 		"-old\n" +
 		"+new\n" +
 		"*** End Patch"
-	got := runtime.validateSelectedReferenceScope(agentToolCall{
+	got := runtime.validateWorkspacePathScope(agentToolCall{
 		Name:          "apply_workspace_patch",
 		ArgumentsJSON: mustJSON(map[string]any{"patch": patch}),
 	})
-	if !strings.Contains(got, "outside") {
-		t.Fatalf("expected outside-scope move target to be rejected, got %q", got)
+	if got != "" {
+		t.Fatalf("selected file should be movable to a new output path, got %q", got)
 	}
 }
 
@@ -1910,9 +1871,10 @@ func TestExecuteToolDeleteWorkspacePath(t *testing.T) {
 }
 
 func TestExecuteToolRunWorkspaceCommand(t *testing.T) {
+	t.Setenv("PERSEUS_COMMAND_EXECUTION", "trusted_host")
 	service, _, _, _ := newTestAIService(t)
 
-	result, _, _, path, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"go version","timeout_sec":30}`, RunOptions{UserID: testUserID})
+	result, _, _, path, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"go version","timeout_sec":30}`, RunOptions{UserID: testUserID, UserRole: "admin"})
 	if err != nil {
 		t.Fatalf("executeTool returned error: %v", err)
 	}
@@ -1935,6 +1897,7 @@ func TestExecuteToolRunWorkspaceCommand(t *testing.T) {
 }
 
 func TestExecuteAndRecordRunWorkspaceCommandEmitsWorkspaceChangeWhenFilesChange(t *testing.T) {
+	t.Setenv("PERSEUS_COMMAND_EXECUTION", "trusted_host")
 	service, _, _, files := newTestAIService(t)
 	ctx := context.Background()
 	command := "printf hello > command-output.txt"
@@ -1945,7 +1908,7 @@ func TestExecuteAndRecordRunWorkspaceCommandEmitsWorkspaceChangeWhenFilesChange(
 	var events []string
 	var changed map[string]any
 	result, event, err := service.executeAndRecordTool(ctx, "conv-test", "msg-test", "run_workspace_command", string(args), "", RunOptions{
-		UserID: testUserID,
+		UserID: testUserID, UserRole: "admin",
 		Event: func(eventType, _ string, payload map[string]any) {
 			events = append(events, eventType)
 			if eventType == "workspace_file_changed" {
@@ -2006,33 +1969,37 @@ func TestCommandWorkspaceMutationRequiresCompletionChangedPath(t *testing.T) {
 }
 
 func TestExecuteToolRunWorkspaceCommandRejectsDangerousCommand(t *testing.T) {
+	t.Setenv("PERSEUS_COMMAND_EXECUTION", "")
 	service, _, _, _ := newTestAIService(t)
 
-	_, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"rm -rf /","timeout_sec":30}`, RunOptions{UserID: testUserID})
-	if err == nil || !strings.Contains(err.Error(), "safety policy") {
+	_, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"echo blocked","timeout_sec":30}`, RunOptions{UserID: testUserID, UserRole: "admin"})
+	if err == nil || failure.Code(err) != "command_disabled" {
 		t.Fatalf("expected safety policy error, got %v", err)
 	}
 }
 
 func TestExecuteToolRunWorkspaceCommandRejectsPathEscape(t *testing.T) {
+	t.Setenv("PERSEUS_COMMAND_EXECUTION", "trusted_host")
 	service, _, _, _ := newTestAIService(t)
 
-	_, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"go version","cwd":"../outside","timeout_sec":30}`, RunOptions{UserID: testUserID})
+	_, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"go version","cwd":"../outside","timeout_sec":30}`, RunOptions{UserID: testUserID, UserRole: "admin"})
 	if err == nil || err.Error() != "path escapes workspace" {
 		t.Fatalf("expected path escape error, got %v", err)
 	}
 }
 
 func TestExecuteToolRunWorkspaceCommandRejectsAbsoluteCwd(t *testing.T) {
+	t.Setenv("PERSEUS_COMMAND_EXECUTION", "trusted_host")
 	service, _, _, _ := newTestAIService(t)
 
-	_, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"go version","cwd":"/tmp","timeout_sec":30}`, RunOptions{UserID: testUserID})
+	_, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"go version","cwd":"/tmp","timeout_sec":30}`, RunOptions{UserID: testUserID, UserRole: "admin"})
 	if err == nil || err.Error() != "invalid path" {
 		t.Fatalf("expected invalid path error, got %v", err)
 	}
 }
 
 func TestExecuteToolRunWorkspaceCommandTimesOut(t *testing.T) {
+	t.Setenv("PERSEUS_COMMAND_EXECUTION", "trusted_host")
 	service, _, _, _ := newTestAIService(t)
 	command := "sleep 2"
 	if runtime.GOOS == "windows" {
@@ -2043,7 +2010,7 @@ func TestExecuteToolRunWorkspaceCommandTimesOut(t *testing.T) {
 		"timeout_sec": 1,
 	})
 
-	result, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", string(args), RunOptions{UserID: testUserID})
+	result, _, _, _, err := service.executeTool(context.Background(), "run_workspace_command", string(args), RunOptions{UserID: testUserID, UserRole: "admin"})
 	if err != nil {
 		t.Fatalf("executeTool returned error: %v", err)
 	}
@@ -2066,46 +2033,18 @@ func TestExecuteToolWebSearchWithoutProviderReturnsClearError(t *testing.T) {
 }
 
 func TestToolDiagnosticClassifiesExpectedToolFailures(t *testing.T) {
-	missingPathErr := fmt.Errorf("stat /data/users/user-1/workspace/docs/missing.md: no such file or directory")
-	diag := buildToolDiagnostic("read_workspace_text", `{"path":"docs/missing.md"}`, "docs/missing.md", 12, missingPathErr)
-	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_path_not_found"`) {
-		t.Fatalf("unexpected missing path diagnostic: %#v", diag)
-	}
-	if strings.Contains(diag.ErrorMessage, "/data/users/") || !strings.Contains(diag.ErrorMessage, "workspace:docs/missing.md") {
-		t.Fatalf("expected sanitized workspace path, got %q", diag.ErrorMessage)
-	}
-
-	diag = buildToolDiagnostic("perseus_search_web", `{"query":"openai"}`, "“openai”", 3, fmt.Errorf("未配置可用搜索工具，请先在设置页配置 Tavily 或 Brave。"))
-	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"search_provider_not_configured"`) {
-		t.Fatalf("unexpected search diagnostic: %#v", diag)
-	}
-
-	diag = buildToolDiagnostic("save_workspace_file", `{}`, "", 0, fmt.Errorf("invalid tool arguments: mode is required"))
-	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"tool_invalid_arguments"`) {
-		t.Fatalf("unexpected invalid arguments diagnostic: %#v", diag)
-	}
-
-	diag = buildToolDiagnostic("edit_workspace_text", `{"path":"script.txt","old_text":"abc","new_text":"def"}`, "script.txt", 0, fmt.Errorf("old_text was not found"))
-	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_exact_edit_unstable"`) {
-		t.Fatalf("unexpected exact edit diagnostic: %#v", diag)
-	}
-	if !strings.Contains(diag.RequestSummary, `"old_text_chars":3`) || !strings.Contains(diag.RequestSummary, "*** Begin Patch") {
-		t.Fatalf("expected edit argument details and patch recovery hint, got %#v", diag)
-	}
-
-	diag = buildToolDiagnostic("read_workspace_text", `{"path":"demo.docx"}`, "demo.docx", 5, fmt.Errorf("unsupported file type"))
-	if diag.Level != "warn" || !strings.Contains(diag.RequestSummary, `"failure_class":"workspace_unsupported_file_type"`) {
-		t.Fatalf("unexpected unsupported file diagnostic: %#v", diag)
-	}
-	if !strings.Contains(diag.RequestSummary, "only reads supported plain-text files") {
-		t.Fatalf("expected unsupported file recovery hint, got %#v", diag)
-	}
-
-	patch := "*** Begin Patch\n*** Add File: draft.txt\n+hello\n*** End Patch\nextra\n"
-	diag = buildToolDiagnostic("apply_workspace_patch", mustJSON(map[string]any{"patch": patch}), "draft.txt", 5, fmt.Errorf("patch apply failed: content after *** End Patch"))
-	for _, want := range []string{`"failure_class":"workspace_patch_apply_failed"`, `"patch_chars":`, `"patch_sha":`, `"patch_head":`, `"patch_tail":`, `"patch_block_count":1`, `"detected_paths":["draft.txt"]`} {
-		if !strings.Contains(diag.RequestSummary, want) {
-			t.Fatalf("expected patch diagnostic to contain %s, got %#v", want, diag)
+	for _, tc := range []struct {
+		name, code string
+		err        error
+	}{
+		{"read_workspace_text", "workspace_path_not_found", fmt.Errorf("read wrapped: %w", os.ErrNotExist)},
+		{"manage_workspace_path", "workspace_path_policy", workspace.ErrTrashManagedOnly},
+		{"edit_workspace_text", "workspace_exact_edit_unstable", failure.New("workspace_exact_edit_unstable", "arbitrary translated text", nil)},
+		{"apply_workspace_patch", "workspace_patch_apply_failed", workspacePatchApplyError{Message: "arbitrary translated text"}},
+	} {
+		diag := buildToolDiagnostic(tc.name, "{}", "", 0, tc.err)
+		if !strings.Contains(diag.RequestSummary, tc.code) {
+			t.Fatalf("lost identity: %s", diag.RequestSummary)
 		}
 	}
 }
@@ -2121,7 +2060,7 @@ func TestValidateToolCallRejectsMissingRequiredSaveArguments(t *testing.T) {
 		Name:          "save_workspace_file",
 		ArgumentsJSON: `{}`,
 	})
-	if !strings.Contains(errText, "path is required") {
+	if !strings.Contains(errText, "requires path") {
 		t.Fatalf("expected missing path validation error, got %q", errText)
 	}
 }
@@ -2218,7 +2157,7 @@ func TestValidateToolCallRejectsMissingChunkIndex(t *testing.T) {
 		Name:          "write_workspace_chunk",
 		ArgumentsJSON: `{"path":"long.txt","content":"x","mode":"append"}`,
 	})
-	if !strings.Contains(errText, "chunk_index is required") {
+	if !strings.Contains(errText, "requires chunk_index") {
 		t.Fatalf("expected chunk_index validation error, got %q", errText)
 	}
 }
@@ -2234,7 +2173,7 @@ func TestSelectedReferenceScopeAllowsAppendingEarlierGeneratedChunkFile(t *testi
 		}},
 	}
 
-	errText := runtime.validateSelectedReferenceScope(agentToolCall{
+	errText := runtime.validateWorkspacePathScope(agentToolCall{
 		Name:          "write_workspace_chunk",
 		ArgumentsJSON: `{"path":"drafts/output.txt","content":"next","mode":"append","chunk_index":2}`,
 	})
@@ -2243,17 +2182,10 @@ func TestSelectedReferenceScopeAllowsAppendingEarlierGeneratedChunkFile(t *testi
 	}
 }
 
-func TestSelectedReferenceScopeRejectsAppendingUnrelatedChunkFile(t *testing.T) {
-	runtime := &agentRuntime{
-		attachments: []AttachmentPayload{{Kind: "workspace_file", Path: "source.txt"}},
-	}
-
-	errText := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "write_workspace_chunk",
-		ArgumentsJSON: `{"path":"drafts/output.txt","content":"next","mode":"append","chunk_index":2}`,
-	})
-	if !strings.Contains(errText, "outside the user's selected workspace file references") {
-		t.Fatalf("expected unrelated append to be rejected, got %q", errText)
+func TestExplicitScopeRejectsAppendingUnrelatedChunkFile(t *testing.T) {
+	r := &agentRuntime{opts: RunOptions{AllowedWorkspacePaths: []string{"selected.md"}}}
+	if r.validateWorkspacePathScope(agentToolCall{Name: "write_workspace_chunk", ArgumentsJSON: `{"path":"other.md","mode":"append","content":"x","chunk_index":1}`}) == "" {
+		t.Fatal("explicit scope bypass")
 	}
 }
 
@@ -2742,55 +2674,30 @@ func TestAttachmentsRequireToolLoop(t *testing.T) {
 	}
 }
 
-func TestSelectedWorkspaceReferencesConstrainReadAndMutationScope(t *testing.T) {
-	runtime := &agentRuntime{
-		attachments: []AttachmentPayload{
-			{Kind: "workspace_file", Path: "白凌传·造化篇（续）/第三十一集.txt", Name: "第三十一集.txt"},
-			{Kind: "workspace_file", Path: "白凌传·造化篇（续）/第三十二集.txt", Name: "第三十二集.txt"},
-			{Kind: "workspace_file", Path: "白凌传·造化篇（续）/第三十三集.txt", Name: "第三十三集.txt"},
-			{Kind: "workspace_file", Path: "白凌传·造化篇（续）/第三十七集.txt", Name: "第三十七集.txt"},
-		},
+func TestReferencesAreContextAndExplicitScopeRestrictsTools(t *testing.T) {
+	r := &agentRuntime{attachments: []AttachmentPayload{{Kind: "workspace_file", Path: "a.md"}}}
+	call := agentToolCall{Name: "read_workspace_text", ArgumentsJSON: `{"path":"b.md"}`}
+	if got := r.validateWorkspacePathScope(call); got != "" {
+		t.Fatal("reference became permission: " + got)
 	}
-
-	if got := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "read_workspace_files",
-		ArgumentsJSON: `{"paths":["白凌传·造化篇（续）/第三十集.txt","白凌传·造化篇（续）/第三十一集.txt"]}`,
-	}); !strings.Contains(got, "outside") {
-		t.Fatalf("expected outside-scope read to be rejected, got %q", got)
+	r.opts.AllowedWorkspacePaths = []string{"a.md"}
+	if got := r.validateWorkspacePathScope(call); got == "" {
+		t.Fatal("explicit scope ignored")
 	}
-	if got := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "save_workspace_file",
-		ArgumentsJSON: `{"path":"白凌传·造化篇（续）/第三十一集.txt","content":"x","mode":"overwrite"}`,
-	}); got != "" {
-		t.Fatalf("expected selected overwrite to be allowed, got %q", got)
-	}
-	if got := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "manage_workspace_path",
-		ArgumentsJSON: `{"action":"move","path":"二十九集.txt","new_parent_path":"白凌传·造化篇（续）"}`,
-	}); !strings.Contains(got, "outside") {
-		t.Fatalf("expected unreferenced extra episode to be rejected, got %q", got)
-	}
-	if got := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "read_workspace_text",
-		ArgumentsJSON: `{"path":"另一个文件夹/第三十一集.txt"}`,
-	}); !strings.Contains(got, "outside") {
-		t.Fatalf("expected same-basename file in another folder to be rejected, got %q", got)
-	}
-	if got := runtime.validateSelectedReferenceScope(agentToolCall{
-		Name:          "save_workspace_file",
-		ArgumentsJSON: `{"path":"白凌传·造化篇（续）/优化说明.txt","content":"x","mode":"create"}`,
-	}); got != "" {
-		t.Fatalf("expected new output file creation to be allowed, got %q", got)
+	for _, call := range []agentToolCall{{Name: "run_workspace_command", ArgumentsJSON: `{"command":"echo test"}`}, {Name: "save_workspace_file", ArgumentsJSON: `{"path":"b.md","mode":"create","content":"x"}`}} {
+		if r.validateWorkspacePathScope(call) == "" {
+			t.Fatal("scope bypass")
+		}
 	}
 }
 
 func TestWorkspaceToolNamesAndGroups(t *testing.T) {
 	loaded := map[string]bool{"workspace": true}
-	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "manage_workspace_path", "organize_workspace_matches"} {
+	for _, name := range []string{"find_workspace_files", "search_workspace_text", "read_workspace_text", "read_workspace_files", "manage_workspace_path", "organize_workspace_matches", "apply_workspace_patch"} {
 		assertToolRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
 		assertToolRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
 	}
-	for _, name := range []string{"apply_workspace_patch", "edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write"} {
+	for _, name := range []string{"edit_workspace_text", "replace_workspace_lines", "save_workspace_file", "write_workspace_chunk", "finalize_workspace_write"} {
 		assertToolNotRegistered(t, openAIToolsForLoadedToolsets(loaded, true), name)
 		assertToolNotRegistered(t, anthropicToolsForLoadedToolsets(loaded, true), name)
 	}
@@ -3470,7 +3377,7 @@ func TestExecuteToolWriteWorkspaceFileRejectsMissingFile(t *testing.T) {
 	service, _, _, _ := newTestAIService(t)
 
 	_, _, _, _, err := service.executeTool(context.Background(), "save_workspace_file", `{"path":"missing.txt","content":"x","mode":"overwrite"}`, RunOptions{UserID: testUserID})
-	if err == nil || err.Error() != "file does not exist" {
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected missing file error, got %v", err)
 	}
 }

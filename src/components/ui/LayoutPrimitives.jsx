@@ -8,7 +8,7 @@ export function DialogActions({ children, className = '' }) {
 export function SettingsSection({ children, className = '', ...props }) {
   return (
     <section
-      className={cn('settings-section-appear border border-gray-100 bg-white/55 p-5 dark:border-white/10 dark:bg-white/[0.03]', className)}
+      className={cn('settings-section', className)}
       {...props}
     >
       {children}

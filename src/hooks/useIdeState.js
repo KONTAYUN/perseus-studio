@@ -120,6 +120,7 @@ export default function useIdeState(options = {}) {
   const { activeEditor, editorPanels, openFile } = editorState;
 
   const chat = useChatState({
+    userId: options.currentUser?.id || options.currentUser?.user_id || '',
     buildCurrentFileContext: editorState.buildCurrentFileContext,
     onAssistantToolEvents: refreshWorkspaceAfterAssistantTools,
     onTasksChanged: options.onTasksChanged,

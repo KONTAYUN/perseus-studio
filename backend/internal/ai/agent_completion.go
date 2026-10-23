@@ -20,21 +20,6 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 		r.discardStreamedCompletionResult()
 		return r.toolErrorJSON("attempt_completion", errText), true, false
 	}
-	if reason := invalidCompletionUserVisibleContent(attempt.Result, attempt.Notes); reason != "" {
-		r.recordToolError("attempt_completion", argumentsJSON, reason)
-		r.discardStreamedCompletionResult()
-		emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
-		return r.actionRejectedObservation(reason, "attempt_completion", attempt.ChangedPaths), true, false
-	}
-	if r.performedMutation {
-		if !r.hasSuccessfulWorkspaceMutation() {
-			reason := "workspace 变更任务尚未产生后端已验证的成功变更，不能完成；attempt_completion 不能创建或修改文件。"
-			r.recordToolError("attempt_completion", argumentsJSON, reason)
-			r.discardStreamedCompletionResult()
-			emitToolLifecycleEvent(r.opts, "completion_rejected", "warn", map[string]any{"reason": reason})
-			return r.actionRejectedObservation(reason, "attempt_completion", attempt.ChangedPaths), true, false
-		}
-	}
 	previousFailure := r.lastToolFailure
 	previousFailed := r.lastToolFailed
 	if rejected := r.completionRejection(attempt); rejected != "" {
@@ -50,9 +35,10 @@ func (r *agentRuntime) handleCompletionAttempt(argumentsJSON string) (string, bo
 	r.clearToolErrors()
 	content := renderCompletionUserVisibleContent(attempt)
 	r.completedContent = content
+	r.completedOutcome = completionOutcome(attempt)
 	r.finalizeActiveAssistantMessage(content)
 	emitToolLifecycleEvent(r.opts, "model_message_completed", "info", map[string]any{"content": content})
-	payload := map[string]any{"result": attempt.Result, "summary": attempt.Summary, "failed_items": attempt.FailedItems, "notes": attempt.Notes}
+	payload := map[string]any{"result": attempt.Result, "summary": attempt.Summary, "failed_items": attempt.FailedItems, "notes": attempt.Notes, "outcome": r.completedOutcome}
 	if changed := r.verifiedWorkspaceChangedPaths(); len(changed) > 0 {
 		payload["changed_paths"] = changed
 	}
@@ -73,42 +59,8 @@ func renderCompletionUserVisibleContent(attempt completionAttempt) string {
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
-func invalidCompletionUserVisibleContent(result, notes string) string {
-	content := strings.TrimSpace(result)
-	if strings.TrimSpace(notes) != "" {
-		content += "\n\n" + strings.TrimSpace(notes)
-	}
-	if content == "" {
-		return ""
-	}
-	if marker := firstInternalCompletionMarker(content); marker != "" {
-		return "attempt_completion.result 必须是最终用户可见答复，不能包含内部编辑协议或工具名：" + marker + "。如果还需要编辑文件，请先执行真实 workspace 编辑动作；如果任务已完成，请改写成面向用户的结果说明。"
-	}
-	return ""
-}
-
-func firstInternalCompletionMarker(content string) string {
-	for _, marker := range []string{
-		"*** Begin Patch",
-		"*** End Patch",
-		"assistant_text_patch",
-		"apply_workspace_patch",
-		"save_workspace_file",
-		"write_workspace_chunk",
-		"finalize_workspace_write",
-		"edit_workspace_text",
-		"replace_workspace_lines",
-		"补丁块",
-		"补丁协议",
-		"补丁编辑协议",
-		"分块写入",
-	} {
-		if strings.Contains(content, marker) {
-			return marker
-		}
-	}
-	return ""
-}
+// Display text is not evidence of actions or completion.
+func invalidCompletionUserVisibleContent(result, notes string) string { return "" }
 
 func (r *agentRuntime) discardStreamedCompletionResult() {
 	if r != nil && r.opts.OnCompletionResultDiscard != nil {
@@ -117,47 +69,42 @@ func (r *agentRuntime) discardStreamedCompletionResult() {
 }
 
 func (r *agentRuntime) completionRejection(attempt completionAttempt) string {
-	if r.toolLoopActive && r.toolCalls == 0 && !r.hasPrefetchedWorkspaceFileContent() {
-		return "当前任务已经进入工具工作流，但还没有执行任何工具。请先调用合适的工具，再使用 attempt_completion。"
+	outcome := completionOutcome(attempt)
+	if outcome != "success" && outcome != "partial" && outcome != "blocked" {
+		return "outcome must be success, partial, or blocked"
 	}
 	if unverified := r.completionPathsWithoutVerifiedMutation(attempt.ChangedPaths); len(unverified) > 0 {
-		return "attempt_completion 声明了未被真实 workspace 变更验证的 changed_paths：" + strings.Join(unverified, ", ") + "。请先执行真实 workspace 编辑动作；attempt_completion 不能创建或修改文件。"
+		return "changed_paths contains unverified workspace changes: " + strings.Join(unverified, ", ")
 	}
-	state := r.actionSelectionState(attempt.ChangedPaths)
-	if attemptReportsFailedWork(attempt) && state.RequiresWorkspaceMutation && !state.HasVerifiedMutation && r.lastToolFailed && r.lastToolFailure.Mutation {
-		if r.lastFailureConditionSatisfied() {
-			return "attempt_completion 正在报告 workspace 写入/修改未完成，但目录条件已满足不等于文件已写入。请继续执行真实编辑动作。"
-		}
+	if outcome != "success" {
+		return ""
+	}
+	if len(attempt.FailedItems) > 0 {
+		return "success cannot include failed_items; use partial or blocked"
+	}
+	if len(r.unresolvedCommands) > 0 {
+		return "A verification command still has an unresolved execution outcome; rerun it successfully or report partial/blocked"
+	}
+	if r.toolLoopActive && r.toolCalls == 0 && !r.hasPrefetchedWorkspaceFileContent() {
+		return "当前任务已进入工具工作流，但还没有执行任何工具；请执行工具，或用 blocked 如实结束。"
 	}
 	if r.performedMutation && !r.hasSuccessfulWorkspaceMutation() {
-		return "workspace 变更任务尚未产生可验证的成功变更，不能完成。请继续执行或修正 workspace 工具。"
+		return "workspace 变更尚未验证；不能以 success 完成，请核验或如实报告 partial/blocked。"
 	}
-	if r.lastToolFailed {
-		if r.lastToolFailure.ToolName == "attempt_completion" {
-			if attemptReportsFailedWork(attempt) {
-				return "attempt_completion 正在报告未完成的 workspace 写入/修改，但本轮没有对应的工具失败结果。请继续执行真实编辑动作，或在确有工具失败后再总结缺失项。"
-			}
-			return ""
-		}
-		if r.lastFailureConditionSatisfied() {
-			return ""
-		}
-		if r.lastToolFailure.Recoverable {
-			detail := r.lastToolFailure.ToolName
-			if r.lastToolFailure.Target != "" {
-				detail += " (" + r.lastToolFailure.Target + ")"
-			}
-			return "上一项可恢复工具调用失败且尚未修复，不能完成：" + detail + "。请根据 tool_result 修正参数并继续执行。"
-		}
-		if len(attempt.FailedItems) > 0 && len(attempt.ChangedPaths) == 0 {
-			return ""
-		}
-		return "上一项工具调用失败且尚未修复，不能完成。请根据 tool_result 修正参数或明确说明无法完成。"
-	}
-	if attemptReportsFailedWork(attempt) {
-		return "attempt_completion 正在报告未完成的 workspace 写入/修改，但本轮没有对应的工具失败结果。请继续执行真实编辑动作，或在确有工具失败后再总结缺失项。"
+	if r.lastToolFailed && r.lastToolFailure.ToolName != "attempt_completion" && !r.lastFailureConditionSatisfied() {
+		return "上一工具失败尚未解决；请修正工具或用 partial/blocked 如实报告。"
 	}
 	return ""
+}
+
+func completionOutcome(attempt completionAttempt) string {
+	if attempt.Outcome != "" {
+		return attempt.Outcome
+	}
+	if len(attempt.FailedItems) > 0 {
+		return "partial"
+	}
+	return "success"
 }
 
 func (r *agentRuntime) hasPrefetchedWorkspaceFileContent() bool {
@@ -168,56 +115,6 @@ func (r *agentRuntime) hasPrefetchedWorkspaceFileContent() bool {
 		if attachment.Kind == "workspace_file" && attachment.IncludedInContext && strings.TrimSpace(attachment.Text) != "" {
 			return true
 		}
-	}
-	return false
-}
-
-func attemptReportsFailedWork(attempt completionAttempt) bool {
-	if len(attempt.FailedItems) > 0 {
-		return true
-	}
-	return completionResultContradictsFinality(attempt.Result, attempt.Notes)
-}
-
-func completionResultContradictsFinality(result, notes string) bool {
-	content := strings.ToLower(strings.TrimSpace(result + "\n" + notes))
-	if content == "" {
-		return false
-	}
-	if containsAny(content, []string{
-		"workspace",
-		"文件",
-		"写入",
-		"保存",
-		"创建",
-		"修改",
-		"变更",
-		"file",
-		"write",
-		"written",
-		"save",
-		"saved",
-		"create",
-		"created",
-		"edit",
-		"edited",
-		"modify",
-		"modified",
-	}) && containsAny(content, []string{
-		"未能",
-		"没能",
-		"没有成功",
-		"尚未",
-		"还没有",
-		"不能声称",
-		"无法完成",
-		"could not",
-		"couldn't",
-		"unable to",
-		"not ",
-		"failed",
-	}) {
-		return true
 	}
 	return false
 }

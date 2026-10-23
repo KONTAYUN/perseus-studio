@@ -136,7 +136,9 @@ func (s *Service) providerV2(protocol agentProtocol) providerAdapterV2 {
 
 func providerTurnCanStreamAssistantText(req providerTurnRequest) bool {
 	if strings.TrimSpace(req.Opts.TaskID) != "" {
-		return false
+		// Background text goes to its task-owned event trace. An observer is
+		// needed to retain partial text if a stream fails before a full turn.
+		return req.Opts.Event != nil
 	}
 	return true
 }

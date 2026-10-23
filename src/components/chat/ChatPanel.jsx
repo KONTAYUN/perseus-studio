@@ -9,6 +9,7 @@ import { useChatScrollController } from './panel/useChatScrollController';
 export default function ChatPanel({ ide, panelId = 'chat' }) {
   const [renamingConversation, setRenamingConversation] = React.useState(null);
   const [renameDraft, setRenameDraft] = React.useState('');
+  const renameReturnFocusRef = React.useRef(null);
   const {
     bottomRef,
     composerHeight,
@@ -20,7 +21,9 @@ export default function ChatPanel({ ide, panelId = 'chat' }) {
     submitChatMessage,
   } = useChatScrollController(ide);
 
-  const openRenameConversation = (conversation) => {
+  const openRenameConversation = (conversation, trigger) => {
+    renameReturnFocusRef.current = trigger;
+    ide.setIsConversationMenuOpen(false);
     setRenamingConversation(conversation);
     setRenameDraft(conversation.title || '新对话');
   };
@@ -87,6 +90,7 @@ export default function ChatPanel({ ide, panelId = 'chat' }) {
       />
 
       <RenameConversationDialog
+        returnFocusRef={renameReturnFocusRef}
         draft={renameDraft}
         onClose={closeRenameConversation}
         onDraftChange={setRenameDraft}

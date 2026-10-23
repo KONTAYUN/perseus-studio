@@ -23,13 +23,13 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 		preferNumberedReadContentForModel(payload)
 		trimReadContentFields(payload, profile.MaxReadFileContentRunes)
 		if fitPayloadStringFieldsToBudget(payload, []string{"numbered_content", "content"}, profile.MaxToolResultRunes) {
-			raw, _ := json.Marshal(payload)
+			raw, _ := marshalModelJSON(payload)
 			return string(raw)
 		}
 	case "read_workspace_files":
 		budgetBatchReadPayload(payload, profile)
 		if fitBatchReadPayloadToBudget(payload, profile.MaxToolResultRunes) {
-			raw, _ := json.Marshal(payload)
+			raw, _ := marshalModelJSON(payload)
 			return string(raw)
 		}
 	case "perseus_search_web", "web_search":
@@ -39,7 +39,7 @@ func budgetToolResultForModel(toolName, result string, profile providerRuntimePr
 	default:
 		// Keep structural metadata, but avoid returning a very large raw object to the model.
 	}
-	raw, err := json.Marshal(payload)
+	raw, err := marshalModelJSON(payload)
 	if err != nil {
 		return compactToolResultJSON(toolName, result, profile.MaxToolResultRunes)
 	}
@@ -92,7 +92,7 @@ func fitPayloadStringFieldsToBudget(payload map[string]any, keys []string, maxRu
 		return false
 	}
 	for attempts := 0; attempts < 8; attempts++ {
-		raw, err := json.Marshal(payload)
+		raw, err := marshalModelJSON(payload)
 		if err != nil {
 			return false
 		}
@@ -144,7 +144,7 @@ func fitBatchReadPayloadToBudget(payload map[string]any, maxRunes int) bool {
 		return false
 	}
 	for attempts := 0; attempts < 80; attempts++ {
-		raw, err := json.Marshal(payload)
+		raw, err := marshalModelJSON(payload)
 		if err != nil {
 			return false
 		}
@@ -216,7 +216,15 @@ func compactToolResultJSON(toolName, raw string, maxRunes int) string {
 		"model_view":     "The tool result is too large for this model view. Retry with a narrower request if more detail is needed.",
 		"original_chars": len([]rune(raw)),
 	}
-	encoded, err := json.Marshal(payload)
+	var original map[string]any
+	if json.Unmarshal([]byte(raw), &original) == nil {
+		for _, key := range []string{"failure_class", "execution_outcome", "exit_code", "timed_out", "observation_complete", "side_effect_state", "applied", "files_changed"} {
+			if value, ok := original[key]; ok {
+				payload[key] = value
+			}
+		}
+	}
+	encoded, err := marshalModelJSON(payload)
 	if err != nil {
 		return `{"truncated":true,"model_view":"tool result was too large"}`
 	}

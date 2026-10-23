@@ -22,7 +22,8 @@ import {
 } from './chatStateUtils.js';
 import { mergeConversationSnapshotPreservingActive } from './chatMessageMerge.js';
 import { markRunSteerApplied, markRunSteerReceived, markRunSteerRejected } from './chatSteerItems.js';
-import { scheduleDelay, startInterval, stopInterval, wait } from './chatRunStreamTimers.js';
+import { startInterval, stopInterval, wait } from './chatRunStreamTimers.js';
+import { consumeRunTransport } from './chatRunTransport.js';
 import { shouldEnsureProgressShell, toolEventFromPayload } from './chatRunStreamToolEvents.js';
 
 export async function waitForAgentRunStream({
@@ -32,6 +33,7 @@ export async function waitForAgentRunStream({
   currentConversationIdRef,
   userMessageId = '',
   loadConversations,
+  scheduleTitleRefresh,
   onAssistantToolEvents,
   onTasksChanged,
   runId,
@@ -69,21 +71,12 @@ export async function waitForAgentRunStream({
     }), runId)
   );
 
-  let source = null;
   let settled = false;
   let fallbackStarted = false;
   let sawAssistantCompletion = false;
   let loadingTimer = null;
-  let lastEventSeq = Number(afterSeq) || 0;
-  let reconnectAttempts = 0;
-  let eventChain = Promise.resolve();
-  const queuedEventSeqs = new Set();
   const closeSource = () => {
-    if (source) {
-      source.close();
-      source = null;
-    }
-    if (loadingTimer) {
+    if (loadingTimer != null) {
       stopInterval(loadingTimer);
       loadingTimer = null;
     }
@@ -93,29 +86,13 @@ export async function waitForAgentRunStream({
       const data = await apiGet(`/api/conversations/${encodeURIComponent(conversationID)}/messages`);
       const messages = normalizeConversationMessages(data.items || []);
       if (isRunConversationVisible()) {
-        setConversationMessages((current) => mergeConversationSnapshotPreservingActive(current, messages));
+        setConversationMessages((current) => mergeConversationSnapshotPreservingActive(current, messages, { authoritative: true, runId }));
       }
       const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
       await onAssistantToolEvents?.(lastAssistant?.attachments || []);
     } catch (error) {
       console.error('refreshFromLatestAssistantMessage failed', error);
     }
-  };
-  const refreshConversationsAfterTitleGeneration = async () => {
-    for (const delay of [1000, 3000, 6000, 10000, 15000, 15000]) {
-      await wait(delay);
-      await loadConversations();
-    }
-  };
-  control.abort = () => {
-    closeSource();
-    settled = true;
-    apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {
-      source: 'stop_button',
-      reason: 'user_requested_stop',
-    }).catch((error) => {
-      console.error('cancelAgentRun failed', error);
-    });
   };
 
   const appendProgress = (type, payload = {}, fallbackText = '') => {
@@ -174,9 +151,7 @@ export async function waitForAgentRunStream({
       (current || []).filter((item) => !isRunShellMessage(item, { thinkingId, runId }))
     );
     await loadConversations();
-    refreshConversationsAfterTitleGeneration().catch((error) => {
-      console.error('refreshConversationsAfterTitleGeneration failed', error);
-    });
+    scheduleTitleRefresh?.(conversationID);
     if (fallbackStarted || !sawAssistantCompletion) {
       await refreshFromLatestAssistantMessage();
     }
@@ -342,20 +317,17 @@ export async function waitForAgentRunStream({
     }
   };
 
-  const pollUntilDone = async () => {
+  const pollUntilDone = async (isStopped) => {
     fallbackStarted = true;
-    for (let attempt = 0; attempt < 120 && !settled; attempt += 1) {
+    for (let attempt = 0; attempt < 120 && !settled && !isStopped(); attempt += 1) {
       const run = await apiGet(`/api/agent-runs/${encodeURIComponent(runId)}`);
+      if (isStopped()) return;
       await handleRun(run);
       if (settled) return;
       await wait(2000);
     }
+    if (isStopped()) return;
     throw new Error('执行仍在进行，但事件流连接中断，请刷新会话查看结果');
-  };
-
-  const runQueued = (handler, reject) => {
-    eventChain = eventChain.then(handler, handler);
-    eventChain.catch(reject);
   };
 
   loadingTimer = startInterval(() => {
@@ -365,61 +337,27 @@ export async function waitForAgentRunStream({
     );
   }, 80);
 
-  await new Promise((resolve, reject) => {
-    const openStream = () => {
-      if (settled) return;
-      const resumeSeq = lastEventSeq > 0 ? lastEventSeq : Number(afterSeq) || 0;
-      const streamPath = `${API_BASE_URL}/api/agent-runs/${encodeURIComponent(runId)}/stream${
-        resumeSeq ? `?after_seq=${encodeURIComponent(resumeSeq)}` : ''
-      }`;
-      source = new EventSource(streamPath, {
-        withCredentials: true,
-      });
-      control.abort = () => {
-        closeSource();
+  try {
+    await consumeRunTransport({
+      initialSequence: afterSeq,
+      url: (sequence) => {
+        const resumeSeq = Math.max(sequence, Number(afterSeq) || 0);
+        return `${API_BASE_URL}/api/agent-runs/${encodeURIComponent(runId)}/stream${resumeSeq ? '?after_seq=' + resumeSeq : ''}`;
+      },
+      control,
+      onCancel: () => {
         settled = true;
         apiPost(`/api/agent-runs/${encodeURIComponent(runId)}/cancel`, {
-          source: 'stop_button',
-          reason: 'user_requested_stop',
-        }).catch((error) => {
-          console.error('cancelAgentRun failed', error);
-        });
-        const error = new DOMException('Aborted', 'AbortError');
-        reject(error);
-      };
-      source.addEventListener('run', (event) => {
-        runQueued(async () => {
-          await handleRun(JSON.parse(event.data));
-          if (settled) resolve();
-        }, reject);
-      });
-      source.addEventListener('event', (event) => {
-        const item = JSON.parse(event.data);
-        if (item?.seq) {
-          if (item.seq <= lastEventSeq || queuedEventSeqs.has(item.seq)) return;
-          queuedEventSeqs.add(item.seq);
-        }
-        runQueued(async () => {
-          await handleEvent(item);
-          reconnectAttempts = 0;
-          if (item?.seq) {
-            lastEventSeq = Math.max(lastEventSeq, item.seq);
-            queuedEventSeqs.delete(item.seq);
-          }
-          if (settled) resolve();
-        }, reject);
-      });
-      source.onerror = () => {
-        closeSource();
-        if (settled || fallbackStarted) return;
-        if (reconnectAttempts < 3) {
-          reconnectAttempts += 1;
-          scheduleDelay(openStream, Math.min(500 * reconnectAttempts, 1500));
-          return;
-        }
-        pollUntilDone().then(resolve).catch(reject);
-      };
-    };
-    openStream();
-  });
+          source: 'stop_button', reason: 'user_requested_stop',
+        }).catch((error) => console.error('cancelAgentRun failed', error));
+      },
+      onRun: handleRun,
+      onEvent: handleEvent,
+      poll: pollUntilDone,
+      isSettled: () => settled,
+    });
+  } finally {
+    settled = true;
+    closeSource();
+  }
 }

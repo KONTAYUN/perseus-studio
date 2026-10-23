@@ -55,6 +55,16 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	s.registrationMu.Lock()
+	defer s.registrationMu.Unlock()
 	count, err := s.users.CountUsers(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -70,14 +80,6 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "registration is disabled")
 			return
 		}
-	}
-	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
-		return
 	}
 	role, err := s.users.DefaultUserRole(r.Context())
 	if err != nil {
@@ -207,7 +209,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 }
 
 func (s *Server) isPublicAPI(path string) bool {
-	return path == "/api/health" ||
+	return path == "/api/health" || path == "/api/ready" ||
 		path == "/api/version" ||
 		path == "/api/auth/login" ||
 		path == "/api/auth/register" ||

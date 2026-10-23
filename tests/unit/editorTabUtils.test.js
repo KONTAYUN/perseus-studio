@@ -165,7 +165,7 @@ test('buildActiveFileToolPlan marks dirty active file conflict after AI write', 
   assert.equal(plan.reloadPlan, null);
 });
 
-test('buildActiveFileToolPlan remaps active file after rename', () => {
+test('buildActiveFileToolPlan remaps active file without inheriting a folder hash', () => {
   const plan = buildActiveFileToolPlan(
     [{ type: 'workspace_file_changed', operation: 'rename', old_path: 'docs', new_path: 'notes', changed_paths: ['docs', 'notes'], hash: 'h2' }],
     { activePath: 'docs/a.md', dirty: false }
@@ -174,7 +174,7 @@ test('buildActiveFileToolPlan remaps active file after rename', () => {
   assert.equal(plan.activePath, 'notes/a.md');
   assert.deepEqual(plan.reloadPlan, {
     path: 'notes/a.md',
-    hash: 'h2',
+    hash: '',
     versionId: '',
     statusMessage: '',
   });

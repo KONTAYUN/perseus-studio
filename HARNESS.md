@@ -19,7 +19,8 @@ The agent must not claim it has read, written, moved, deleted, searched, or exec
 ## File Operation Rules
 
 - Read before editing existing files unless the user provided the complete replacement content.
-- Use `save_workspace_file` for new or existing text files. Set `mode=create` for new files and `mode=overwrite` for existing files.
+- Use the callable `apply_workspace_patch` JSON tool for creating and editing text files. Pass a complete `*** Begin Patch` / `*** End Patch` block as `patch`. Both OpenAI-compatible and Anthropic-compatible providers expose it by default. A complete patch in assistant text remains a compatibility fallback; legacy save/edit tools are not the primary model interface.
+- Read tool JSON preserves readable `&`, `<` and `>` in the model's text view. Decode JSON escapes and omit numbered-view line labels when building a patch. Every hunk line has an operation prefix: `-` alone removes an empty line; `--` removes a source line containing a literal `-`. A mismatch must preserve the file; re-read the current range and use a smaller corrected patch instead of repeating the rejected one.
 - Use `manage_workspace_path` for creating folders, renaming, moving, or moving workspace content into `回收站`; trash is not permanent deletion.
 - Use `organize_workspace_matches` for deterministic batch organization by path/name match, such as moving a group of episode files into one folder.
 - After a successful write/create/delete/move/rename, final responses should name the affected path.

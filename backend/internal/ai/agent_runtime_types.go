@@ -80,12 +80,13 @@ type ActionProgressLedger struct {
 }
 
 type AgentLoopGuard struct {
-	LastActionKey           string `json:"last_action_key,omitempty"`
-	RepeatedActionCount     int    `json:"repeated_action_count,omitempty"`
-	TerminalRejectionCount  int    `json:"terminal_rejection_count,omitempty"`
-	ContentRejectionCount   int    `json:"content_rejection_count,omitempty"`
-	NoProgressRoundCount    int    `json:"no_progress_round_count,omitempty"`
-	LastProgressFingerprint string `json:"last_progress_fingerprint,omitempty"`
+	Observations            map[string]string `json:"observations,omitempty"`
+	LastActionKey           string            `json:"last_action_key,omitempty"`
+	RepeatedActionCount     int               `json:"repeated_action_count,omitempty"`
+	TerminalRejectionCount  int               `json:"terminal_rejection_count,omitempty"`
+	ContentRejectionCount   int               `json:"content_rejection_count,omitempty"`
+	NoProgressRoundCount    int               `json:"no_progress_round_count,omitempty"`
+	LastProgressFingerprint string            `json:"last_progress_fingerprint,omitempty"`
 }
 
 type LoopGuardObservation struct {
@@ -97,17 +98,18 @@ type LoopGuardObservation struct {
 }
 
 type agentRuntime struct {
-	service          *Service
-	protocol         agentProtocol
-	conversationID   string
-	messageID        string
-	provider         store.ModelProvider
-	messages         []store.Message
-	attachments      []AttachmentPayload
-	opts             RunOptions
-	profile          providerRuntimeProfile
-	allowTask        bool
-	recentReadMemory RecentWorkspaceReadMemory
+	unresolvedCommands map[string]string
+	service            *Service
+	protocol           agentProtocol
+	conversationID     string
+	messageID          string
+	provider           store.ModelProvider
+	messages           []store.Message
+	attachments        []AttachmentPayload
+	opts               RunOptions
+	profile            providerRuntimeProfile
+	allowTask          bool
+	recentReadMemory   RecentWorkspaceReadMemory
 
 	events                    []ToolEvent
 	appliedMutations          map[string]ToolEvent
@@ -126,6 +128,7 @@ type agentRuntime struct {
 	lastProviderFinishReason  string
 	lastProviderEmptyResponse bool
 	completedContent          string
+	completedOutcome          string
 	currentRound              int
 	transcript                *AgentTranscript
 	contextManager            *agentContextManager
@@ -179,6 +182,7 @@ type workspaceChunkWriteState struct {
 }
 
 type completionAttempt struct {
+	Outcome      string   `json:"outcome"`
 	Result       string   `json:"result"`
 	Summary      string   `json:"summary"`
 	ChangedPaths []string `json:"changed_paths"`

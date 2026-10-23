@@ -1,10 +1,16 @@
 import React, { useRef, useState } from 'react';
-import { Download, FileCode2, PanelTop, X } from 'lucide-react';
+import { FileCode2, PanelTop, X } from 'lucide-react';
 import { Button } from '../ui';
+import EditorDocumentActions from './EditorDocumentActions.jsx';
+import MarkdownDocument from './MarkdownDocument.jsx';
+import { isMarkdownFile } from '../markdown/markdownPolicy.js';
 
 export default function EditorPanel({ ide, editor, panelId }) {
   const tabsStripRef = useRef(null);
+  const draggingTabRef = useRef(null);
   const [tabDropIndicator, setTabDropIndicator] = useState(null);
+  const markdown = editor.isTextFile && isMarkdownFile(editor.currentFilePath);
+  const documentMode = editor.documentMode;
 
   const scrollTabsWithWheel = (event) => {
     const strip = tabsStripRef.current;
@@ -22,7 +28,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
 
   const isSamePanelTabDrag = (event) =>
     event.dataTransfer?.types?.includes('editor_tab_path') &&
-    event.dataTransfer?.getData('editor_tab_source_panel_id') === panelId;
+    (Boolean(draggingTabRef.current) || event.dataTransfer?.getData('editor_tab_source_panel_id') === panelId);
 
   const clearTabDropIndicator = () => setTabDropIndicator(null);
 
@@ -36,6 +42,12 @@ export default function EditorPanel({ ide, editor, panelId }) {
       onClick={() => {
         ide.setActivePanel(panelId);
         ide.setActiveEditorPanelId(panelId);
+      }}
+      onKeyDown={event => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+          event.preventDefault();
+          editor.saveCurrentFile();
+        }
       }}
     >
       <div
@@ -93,6 +105,9 @@ export default function EditorPanel({ ide, editor, panelId }) {
                     draggable
                     onDragStart={(e) => {
                       e.stopPropagation();
+                      // Browsers protect getData() during dragover. Keep only
+                      // this panel's active drag identity locally until dragend.
+                      draggingTabRef.current = tab.path;
                       e.dataTransfer.effectAllowed = 'move';
                       e.dataTransfer.setData('editor_tab_path', tab.path);
                       e.dataTransfer.setData('editor_tab_source_panel_id', panelId);
@@ -112,7 +127,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
                     }}
                     onDragOver={(e) => {
                       if (!isSamePanelTabDrag(e)) return;
-                      const sourcePath = e.dataTransfer.getData('editor_tab_path');
+                      const sourcePath = draggingTabRef.current;
                       if (!sourcePath || sourcePath === tab.path) {
                         e.preventDefault();
                         e.stopPropagation();
@@ -146,7 +161,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
                       editor.reorderTab?.(sourcePath, tab.path, position);
                       clearTabDropIndicator();
                     }}
-                    onDragEnd={clearTabDropIndicator}
+                    onDragEnd={() => { draggingTabRef.current = null; clearTabDropIndicator(); }}
                     onClick={(e) => {
                       e.stopPropagation();
                       editor.activateTab(tab.path);
@@ -194,28 +209,8 @@ export default function EditorPanel({ ide, editor, panelId }) {
             )}
           </div>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          <Button
-            data-testid="editor-download"
-            type="button"
-            variant="subtle"
-            size="xs"
-            draggable={Boolean(editor.currentFilePath && editor.isTextFile)}
-            onDragStart={(e) => {
-              e.stopPropagation();
-              ide.handleDownloadDragStart(e, editor.currentFilePath, editor.currentFileContent);
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              ide.downloadFile(editor.currentFilePath).catch((error) => console.error(error));
-            }}
-            disabled={!editor.currentFilePath || !editor.isTextFile}
-            className="h-8 px-2"
-          >
-            <Download size={13} />
-            <span className="hidden xl:inline">下载</span>
-          </Button>
-        </div>
+        <EditorDocumentActions ide={ide} editor={editor} markdown={markdown} mode={documentMode}
+          onModeChange={editor.setDocumentMode} />
       </div>
 
       <div
@@ -264,13 +259,15 @@ export default function EditorPanel({ ide, editor, panelId }) {
                       type="button"
                       variant="subtle"
                       size="xs"
+                      disabled={editor.isSavingFile}
                       onClick={(e) => {
                         e.stopPropagation();
-                        editor.keepLocalFileChanges();
+                        if (editor.externalFileConflict.keepLocal) editor.saveCurrentFile();
+                        else editor.keepLocalFileChanges();
                       }}
                       className="border-amber-300/80 text-amber-700 hover:bg-amber-100/80 dark:border-amber-300/20 dark:text-amber-100 dark:hover:bg-amber-400/10"
                     >
-                      保留本地修改
+                      {editor.externalFileConflict.keepLocal ? '保存本地版本' : '保留本地修改'}
                     </Button>
                     <Button
                       type="button"
@@ -308,6 +305,8 @@ export default function EditorPanel({ ide, editor, panelId }) {
               <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
                 {editor.currentFileNotice}
               </div>
+            ) : markdown && documentMode === 'rich' ? (
+              <MarkdownDocument key={editor.currentFilePath} content={editor.currentFileContent} onChange={editor.setCurrentFileContent} />
             ) : (
               <textarea
                 data-testid="editor-textarea"

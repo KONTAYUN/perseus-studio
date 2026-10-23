@@ -10,7 +10,7 @@ export function isCenteredSingleChatPanel(panels = []) {
 export function defaultWidthForPanel(panel, { centerSinglePanel = false, contentWidth = 0 } = {}) {
   if (panel.type === 'fileTree') return 260;
   if (panel.type === 'chat') {
-    return centerSinglePanel ? Math.min(1120, Math.max(760, contentWidth)) : 420;
+    return centerSinglePanel ? Math.min(1120, Math.max(0, contentWidth)) : 420;
   }
   return 520;
 }
@@ -24,6 +24,7 @@ export function calculateDisplayWidths({
   const centerSinglePanel = isCenteredSingleChatPanel(panels);
   const contentWidth = Math.max(0, mainWidth - MAIN_HORIZONTAL_PADDING);
   if (mainWidth <= 0 || panels.length === 0) return {};
+  if (centerSinglePanel) return { [panels[0].id]: Math.round(Math.min(1120, contentWidth)) };
 
   const gapTotal = Math.max(0, panels.length - 1) * panelGap;
   const minimumTotal = panels.reduce((sum, panel) => sum + minWidthForPanelType(panel.type), 0);

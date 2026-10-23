@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPatch, apiPost } from '../api/client';
+import { apiDelete, apiGet, apiPatch, apiPost } from '../api/client.js';
 import {
   normalizeConversationMessages,
   normalizeStoredContextUsage,
@@ -15,6 +15,7 @@ export function createChatConversationActions({
   conversationTransitionRef,
   currentConversationIdRef,
   currentConversationId,
+  onLatestRun,
   selectedModel,
   setAgentRecoveryNotice,
   setChatError,
@@ -29,11 +30,10 @@ export function createChatConversationActions({
   setRunSteerItems,
   suppressNextConversationLoadRef,
 }) {
-  async function loadConversations() {
-    setChatError('');
-    setResumableRun(null);
+  async function loadConversations({ signal, quiet = false } = {}) {
     try {
-      const data = await apiGet('/api/conversations');
+      const data = await apiGet('/api/conversations', { signal });
+      if (signal?.aborted) return null;
       const items = data.items || [];
       setConversations(items);
       const activeConversationID = currentConversationIdRef?.current || currentConversationId;
@@ -45,10 +45,15 @@ export function createChatConversationActions({
         setContextUsage(null);
         setContextCompactionNotice(null);
         setAgentRecoveryNotice(null);
+        setChatError('');
+        setResumableRun(null);
       }
+      return items;
     } catch (error) {
+      if (signal?.aborted) return null;
       console.error('loadConversations failed', error);
-      setChatError(error.message);
+      if (!quiet) setChatError(error.message);
+      return null;
     }
   }
 
@@ -85,6 +90,7 @@ export function createChatConversationActions({
         setRunSteerItems?.((current) => reconcileRunSteerItems(current, restoredSteers));
       }
       setConversationMessages(messages);
+      onLatestRun?.(data.latest_run || null);
       setResumableRun(recoverableRunFromLatestRun(data.latest_run));
       setContextUsage(normalizeStoredContextUsage(usageData, selectedModel));
     } catch (error) {
@@ -132,6 +138,8 @@ export function createChatConversationActions({
   }
 
   async function selectConversation(conversationID) {
+    setChatError('');
+    setResumableRun(null);
     currentConversationIdRef.current = conversationID;
     setCurrentConversationId(conversationID);
     setContextUsage(null);

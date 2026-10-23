@@ -23,6 +23,9 @@ func applyWorkspacePatchUpdate(content string, hunks []workspacePatchHunk) (stri
 		oldLines := trimPatchLineSuffixes(hunk.OldLines)
 		newLines := trimPatchLineSuffixes(hunk.NewLines)
 		if len(oldLines) == 0 {
+			if content == "" && len(hunks) == 1 && len(hunk.Contexts) == 0 {
+				return restoreEOL(strings.Join(newLines, "\n")+"\n", eol), nil
+			}
 			return "", patchApplyError(fmt.Sprintf("hunk %d has no removable/context lines", index+1), "", 0, index+1, "hunk has no removable/context lines", nil)
 		}
 		for _, context := range hunk.Contexts {
@@ -162,9 +165,6 @@ func seekWorkspacePatchSequence(lines, pattern []string, start int, eof ...bool)
 	matches := 0
 	for _, matcher := range []func(string, string) bool{
 		func(a, b string) bool { return a == b },
-		func(a, b string) bool { return strings.TrimRight(a, " \t") == strings.TrimRight(b, " \t") },
-		func(a, b string) bool { return strings.TrimSpace(a) == strings.TrimSpace(b) },
-		func(a, b string) bool { return normalizeWorkspacePatchUnicode(a) == normalizeWorkspacePatchUnicode(b) },
 	} {
 		best = -1
 		matches = 0

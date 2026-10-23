@@ -25,6 +25,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 }
 
 func writeAtomic(target string, content []byte) error {
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(target); err == nil {
+		mode = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	tempFile, err := os.CreateTemp(filepath.Dir(target), ".tmp-*")
 	if err != nil {
 		return err
@@ -33,6 +39,10 @@ func writeAtomic(target string, content []byte) error {
 	defer os.Remove(tempName)
 
 	if _, err := tempFile.Write(content); err != nil {
+		tempFile.Close()
+		return err
+	}
+	if err := tempFile.Chmod(mode); err != nil {
 		tempFile.Close()
 		return err
 	}

@@ -69,14 +69,15 @@ type UpdateAgentRunInput struct {
 }
 
 type AgentEventInput struct {
-	RunID          string
-	UserID         string
-	ConversationID string
-	MessageID      string
-	TaskID         string
-	Type           string
-	Level          string
-	Payload        any
+	PendingMessageID string
+	RunID            string
+	UserID           string
+	ConversationID   string
+	MessageID        string
+	TaskID           string
+	Type             string
+	Level            string
+	Payload          any
 }
 
 type AgentEventFilter struct {
@@ -134,6 +135,28 @@ CREATE TABLE IF NOT EXISTS agent_run_checkpoints (
   state_json TEXT NOT NULL,
   created_at DATETIME NOT NULL,
   FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS conversation_run_requests (
+  user_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  PRIMARY KEY(user_id, request_id),
+  FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pending_conversation_messages (
+  id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  model_provider_id TEXT NOT NULL,
+  thinking_mode TEXT NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY(user_id, id),
+  UNIQUE(user_id, conversation_id),
+  FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
 `
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
@@ -212,7 +235,7 @@ SET status = COALESCE(NULLIF(?, ''), status),
     started_at = COALESCE(?, started_at),
     completed_at = COALESCE(?, completed_at),
     updated_at = ?
-WHERE id = ? AND user_id = ?
+WHERE id = ? AND user_id = ? AND status IN ('queued', 'running')
 `, input.Status, input.Stage, input.ErrorMessage, input.DiagnosticLogID, input.UserMessageID, input.AssistantMessageID, startedAt, completedAt, now, id, userID)
 	if err != nil {
 		return AgentRun{}, err
@@ -221,26 +244,12 @@ WHERE id = ? AND user_id = ?
 }
 
 func (s *AgentRunStore) ResumeRun(ctx context.Context, userID, id string) (AgentRun, error) {
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
-UPDATE agent_runs
-SET status = ?,
-    stage = ?,
-    error_message = NULL,
-    diagnostic_log_id = NULL,
-    started_at = NULL,
-    completed_at = NULL,
-    updated_at = ?
-WHERE id = ? AND user_id = ? AND status IN (?, ?)
-`, AgentRunQueued, "queued", now, id, userID, AgentRunFailed, AgentRunCanceled)
-	if err != nil {
-		return AgentRun{}, err
-	}
-	return s.GetRun(ctx, userID, id)
+	run, _, err := s.resumeRun(ctx, userID, id, false, "")
+	return run, err
 }
 
 func (s *AgentRunStore) FailStaleRunningRuns(ctx context.Context, olderThan time.Duration, message string) (int64, error) {
-	if olderThan <= 0 {
+	if olderThan < 0 {
 		olderThan = 2 * time.Minute
 	}
 	message = strings.TrimSpace(message)

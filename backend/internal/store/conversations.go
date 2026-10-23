@@ -28,19 +28,20 @@ type ConversationSummary struct {
 }
 
 type Message struct {
-	ID              string          `json:"id"`
-	UserID          string          `json:"user_id"`
-	ConversationID  string          `json:"conversation_id"`
-	Role            string          `json:"role"`
-	Content         string          `json:"content"`
-	AttachmentsJSON string          `json:"-"`
-	Status          string          `json:"status,omitempty"`
-	SegmentIndex    int             `json:"segment_index,omitempty"`
-	MetaJSON        string          `json:"-"`
-	UpdatedAt       sql.NullTime    `json:"-"`
-	CreatedAt       time.Time       `json:"created_at"`
-	Attachments     json.RawMessage `json:"attachments,omitempty"`
-	Meta            json.RawMessage `json:"meta,omitempty"`
+	ID                     string          `json:"id"`
+	UserID                 string          `json:"user_id"`
+	ConversationID         string          `json:"conversation_id"`
+	Role                   string          `json:"role"`
+	Content                string          `json:"content"`
+	AttachmentsJSON        string          `json:"-"`
+	AttachmentPayloadsJSON string          `json:"-"`
+	Status                 string          `json:"status,omitempty"`
+	SegmentIndex           int             `json:"segment_index,omitempty"`
+	MetaJSON               string          `json:"-"`
+	UpdatedAt              sql.NullTime    `json:"-"`
+	CreatedAt              time.Time       `json:"created_at"`
+	Attachments            json.RawMessage `json:"attachments,omitempty"`
+	Meta                   json.RawMessage `json:"meta,omitempty"`
 }
 
 type CreateConversationInput struct {
@@ -173,6 +174,11 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   version_id TEXT NOT NULL DEFAULT '',
   content_hash TEXT NOT NULL DEFAULT '',
   created_at DATETIME NOT NULL
+);
+CREATE TABLE IF NOT EXISTS message_attachment_payloads (
+  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
 );
 `
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
@@ -313,11 +319,6 @@ WHERE id = ? AND user_id = ?
 	return err
 }
 
-func (s *ConversationStore) DeleteConversation(ctx context.Context, userID, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM conversations WHERE id = ? AND user_id = ?`, id, userID)
-	return err
-}
-
 func (s *ConversationStore) BranchConversation(ctx context.Context, userID, conversationID, messageID string) (Conversation, []Message, error) {
 	source, err := s.GetConversation(ctx, userID, conversationID)
 	if err != nil {
@@ -366,6 +367,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 INSERT INTO messages (id, user_id, conversation_id, role, content, attachments_json, status, segment_index, meta_json, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `, messageID, userID, newID, item.Role, item.Content, item.AttachmentsJSON, firstNonEmptyString(item.Status, "final"), item.SegmentIndex, item.MetaJSON, createdAt, item.UpdatedAt); err != nil {
+			return Conversation{}, nil, err
+		}
+		if err := saveMessageAttachmentPayloads(ctx, tx, userID, messageID, item.AttachmentPayloadsJSON); err != nil {
 			return Conversation{}, nil, err
 		}
 	}

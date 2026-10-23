@@ -30,14 +30,16 @@ export default function useSettingsData({ enabled = true } = {}) {
     setSelectedModelId(nextModel?.id || '');
   }, [enabledModels, selectedModelId]);
 
-  async function loadModelProviders() {
-    setSettingsError('');
+  async function loadModelProviders({ report = true } = {}) {
+    if (report) setSettingsError('');
     try {
       const data = await apiGet('/api/model-providers');
       setModelProviders(data.items || []);
+      return {};
     } catch (error) {
       console.error('loadModelProviders failed', error);
-      setSettingsError(error.message);
+      if (report) setSettingsError(error.message);
+      return { refreshError: error.message };
     }
   }
 
@@ -49,10 +51,9 @@ export default function useSettingsData({ enabled = true } = {}) {
       } else {
         await apiPost('/api/model-providers', input);
       }
-      await loadModelProviders();
+      return await loadModelProviders({ report: false });
     } catch (error) {
       console.error('saveModelProvider failed', error);
-      setSettingsError(error.message);
       throw error;
     }
   }
@@ -61,10 +62,9 @@ export default function useSettingsData({ enabled = true } = {}) {
     setSettingsError('');
     try {
       await apiDelete(`/api/model-providers/${encodeURIComponent(id)}`);
-      await loadModelProviders();
+      return await loadModelProviders({ report: false });
     } catch (error) {
       console.error('deleteModelProvider failed', error);
-      setSettingsError(error.message);
       throw error;
     }
   }
@@ -73,22 +73,23 @@ export default function useSettingsData({ enabled = true } = {}) {
     setSettingsError('');
     try {
       await apiPost(`/api/model-providers/${encodeURIComponent(id)}/set-default`, {});
-      await loadModelProviders();
+      return await loadModelProviders({ report: false });
     } catch (error) {
       console.error('setDefaultModelProvider failed', error);
-      setSettingsError(error.message);
       throw error;
     }
   }
 
-  async function loadSearchProviders() {
-    setSettingsError('');
+  async function loadSearchProviders({ report = true } = {}) {
+    if (report) setSettingsError('');
     try {
       const data = await apiGet('/api/search-providers');
       setSearchProviders(data.items || []);
+      return {};
     } catch (error) {
       console.error('loadSearchProviders failed', error);
-      setSettingsError(error.message);
+      if (report) setSettingsError(error.message);
+      return { refreshError: error.message };
     }
   }
 
@@ -100,10 +101,9 @@ export default function useSettingsData({ enabled = true } = {}) {
       } else {
         await apiPost('/api/search-providers', input);
       }
-      await loadSearchProviders();
+      return await loadSearchProviders({ report: false });
     } catch (error) {
       console.error('saveSearchProvider failed', error);
-      setSettingsError(error.message);
       throw error;
     }
   }
@@ -112,10 +112,9 @@ export default function useSettingsData({ enabled = true } = {}) {
     setSettingsError('');
     try {
       await apiDelete(`/api/search-providers/${encodeURIComponent(id)}`);
-      await loadSearchProviders();
+      return await loadSearchProviders({ report: false });
     } catch (error) {
       console.error('deleteSearchProvider failed', error);
-      setSettingsError(error.message);
       throw error;
     }
   }

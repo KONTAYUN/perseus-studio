@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"webide-backend/internal/failure"
 
 	"webide-backend/internal/workspace"
 )
@@ -19,7 +20,7 @@ func (s *Service) execListWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		MaxDepth int    `json:"max_depth"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在查看工作区文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在查看工作区文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	nodes, limited, err := files.List(args.Path, args.MaxDepth, 200)
 	if err != nil {
@@ -46,7 +47,7 @@ func (s *Service) execFindWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		MaxResults int    `json:"max_results"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在查找文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在查找文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	results, err := files.FindFiles(args.Query, args.Pattern, args.MaxResults)
 	if err != nil {
@@ -78,7 +79,7 @@ func (s *Service) execSearchWorkspaceText(ctx context.Context, userID, arguments
 		ExcludeGlobs []string `json:"exclude_globs"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在搜索文件内容...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在搜索文件内容...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	results, limited, err := files.SearchTextScoped(args.Query, args.Regex, args.MaxResults, args.ContextLines, workspace.TextSearchOptions{
 		PathScope:    args.PathScope,
@@ -115,7 +116,7 @@ func (s *Service) execReadWorkspaceFile(ctx context.Context, userID, argumentsJS
 		MaxChars  int    `json:"max_chars"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在读取工作区文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在读取工作区文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	maxChars := args.MaxChars
 	if maxChars <= 0 || maxChars > 50000 {
@@ -135,7 +136,7 @@ func (s *Service) execReadWorkspaceFile(ctx context.Context, userID, argumentsJS
 		"start_line":       result.StartLine,
 		"end_line":         result.EndLine,
 		"total_lines":      result.TotalLines,
-		"next_hint":        "Use a *** Begin Patch text patch for any file content change.",
+		"next_hint":        "Use apply_workspace_patch with a complete *** Begin Patch / *** End Patch block in its patch argument for file content changes.",
 	})
 	return mustJSON(payload), summary, label, result.Path, nil
 }
@@ -154,7 +155,7 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		MaxCharsPerFile int      `json:"max_chars_per_file"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-		return "", "", "正在批量读取文件...", "", fmt.Errorf("invalid tool arguments")
+		return "", "", "正在批量读取文件...", "", failure.New("tool_invalid_arguments", "invalid tool arguments", nil)
 	}
 	paths := normalizeBatchReadPaths(args.Paths)
 	if len(paths) == 0 {
@@ -206,7 +207,7 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		})
 	}
 	if len(items) == 0 {
-		return "", "", "正在批量读取文件...", "", fmt.Errorf("all requested files failed to read")
+		return "", "", "正在批量读取文件...", "", failure.New("workspace_batch_read_all_failed", fmt.Errorf("all requested files failed to read").Error(), nil)
 	}
 	readPaths := make([]string, 0, len(items))
 	for _, item := range items {
@@ -222,7 +223,7 @@ func (s *Service) execReadWorkspaceFiles(ctx context.Context, userID, argumentsJ
 		"limited_by_count": limitedByCount,
 		"start_line":       args.StartLine,
 		"end_line":         args.EndLine,
-		"next_hint":        "Use a *** Begin Patch text patch for any file content change.",
+		"next_hint":        "Use apply_workspace_patch with a complete *** Begin Patch / *** End Patch block in its patch argument for file content changes.",
 	})
 	summary := fmt.Sprintf("read %d workspace file(s), %d failed", len(items), len(failed))
 	return mustJSON(payload), summary, "正在批量读取文件...", strings.Join(readPaths, ","), nil

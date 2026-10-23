@@ -2,12 +2,8 @@ package ai
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"strings"
-
-	"webide-backend/internal/workspace"
 )
 
 type toolDiagnostic struct {
@@ -40,7 +36,7 @@ func buildToolDiagnostic(toolName, argumentsJSON, targetSummary string, duration
 	if durationMS > 0 {
 		summary["duration_ms"] = durationMS
 	}
-	if hint := toolFailureRecoveryHint(toolName, errString(err)); hint != "" {
+	if hint := recoveryHintForFailure(failureClass); hint != "" {
 		summary["recovery_hint"] = hint
 	}
 	if details := toolArgumentDiagnosticDetails(toolName, argumentsJSON); len(details) > 0 {
@@ -70,7 +66,7 @@ func toolArgumentDiagnosticDetails(toolName, argumentsJSON string) map[string]an
 			"patch_tail":        patchDiagnosticTail(patch),
 			"patch_block_count": countWorkspacePatchBlocks(patch),
 			"detected_paths":    workspacePatchCandidatePathsLoose(patch),
-			"transport":         "json_or_text_patch",
+			"transport":         ToolTransportJSON,
 		}
 		return details
 	case "edit_workspace_text":
@@ -114,57 +110,13 @@ func intField(values map[string]any, key string) int {
 	}
 }
 
-func toolFailureClass(toolName string, err error) string {
-	if err == nil {
-		return ""
-	}
-	text := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(text, "invalid tool arguments") ||
-		strings.Contains(text, "tool arguments are required") ||
-		strings.Contains(text, "tool arguments must be"):
-		return "tool_invalid_arguments"
-	case strings.Contains(text, "unsupported file type"):
-		return "workspace_unsupported_file_type"
-	case toolName == "edit_workspace_text" && (strings.Contains(text, "old_text was not found") || strings.Contains(text, "old_text matched")):
-		return "workspace_exact_edit_unstable"
-	case toolName == "apply_workspace_patch" && strings.Contains(text, "patch apply failed"):
-		return "workspace_patch_apply_failed"
-	case toolName == "replace_workspace_lines" && strings.Contains(text, "line range"):
-		return "workspace_line_range_invalid"
-	case strings.Contains(text, "path already exists") || strings.Contains(text, "already exists"):
-		return "workspace_path_already_exists"
-	case strings.Contains(text, "all requested files failed to read"):
-		return "workspace_batch_read_all_failed"
-	case errors.Is(err, fs.ErrNotExist) || strings.Contains(text, "no such file or directory") || strings.Contains(text, "file does not exist"):
-		return "workspace_path_not_found"
-	case workspace.IsPathError(err) || strings.Contains(text, "path escapes workspace") || strings.Contains(text, "invalid path"):
-		return "workspace_path_policy"
-	case strings.Contains(text, "未配置可用搜索工具"):
-		return "search_provider_not_configured"
-	case strings.Contains(text, "tavily extract returned no content") || strings.Contains(text, "当前 provider 不支持 extract"):
-		return "web_extract_unavailable"
-	case strings.Contains(text, "skill not found") || strings.Contains(text, "skill is disabled"):
-		return "skill_unavailable"
-	case strings.Contains(text, "zip ") ||
-		strings.Contains(text, "skill") && (strings.Contains(text, "安装") || strings.Contains(text, "not a directory") || strings.Contains(text, "mkdir")):
-		return "skill_install_invalid_archive"
-	case strings.Contains(text, "safety policy"):
-		return "command_safety_policy"
-	case strings.Contains(text, "exit status") || strings.Contains(text, "timed out"):
-		return "command_execution_failed"
-	default:
-		_ = toolName
-		return "tool_execution_failed"
-	}
-}
-
 func toolDiagnosticLevel(failureClass string) string {
 	switch failureClass {
 	case "workspace_path_not_found",
 		"workspace_path_already_exists",
 		"workspace_unsupported_file_type",
 		"workspace_exact_edit_unstable",
+		"workspace_file_conflict",
 		"workspace_line_range_invalid",
 		"workspace_patch_apply_failed",
 		"workspace_batch_read_all_failed",

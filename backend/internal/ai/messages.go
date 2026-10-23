@@ -12,7 +12,8 @@ func buildOpenAIMessages(messages []store.Message, attachments []AttachmentPaylo
 	lastUserIndex := lastUserMessageIndex(messages)
 	for index, item := range messages {
 		content := any(item.Content)
-		if index == lastUserIndex && len(attachments) > 0 {
+		attachments := attachmentsForMessage(item, attachments, index == lastUserIndex)
+		if len(attachments) > 0 {
 			parts := []map[string]any{
 				{"type": "text", "text": buildUserTextWithAttachments(item.Content, attachments)},
 			}
@@ -53,7 +54,8 @@ func buildAnthropicMessages(messages []store.Message, attachments []AttachmentPa
 			continue
 		}
 		content := any(item.Content)
-		if index == lastUserIndex && len(attachments) > 0 {
+		attachments := attachmentsForMessage(item, attachments, index == lastUserIndex)
+		if len(attachments) > 0 {
 			blocks := []map[string]any{
 				{"type": "text", "text": buildUserTextWithAttachments(item.Content, attachments)},
 			}

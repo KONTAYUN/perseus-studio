@@ -1,9 +1,8 @@
 package ai
 
 import (
-	"fmt"
-	"sort"
 	"strings"
+	"webide-backend/internal/failure"
 )
 
 func validateToolArgumentsAgainstSchema(toolName string, args map[string]any, tools []map[string]any) string {
@@ -12,27 +11,7 @@ func validateToolArgumentsAgainstSchema(toolName string, args map[string]any, to
 }
 
 func validateToolArgumentsAgainstSchemaMap(args map[string]any, schema map[string]any) string {
-	if len(schema) == 0 {
-		return ""
-	}
-	for _, field := range schemaRequiredFields(schema) {
-		value, ok := args[field]
-		if !ok || value == nil {
-			return fmt.Sprintf("invalid tool arguments: %s is required", field)
-		}
-	}
-	properties, _ := schema["properties"].(map[string]any)
-	for field, property := range properties {
-		value, ok := args[field]
-		if !ok || value == nil {
-			continue
-		}
-		propSchema, _ := property.(map[string]any)
-		if errText := validateToolArgumentField(field, value, propSchema); errText != "" {
-			return errText
-		}
-	}
-	return ""
+	return validateSchemaValue("arguments", args, schema, 0)
 }
 
 func toolInputSchema(toolName string, tools []map[string]any) map[string]any {
@@ -75,22 +54,7 @@ func schemaRequiredFields(schema map[string]any) []string {
 }
 
 func validateToolArgumentField(field string, value any, schema map[string]any) string {
-	if len(schema) == 0 {
-		return ""
-	}
-	if expected := strings.TrimSpace(fmt.Sprint(schema["type"])); expected != "" {
-		if !toolArgumentTypeMatches(value, expected) {
-			return fmt.Sprintf("invalid tool arguments: %s must be %s", field, expected)
-		}
-	}
-	if allowed := schemaEnumValues(schema); len(allowed) > 0 {
-		text, ok := value.(string)
-		if !ok || !containsToolArgumentString(allowed, text) {
-			sort.Strings(allowed)
-			return fmt.Sprintf("invalid tool arguments: %s must be one of %s", field, strings.Join(allowed, ", "))
-		}
-	}
-	return ""
+	return validateSchemaValue(field, value, schema, 0)
 }
 
 func toolArgumentTypeMatches(value any, expected string) bool {
@@ -162,5 +126,5 @@ func invalidToolArgumentsError(message string) error {
 	if !strings.Contains(strings.ToLower(message), "invalid tool arguments") {
 		message = "invalid tool arguments: " + message
 	}
-	return fmt.Errorf("%s", message)
+	return failure.New("tool_invalid_arguments", message, nil)
 }

@@ -71,6 +71,22 @@ export function pathMovesFromToolEvent(event) {
   return [];
 }
 
+export function deletedPathsFromToolEvent(event) {
+  const paths = (event?.moved || [])
+    .filter((item) => item?.old_path && item.status !== 'failed' && isAnyTrashPath(item.new_path))
+    .map((item) => item.old_path);
+  if (['delete', 'trash'].includes(event?.operation) && isAnyTrashPath(event.new_path)) {
+    paths.push(event.old_path || event.path);
+  }
+  return [...new Set(paths.filter(Boolean))];
+}
+
+export function fileMetadataFromToolEvent(event, path) {
+	const change = event.changes?.find((item) => item.path === path && item.operation !== 'delete');
+	if (change) return { hash: change.hash || '', versionId: change.version_id || '' };
+  return event.path === path || event.new_path === path ? { hash: event.hash || '', versionId: event.version_id || '' } : { hash: '', versionId: '' };
+}
+
 export function buildActiveFileToolPlan(events, { activePath = '', dirty = false } = {}) {
   let nextActivePath = activePath;
   let reloadPlan = null;
@@ -79,6 +95,14 @@ export function buildActiveFileToolPlan(events, { activePath = '', dirty = false
 
   for (const event of events || []) {
     if (!nextActivePath) continue;
+
+    if (deletedPathsFromToolEvent(event).some((path) => pathMatches(nextActivePath, path))) {
+      nextActivePath = '';
+      reloadPlan = null;
+      conflictPlan = null;
+      closeNotice = '当前打开文件已被 AI 移入回收站';
+      continue;
+    }
 
     if (event.operation === 'command_unknown') {
       if (dirty) {
@@ -104,8 +128,7 @@ export function buildActiveFileToolPlan(events, { activePath = '', dirty = false
       const matchedMove = moves.find((move) => pathMatches(nextActivePath, move.oldPath));
       if (matchedMove) {
         nextActivePath = remapEditorPath(nextActivePath, matchedMove.oldPath, matchedMove.newPath);
-        const nextHash = event.hash || reloadPlan?.hash || conflictPlan?.hash || '';
-        const nextVersionId = event.version_id || reloadPlan?.versionId || conflictPlan?.versionId || '';
+        const { hash: nextHash, versionId: nextVersionId } = fileMetadataFromToolEvent(event, nextActivePath);
 
         if (dirty) {
           conflictPlan = {
@@ -123,7 +146,6 @@ export function buildActiveFileToolPlan(events, { activePath = '', dirty = false
           };
         }
       }
-      continue;
     }
 
     if ((event.operation === 'delete' || event.operation === 'trash') && event.old_path && event.new_path && isAnyTrashPath(event.new_path)) {
@@ -141,15 +163,13 @@ export function buildActiveFileToolPlan(events, { activePath = '', dirty = false
         if (dirty) {
           conflictPlan = {
             reloadPath: nextActivePath,
-            hash: event.hash || '',
-            versionId: event.version_id || '',
+            ...fileMetadataFromToolEvent(event, nextActivePath),
             message: '该文件已被 AI 修改，但你有未保存内容，请选择保留本地修改或重新加载文件',
           };
         } else {
           reloadPlan = {
             path: nextActivePath,
-            hash: event.hash || '',
-            versionId: event.version_id || '',
+            ...fileMetadataFromToolEvent(event, nextActivePath),
             statusMessage: '',
           };
         }

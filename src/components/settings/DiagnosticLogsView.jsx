@@ -3,6 +3,7 @@ import { ArrowLeft, Clipboard, Download, RefreshCw, Trash2, Users, X } from 'luc
 import { API_BASE_URL, apiDelete, apiGet } from '../../api/client';
 import { Button, EmptyCard, SegmentedControl, SettingsSection, formatDate } from './SettingsUI';
 import { diagnosticShortJudgement, formatRequestSummary } from './diagnosticLogUtils';
+import SettingsRowMenu from './SettingsRowMenu';
 
 export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
@@ -129,9 +130,9 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
     <SettingsSection data-testid="diagnostics-view" className="settings-view-enter">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+          {onBack && <Button type="button" variant="ghost" size="sm" onClick={onBack}>
             <ArrowLeft size={16} /> 诊断日志
-          </Button>
+          </Button>}
           <SegmentedControl
             value={scope}
             onChange={setScope}
@@ -150,9 +151,7 @@ export default function DiagnosticLogsView({ dialog, onBack, currentUser }) {
           <Button type="button" size="sm" onClick={exportLogs}>
             <Download size={14} /> 导出日志
           </Button>
-          <Button type="button" variant="danger" size="sm" onClick={clearLogs}>
-            <Trash2 size={14} /> 清空全部
-          </Button>
+          <SettingsRowMenu label="日志管理操作" actions={[{ label: '清空全部日志', danger: true, run: clearLogs }]} />
         </div>
       </div>
 

@@ -17,9 +17,6 @@ func (s *partialJSONFieldStreamer) EmitNewDelta(toolName, partialJSON string, em
 	if !ok || len(value) <= len(s.last) || !strings.HasPrefix(value, s.last) {
 		return
 	}
-	if firstInternalCompletionMarker(value) != "" {
-		return
-	}
 	delta := value[len(s.last):]
 	s.last = value
 	if delta != "" {
@@ -44,9 +41,6 @@ func emitStreamedCompletionResultFromToolCalls(calls []agentToolCall, emit func(
 			content += "\n\n" + strings.TrimSpace(attempt.Notes)
 		}
 		if content == "" {
-			return false
-		}
-		if firstInternalCompletionMarker(content) != "" {
 			return false
 		}
 		for _, chunk := range splitRunes(content, 256) {

@@ -98,15 +98,18 @@ type TrashItem struct {
 }
 
 type CommandResult struct {
-	Command           string    `json:"command"`
-	Cwd               string    `json:"cwd"`
-	Stdout            string    `json:"stdout"`
-	Stderr            string    `json:"stderr"`
-	ExitCode          int       `json:"exit_code"`
-	TimedOut          bool      `json:"timed_out"`
-	StartedAt         time.Time `json:"started_at"`
-	FinishedAt        time.Time `json:"finished_at"`
-	ChangedPaths      []string  `json:"changed_paths,omitempty"`
-	WorkspaceMutation bool      `json:"workspace_mutation,omitempty"`
-	Hash              string    `json:"hash,omitempty"`
+	ExecutionOutcome    string    `json:"execution_outcome"`
+	ObservationComplete bool      `json:"observation_complete"`
+	ObservationError    string    `json:"observation_error,omitempty"`
+	Command             string    `json:"command"`
+	Cwd                 string    `json:"cwd"`
+	Stdout              string    `json:"stdout"`
+	Stderr              string    `json:"stderr"`
+	ExitCode            int       `json:"exit_code"`
+	TimedOut            bool      `json:"timed_out"`
+	StartedAt           time.Time `json:"started_at"`
+	FinishedAt          time.Time `json:"finished_at"`
+	ChangedPaths        []string  `json:"changed_paths,omitempty"`
+	WorkspaceMutation   bool      `json:"workspace_mutation,omitempty"`
+	Hash                string    `json:"hash,omitempty"`
 }

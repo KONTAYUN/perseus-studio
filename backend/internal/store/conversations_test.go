@@ -236,13 +236,21 @@ func TestAgentRunResumeClearsTerminalStateAndListsEventsAfterSeq(t *testing.T) {
 	}
 	defer db.Close()
 
+	conversations := NewConversationStore(db)
+	if err := conversations.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	conversation, err := conversations.CreateConversation(ctx, CreateConversationInput{UserID: "user-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	runs := NewAgentRunStore(db)
 	if err := runs.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate returned error: %v", err)
 	}
 	run, err := runs.CreateRun(ctx, CreateAgentRunInput{
 		UserID:          "user-a",
-		ConversationID:  "conv-a",
+		ConversationID:  conversation.ID,
 		UserMessageID:   "msg-a",
 		ModelProviderID: "mp-a",
 	})

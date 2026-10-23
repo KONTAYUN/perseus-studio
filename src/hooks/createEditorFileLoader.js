@@ -1,8 +1,10 @@
-import { apiGet } from '../api/client';
-import { detectFileType } from './ideUtils';
+import { apiGet } from '../api/client.js';
+import { detectFileType } from './ideUtils.js';
 
 export function createEditorFileLoader({
   editorLoadRequestRef,
+  currentFileContentRef,
+  isDirtyRef,
   setActivePanel,
   setActiveTabPath,
   setCurrentFileContent,
@@ -31,6 +33,7 @@ export function createEditorFileLoader({
     } = options;
 
     const requestId = ++editorLoadRequestRef.current;
+    const contentAtStart = currentFileContentRef?.current;
     setIsEditorLoading(true);
     setErrorMessage?.('');
     if (clearConflict) {
@@ -93,18 +96,23 @@ export function createEditorFileLoader({
 
       const file = await apiGet(`/api/files/read?path=${encodeURIComponent(path)}`);
       if (requestId !== editorLoadRequestRef.current) return;
+      if (options.preserveLocalEdits && (isDirtyRef?.current || currentFileContentRef?.current !== contentAtStart)) {
+        setExternalFileConflict({ reloadPath: path, hash: file.hash || '', versionId });
+        setEditorStatusMessage('');
+        return;
+      }
       setCurrentFilePath(file.path);
       setCurrentFileNotice('');
       setCurrentFileContent(file.content);
       setSavedFileContent(file.content);
-      setCurrentFileHash(hash || file.hash || '');
+      setCurrentFileHash(file.hash || hash || '');
       setCurrentFileVersionId(versionId || '');
       setActiveTabPath(file.path);
       upsertOpenTab({
         path: file.path,
         content: file.content,
         savedContent: file.content,
-        hash: hash || file.hash || '',
+        hash: file.hash || hash || '',
         versionId: versionId || '',
         fileType,
         notice: '',

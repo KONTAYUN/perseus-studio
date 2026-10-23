@@ -1,12 +1,13 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from './cn';
+import { usePresence } from '../../motion/usePresence.js';
 
 export function PopoverSurface({ children, className = '', ...props }) {
   return (
     <div
       className={cn(
-        'ui-popover-surface overflow-hidden rounded-xl border border-gray-100 bg-white/95 backdrop-blur-xl dark:border-white/10 dark:bg-[#252527]/95',
+        'ui-popover-surface custom-scrollbar overflow-hidden rounded-xl border border-gray-100 bg-white/95 backdrop-blur-xl dark:border-white/10 dark:bg-[#252527]/95',
         className
       )}
       {...props}
@@ -36,6 +37,7 @@ export function AnchoredPopover({
   zIndex = 430,
 }) {
   const popoverRef = React.useRef(null);
+  const present = usePresence(open);
   const position = useAnchoredPopoverPosition(anchorRef, popoverRef, {
     align,
     estimatedHeight,
@@ -44,7 +46,7 @@ export function AnchoredPopover({
     maxHeight,
     matchAnchorWidth,
     minWidth,
-    open,
+    open: present,
     placement,
     width,
   });
@@ -52,22 +54,30 @@ export function AnchoredPopover({
   React.useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose?.();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onClose?.();
+        anchorRef?.current?.focus({ preventScroll: true });
+      }
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose, open]);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [anchorRef, onClose, open]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!present || typeof document === 'undefined') return null;
 
   return createPortal(
     <>
-      {showBackdrop && <div className="fixed inset-0" style={{ zIndex: zIndex - 10 }} onClick={() => onClose?.()} />}
+      {showBackdrop && open && <div className="fixed inset-0" style={{ zIndex: zIndex - 10 }} onClick={() => onClose?.()} />}
       <div
         ref={popoverRef}
         data-testid={testId}
+        data-state={open ? 'open' : 'closed'}
+        aria-hidden={!open || undefined}
+        inert={!open ? '' : undefined}
         className={cn(
-          'motion-popover ui-popover-surface fixed overflow-hidden rounded-2xl border border-gray-100/90 bg-white/95 backdrop-blur-2xl dark:border-white/10 dark:bg-[#252527]/95',
+          'motion-popover ui-popover-surface custom-scrollbar fixed overflow-hidden rounded-2xl border border-gray-100/90 bg-white/95 backdrop-blur-2xl dark:border-white/10 dark:bg-[#252527]/95',
           className
         )}
         style={{
@@ -76,6 +86,8 @@ export function AnchoredPopover({
           width: position.width,
           maxHeight: position.maxHeight,
           zIndex,
+          '--popover-origin': position.origin || 'center top',
+          '--popover-offset': position.offset || '-4px',
         }}
         onClick={(event) => event.stopPropagation()}
       >
@@ -115,7 +127,8 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     const baseWidth = matchAnchorWidth ? rect.width : preferredWidth;
-    const resolvedWidth = Math.max(minWidth, Math.min(baseWidth, viewportWidth - margin * 2));
+    const resolvedWidth = Math.min(Math.max(minWidth, baseWidth), Math.max(0, viewportWidth - margin * 2));
+    const commit = (next) => setPosition((current) => Object.keys(next).every((key) => current[key] === next[key]) ? current : next);
 
     if (placement === 'left' || placement === 'right') {
       const rightSpace = viewportWidth - rect.right - gap - margin;
@@ -130,7 +143,7 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
       const centeredTop = anchorMiddle - placementHeight / 2;
       const top = Math.min(Math.max(centeredTop, margin), viewportHeight - placementHeight - margin);
 
-      setPosition({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight });
+      commit({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight, origin: `${openLeft ? 'right' : 'left'} center`, offset: '0px' });
       return;
     }
 
@@ -144,14 +157,14 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
 
     const below = viewportHeight - rect.bottom - gap - margin;
     const above = rect.top - gap - margin;
-    const opensAbove = below < 240 && above > below;
+    const opensAbove = placement === 'top' ? above >= 160 || above > below : below < 240 && above > below;
     const resolvedMaxHeight = resolveMaxHeight(opensAbove ? above : below, maxHeight, 80);
     const placementHeight = resolvePlacementHeight(popoverHeight, resolvedMaxHeight, estimatedHeight);
     const top = opensAbove
       ? Math.max(margin, rect.top - gap - placementHeight)
       : Math.min(rect.bottom + gap, viewportHeight - placementHeight - margin);
 
-    setPosition({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight });
+    commit({ left, top, width: resolvedWidth, maxHeight: resolvedMaxHeight, origin: `${Math.min(resolvedWidth, Math.max(0, rect.left + rect.width / 2 - left))}px ${opensAbove ? 'bottom' : 'top'}`, offset: opensAbove ? '4px' : '-4px' });
   }, [align, anchorRef, estimatedHeight, gap, margin, matchAnchorWidth, maxHeight, minWidth, placement, popoverRef, preferredWidth]);
 
   React.useLayoutEffect(() => {
@@ -162,7 +175,7 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
     const followAnchor = (timestamp) => {
       if (!startedAt) startedAt = timestamp;
       updatePosition();
-      if (timestamp - startedAt < 700) {
+      if (timestamp - startedAt < 260) {
         frameId = window.requestAnimationFrame(followAnchor);
       }
     };
@@ -189,14 +202,14 @@ function useAnchoredPopoverPosition(anchorRef, popoverRef, options) {
 
 function measurePopoverHeight(popover) {
   if (!popover) return 0;
-  const rectHeight = Math.ceil(popover.getBoundingClientRect().height || 0);
+  const rectHeight = Math.ceil(popover.offsetHeight || 0);
   const scrollHeight = Math.ceil(popover.scrollHeight || 0);
   return Math.max(rectHeight, scrollHeight, 0);
 }
 
 function resolveMaxHeight(available, maxHeight, minHeight) {
   const availableHeight = Math.max(0, available);
-  return Math.max(minHeight, Math.min(maxHeight, availableHeight));
+  return Math.min(availableHeight, Math.max(minHeight, Math.min(maxHeight, availableHeight)));
 }
 
 function resolvePlacementHeight(popoverHeight, maxHeight, estimatedHeight = 0) {

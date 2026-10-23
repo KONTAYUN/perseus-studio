@@ -1,8 +1,14 @@
 # Perseus Studio Architecture
 
+Design-audit migration (2026-10-20): only structured tool calls execute actions; completion consumes explicit outcomes and verified events. Error identity is retained across AI/API boundaries. Provider capability settings are explicit; reference attachments do not grant or restrict permissions. Workspace owns persistent patch recovery and bounded change observation; host commands are disabled unless explicitly enabled for trusted administrators. Chat utilities own authoritative terminal reconciliation. A full session reducer migration remains pending; existing facade/action interfaces are retained. These changes refine existing packages; the detailed migration and evidence are recorded in `docs/DESIGN_AUDIT_REMEDIATION.md`.
+
 Single-container web IDE: React frontend + Go backend, served from one binary. Multi-user with per-user data isolation.
 
 ## Directory Layout
+
+Markdown format checks are conservative, bounded frontend diagnostics. The editor header offers one icon to switch rich/source views and a warning icon only for suspected issues. Confirmed repair reuses chat submission with a dedicated formatting prompt; it first saves and validates the selected file snapshot through existing editor save actions. Local conflicts, save errors and target changes prevent submission. Scrollbar visuals are shared across application and portalled surfaces.
+
+Markdown messages share a safe React Markdown renderer with GFM and copyable fenced code. Markdown documents can switch between source and a Tiptap document editor, using Markdown as the sole persisted format. The rich editor owns selection/block controls and local document transactions; existing editor hooks retain file identity, per-file display mode, autosave and conflict ownership. Keyboard saves reuse the manual save action. Merely opening a document must not rewrite it. Unsupported document syntax remains available as rendered preview/source instead of silently discarding content.
 
 ```
 src/                        React frontend (Vite + Tailwind)
@@ -52,6 +58,7 @@ src/                        React frontend (Vite + Tailwind)
     surfaces.css            Reusable surfaces and low-depth material classes
     motion.css              Shared animation and interaction primitives
     controls.css            Shared button/icon/segmented/switch rules
+    change-review.css       Inline file change review and reversal
     chat.css                Chat messages and chat progress surfaces
     chat-composer.css       Composer shell, input, action bar, model status, scroll-to-bottom control
     chat-composer-queue.css Pending input, running steer, and follow-up panels above the composer
@@ -130,10 +137,12 @@ backend/
 
 ## Key Flows
 
+Reliability refactor (2026-10): foreground runs enter a bounded `runqueue` through the API lifecycle facade. The queue serializes runs for each user, exposes cancellation before execution starts, and drains on shutdown. UI motion is centralized around shared duration tokens, reduced-motion preference, and cancellable animation ownership; panel focus decoration stays attached to its panel.
+
 ### User Authentication
 
 1. First user registers via `/api/auth/register` and is auto-promoted to `admin`
-2. Login via `/api/auth/login` creates an in-memory session; `perseus_session` cookie returned
+2. Login via `/api/auth/login` creates a SQLite-backed session; `perseus_session` cookie returned. Sessions survive server recreation.
 3. All subsequent API calls authenticated via session cookie middleware
 4. `/api/auth/me` returns current user info including role and registration-open status
 
@@ -143,6 +152,8 @@ backend/
 2. Each user's files stored under `<USER_DATA_ROOT>/<user_id>/workspace/`
 3. Workspace files, conversations, tasks, and uploads remain user-scoped. Model providers, search providers, and Skills are admin-managed resources with `private`/`public` visibility: private resources are admin-only, public enabled resources are usable by ordinary users.
 4. API middleware extracts `userID` from session and passes it to all service calls
+
+File edits use `apply_workspace_patch`, exposed as an ordinary function tool on both supported protocols. Assistant prose and fenced patch examples are display-only; only structured tool calls execute edits. Tool results include every changed path and move/trash mapping so all editor tabs can synchronize. Editor saves send `expected_hash`; the workspace service compares and writes under one per-user write lock and returns HTTP 409 for stale edits. This lock coordinates content writes inside one service process, not shell commands or multiple server replicas. Cross-origin browser requests require the same request host or an explicit `CORS_ALLOWED_ORIGINS` entry.
 
 ### Agent Chat Run
 
@@ -189,6 +200,8 @@ Runtime data belongs in `data/`. Local exports, binary builds, and deployment pa
 
 ## Frontend UI Governance
 
+Markdown rich editing supports balanced single-line HTML spans through a source-preserving inline Tiptap node. Its recognizer is shared with the compatibility guard. HTML wrappers remain inert data while child text/marks remain editable; unsupported block HTML, frontmatter and other extensions still fall back to preview/source. Both modes retain the existing Markdown save/conflict pipeline.
+
 Frontend UI changes should follow [docs/UI_DESIGN_SYSTEM.md](docs/UI_DESIGN_SYSTEM.md). That document is the source of truth for UI tokens, button/input/menu/dialog standards, panel headers, chat composer behavior, file tree interaction, animation rules, dark-mode parity, and future component extraction.
 
 Do not add new one-off Tailwind styling for common controls when an existing shared utility or primitive can be used.
@@ -206,3 +219,23 @@ Key rules:
 - Frontend state machines and algorithms belong in hooks/utilities, not large render components.
 - Backend agent runtime follows mature agent boundaries: provider turn, recovery, tool loop, registry, ledger/events, completion, and follow-up question are separate modules.
 - Do not periodically re-split the project by taste. Continue within the boundaries in `docs/STRUCTURE_STANDARDS.md`; changing a boundary requires updating the standard and scorecard first.
+
+
+### 2026-10-20 admission refinement
+
+Conversation send and regeneration share `store` transactional run preparation (message, run, initial events, request identity) and the API run lifecycle facade. Regeneration truncates the assistant tail only after scheduler admission, immediately before execution. Frontend request controls own cancellation through the submission-to-stream handoff; API request deadlines remain separate from durable run lifetimes. This closes the synchronous regeneration bypass without introducing a second agent runner.
+
+
+### Verified change review and reversal
+
+Host command subprocesses receive an explicit runtime environment allowlist and a per-user command home. Service API keys, auth/admin configuration, proxy credentials, Git configuration injection, and loader hooks are not inherited. Commands still run with the service OS identity; filesystem/network containment requires a separate worker sandbox and remains an open deployment boundary.
+
+Server startup acquires OS file locks on the canonical database path and user-data root before migrations or recovery. Locks remain open until process shutdown and are released by the OS after a crash; the lock files are retained to avoid unlink/recreate races. This enforces single-process ownership on supported local filesystems. It does not provide distributed locking over filesystems without reliable OS locks.
+
+Conversation-title generation is optional auxiliary work: the API owns a separate one-worker/sixteen-admission queue, deduplicates by conversation, passes shutdown cancellation into provider requests, and drains it before releasing storage. Foreground workspace execution has its own queue. The frontend title-refresh hook cancels timers/requests on replacement or unmount and stops polling when a title arrives; background list refresh never clears current run recovery state.
+
+Conversation deletion is serialized with foreground/background admission in SQLite: active work prevents deletion, background AI tasks require an owned existing conversation, and resume cannot revive deleted history. The API also checks registered foreground owners, including canceled executions still draining. This preserves the existing store/API responsibilities without adding a second lifecycle system.
+
+Background task startup recovery is conservative: cancellation remains canceled, interrupted AI/unknown work fails with an explicit artifact-verification requirement, and only mock jobs can requeue automatically. Recovery state and logs are atomic. Full background task checkpoint/resume remains unimplemented.
+
+`workspace` owns bounded change previews and hash-checked reversal of one persisted tool change. `api/workspace_changes` resolves the authenticated user's tool ledger entry and schedules reversals through the shared workspace queue. A durable reversal journal prevents replay after an ambiguous filesystem/database failure. Chat renders this through a dedicated change-review component; it does not trust client-supplied paths, hashes or snapshots. This is per-file tool-change recovery, not a shell-command or whole-workspace checkpoint.

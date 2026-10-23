@@ -24,6 +24,8 @@ export function textOnlyPayload(content, { conversationId = '', thinkingMode = '
 }
 
 export function createChatSteerActions({
+  refreshPendingMessages,
+  modelProviderId,
   activeAgentRunRef,
   chatAttachments,
   chatFileReferences,
@@ -43,22 +45,26 @@ export function createChatSteerActions({
   setRunSteerNotice,
   thinkingMode,
 }) {
-  function createPendingRunMessage(content, options = {}) {
+  async function createPendingRunMessage(content, options = {}) {
     const trimmedContent = String(content || '').trim();
     if (!trimmedContent) return false;
     const activeRunConversationId = activeAgentRunRef.current?.conversationId || '';
     const targetConversationId = currentConversationIdRef?.current || currentConversationId;
     const conversationId = options.conversationId || activeRunConversationId || targetConversationId;
-    const id = `pending_run_${Date.now()}`;
+    const id = globalThis.crypto.randomUUID();
     canceledPendingRunMessageIdsRef?.current?.delete?.(id);
-    setPendingRunMessage({
+    const saved = await setPendingRunMessage({
       id,
       content: trimmedContent,
       conversationId,
       createdAt: new Date().toISOString(),
       thinkingMode,
+      modelProviderId,
     });
-    setChatInput('');
+    if (!saved) return false;
+    if ((currentConversationIdRef?.current || currentConversationId) === targetConversationId) {
+      setChatInput(current => current.trim() === trimmedContent ? '' : current);
+    }
     setRunSteerNotice({
       id: `steer_notice_${Date.now()}`,
       conversationId,
@@ -83,8 +89,7 @@ export function createChatSteerActions({
     const activeRun = activeAgentRunRef.current;
     const targetConversationId = currentConversationIdRef?.current || currentConversationId;
     if (!activeRun?.runId || activeRun.conversationId !== targetConversationId) {
-      createPendingRunMessage(trimmedContent, { conversationId: targetConversationId });
-      setChatInput('');
+      await createPendingRunMessage(trimmedContent, { conversationId: targetConversationId });
       return;
     }
     if (chatAttachments.length > 0 || chatFileReferences.length > 0 || chatSkillReferences.length > 0) {
@@ -103,7 +108,7 @@ export function createChatSteerActions({
       thinkingMode: pendingRunMessage.thinkingMode,
     });
     if (ok) {
-      setPendingRunMessage((current) => (current?.id === pendingRunMessage.id ? null : current));
+      await refreshPendingMessages?.();
     }
   }
 
@@ -131,12 +136,12 @@ export function createChatSteerActions({
     });
   }
 
-  function queueRunSteerItemAfterRun(itemId) {
+  async function queueRunSteerItemAfterRun(itemId) {
     const item = findRunSteerItem(runSteerItems, itemId);
     if (!item?.content) return false;
-    setRunSteerItems((current) => removeRunSteerItem(current, itemId));
-    createPendingRunMessage(item.content, { conversationId: item.conversation_id });
-    return true;
+    const saved = await createPendingRunMessage(item.content, { conversationId: item.conversation_id });
+    if (saved) setRunSteerItems((current) => removeRunSteerItem(current, itemId));
+    return saved;
   }
 
   function discardRunSteerItem(itemId) {
@@ -154,18 +159,15 @@ export function createChatSteerActions({
     const activeRun = activeAgentRunRef.current;
     const targetConversationId = options.conversationId || currentConversationIdRef?.current || currentConversationId;
     if (!isChatSending || !activeRun?.runId || activeRun.conversationId !== targetConversationId) {
-      setPendingRunMessage((current) => (options.pendingId && current?.id === options.pendingId ? null : current));
       if (isChatSending) {
-        createPendingRunMessage(trimmedContent, { conversationId: targetConversationId });
-        return true;
+        return createPendingRunMessage(trimmedContent, { conversationId: targetConversationId });
       }
-      await sendChatPayloadRef.current?.(textOnlyPayload(trimmedContent, {
+      return sendChatPayloadRef.current?.({ ...textOnlyPayload(trimmedContent, {
         conversationId: targetConversationId,
         thinkingMode: options.thinkingMode || thinkingMode,
-      }));
-      return true;
+      }), ...(options.pendingId ? { pendingMessageId: options.pendingId } : {}) });
     }
-    const clientSteerId = `client_steer_${Date.now()}`;
+    const clientSteerId = options.pendingId ? `pending:${options.pendingId}` : globalThis.crypto.randomUUID();
     canceledRunSteerIdsRef?.current?.delete?.(clientSteerId);
     const steerItem = buildRunSteerItem({
       clientSteerId,
@@ -178,6 +180,7 @@ export function createChatSteerActions({
     setRunSteerNotice(null);
     try {
       const result = await apiPost(`/api/agent-runs/${encodeURIComponent(activeRun.runId)}/steer`, {
+        pending_message_id: options.pendingId || '',
         content: trimmedContent,
         expected_run_id: activeRun.runId,
         client_steer_id: clientSteerId,
@@ -248,51 +251,8 @@ function cancelRunSteerOnServer(item) {
   });
 }
 
-export function usePendingRunMessageAutoSend({
-  currentConversationId,
-  currentConversationIdRef,
-  canceledPendingRunMessageIdsRef,
-  isChatSending,
-  pendingRunMessage,
-  resumableRun,
-  sendChatPayloadRef,
-  setPendingRunMessage,
-  setRunSteerNotice,
-  thinkingMode,
-}) {
-  const pendingRunMessageRef = useRef(pendingRunMessage);
-  useEffect(() => {
-    pendingRunMessageRef.current = pendingRunMessage;
-  }, [pendingRunMessage]);
-
-  useEffect(() => {
-    if (isChatSending || !pendingRunMessage || resumableRun) return;
-    const nextMessage = pendingRunMessage;
-    if (nextMessage.canceled || canceledPendingRunMessageIdsRef?.current?.has?.(nextMessage.id)) {
-      setPendingRunMessage((current) => (current?.id === nextMessage.id ? null : current));
-      setRunSteerNotice(null);
-      return;
-    }
-    setPendingRunMessage(null);
-    setRunSteerNotice(null);
-    window.queueMicrotask(() => {
-      const latest = pendingRunMessageRef.current;
-      if (
-        canceledPendingRunMessageIdsRef?.current?.has?.(nextMessage.id) ||
-        (latest?.id === nextMessage.id && latest?.canceled)
-      ) {
-        return;
-      }
-      canceledPendingRunMessageIdsRef?.current?.delete?.(nextMessage.id);
-      sendChatPayloadRef.current?.(textOnlyPayload(nextMessage.content, {
-        conversationId: nextMessage.conversationId || currentConversationIdRef?.current || currentConversationId,
-        thinkingMode: nextMessage.thinkingMode || thinkingMode,
-      }));
-    });
-  }, [canceledPendingRunMessageIdsRef, currentConversationId, currentConversationIdRef, isChatSending, pendingRunMessage, resumableRun, sendChatPayloadRef, setPendingRunMessage, setRunSteerNotice, thinkingMode]);
-}
-
 export function useMissedRunSteerAutoQueue({
+  modelProviderId,
   currentConversationId,
   currentConversationIdRef,
   canceledPendingRunMessageIdsRef,
@@ -304,34 +264,34 @@ export function useMissedRunSteerAutoQueue({
   setRunSteerNotice,
   thinkingMode,
 }) {
+  const persisting = useRef(false);
   useEffect(() => {
-    if (isChatSending || resumableRun) return;
+    if (isChatSending || resumableRun || persisting.current) return;
     const missed = unappliedRunSteerItems(runSteerItems);
     if (missed.length === 0) return;
     const content = missed.map((item) => item.content).filter(Boolean).join('\n\n').trim();
     if (!content) return;
-    setRunSteerItems((current) =>
-      removeRunSteerItems(
-        current,
-        missed.flatMap((item) => [item.id, item.clientSteerId, item.steerId])
-      )
-    );
-    const pendingId = `pending_run_${Date.now()}`;
+    const pendingId = globalThis.crypto.randomUUID();
     canceledPendingRunMessageIdsRef?.current?.delete?.(pendingId);
-    setPendingRunMessage({
+    persisting.current = true;
+    Promise.resolve(setPendingRunMessage({
       id: pendingId,
       content,
       conversationId: missed[0]?.conversation_id || currentConversationIdRef?.current || currentConversationId,
       createdAt: new Date().toISOString(),
       thinkingMode,
-    });
-    setRunSteerNotice({
+      modelProviderId,
+    })).then(saved => {
+      if (!saved) return;
+      setRunSteerItems(current => removeRunSteerItems(current, missed.flatMap(item => [item.id, item.clientSteerId, item.steerId])));
+      setRunSteerNotice({
       id: `steer_missed_${Date.now()}`,
       conversationId: missed[0]?.conversation_id || currentConversationIdRef?.current || currentConversationId,
       status: 'queued',
       text: '引导没有赶上上一轮，已转为下一条消息。',
-    });
-  }, [canceledPendingRunMessageIdsRef, currentConversationId, currentConversationIdRef, isChatSending, resumableRun, runSteerItems, setPendingRunMessage, setRunSteerItems, setRunSteerNotice, thinkingMode]);
+      });
+    }).finally(() => { persisting.current = false; });
+  }, [modelProviderId, canceledPendingRunMessageIdsRef, currentConversationId, currentConversationIdRef, isChatSending, resumableRun, runSteerItems, setPendingRunMessage, setRunSteerItems, setRunSteerNotice, thinkingMode]);
 }
 
 export function useActiveAgentRunRef(activeAgentRun, activeAgentRunRef) {

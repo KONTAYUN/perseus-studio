@@ -83,10 +83,18 @@ func (s *Server) handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
+	// ParseMultipartForm's argument only limits memory, not total upload size.
+	r.Body = http.MaxBytesReader(w, r.Body, 65<<20)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "upload exceeds 64 MiB limit")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid multipart body")
 		return
 	}
+	defer r.MultipartForm.RemoveAll()
 
 	targetPath := r.FormValue("path")
 	overwrite := r.FormValue("overwrite") == "true"
@@ -97,9 +105,13 @@ func (s *Server) handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	content, err := io.ReadAll(file)
+	content, err := io.ReadAll(io.LimitReader(file, (64<<20)+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+	if len(content) > 64<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload exceeds 64 MiB limit")
 		return
 	}
 
@@ -136,7 +148,11 @@ func (s *Server) handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
-	result, err := files.WriteFile(r.Context(), req.Path, req.Content, "write")
+	result, err := files.WriteFileIfUnchanged(r.Context(), req.Path, req.Content, "write", req.ExpectedHash)
+	if errors.Is(err, workspace.ErrFileConflict) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		s.writeFileError(w, err)
 		return

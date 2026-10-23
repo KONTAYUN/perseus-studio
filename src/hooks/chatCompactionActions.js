@@ -13,7 +13,6 @@ export function createChatCompactionActions({
   isChatSending,
   loadConversations,
   setChatError,
-  setChatInput,
   setContextCompactionNotice,
   setConversationMessages,
 }) {
@@ -28,7 +27,6 @@ export function createChatCompactionActions({
     }
     const thinkingId = `temp_compact_${Date.now()}`;
     setChatError('');
-    setChatInput('');
     setConversationMessages((current) => [
       ...current,
       buildAssistantRunShell({

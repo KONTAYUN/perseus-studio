@@ -1,0 +1,99 @@
+.markdown-content {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.8;
+  letter-spacing: normal;
+  color: inherit;
+}
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content p { margin: 0.65em 0; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3,
+.markdown-content h4, .markdown-content h5, .markdown-content h6 {
+  margin: 1.25em 0 0.5em;
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+.markdown-content h1 { font-size: 1.85em; }
+.markdown-content h2 { font-size: 1.5em; }
+.markdown-content h3 { font-size: 1.25em; }
+.markdown-content h4 { font-size: 1.1em; }
+.markdown-content h5, .markdown-content h6 { font-size: 1em; }
+.markdown-content strong { font-weight: 700; }
+.markdown-content ul, .markdown-content ol { margin: 0.65em 0; padding-left: 1.65em; }
+.markdown-content ul { list-style: disc; }
+.markdown-content ol { list-style: decimal; }
+.markdown-content ul ul { list-style: circle; }
+.markdown-content li { margin: 0.18em 0; padding-left: 0.15em; }
+.markdown-content li > p { margin: 0.2em 0; }
+.markdown-content li > ul, .markdown-content li > ol { margin: 0.2em 0; }
+.markdown-content blockquote {
+  margin: 1em 0;
+  padding: 0.15em 1em;
+  border-left: 3px solid rgb(59 130 246 / 0.45);
+  color: #64748b;
+}
+.markdown-content a { color: #2563eb; text-decoration: underline; text-underline-offset: 3px; }
+.markdown-content hr { margin: 1.5em 0; border: 0; border-top: 1px solid var(--surface-line); }
+.markdown-content :not(pre) > code {
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  background: rgb(100 116 139 / 0.1);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.88em;
+  box-decoration-break: clone;
+}
+.markdown-content .code-fence {
+  margin: 0.9em 0;
+  overflow: hidden;
+  border: 1px solid rgb(100 116 139 / 0.18);
+  border-radius: var(--radius-control-sm);
+  background: #f4f6f8;
+}
+.code-fence-header {
+  display: flex;
+  min-height: 35px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 3px 8px 3px 13px;
+  border-bottom: 1px solid rgb(100 116 139 / 0.12);
+  background: rgb(100 116 139 / 0.04);
+  color: #64748b;
+  font: 11px/1.5 ui-sans-serif, system-ui, sans-serif;
+  user-select: none;
+}
+.code-copy-button { min-width: 58px; gap: 5px; font-weight: 500; }
+.markdown-content pre {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 13px 15px;
+  white-space: pre;
+  tab-size: 2;
+  font: 12.5px/1.8 ui-monospace, "Cascadia Code", Consolas, monospace;
+  letter-spacing: 0;
+  overscroll-behavior-inline: contain;
+}
+.markdown-content pre code { padding: 0; background: transparent; font: inherit; }
+.markdown-table-scroll { max-width: 100%; overflow-x: auto; margin: 1em 0; }
+.markdown-content table { border-collapse: collapse; width: 100%; margin: 0; font-size: 0.93em; }
+.markdown-content th, .markdown-content td { border: 1px solid rgb(100 116 139 / 0.22); padding: 7px 11px; text-align: left; vertical-align: top; min-width: 70px; }
+.markdown-content th { background: rgb(100 116 139 / 0.07); font-weight: 650; }
+.markdown-content :is(th, td)[align="center"] { text-align: center; }
+.markdown-content :is(th, td)[align="right"] { text-align: right; }
+.markdown-content img { max-width: 100%; height: auto; border-radius: 6px; }
+.markdown-content .contains-task-list { padding-left: 0.4em; list-style: none; }
+.markdown-content .task-list-item > input { margin: 0 0.55em 0 0; }
+.dark .markdown-content blockquote { color: #a1a9b7; }
+.dark .markdown-content a { color: #93bbfc; }
+.dark .markdown-content .code-fence { background: #202124; border-color: rgb(255 255 255 / 0.1); }
+.dark .code-fence-header { color: #a1a9b7; border-color: rgb(255 255 255 / 0.07); background: rgb(255 255 255 / 0.025); }
+.dark .markdown-content :not(pre) > code { background: rgb(255 255 255 / 0.08); }
+.dark .markdown-content th { background: rgb(255 255 255 / 0.045); }

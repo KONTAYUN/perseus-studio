@@ -4,7 +4,7 @@
 }
 
 .animate-in {
-  animation-duration: 260ms;
+  animation-duration: var(--motion-popover);
   animation-fill-mode: both;
   animation-timing-function: var(--ease-apple);
 }
@@ -14,11 +14,11 @@
 }
 
 .duration-300.animate-in {
-  animation-duration: 300ms;
+  animation-duration: var(--motion-modal);
 }
 
 .duration-500.animate-in {
-  animation-duration: 500ms;
+  animation-duration: var(--motion-panel);
 }
 
 .fade-in {
@@ -50,34 +50,34 @@
 }
 
 .animate-panel-appear {
-  animation: perseus-panel-appear 900ms var(--ease-apple-soft) both;
+  animation: perseus-panel-appear var(--motion-panel) var(--ease-apple-soft) both;
 }
 
 .motion-popover {
-  transform-origin: top center;
-  animation: perseus-popover-enter 320ms var(--ease-apple) both;
+  transform-origin: var(--popover-origin, top center);
+  animation: perseus-popover-enter var(--motion-popover) var(--ease-apple) both;
 }
 
 .motion-popover-right {
   transform-origin: left top;
-  animation: perseus-popover-right-enter 300ms var(--ease-apple) both;
+  animation: perseus-popover-right-enter var(--motion-popover) var(--ease-apple) both;
 }
 
 .motion-modal {
-  transform-origin: center 46%;
-  animation: perseus-modal-enter 420ms var(--ease-apple) both;
+  transform-origin: center;
+  animation: perseus-modal-enter var(--motion-modal) var(--ease-apple) both;
 }
 
 .motion-card {
-  animation: perseus-card-enter 460ms var(--ease-apple) both;
+  animation: perseus-card-enter var(--motion-popover) var(--ease-apple) both;
 }
 
 .motion-message {
-  animation: perseus-message-enter 420ms var(--ease-apple) both;
+  animation: perseus-message-enter var(--motion-popover) var(--ease-apple) both;
 }
 
 .motion-chip {
-  animation: perseus-chip-enter 260ms var(--ease-apple) both;
+  animation: perseus-chip-enter var(--motion-control) var(--ease-apple) both;
 }
 
 .motion-row {
@@ -116,6 +116,64 @@
 .motion-button:disabled:hover,
 .motion-button:disabled:active {
   transform: none;
+}
+
+.motion-popover[data-state] {
+  animation: none;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: opacity var(--motion-popover) var(--ease-apple), transform var(--motion-popover) var(--ease-apple);
+}
+
+.motion-popover[data-state='closed'] {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(var(--popover-offset, -4px)) scale(0.98);
+  transition-duration: var(--motion-fast);
+}
+
+.motion-dialog-backdrop {
+  opacity: 1;
+  transition: opacity var(--motion-modal) var(--ease-apple);
+}
+
+.motion-dialog-card {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: transform var(--motion-modal) var(--ease-apple), opacity var(--motion-modal) var(--ease-apple);
+}
+
+.motion-dialog-backdrop[data-state='closed'] {
+  pointer-events: none;
+  opacity: 0;
+  transition-duration: var(--motion-fast);
+}
+
+.motion-dialog-backdrop[data-state='closed'] .motion-dialog-card {
+  opacity: 0;
+  transform: translateY(6px) scale(0.99);
+  transition-duration: var(--motion-fast);
+}
+
+@starting-style {
+  .motion-popover[data-state='open'] {
+    opacity: 0;
+    transform: translateY(var(--popover-offset, -4px)) scale(0.98);
+  }
+  .motion-dialog-backdrop[data-state='open'] { opacity: 0; }
+  .motion-dialog-backdrop[data-state='open'] .motion-dialog-card {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @keyframes perseus-fade-in {
@@ -184,17 +242,14 @@
 @keyframes perseus-panel-appear {
   0% {
     opacity: 0;
-    transform: translateX(38px) scale(0.978);
-    filter: blur(2px);
+    transform: translateX(8px);
   }
   58% {
     opacity: 1;
-    filter: blur(0);
   }
   100% {
     opacity: 1;
     transform: translateX(0) scale(1);
-    filter: blur(0);
   }
 }
 
@@ -202,16 +257,13 @@
   from {
     opacity: 0;
     transform: translateY(-8px) scale(0.965);
-    filter: blur(1px);
   }
   65% {
     opacity: 1;
-    filter: blur(0);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
@@ -219,29 +271,24 @@
   from {
     opacity: 0;
     transform: translateX(10px) scale(0.97);
-    filter: blur(1px);
   }
   to {
     opacity: 1;
     transform: translateX(0) scale(1);
-    filter: blur(0);
   }
 }
 
 @keyframes perseus-modal-enter {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.97);
-    filter: blur(2px);
+    transform: translateY(6px) scale(0.99);
   }
   65% {
     opacity: 1;
-    filter: blur(0);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
@@ -259,7 +306,7 @@
 @keyframes perseus-message-enter {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.992);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;

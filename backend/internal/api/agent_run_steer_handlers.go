@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,9 +15,10 @@ import (
 )
 
 type steerAgentRunRequest struct {
-	Content       string `json:"content"`
-	ExpectedRunID string `json:"expected_run_id"`
-	ClientSteerID string `json:"client_steer_id"`
+	PendingMessageID string `json:"pending_message_id"`
+	Content          string `json:"content"`
+	ExpectedRunID    string `json:"expected_run_id"`
+	ClientSteerID    string `json:"client_steer_id"`
 }
 
 type cancelSteerRequest struct {
@@ -37,6 +39,16 @@ func (s *Server) steerAgentRun(ctx context.Context, userID, runID string, body i
 	}
 	if strings.TrimSpace(req.ExpectedRunID) != runID {
 		return store.AgentEvent{}, fmt.Errorf("expected_run_id does not match active run")
+	}
+	if req.PendingMessageID != "" {
+		if existing, err := s.runs.PendingSteerEvent(ctx, userID, req.PendingMessageID); err == nil {
+			if existing.RunID != runID {
+				return store.AgentEvent{}, store.ErrRequestConflict
+			}
+			return existing, nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return store.AgentEvent{}, err
+		}
 	}
 	run, err := s.runs.GetRun(ctx, userID, runID)
 	if err != nil {
@@ -63,21 +75,23 @@ func (s *Server) steerAgentRun(ctx context.Context, userID, runID string, body i
 		return store.AgentEvent{}, err
 	}
 	event, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
-		RunID:          runID,
-		UserID:         userID,
-		ConversationID: run.ConversationID,
-		MessageID:      userMessage.ID,
-		Type:           "agent_steer_received",
-		Level:          "info",
+		PendingMessageID: req.PendingMessageID,
+		RunID:            runID,
+		UserID:           userID,
+		ConversationID:   run.ConversationID,
+		MessageID:        userMessage.ID,
+		Type:             "agent_steer_received",
+		Level:            "info",
 		Payload: map[string]any{
-			"steer_id":        steerID,
-			"client_steer_id": clientSteerID,
-			"content":         content,
-			"content_preview": preview,
-			"created_at":      receivedAt.Format(time.RFC3339Nano),
-			"message_id":      userMessage.ID,
-			"user_message":    userMessage,
-			"message":         "已收到引导，会在下一次安全边界应用",
+			"pending_message_id": req.PendingMessageID,
+			"steer_id":           steerID,
+			"client_steer_id":    clientSteerID,
+			"content":            content,
+			"content_preview":    preview,
+			"created_at":         receivedAt.Format(time.RFC3339Nano),
+			"message_id":         userMessage.ID,
+			"user_message":       userMessage,
+			"message":            "已收到引导，会在下一次安全边界应用",
 		},
 	})
 	if err != nil {
@@ -85,6 +99,11 @@ func (s *Server) steerAgentRun(ctx context.Context, userID, runID string, body i
 			return store.AgentEvent{}, fmt.Errorf("%w; rollback steer message failed: %v", err, deleteErr)
 		}
 		return store.AgentEvent{}, err
+	}
+	if event.MessageID != userMessage.ID {
+		if err := s.conversations.DeleteMessage(ctx, userID, run.ConversationID, userMessage.ID); err != nil {
+			return store.AgentEvent{}, err
+		}
 	}
 	return event, nil
 }

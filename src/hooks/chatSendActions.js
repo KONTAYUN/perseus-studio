@@ -1,4 +1,5 @@
-import { apiPostFormWithSignal } from '../api/client';
+import { apiPost, apiPostForm } from '../api/client.js';
+import { createRunSubmission, submitRunRequest } from './chatRunSubmission.js';
 import { formatChatError } from './chatErrorUtils';
 import { buildAssistantRunShell, mapPendingAssistant, mergeCommittedRunStart } from './chatStateUtils.js';
 
@@ -178,12 +179,10 @@ export function createChatSendActions({
     setIsChatSending(true);
 
     let conversationID = conversationIDForPayload;
-    const abortController = new AbortController();
-    const control = {
-      conversationId: conversationID || conversationIDForPayload || '',
-      abort: () => abortController.abort(),
-    };
+    const control = createRunSubmission(conversationID || conversationIDForPayload || '');
+    if (payload.pendingMessageId) control.requestId = `pending:${payload.pendingMessageId}`;
     activeChatAbortRef.current = control;
+    let accepted = false;
     try {
       if (conversationID) {
         if (shouldUpdateVisibleConversation()) {
@@ -194,12 +193,16 @@ export function createChatSendActions({
         conversationID = await ensureConversation(selectedModel.id);
         control.conversationId = conversationID;
       }
-      const formData = buildMessageFormData(payload, selectedModel.id, thinkingMode, filesToSend);
-      const result = await apiPostFormWithSignal(
+      if (control.canceled) throw new DOMException('Aborted', 'AbortError');
+      const formData = payload.pendingMessageId ? null : buildMessageFormData(payload, selectedModel.id, thinkingMode, filesToSend);
+      const result = await submitRunRequest(control, (options) => payload.pendingMessageId
+        ? apiPost(`/api/pending-messages/${encodeURIComponent(payload.pendingMessageId)}/send`, {}, options)
+        : apiPostForm(
         `/api/conversations/${encodeURIComponent(conversationID)}/messages`,
         formData,
-        abortController.signal
-      );
+        { ...options, headers: { 'Idempotency-Key': control.requestId } }
+      ));
+      accepted = true;
       if (shouldUpdateVisibleConversation()) {
         setCurrentConversationId(result.conversation.id);
         currentConversationIdRef.current = result.conversation.id;
@@ -234,11 +237,15 @@ export function createChatSendActions({
         await onAssistantToolEvents?.(result.assistant_message?.attachments || []);
       }
     } catch (error) {
+      if (payload.pendingMessageId && !accepted) {
+        setVisibleConversationMessages(current => current.filter(item => item.id !== optimisticId && item.id !== thinkingId));
+      }
       handleSendError(error, thinkingId, conversationID);
     } finally {
       if (activeChatAbortRef.current === control) activeChatAbortRef.current = null;
       setIsChatSending(false);
     }
+    return accepted;
   }
 
   function setQueuedUserMessage(payload, content) {

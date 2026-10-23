@@ -59,31 +59,23 @@ func (s *Server) completeConversationRun(ctx context.Context, input conversation
 			return
 		}
 	}
+	if assistantMessage.ID != "" && reply.Outcome != "" {
+		updated, err := s.conversations.PatchMessageMeta(ctx, input.UserID, assistantMessage.ID, completionMessageMetaJSON(reply.Outcome, assistantMessage.SegmentIndex, input.RunID), "final")
+		if err != nil {
+			s.failConversationRunStartedAt(ctx, input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
+			return
+		}
+		assistantMessage = updated
+	}
 	if reply.IncompleteReason == ai.IncompleteReasonBudgetExhausted {
 		if err := s.completeConversationRunWithBudgetExhaustion(ctx, input.UserID, input.ConversationID, input.UserMessageID, input.RunID, assistantMessage, reply); err != nil {
 			s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
 		}
 		return
 	}
-	if err := s.ai.ClearRunCheckpoints(ctx, ai.RunOptions{UserID: input.UserID, RunID: input.RunID}); err != nil {
-		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
-		return
-	}
-	if _, err := s.publishRunStrict(ctx, input.UserID, input.RunID, store.AgentRunSucceeded, "completed", store.UpdateAgentRunInput{
+	if err := s.completeRunStrict(ctx, input.UserID, input.RunID, store.CompleteAgentRunInput{
 		AssistantMessageID: assistantMessage.ID,
-		SetCompletedAt:     true,
-	}); err != nil {
-		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
-		return
-	}
-	if _, err := s.appendRunEventStrict(ctx, store.AgentEventInput{
-		RunID:          input.RunID,
-		UserID:         input.UserID,
-		ConversationID: input.ConversationID,
-		MessageID:      assistantMessage.ID,
-		Type:           "run_completed",
-		Level:          "info",
-		Payload:        map[string]any{"message": "run completed"},
+		Outcome:            reply.Outcome,
 	}); err != nil {
 		s.failConversationRunStartedAt(context.Background(), input.UserID, input.ConversationID, input.UserMessageID, input.RunID, err, input.RunStartedAt)
 		return
@@ -108,7 +100,7 @@ func (s *Server) createFinalConversationRunMessage(ctx context.Context, input co
 		AttachmentsJSON: assistantAttachments,
 		Status:          "final",
 		SegmentIndex:    1,
-		MetaJSON:        messageMetaJSON("assistant_segment", 1, input.RunID),
+		MetaJSON:        completionMessageMetaJSON(reply.Outcome, 1, input.RunID),
 	})
 	if err != nil {
 		return store.Message{}, err

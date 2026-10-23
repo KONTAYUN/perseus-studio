@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"webide-backend/internal/store"
 )
@@ -16,6 +17,7 @@ var (
 	ErrPathExists       = errors.New("path already exists")
 	ErrTrashManagedOnly = errors.New("回收站只能通过回收站面板管理")
 	ErrMoveIntoSelf     = errors.New("不能移动到自身文件夹内部")
+	ErrFileConflict     = errors.New("文件已被其他操作修改，请重新加载或确认保留本地修改")
 )
 
 const (
@@ -24,6 +26,8 @@ const (
 )
 
 type Service struct {
+	writeMu sync.Mutex
+	patchMu sync.Mutex
 	db      *sql.DB
 	root    string
 	rootAbs string
@@ -45,6 +49,10 @@ func NewService(db *sql.DB, root, userID string) (*Service, error) {
 
 func (s *Service) Migrate(ctx context.Context) error {
 	tables := `
+CREATE TABLE IF NOT EXISTS workspace_patch_journals (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, state TEXT NOT NULL, plan_json TEXT NOT NULL, created_at DATETIME NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_patch_pending ON workspace_patch_journals(user_id) WHERE state='pending';
 CREATE TABLE IF NOT EXISTS file_versions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL DEFAULT '',
@@ -71,6 +79,14 @@ CREATE TABLE IF NOT EXISTS workspace_item_orders (
   position INTEGER NOT NULL,
   updated_at DATETIME NOT NULL,
   PRIMARY KEY (user_id, parent_path, child_name)
+);
+CREATE TABLE IF NOT EXISTS workspace_change_reverts (
+  user_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  result_json TEXT NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (user_id, operation_id)
 );
 `
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {

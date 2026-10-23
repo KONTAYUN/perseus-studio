@@ -1,6 +1,6 @@
 ARG IMAGE_REGISTRY=docker.io
 
-FROM ${IMAGE_REGISTRY}/library/node:20-bookworm AS frontend-build
+FROM ${IMAGE_REGISTRY}/library/node:22-bookworm AS frontend-build
 WORKDIR /src
 COPY package*.json ./
 RUN npm ci
@@ -9,7 +9,7 @@ COPY public ./public
 COPY src ./src
 RUN npm run build
 
-FROM ${IMAGE_REGISTRY}/library/golang:1.25-bookworm AS backend-build
+FROM ${IMAGE_REGISTRY}/library/golang:1.27-bookworm AS backend-build
 ARG APP_VERSION=dev
 ARG APP_COMMIT=unknown
 ARG APP_BUILT_AT=unknown

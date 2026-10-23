@@ -154,124 +154,68 @@ func TestParseOpenAIStreamDoesNotRevealRequiredTextWithoutTool(t *testing.T) {
 	}
 }
 
-func TestProviderPatchFilteredEmitterHidesPatchBlockOnly(t *testing.T) {
-	var deltas []string
-	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
-		EmitText: func(text string) {
-			deltas = append(deltas, text)
-		},
-	}))
-
-	for _, piece := range []string{
-		"我会创建文件。\n",
-		"*** Begin",
-		" Patch\n*** Add File: draft.md\n+secret\n*** End Patch",
-		"\n已经处理。",
-	} {
-		emitter.Add(piece)
+func TestProviderPatchFilteredEmitterPreservesPatchExample(t *testing.T) {
+	want := "我会解释。\n*** Begin Patch\n*** Add File: draft.md\n+demo\n*** End Patch\n这是示例。"
+	var got strings.Builder
+	e := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{EmitText: func(text string) { got.WriteString(text) }}))
+	for _, ch := range want {
+		e.Add(string(ch))
 	}
-	emitter.Flush()
-
-	if got := strings.Join(deltas, ""); got != "我会创建文件。\n\n已经处理。" {
-		t.Fatalf("unexpected streamed text: %q deltas=%#v", got, deltas)
-	}
-	if strings.Contains(emitter.StreamedContent(), "*** Begin Patch") || strings.Contains(emitter.StreamedContent(), "secret") {
-		t.Fatalf("patch content leaked through filter: %q", emitter.StreamedContent())
+	e.Flush()
+	if got.String() != want || e.StreamedContent() != want {
+		t.Fatalf("display text changed: %q", got.String())
 	}
 }
 
-func TestProviderPatchFilteredEmitterSuppressesPatchOnlyWhitespace(t *testing.T) {
-	var deltas []string
-	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
-		EmitText: func(text string) {
-			deltas = append(deltas, text)
-		},
-	}))
-
-	for _, piece := range []string{
-		"\n",
-		"*** Begin Patch\n*** Add File: draft.md\n+secret\n",
-		"*** End Patch",
-	} {
-		emitter.Add(piece)
+func TestProviderPatchFilteredEmitterPreservesPatchOnlyWhitespace(t *testing.T) {
+	want := "\n*** Begin Patch\n*** Add File: draft.md\n+demo\n*** End Patch"
+	var got strings.Builder
+	e := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{EmitText: func(text string) { got.WriteString(text) }}))
+	for _, ch := range want {
+		e.Add(string(ch))
 	}
-	emitter.Flush()
-
-	if got := strings.Join(deltas, ""); got != "" {
-		t.Fatalf("patch-only whitespace should not stream, got %q deltas=%#v", got, deltas)
-	}
-	if got := emitter.StreamedContent(); got != "" {
-		t.Fatalf("patch-only whitespace should not be recorded as public content, got %q", got)
+	e.Flush()
+	if got.String() != want || e.StreamedContent() != want {
+		t.Fatalf("display text changed: %q", got.String())
 	}
 }
 
-func TestProviderPatchFilteredEmitterSuppressesPatchFenceOnlyWrapper(t *testing.T) {
-	var deltas []string
-	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
-		EmitText: func(text string) {
-			deltas = append(deltas, text)
-		},
-	}))
-
-	for _, piece := range []string{
-		"```patch\n",
-		"*** Begin Patch\n*** Add File: draft.md\n+secret\n*** End Patch",
-		"\n```",
-	} {
-		emitter.Add(piece)
+func TestProviderPatchFilteredEmitterPreservesPatchFenceOnlyWrapper(t *testing.T) {
+	want := "```patch\n*** Begin Patch\n*** Add File: draft.md\n+demo\n*** End Patch\n```"
+	var got strings.Builder
+	e := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{EmitText: func(text string) { got.WriteString(text) }}))
+	for _, ch := range want {
+		e.Add(string(ch))
 	}
-	emitter.Flush()
-
-	if got := strings.Join(deltas, ""); got != "" {
-		t.Fatalf("fenced patch-only wrapper should not stream, got %q deltas=%#v", got, deltas)
+	e.Flush()
+	if got.String() != want || e.StreamedContent() != want {
+		t.Fatalf("display text changed: %q", got.String())
 	}
 }
 
 func TestProviderPatchFilteredEmitterStreamsRealTextAroundFencedPatch(t *testing.T) {
-	var deltas []string
-	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
-		EmitText: func(text string) {
-			deltas = append(deltas, text)
-		},
-	}))
-
-	for _, piece := range []string{
-		"我会创建文件。\n\n```patch\n*** Begin",
-		" Patch\n*** Add File: draft.md\n+secret\n*** End Patch\n",
-		"```\n已经处理。",
-	} {
-		emitter.Add(piece)
+	want := "讲解\n```diff\n*** Begin Patch\n*** End Patch\n```\n结束"
+	var got strings.Builder
+	e := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{EmitText: func(text string) { got.WriteString(text) }}))
+	for _, ch := range want {
+		e.Add(string(ch))
 	}
-	emitter.Flush()
-
-	if got := strings.Join(deltas, ""); got != "我会创建文件。\n已经处理。" {
-		t.Fatalf("unexpected streamed text: %q deltas=%#v", got, deltas)
+	e.Flush()
+	if got.String() != want || e.StreamedContent() != want {
+		t.Fatalf("display text changed: %q", got.String())
 	}
 }
 
-func TestProviderPatchFilteredEmitterSuppressesRepeatedEndPatchTail(t *testing.T) {
-	var deltas []string
-	emitter := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{
-		EmitText: func(text string) {
-			deltas = append(deltas, text)
-		},
-	}))
-
-	for _, piece := range []string{
-		"*** Begin Patch\n*** Add File: draft.md\n+secret\n",
-		"*** End Patch",
-		"\n*** End Patch\n我会核对文件是否落盘。",
-	} {
-		emitter.Add(piece)
+func TestProviderPatchFilteredEmitterPreservesRepeatedEndPatchTail(t *testing.T) {
+	want := "*** Begin Patch\n*** End Patch\n*** End Patch"
+	var got strings.Builder
+	e := newProviderPatchFilteredEmitter(newToolGatedStreamDeltaEmitter(providerStreamParseOptions{EmitText: func(text string) { got.WriteString(text) }}))
+	for _, ch := range want {
+		e.Add(string(ch))
 	}
-	emitter.Flush()
-
-	got := strings.Join(deltas, "")
-	if got != "我会核对文件是否落盘。" {
-		t.Fatalf("unexpected streamed text: %q deltas=%#v", got, deltas)
-	}
-	if strings.Contains(got, "*** End Patch") || strings.Contains(got, "secret") {
-		t.Fatalf("patch marker leaked through filter: %q", got)
+	e.Flush()
+	if got.String() != want || e.StreamedContent() != want {
+		t.Fatalf("display text changed: %q", got.String())
 	}
 }
 
@@ -345,7 +289,7 @@ func TestParseOpenAIStreamStreamsAttemptCompletionResultFromToolArguments(t *tes
 	}
 }
 
-func TestParseOpenAIStreamDoesNotPreviewInternalCompletionProtocol(t *testing.T) {
+func TestParseOpenAIStreamAllowsExplainingCompletionProtocol(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"done_1","type":"function","function":{"name":"attempt_completion","arguments":"{\"result\":\"需要使用 *** Begin Patch"}}]}}]}`,
 		``,
@@ -363,7 +307,7 @@ func TestParseOpenAIStreamDoesNotPreviewInternalCompletionProtocol(t *testing.T)
 	if err != nil {
 		t.Fatalf("parseOpenAIStream returned error: %v", err)
 	}
-	if turn.CompletionResultStreamed || len(deltas) != 0 {
+	if !turn.CompletionResultStreamed || !strings.Contains(strings.Join(deltas, ""), "*** Begin Patch") {
 		t.Fatalf("internal completion protocol should not stream, streamed=%v deltas=%#v", turn.CompletionResultStreamed, deltas)
 	}
 }
@@ -593,7 +537,7 @@ func TestParseAnthropicStreamDetectsTruncatedToolArguments(t *testing.T) {
 	if item.ArgumentsJSONValid || item.ArgumentsJSONError == "" {
 		t.Fatalf("expected invalid JSON details, got %#v", item)
 	}
-	if !item.LooksLikeLongWrite || item.RecommendedTool != "assistant_text_patch" {
+	if !item.LooksLikeLongWrite || item.RecommendedTool != "apply_workspace_patch" {
 		t.Fatalf("expected long-write recommendation, got %#v", item)
 	}
 }
@@ -612,7 +556,7 @@ func TestStreamToolDiagnosticsRecommendLineReplaceForLargeEdits(t *testing.T) {
 		t.Fatalf("expected one stream tool call diagnostic, got %#v", summary.StreamToolCalls)
 	}
 	item := summary.StreamToolCalls[0]
-	if !item.LooksLikeLargeEdit || item.RecommendedTool != "assistant_text_patch" {
+	if !item.LooksLikeLargeEdit || item.RecommendedTool != "apply_workspace_patch" {
 		t.Fatalf("expected line replacement recommendation, got %#v", item)
 	}
 	if item.OldTextChars == 0 || item.NewTextChars == 0 {

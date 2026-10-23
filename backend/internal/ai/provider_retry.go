@@ -91,9 +91,6 @@ func isRetryableProviderAttemptError(err error, statusCode int) bool {
 func providerRetryDelay(policy ProviderRetryPolicy, attempt int, resp *http.Response) (time.Duration, time.Duration) {
 	if resp != nil {
 		if retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()); retryAfter > 0 {
-			if policy.MaxDelay > 0 && retryAfter > policy.MaxDelay {
-				return policy.MaxDelay, retryAfter
-			}
 			return retryAfter, retryAfter
 		}
 	}
@@ -127,8 +124,11 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 		return 0
 	}
 	if seconds, err := strconv.ParseFloat(value, 64); err == nil {
-		if seconds <= 0 {
+		if math.IsNaN(seconds) || seconds <= 0 {
 			return 0
+		}
+		if math.IsInf(seconds, 1) || seconds >= float64(math.MaxInt64)/float64(time.Second) {
+			return time.Duration(math.MaxInt64)
 		}
 		return time.Duration(seconds * float64(time.Second))
 	}

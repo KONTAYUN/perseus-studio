@@ -1,4 +1,4 @@
-import { apiGet } from '../api/client';
+import { apiGetBlob } from '../api/client';
 import { collectDownloadFiles, createZipBlob, isTextPath } from './ideUtils';
 
 export function downloadBlob(fileName, blob) {
@@ -28,31 +28,21 @@ export function handleDownloadDragStart(e, path, content) {
   window.setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-export async function readTextFileForDownload(path) {
-  if (!isTextPath(path)) {
-    throw new Error('第一版仅支持文本文件下载');
-  }
-  const file = await apiGet(`/api/files/read?path=${encodeURIComponent(path)}`);
-  return { path: file.path, content: file.content };
+export async function readFileForDownload(path) {
+  return apiGetBlob(`/api/files/download?path=${encodeURIComponent(path)}`);
 }
 
 export async function buildZipDownloadBlob(items, treeData) {
-  const downloadFiles = collectDownloadFiles(items, treeData);
-  const textFiles = downloadFiles.filter((file) => isTextPath(file.path));
-  const skippedCount = downloadFiles.length - textFiles.length;
-
-  if (textFiles.length === 0) {
-    throw new Error('没有可下载的文本文件');
-  }
-
+  const files = collectDownloadFiles(items, treeData);
+  if (files.length === 0) throw new Error('没有可下载的文件');
+  if (files.length > 65535) throw new Error('文件过多，请分批下载');
   const entries = [];
-  for (const item of textFiles) {
-    const file = await readTextFileForDownload(item.path);
-    entries.push({ path: file.path, content: file.content });
+  let totalBytes = 0;
+  for (const item of files) {
+    const blob = await readFileForDownload(item.path);
+    totalBytes += blob.size;
+    if (totalBytes > 256 * 1024 * 1024) throw new Error('批量下载超过 256 MiB，请分批下载');
+    entries.push({ path: item.path, bytes: new Uint8Array(await blob.arrayBuffer()) });
   }
-
-  return {
-    blob: createZipBlob(entries),
-    skippedCount,
-  };
+  return { blob: createZipBlob(entries) };
 }

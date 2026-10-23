@@ -14,6 +14,8 @@ import (
 )
 
 func (s *Service) ReorderPath(path, targetParentPath, previousPath, nextPath string) (PathChangeResult, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	cleanOld, absOld, err := s.sanitizePath(path)
 	if err != nil {
 		return PathChangeResult{}, err
@@ -78,6 +80,10 @@ func (s *Service) ReorderPath(path, targetParentPath, previousPath, nextPath str
 	previousName := reorderSiblingName(cleanPrevious, cleanOld, cleanNew)
 	nextName := reorderSiblingName(cleanNext, cleanOld, cleanNew)
 	if err := s.rewriteSiblingOrder(cleanParent, filepath.Base(cleanNew), previousName, nextName); err != nil {
+		if cleanNew != cleanOld {
+			_, rollbackErr := s.renameValidated(cleanNew, cleanOld)
+			return PathChangeResult{}, errors.Join(err, rollbackErr)
+		}
 		return PathChangeResult{}, err
 	}
 
@@ -292,8 +298,8 @@ VALUES (?, ?, ?, ?, ?)
 
 	if _, err := tx.Exec(`
 DELETE FROM workspace_item_orders
-WHERE user_id = ? AND (parent_path = ? OR parent_path LIKE ?)
-`, s.userID, newPath, newPath+"/%"); err != nil {
+WHERE user_id = ? AND (parent_path = ? OR substr(parent_path, 1, ?) = ?)
+`, s.userID, newPath, utf8.RuneCountInString(newPath)+1, newPath+"/"); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`
@@ -306,8 +312,8 @@ WHERE user_id = ? AND parent_path = ?
 	if _, err := tx.Exec(`
 UPDATE workspace_item_orders
 SET parent_path = ? || substr(parent_path, ?)
-WHERE user_id = ? AND parent_path LIKE ?
-`, newPath, utf8.RuneCountInString(oldPath)+1, s.userID, oldPath+"/%"); err != nil {
+WHERE user_id = ? AND substr(parent_path, 1, ?) = ?
+`, newPath, utf8.RuneCountInString(oldPath)+1, s.userID, utf8.RuneCountInString(oldPath)+1, oldPath+"/"); err != nil {
 		return err
 	}
 
@@ -323,9 +329,9 @@ WHERE user_id = ?
   AND (
     (parent_path = ? AND child_name = ?)
     OR parent_path = ?
-    OR parent_path LIKE ?
+    OR substr(parent_path, 1, ?) = ?
   )
-`, s.userID, parent, name, path, path+"/%")
+`, s.userID, parent, name, path, utf8.RuneCountInString(path)+1, path+"/")
 	return err
 }
 

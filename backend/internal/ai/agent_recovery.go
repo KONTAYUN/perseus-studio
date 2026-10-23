@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"webide-backend/internal/failure"
 )
 
 func (r *agentRuntime) callModelWithRecovery(ctx context.Context, round int) (agentModelTurn, error) {
@@ -26,7 +27,7 @@ func (r *agentRuntime) callModelWithRecovery(ctx context.Context, round int) (ag
 }
 
 func (r *agentRuntime) shouldCheckpointResume(ctx context.Context, err error) bool {
-	if err == nil || isContextCanceledError(err) || !isCheckpointRecoverableProviderError(err) {
+	if err == nil || failure.Code(err) != "" || isContextCanceledError(err) || !isCheckpointRecoverableProviderError(err) {
 		return false
 	}
 	if ctx != nil && ctx.Err() != nil {

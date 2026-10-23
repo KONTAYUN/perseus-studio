@@ -179,6 +179,12 @@ func compactedToolResultNoticeWithReason(toolName string, event ToolEvent, reaso
 	if isReadWorkspaceTool(toolName) {
 		payload["read_content_state"] = readContentStateForReference(contentState)
 	}
+	if event.ExecutionOutcome != "" {
+		payload["execution_outcome"] = event.ExecutionOutcome
+		payload["failure_class"] = event.FailureClass
+		payload["exit_code"] = event.ExitCode
+		payload["timed_out"] = event.TimedOut
+	}
 	return mustJSON(payload)
 }
 

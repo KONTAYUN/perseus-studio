@@ -1,9 +1,9 @@
 .ui-panel-surface {
   border-radius: var(--radius-panel);
   transition:
-    border-color 460ms var(--ease-apple),
-    box-shadow 680ms var(--ease-apple),
-    background-color 460ms var(--ease-apple);
+    border-color var(--motion-control) var(--ease-apple),
+    box-shadow var(--motion-control) var(--ease-apple),
+    background-color var(--motion-control) var(--ease-apple);
   box-shadow:
     var(--surface-shadow-panel),
     0 0 18px 1px rgb(59 130 246 / 0),
@@ -46,45 +46,6 @@
     0 0 48px 8px rgb(59 130 246 / 0.22),
     inset 0 0 0 1px rgb(96 165 250 / 0.34),
     inset 0 1px 0 var(--surface-highlight);
-}
-
-.panel-active-glow-fixed {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: 0;
-  height: 0;
-  z-index: 95;
-  pointer-events: none;
-  border: 1px solid rgb(96 165 250 / 0);
-  border-radius: var(--radius-panel);
-  opacity: 0;
-  box-shadow:
-    0 0 14px 1px rgb(59 130 246 / 0),
-    0 0 34px 7px rgb(37 99 235 / 0),
-    inset 0 0 0 1px rgb(96 165 250 / 0);
-  will-change: opacity, border-color, box-shadow;
-  transition:
-    opacity 460ms var(--ease-apple),
-    border-color 460ms var(--ease-apple),
-    box-shadow 460ms var(--ease-apple);
-}
-
-.panel-active-glow-fixed-on {
-  border-color: rgb(96 165 250 / 0.52);
-  opacity: 1;
-  box-shadow:
-    0 0 18px 2px rgb(59 130 246 / 0.32),
-    0 0 42px 8px rgb(37 99 235 / 0.14),
-    inset 0 0 0 1px rgb(96 165 250 / 0.22);
-}
-
-.dark .panel-active-glow-fixed-on {
-  border-color: rgb(96 165 250 / 0.62);
-  box-shadow:
-    0 0 20px 2px rgb(59 130 246 / 0.4),
-    0 0 48px 9px rgb(59 130 246 / 0.2),
-    inset 0 0 0 1px rgb(96 165 250 / 0.3);
 }
 
 .ui-overlay-surface {

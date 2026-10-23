@@ -165,7 +165,7 @@ func (s *Server) handleSkillUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid multipart body")
 		return
 	}
@@ -179,7 +179,11 @@ func (s *Server) handleSkillUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "只支持上传 .zip 格式的 Skill")
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(file, 26<<20))
+	raw, err := io.ReadAll(io.LimitReader(file, (26<<20)+1))
+	if len(raw) > 26<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "Skill archive exceeds 26 MiB")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read file")
 		return

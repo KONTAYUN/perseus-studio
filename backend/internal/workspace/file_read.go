@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"webide-backend/internal/failure"
 )
 
 func (s *Service) ReadFile(path string) (FileReadResult, error) {
@@ -17,14 +18,14 @@ func (s *Service) ReadFile(path string) (FileReadResult, error) {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return FileReadResult{}, fmt.Errorf("file does not exist")
+			return FileReadResult{}, fmt.Errorf("file does not exist: %w", err)
 		}
 		return FileReadResult{}, err
 	}
 	if info.IsDir() {
 		return FileReadResult{}, fmt.Errorf("path is a directory")
 	}
-	content, err := os.ReadFile(absPath)
+	content, err := readFileBounded(absPath, maxFileReadBytes)
 	if err != nil {
 		return FileReadResult{}, err
 	}
@@ -55,7 +56,7 @@ func (s *Service) ReadTextFileRange(path string, startLine, endLine, maxChars in
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return TextReadResult{}, fmt.Errorf("file does not exist")
+			return TextReadResult{}, fmt.Errorf("file does not exist: %w", err)
 		}
 		return TextReadResult{}, err
 	}
@@ -63,9 +64,9 @@ func (s *Service) ReadTextFileRange(path string, startLine, endLine, maxChars in
 		return TextReadResult{}, fmt.Errorf("path is a directory")
 	}
 	if !isTextPath(cleanPath) {
-		return TextReadResult{}, fmt.Errorf("unsupported file type")
+		return TextReadResult{}, failure.New("workspace_unsupported_file_type", fmt.Errorf("unsupported file type").Error(), nil)
 	}
-	content, err := os.ReadFile(absPath)
+	content, err := readFileBounded(absPath, maxTextReadBytes)
 	if err != nil {
 		return TextReadResult{}, err
 	}

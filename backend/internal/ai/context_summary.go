@@ -43,6 +43,20 @@ func (s *Service) prepareMessagesWithConversationSummary(ctx context.Context, co
 	if err != nil {
 		return messages
 	}
+	// A queued task owns an earlier conversation prefix. A newer foreground
+	// summary must not inject future turns into that task's input.
+	if opts.TaskID != "" && summary.UntilMessageID != "" {
+		found := false
+		for _, message := range messages {
+			if message.ID == summary.UntilMessageID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return messages
+		}
+	}
 
 	if opts.TaskID == "" {
 		result := s.maybeRefreshConversationSummary(ctx, conversationID, provider, messages, summary, opts, runtimeProfileForProvider(provider), "auto_threshold", "")
@@ -226,7 +240,7 @@ func buildConversationSummaryPrompt(previousSummary string, messages []store.Mes
 		if role == "" {
 			role = "MESSAGE"
 		}
-		content := truncateWithContextNote(message.Content, 1800, "message")
+		content := truncateWithContextNote(buildUserTextWithAttachments(message.Content, StoredMessageAttachments(message)), 1800, "message and uploaded attachments")
 		if strings.TrimSpace(message.AttachmentsJSON) != "" && strings.TrimSpace(message.AttachmentsJSON) != "[]" {
 			content += "\n[attachments metadata present; do not treat as file content unless explicitly described]"
 		}

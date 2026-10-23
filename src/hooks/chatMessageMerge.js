@@ -1,8 +1,17 @@
 import { normalizeConversationMessages } from './chatStateUtils.js';
 
-export function mergeConversationSnapshotPreservingActive(currentMessages, snapshotMessages) {
+export function mergeConversationSnapshotPreservingActive(currentMessages, snapshotMessages, { authoritative = false, runId = '' } = {}) {
   const current = currentMessages || [];
   const snapshot = normalizeConversationMessages(snapshotMessages || []);
+  if (authoritative) {
+    const snapshotIds = new Set(snapshot.map(item => item.id));
+    const locals = current.filter(item => !snapshotIds.has(item.id) && ((item.role === 'user' && (item.queued || item.pending)) || belongsToOtherActiveRun(item, runId)));
+    const currentById = new Map(current.map(item => [item.id, item]));
+    const settled = snapshot.map(item => belongsToOtherActiveRun(currentById.get(item.id), runId)
+      ? currentById.get(item.id) : item.role === 'assistant' && item.status !== 'streaming'
+      ? { ...item, pending: false, activeMessageId: '', loadingState: null } : item);
+    return [...settled, ...locals];
+  }
   if (current.length === 0) return snapshot;
 
   const snapshotById = new Map(snapshot.map((item) => [item.id, item]));
@@ -34,10 +43,14 @@ export function mergeConversationSnapshotPreservingActive(currentMessages, snaps
 }
 
 function shouldKeepActiveMessageContent(current, snapshot) {
-  if (!current?.pending) return false;
+  if (!current?.pending || (snapshot?.status && snapshot.status !== 'streaming')) return false;
   if (current.role !== 'assistant' || snapshot?.role !== 'assistant') return false;
   const currentContent = String(current.content || '');
   if (currentContent === '') return false;
   const snapshotContent = String(snapshot.content || '');
   return currentContent.length >= snapshotContent.length || !snapshotContent.startsWith(currentContent);
+}
+
+function belongsToOtherActiveRun(item, runId) {
+  return Boolean(runId && item?.role === 'assistant' && item.pending && item.runId && item.runId !== runId);
 }

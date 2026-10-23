@@ -34,6 +34,8 @@ func parseWorkspacePatch(input string) (workspacePatch, error) {
 		line := lines[i]
 		header := strings.TrimSpace(strings.TrimSuffix(line, "\n"))
 		switch {
+		case line == "\n" && isWorkspacePatchSeparator(lines, i):
+			continue
 		case header == "*** End Patch":
 			finishOp()
 			if i != len(lines)-1 {
@@ -125,4 +127,18 @@ func parseWorkspacePatch(input string) (workspacePatch, error) {
 		}
 	}
 	return workspacePatch{}, parsePatchApplyError("patch apply failed: missing *** End Patch", "missing *** End Patch", len(lines), patchDiagnosticLineWindow(lines, len(lines)-1), workspacePatchCandidatePathsLoose(text))
+}
+
+// Blank lines between operations are formatting, not an unmarked hunk line.
+// A blank line in file content must still use its explicit space/+/− prefix.
+func isWorkspacePatchSeparator(lines []string, index int) bool {
+	for _, line := range lines[index+1:] {
+		if line == "\n" {
+			continue
+		}
+		header := strings.TrimSpace(line)
+		return header == "*** End Patch" || strings.HasPrefix(header, "*** Add File: ") ||
+			strings.HasPrefix(header, "*** Update File: ") || strings.HasPrefix(header, "*** Delete File: ") || strings.HasPrefix(header, "@@")
+	}
+	return false
 }

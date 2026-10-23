@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"webide-backend/internal/failure"
 	"webide-backend/internal/idgen"
 	"webide-backend/internal/store"
 	"webide-backend/internal/workspace"
@@ -50,7 +51,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 				"diagnostic_log_id": diagID,
 				"operation_hash":    operationHash,
 			})
-			return "", ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: userFriendlyToolLabel(name), Status: "failed", Error: wrapped.Error(), OperationHash: operationHash}, WithDiagnosticID(wrapped, diagID)
+			return "", ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: "工具未执行", Status: "failed", Error: wrapped.Error(), OperationHash: operationHash}, WithDiagnosticID(wrapped, diagID)
 		}
 		if recorded.ID != "" {
 			toolCallID = recorded.ID
@@ -67,8 +68,14 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		if !jsonObjectHasField(result, "error") {
 			result = mustJSON(map[string]any{
 				"error":         errorText,
-				"recovery_hint": toolFailureRecoveryHint(name, errorText),
+				"failure_class": toolFailureClass(name, err),
+				"recovery_hint": recoveryHintForFailure(toolFailureClass(name, err)),
 			})
+		}
+		var failurePayload map[string]any
+		if json.Unmarshal([]byte(result), &failurePayload) == nil {
+			failurePayload["failure_class"] = toolFailureClass(name, err)
+			result = mustJSON(failurePayload)
 		}
 		summary = errorText
 		s.recordToolDiagnostic(ctx, opts, conversationID, messageID, name, argumentsJSON, targetSummary, durationMS, err)
@@ -76,6 +83,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	}
 	if status == "success" && verification.Status == "failed" {
 		status = "failed"
+		err = failure.New("workspace_verification_failed", verification.Message, nil)
 		errorText = verification.Message
 		result = mustJSON(map[string]any{
 			"error":         errorText,
@@ -104,31 +112,33 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 	}
 	if errorText != "" {
 		eventPayload["error"] = errorText
-		eventPayload["recovery_hint"] = toolFailureRecoveryHint(name, errorText)
+		eventPayload["recovery_hint"] = recoveryHintForFailure(toolFailureClass(name, err))
 	}
-	event := ToolEvent{ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: label, Status: status, TargetSummary: targetSummary, OperationHash: operationHash, Path: path, Error: errorText, DurationMS: durationMS}
+	event := ToolEvent{FailureClass: toolFailureClass(name, err), ToolCallID: toolCallID, ToolName: name, StatusKind: manifestStatusKind(name), Label: label, Status: status, TargetSummary: targetSummary, OperationHash: operationHash, Path: path, Error: errorText, DurationMS: durationMS}
 	if status == "success" {
 		var meta struct {
-			Path          string              `json:"path"`
-			OldPath       string              `json:"old_path"`
-			NewPath       string              `json:"new_path"`
-			ChangedPaths  []string            `json:"changed_paths"`
-			Moved         []WorkspacePathMove `json:"moved"`
-			Operation     string              `json:"operation"`
-			Question      string              `json:"question"`
-			Options       []string            `json:"options"`
-			AllowFreeform *bool               `json:"allow_freeform"`
-			VersionID     string              `json:"version_id"`
-			Hash          string              `json:"hash"`
-			SkillID       string              `json:"skill_id"`
-			Command       string              `json:"command"`
-			Cwd           string              `json:"cwd"`
-			Stdout        string              `json:"stdout"`
-			Stderr        string              `json:"stderr"`
-			ExitCode      *int                `json:"exit_code"`
-			TimedOut      bool                `json:"timed_out"`
-			Provider      string              `json:"provider"`
-			URL           string              `json:"url"`
+			ExecutionOutcome string                 `json:"execution_outcome"`
+			Path             string                 `json:"path"`
+			OldPath          string                 `json:"old_path"`
+			NewPath          string                 `json:"new_path"`
+			ChangedPaths     []string               `json:"changed_paths"`
+			Moved            []WorkspacePathMove    `json:"moved"`
+			Changes          []workspace.FileChange `json:"changes"`
+			Operation        string                 `json:"operation"`
+			Question         string                 `json:"question"`
+			Options          []string               `json:"options"`
+			AllowFreeform    *bool                  `json:"allow_freeform"`
+			VersionID        string                 `json:"version_id"`
+			Hash             string                 `json:"hash"`
+			SkillID          string                 `json:"skill_id"`
+			Command          string                 `json:"command"`
+			Cwd              string                 `json:"cwd"`
+			Stdout           string                 `json:"stdout"`
+			Stderr           string                 `json:"stderr"`
+			ExitCode         *int                   `json:"exit_code"`
+			TimedOut         bool                   `json:"timed_out"`
+			Provider         string                 `json:"provider"`
+			URL              string                 `json:"url"`
 		}
 		if err := json.Unmarshal([]byte(result), &meta); err == nil {
 			if meta.Path != "" {
@@ -138,6 +148,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 			event.NewPath = meta.NewPath
 			event.ChangedPaths = meta.ChangedPaths
 			event.Moved = meta.Moved
+			event.Changes = meta.Changes
 			event.Operation = meta.Operation
 			event.Question = meta.Question
 			event.Options = meta.Options
@@ -151,10 +162,15 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 			event.Stderr = meta.Stderr
 			event.ExitCode = meta.ExitCode
 			event.TimedOut = meta.TimedOut
+			event.ExecutionOutcome = meta.ExecutionOutcome
+			eventPayload["execution_outcome"] = meta.ExecutionOutcome
 			event.Provider = meta.Provider
 			event.URL = meta.URL
 		}
 	}
+	event.Label = completedToolLabel(event)
+	eventPayload["label"] = event.Label
+	eventPayload["failure_class"] = event.FailureClass
 	changedPathsJSON := ""
 	if len(event.ChangedPaths) > 0 {
 		changedRaw, _ := json.Marshal(event.ChangedPaths)
@@ -215,6 +231,9 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		if len(event.Moved) > 0 {
 			eventPayload["moved"] = event.Moved
 		}
+		if len(event.Changes) > 0 {
+			eventPayload["changes"] = event.Changes
+		}
 		event.Operation = workspaceFileChangedOperation(name, event)
 		if event.Operation != "" {
 			eventPayload["operation"] = event.Operation
@@ -245,6 +264,7 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 				"new_path":       event.NewPath,
 				"changed_paths":  event.ChangedPaths,
 				"moved":          event.Moved,
+				"changes":        event.Changes,
 				"operation":      event.Operation,
 				"hash":           event.Hash,
 				"version_id":     event.VersionID,

@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"time"
 
+	"webide-backend/internal/failure"
 	"webide-backend/internal/store"
 	"webide-backend/internal/usersvc"
+	"webide-backend/internal/workspace"
 )
 
 const providerHTTPTransportProtocol = "http/1.1"
@@ -52,36 +54,39 @@ type EditorPanelContext struct {
 }
 
 type ToolEvent struct {
-	Type          string              `json:"type,omitempty"`
-	ToolCallID    string              `json:"tool_call_id,omitempty"`
-	ToolName      string              `json:"tool_name"`
-	StatusKind    string              `json:"status_kind,omitempty"`
-	Label         string              `json:"label"`
-	Status        string              `json:"status"`
-	TargetSummary string              `json:"target_summary,omitempty"`
-	OperationHash string              `json:"operation_hash,omitempty"`
-	Question      string              `json:"question,omitempty"`
-	Options       []string            `json:"options,omitempty"`
-	AllowFreeform *bool               `json:"allow_freeform,omitempty"`
-	SkillID       string              `json:"skill_id,omitempty"`
-	Path          string              `json:"path,omitempty"`
-	OldPath       string              `json:"old_path,omitempty"`
-	NewPath       string              `json:"new_path,omitempty"`
-	ChangedPaths  []string            `json:"changed_paths,omitempty"`
-	Moved         []WorkspacePathMove `json:"moved,omitempty"`
-	Operation     string              `json:"operation,omitempty"`
-	VersionID     string              `json:"version_id,omitempty"`
-	Hash          string              `json:"hash,omitempty"`
-	Command       string              `json:"command,omitempty"`
-	Cwd           string              `json:"cwd,omitempty"`
-	Stdout        string              `json:"stdout,omitempty"`
-	Stderr        string              `json:"stderr,omitempty"`
-	ExitCode      *int                `json:"exit_code,omitempty"`
-	TimedOut      bool                `json:"timed_out,omitempty"`
-	Provider      string              `json:"provider,omitempty"`
-	URL           string              `json:"url,omitempty"`
-	Error         string              `json:"error,omitempty"`
-	DurationMS    int64               `json:"duration_ms,omitempty"`
+	FailureClass     string                 `json:"failure_class,omitempty"`
+	ExecutionOutcome string                 `json:"execution_outcome,omitempty"`
+	Type             string                 `json:"type,omitempty"`
+	ToolCallID       string                 `json:"tool_call_id,omitempty"`
+	ToolName         string                 `json:"tool_name"`
+	StatusKind       string                 `json:"status_kind,omitempty"`
+	Label            string                 `json:"label"`
+	Status           string                 `json:"status"`
+	TargetSummary    string                 `json:"target_summary,omitempty"`
+	OperationHash    string                 `json:"operation_hash,omitempty"`
+	Question         string                 `json:"question,omitempty"`
+	Options          []string               `json:"options,omitempty"`
+	AllowFreeform    *bool                  `json:"allow_freeform,omitempty"`
+	SkillID          string                 `json:"skill_id,omitempty"`
+	Path             string                 `json:"path,omitempty"`
+	OldPath          string                 `json:"old_path,omitempty"`
+	NewPath          string                 `json:"new_path,omitempty"`
+	ChangedPaths     []string               `json:"changed_paths,omitempty"`
+	Changes          []workspace.FileChange `json:"changes,omitempty"`
+	Moved            []WorkspacePathMove    `json:"moved,omitempty"`
+	Operation        string                 `json:"operation,omitempty"`
+	VersionID        string                 `json:"version_id,omitempty"`
+	Hash             string                 `json:"hash,omitempty"`
+	Command          string                 `json:"command,omitempty"`
+	Cwd              string                 `json:"cwd,omitempty"`
+	Stdout           string                 `json:"stdout,omitempty"`
+	Stderr           string                 `json:"stderr,omitempty"`
+	ExitCode         *int                   `json:"exit_code,omitempty"`
+	TimedOut         bool                   `json:"timed_out,omitempty"`
+	Provider         string                 `json:"provider,omitempty"`
+	URL              string                 `json:"url,omitempty"`
+	Error            string                 `json:"error,omitempty"`
+	DurationMS       int64                  `json:"duration_ms,omitempty"`
 }
 
 type WorkspacePathMove struct {
@@ -109,6 +114,7 @@ type WebExtractResult struct {
 }
 
 type Reply struct {
+	Outcome          string                 `json:"outcome,omitempty"`
 	Content          string                 `json:"content"`
 	ToolEvents       []ToolEvent            `json:"tool_events,omitempty"`
 	BackgroundTask   *BackgroundTaskRequest `json:"background_task,omitempty"`
@@ -121,7 +127,20 @@ type ConversationTitleResult struct {
 	Title string `json:"title"`
 }
 
+// ModelIdentity snapshots the selected model without credentials or endpoint URLs.
+type ModelIdentity struct {
+	ProviderID   string
+	ProviderName string
+	ModelID      string
+	Protocol     string
+}
+
 type RunOptions struct {
+	// AllowedWorkspacePaths is an exact-path restriction, independent of references.
+	// Nil means ordinary workspace policy. Empty non-nil denies filesystem access.
+	AllowedWorkspacePaths       []string
+	MaxProviderRequests         int
+	MaxRunDuration              time.Duration
 	UserID                      string
 	UserRole                    string
 	RunID                       string
@@ -139,6 +158,7 @@ type RunOptions struct {
 	OnCompletionResultDelta     func(delta string)
 	OnCompletionResultDiscard   func()
 	OnProviderAttempt           func()
+	OnModelResolved             func(ModelIdentity)
 }
 
 type ExpectedOutput struct {
@@ -221,7 +241,14 @@ func (s *Service) GenerateTaskReply(ctx context.Context, conversationID, message
 	return s.generateReply(ctx, conversationID, messageID, modelProviderID, messages, attachments, opts)
 }
 
-func (s *Service) generateReply(ctx context.Context, conversationID, messageID, modelProviderID string, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {
+func (s *Service) generateReply(ctx context.Context, conversationID, messageID, modelProviderID string, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (reply Reply, runErr error) {
+	ctx, cancel := withRunRequestBudget(ctx, opts)
+	defer cancel()
+	defer func() {
+		if code := failure.Code(context.Cause(ctx)); code == "run_deadline_exceeded" {
+			runErr = context.Cause(ctx)
+		}
+	}()
 	opts.UserRole = normalizeRunUserRole(opts.UserRole)
 	attachments = s.enrichSelectedSkillAttachmentsForRole(ctx, opts.UserID, opts.UserRole, attachments)
 	opts.Attachments = attachments
@@ -229,6 +256,9 @@ func (s *Service) generateReply(ctx context.Context, conversationID, messageID, 
 	provider, err := s.configs.GetModelProviderForUser(ctx, opts.UserID, opts.UserRole, modelProviderID)
 	if err != nil {
 		return Reply{}, err
+	}
+	if opts.OnModelResolved != nil {
+		opts.OnModelResolved(ModelIdentity{ProviderID: provider.ID, ProviderName: provider.Name, ModelID: provider.ModelID, Protocol: provider.Protocol})
 	}
 	if !provider.Enabled {
 		return Reply{}, fmt.Errorf("selected model is disabled")
