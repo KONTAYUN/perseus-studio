@@ -27,7 +27,7 @@ services:
       PERSEUS_ADMIN_PASSWORD: "${PERSEUS_ADMIN_PASSWORD:-}"
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-}"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${PERSEUS_PORT:-8080}:8080"
     volumes:
       - ./data:/data
     restart: unless-stopped
