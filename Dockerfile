@@ -7,6 +7,7 @@ RUN npm ci
 COPY index.html postcss.config.js tailwind.config.js vite.config.js ./
 COPY public ./public
 COPY src ./src
+COPY backend/internal/document/profile.json ./backend/internal/document/profile.json
 RUN npm run build
 
 FROM ${IMAGE_REGISTRY}/library/golang:1.27-bookworm AS backend-build
