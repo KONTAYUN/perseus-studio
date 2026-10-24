@@ -32,13 +32,41 @@ func (r *agentRuntime) contentOnlyCompletionPolicy(turn agentModelTurn) ContentO
 	if r.lastToolFailed && r.lastToolFailure.Recoverable {
 		return ContentOnlyCompletionPolicy{Accept: false, Reason: "recoverable_tool_failure_requires_action"}
 	}
-	if r.hasSuccessfulReadOnlyWorkspaceEvent() {
+	// A plain-text answer is a valid way to finish once a read-only tool has
+	// succeeded and nothing was changed. Read-only web lookups count the same as
+	// read-only workspace reads; otherwise a pure "search the web and answer"
+	// request can only end through attempt_completion, which many models never
+	// call after receiving search results.
+	readOnlyReason := ""
+	switch {
+	case r.hasSuccessfulReadOnlyWorkspaceEvent():
+		readOnlyReason = "read_only_workspace_tool_completed"
+	case r.hasSuccessfulReadOnlyWebEvent():
+		readOnlyReason = "read_only_web_tool_completed"
+	}
+	if readOnlyReason != "" {
 		if attachmentsRequireToolLoop(r.attachments) {
 			return ContentOnlyCompletionPolicy{Accept: false, Reason: "selected_workspace_reference_requires_terminal_or_action"}
 		}
-		return ContentOnlyCompletionPolicy{Accept: true, Reason: "read_only_workspace_tool_completed"}
+		return ContentOnlyCompletionPolicy{Accept: true, Reason: readOnlyReason}
 	}
 	return ContentOnlyCompletionPolicy{Accept: false, Reason: "action_boundary_requires_action"}
+}
+
+func (r *agentRuntime) hasSuccessfulReadOnlyWebEvent() bool {
+	if r == nil {
+		return false
+	}
+	for _, event := range r.events {
+		if event.Status != "success" {
+			continue
+		}
+		switch event.ToolName {
+		case "perseus_search_web", "web_extract":
+			return true
+		}
+	}
+	return false
 }
 
 func (r *agentRuntime) hasSuccessfulReadOnlyWorkspaceEvent() bool {
