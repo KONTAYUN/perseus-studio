@@ -24,11 +24,27 @@ export async function open(page, content) {
   return path;
 }
 export async function append(page, locator, text) {
-  await locator.click(); await page.keyboard.press('End'); await page.keyboard.insertText(text);
+  await locator.click(); await waitForCaret(locator);
+  await page.keyboard.press('End'); await page.keyboard.insertText(text);
+}
+export async function waitForCaret(locator, atEnd = false) {
+  // Native selectionchange and the editor's focus reconciliation run after
+  // click/key dispatch. Observe the settled caret before sending the next input.
+  await locator.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect.poll(() => locator.evaluate((element, end) => {
+    const selection = window.getSelection();
+    if (!selection?.isCollapsed || !element.contains(selection.anchorNode)) return false;
+    if (!end) return true;
+    const remaining = document.createRange();
+    remaining.selectNodeContents(element);
+    remaining.setStart(selection.anchorNode, selection.anchorOffset);
+    return remaining.toString() === '';
+  }, atEnd)).toBe(true);
 }
 export async function paste(page, { html = '', text = '' }) {
   // Deliver real DataTransfer payloads through the editor's DOM event boundary;
   // unlike OS clipboard permissions this is supported by all three engines.
+  await waitForCaret(rich(page));
   await rich(page).evaluate((element, payload) => {
     const data = new DataTransfer();
     if (payload.html) data.setData('text/html', payload.html);

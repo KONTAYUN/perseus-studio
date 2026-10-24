@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { paste } from './helpers/document.js';
+import { paste, waitForCaret } from './helpers/document.js';
 
 async function api(page, path, body) {
   return page.evaluate(async ({ path, body }) => {
@@ -157,7 +157,10 @@ test('one remaining row/column is protected; delete table is undoable and prose 
 
 test('Tab appends a final row, Shift+Tab moves back, and Mod+Enter escapes the table', async ({ page }) => {
   await open(page, source);
-  await rich(page).locator('td').last().click();
+  const lastCell = rich(page).locator('td').last();
+  await lastCell.getByText('B2', { exact: true }).click();
+  await expect(tools(page)).toBeVisible();
+  await waitForCaret(lastCell);
   await page.keyboard.press('Tab');
   await page.keyboard.insertText('新增末行');
   await expect(rich(page).locator('tr')).toHaveCount(4);

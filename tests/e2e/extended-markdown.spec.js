@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { api, open, rich, read, append, paste } from './helpers/document.js';
+import { api, open, rich, read, append, paste, waitForCaret } from './helpers/document.js';
 
 test('native extensions and inert special payloads survive adjacent prose edits and reload', async ({ page }) => {
   const raw = '<details>摘要原文</details>', content = `---\ntitle: 原稿\n---\n\n${raw}\n\n正文 $x^2$ 脚注[^n] [[资料]]\n\n[^n]: **注释**\n\n尾段`;
@@ -82,8 +82,11 @@ test('merged tables and script payloads are preserved locally and never execute'
 
 test('paste in code blocks preserves literal text rather than interpreting Markdown', async ({ page }) => {
   const path = await open(page, '```txt\n原文\n```');
-  await rich(page).locator('pre code').getByText('原文', { exact: true }).click();
+  const code = rich(page).locator('pre code');
+  await code.getByText('原文', { exact: true }).click();
+  await waitForCaret(code);
   await rich(page).press('Control+End');
+  await waitForCaret(code, true);
   await paste(page, { text: '\n# 原样标题\n**文字**' });
   await expect.poll(async () => (await read(page, path)).content).toContain('原文\n# 原样标题\n**文字**');
   await expect(rich(page).locator('h1,strong')).toHaveCount(0);
