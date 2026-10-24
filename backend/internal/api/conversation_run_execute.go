@@ -341,12 +341,20 @@ func (s *Server) executeConversationRun(ctx context.Context, userID, userRole, c
 		s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
 		return
 	}
+	action, err := s.documentActionForRun(ctx, userID, userMessageID)
+	if err != nil {
+		s.failConversationRunStartedAt(ctx, userID, conversationID, userMessageID, runID, err, runStartedAt)
+		return
+	}
+	items, attachmentPayloads = documentRunContext(action, items, attachmentPayloads, userMessageID)
 	reply, err := s.ai.GenerateReply(ctx, conversationID, userMessageID, modelProviderID, items, attachmentPayloads, ai.RunOptions{
-		UserID:       userID,
-		UserRole:     userRole,
-		RunID:        runID,
-		ThinkingMode: thinkingMode,
-		Log:          logEvent,
+		DocumentAction:        action,
+		AllowedWorkspacePaths: documentActionPaths(action),
+		UserID:                userID,
+		UserRole:              userRole,
+		RunID:                 runID,
+		ThinkingMode:          thinkingMode,
+		Log:                   logEvent,
 		Event: func(eventType, level string, payload map[string]any) {
 			streamState := assistantStreamState{
 				ActiveMessageID:      activeAssistantMessageID,

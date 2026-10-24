@@ -41,6 +41,17 @@ func (r *agentRuntime) restoreDurableToolLedger(ctx context.Context) error {
 			return fmt.Errorf("恢复前文件核验失败（%s）：%s。请核对工作区后开启新一轮", call.ID, verification.Message)
 		}
 		event := toolEventFromLedger(call)
+		if event.Operation == "document_repair_staged" || event.Operation == "document_chunk_staged" {
+			if !recorded[call.ID] {
+				r.events = append(r.events, event)
+				if event.Operation == "document_chunk_staged" {
+					r.appliedMutations[call.OperationHash] = event
+					r.recordChunkWriteSuccess(agentToolCall{Name: call.ToolName, ArgumentsJSON: call.ArgumentsJSON}, &event)
+				}
+			}
+			r.requiresCompletion = true
+			continue
+		}
 		r.appliedMutations[call.OperationHash] = event
 		r.events = append(r.events, event)
 		r.performedMutation = true

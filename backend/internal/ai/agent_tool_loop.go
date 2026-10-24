@@ -146,6 +146,12 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 		r.events = append(r.events, event)
 		return r.toolErrorJSON(call.Name, errText), true, nil, false, nil
 	}
+	if !r.opts.DocumentAction.Allows(call.Name) {
+		message := "格式修复只允许读取目标文稿、提交修复候选、询问或结束"
+		r.recordToolError(call.Name, executionToolArgumentsJSON(call), message)
+		r.events = append(r.events, r.invalidToolCallEvent(ctx, call, message))
+		return r.toolErrorJSON(call.Name, message), true, nil, false, nil
+	}
 	if r.allowTask && call.Name == "start_background_task" {
 		r.requiresCompletion = true
 		request, err := parseBackgroundTaskRequest(call.ArgumentsJSON, lastUserMessageContent(r.messages))
@@ -228,8 +234,10 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 	if event.Status == "success" && call.Name == "load_perseus_toolset" {
 		markLoadedToolset(r.loadedToolsets, call.ArgumentsJSON, r.allowTask)
 	}
-	if event.Status == "success" && isWorkspaceMutationTool(call.Name) {
-		r.performedMutation = true
+	if event.Status == "success" && isWorkspaceMutationTool(call.Name) && event.Operation != "document_repair_staged" {
+		if event.Operation != "document_chunk_staged" {
+			r.performedMutation = true
+		}
 		if operationHash != "" {
 			r.appliedMutations[operationHash] = event
 		}
@@ -258,6 +266,11 @@ func (r *agentRuntime) processOneToolCall(ctx context.Context, call agentToolCal
 }
 
 func (r *agentRuntime) alreadyAppliedToolResult(call agentToolCall, previous ToolEvent) (string, ToolEvent) {
+	if previous.Operation == "document_chunk_staged" {
+		previous.ToolCallID = call.ID
+		previous.Label = "分块已暂存，正式文件未修改"
+		return mustJSON(map[string]any{"operation": "document_chunk_staged", "path": previous.Path, "hash": previous.Hash, "needs_finalize": true, "message": "This chunk is already staged. Continue or finalize; original file is unchanged."}), previous
+	}
 	previous.ToolCallID = call.ID
 	previous.Status = "success"
 	previous.Label = userFriendlyToolLabel(call.Name)

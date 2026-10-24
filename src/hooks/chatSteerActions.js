@@ -51,6 +51,9 @@ export function createChatSteerActions({
     const activeRunConversationId = activeAgentRunRef.current?.conversationId || '';
     const targetConversationId = currentConversationIdRef?.current || currentConversationId;
     const conversationId = options.conversationId || activeRunConversationId || targetConversationId;
+    if (options.documentAction && pendingRunMessage?.conversationId === conversationId) {
+      throw new Error('当前对话已有挂起消息，请发送或处理该消息后再请求格式调整。原消息已保留。');
+    }
     const id = globalThis.crypto.randomUUID();
     canceledPendingRunMessageIdsRef?.current?.delete?.(id);
     const saved = await setPendingRunMessage({
@@ -60,9 +63,10 @@ export function createChatSteerActions({
       createdAt: new Date().toISOString(),
       thinkingMode,
       modelProviderId,
+      documentAction: options.documentAction,
     });
     if (!saved) return false;
-    if ((currentConversationIdRef?.current || currentConversationId) === targetConversationId) {
+    if (!options.documentAction && (currentConversationIdRef?.current || currentConversationId) === targetConversationId) {
       setChatInput(current => current.trim() === trimmedContent ? '' : current);
     }
     setRunSteerNotice({
@@ -102,6 +106,10 @@ export function createChatSteerActions({
 
   async function sendPendingRunMessageAsSteer() {
     if (!pendingRunMessage?.content) return;
+    if (pendingRunMessage.documentAction) {
+      setRunSteerNotice({ status: 'warn', conversationId: pendingRunMessage.conversationId, text: '格式修复需要独立执行，将在当前任务结束后运行。' });
+      return;
+    }
     const ok = await sendRunSteer(pendingRunMessage.content, {
       pendingId: pendingRunMessage.id,
       conversationId: pendingRunMessage.conversationId,

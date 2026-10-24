@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 const pendingSteerSelect = `SELECT id,run_id,user_id,conversation_id,message_id,task_id,type,level,seq,payload_json,created_at FROM agent_events WHERE user_id=? AND type='agent_steer_received' AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.pending_message_id') END=? LIMIT 1`
@@ -31,6 +32,9 @@ func (s *AgentRunStore) appendPendingSteer(ctx context.Context, in AgentEventInp
 	p, err := scanPending(tx.QueryRowContext(ctx, `SELECT `+pendingColumns+` FROM pending_conversation_messages p WHERE p.user_id=? AND p.id=?`, in.UserID, in.PendingMessageID))
 	if err != nil {
 		return AgentEvent{}, err
+	}
+	if p.DocumentAction != nil {
+		return AgentEvent{}, fmt.Errorf("文稿修复必须作为独立授权任务执行，不能插入其他任务")
 	}
 	payload, ok := in.Payload.(map[string]any)
 	if !ok || in.Type != "agent_steer_received" || p.ConversationID != in.ConversationID || payload["content"] != p.Content || payload["client_steer_id"] != "pending:"+p.ID {

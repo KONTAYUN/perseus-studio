@@ -6,6 +6,7 @@ export default function useIdeEditorPanels({
   editorRef,
   layout,
   loadTree,
+  renamePath,
   setErrorMessage,
   setSelectedItemPath,
   setSelectedItemType,
@@ -13,6 +14,7 @@ export default function useIdeEditorPanels({
   const makeEditor = (panelId) =>
     useEditorTabs({
       loadTree,
+      renamePath,
       setActivePanel: (id) => {
         layout.setActivePanel(id === 'editor' ? panelId : id);
         layout.setActiveEditorPanelId(panelId);
@@ -78,6 +80,7 @@ export default function useIdeEditorPanels({
     let movedSnapshot = null;
     if (options.sourcePanelId && options.sourcePanelId !== panelId) {
       const source = editorPanels[options.sourcePanelId];
+      if (source) await source.flushAutoSave();
       movedSnapshot = source?.getTabSnapshot(path) || null;
       if (source && !(await source.detachTab(path))) return;
     }
@@ -120,6 +123,9 @@ export default function useIdeEditorPanels({
   }
 
   async function closePanel(panelId) {
+    if (editorPanels[panelId]?.isConvertingFile) return false;
+    try { await editorPanels[panelId]?.flushAutoSave(); }
+    catch (error) { setErrorMessage?.(`关闭面板前保存未完成：${error.message}`); return false; }
     const canRemove = await (async () => {
       const panel = layout.panels.find((item) => item.id === panelId);
       if (!panel || panel.type !== 'editor') return true;
@@ -151,6 +157,12 @@ export default function useIdeEditorPanels({
   }
 
   return {
+    setLayoutColumns: async columns => {
+      try {
+        for (const { editor } of visibleEditorEntries()) await editor.flushAutoSave();
+        layout.setLayoutColumns(columns);
+      } catch (error) { setErrorMessage?.(`切换布局前保存未完成：${error.message}`); }
+    },
     activeEditor,
     addPanel,
     buildCurrentFileContext,

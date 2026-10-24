@@ -13,6 +13,7 @@ import (
 
 	"webide-backend/internal/ai"
 	"webide-backend/internal/config"
+	"webide-backend/internal/document"
 	"webide-backend/internal/idgen"
 	"webide-backend/internal/runqueue"
 	"webide-backend/internal/store"
@@ -67,14 +68,16 @@ type searchFilesRequest struct {
 }
 
 type writeFileRequest struct {
-	Path         string  `json:"path"`
-	Content      string  `json:"content"`
-	ExpectedHash *string `json:"expected_hash"`
+	Path           string  `json:"path"`
+	Content        string  `json:"content"`
+	ExpectedHash   *string `json:"expected_hash"`
+	ProfileVersion string  `json:"profile_version,omitempty"`
 }
 
 type renameRequest struct {
-	OldPath string `json:"old_path"`
-	NewPath string `json:"new_path"`
+	OldPath      string  `json:"old_path"`
+	NewPath      string  `json:"new_path"`
+	ExpectedHash *string `json:"expected_hash"`
 }
 
 type reorderRequest struct {
@@ -99,10 +102,11 @@ type updateConversationRequest struct {
 }
 
 type createConversationMessageRequest struct {
-	Content         string          `json:"content"`
-	AttachmentsJSON json.RawMessage `json:"attachments"`
-	ModelProviderID string          `json:"model_provider_id"`
-	ThinkingMode    string          `json:"thinking_mode"`
+	DocumentAction  *document.Action `json:"document_action,omitempty"`
+	Content         string           `json:"content"`
+	AttachmentsJSON json.RawMessage  `json:"attachments"`
+	ModelProviderID string           `json:"model_provider_id"`
+	ThinkingMode    string           `json:"thinking_mode"`
 }
 
 type branchConversationRequest struct {
@@ -193,6 +197,13 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/api/files/tree", s.handleFilesTree)
 	s.mux.HandleFunc("/api/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("/api/files/read", s.handleFilesRead)
+	s.mux.HandleFunc("/api/files/image", s.handleFilesImage)
+	s.mux.HandleFunc("/api/documents/profile", s.handleDocumentProfile)
+	s.mux.HandleFunc("/api/documents/images", s.handleDocumentImages)
+	s.mux.HandleFunc("/api/documents/validate", s.handleDocumentValidate)
+	s.mux.HandleFunc("/api/documents/versions", s.handleDocumentVersions)
+	s.mux.HandleFunc("/api/documents/restore", s.handleDocumentRestore)
+	s.mux.HandleFunc("/api/documents/repairs", s.handleDocumentRepairs)
 	s.mux.HandleFunc("/api/files/download", s.handleFilesDownload)
 	s.mux.HandleFunc("/api/workspace/changes", s.handleWorkspaceChanges)
 	s.mux.HandleFunc("/api/files/upload", s.handleFilesUpload)

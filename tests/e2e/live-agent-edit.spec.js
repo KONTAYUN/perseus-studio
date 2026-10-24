@@ -41,8 +41,7 @@ for (const model of models.length ? models : ['not configured']) {
       await page.getByTestId('layout-3').click();
       await page.getByTestId(`toggle-folder-${folder}`).click();
       await page.getByTestId(`file-row-${draft}`).click();
-      await page.getByRole('button', { name: '切换为纯文本（当前：富文本）', exact: true }).click();
-      await expect(page.getByTestId('editor-textarea')).toHaveValue('# Test\nstatus: pending\n');
+      await expect(page.getByTestId('rich-text-editor').locator('p')).toHaveText('status: pending');
       const accepted = page.waitForResponse((response) => response.request().method() === 'POST' && /\/messages$/.test(response.url()));
       await page.getByTestId('chat-input').fill(`请直接在当前会话完成这次小型文件编辑并实际保存：先读取 ${draft} 和 ${empty}，把 ${draft} 中的 status: pending 改为 status: done，保留其他文字；向已有空文件 ${empty} 写入一行 EMPTY_FILE_FIXED；新建 ${output}，内容为一行 LIVE_EDIT_OK。请使用工作区编辑工具，不要只提供建议，不要启动后台任务。完成后核验三个文件。`);
       await page.getByTestId('chat-send-button').click();
@@ -59,7 +58,7 @@ for (const model of models.length ? models : ['not configured']) {
       expect((await read(draft)).content).toBe('# Test\nstatus: done\n');
       expect((await read(empty)).content.trim()).toBe('EMPTY_FILE_FIXED');
       expect((await read(output)).content.trim()).toBe('LIVE_EDIT_OK');
-      await expect(page.getByTestId('editor-textarea')).toHaveValue('# Test\nstatus: done\n');
+      await expect(page.getByTestId('rich-text-editor').locator('p')).toHaveText('status: done');
       console.log(JSON.stringify({ model, run_id: run.id, status: finished.status, verified_files: [draft, empty, output] }));
     } finally {
       if (run?.id) await api(page, `/api/agent-runs/${run.id}/cancel`, {}).catch(() => {});

@@ -4,13 +4,17 @@ go 1.25.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.4.0
+	github.com/gohugoio/hugo-goldmark-extensions/passthrough v0.5.0
 	github.com/openai/openai-go v0.1.0-beta.2
+	github.com/yuin/goldmark v1.8.2
+	go.abhg.dev/goldmark/frontmatter v0.3.0
 	golang.org/x/crypto v0.50.0
 	golang.org/x/sys v0.43.0
 	modernc.org/sqlite v1.36.0
 )
 
 require (
+	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -21,6 +25,7 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	golang.org/x/exp v0.0.0-20230315142452-642cacee5cc0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.61.13 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.8.2 // indirect

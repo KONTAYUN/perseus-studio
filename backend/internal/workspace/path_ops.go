@@ -158,6 +158,9 @@ func (s *Service) Delete(path string) (map[string]string, error) {
 	if err := os.RemoveAll(absPath); err != nil {
 		return nil, err
 	}
+	if err := s.retireDocumentIdentity(cleanPath); err != nil {
+		return nil, err
+	}
 	if err := s.removeOrderMetadataForPath(cleanPath); err != nil {
 		return nil, err
 	}
@@ -177,7 +180,7 @@ func (s *Service) renameValidated(cleanOld, cleanNew string) (PathChangeResult, 
 		return PathChangeResult{}, err
 	}
 	if _, err := os.Stat(absNew); err == nil {
-		return PathChangeResult{}, fmt.Errorf("target path already exists")
+		return PathChangeResult{}, fmt.Errorf("target %w", ErrPathExists)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return PathChangeResult{}, err
 	}
@@ -189,6 +192,9 @@ func (s *Service) renameValidated(cleanOld, cleanNew string) (PathChangeResult, 
 	}
 	if err := s.moveOrderMetadata(cleanOld, cleanNew); err != nil {
 		return PathChangeResult{}, errors.Join(err, os.Rename(absNew, absOld))
+	}
+	if err := s.moveDocumentIdentity(cleanOld, cleanNew); err != nil {
+		return PathChangeResult{}, errors.Join(err, os.Rename(absNew, absOld), s.moveOrderMetadata(cleanNew, cleanOld))
 	}
 	return PathChangeResult{
 		Path:         cleanNew,

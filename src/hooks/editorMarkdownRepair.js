@@ -1,4 +1,5 @@
 import { buildMarkdownRepairPrompt, diagnoseMarkdown } from '../components/markdown/markdownDiagnostics.js';
+import { DOCUMENT_PROFILE } from '../components/editor/document/profile.js';
 
 export async function submitMarkdownRepair({ snapshot, getCurrent, prepareFile, send }) {
   function verify() {
@@ -11,9 +12,12 @@ export async function submitMarkdownRepair({ snapshot, getCurrent, prepareFile, 
     if (current.conflict) throw new Error('文件存在保存冲突，请先处理冲突，再请求修复。');
   }
   verify();
-  const issues = diagnoseMarkdown(snapshot.content);
+  const issues = snapshot.issues?.length ? snapshot.issues : diagnoseMarkdown(snapshot.content);
   if (!issues.length) throw new Error('当前未发现可检查的格式问题，无需发送修复请求。');
   const saved = await prepareFile(snapshot);
   verify();
-  await send(buildMarkdownRepairPrompt({ path: snapshot.path, hash: saved.hash, issues }));
+  const accepted = await send(buildMarkdownRepairPrompt({ path: snapshot.path, hash: saved.hash, issues }), {
+    documentAction: { type: 'format_repair', path: snapshot.path, base_hash: saved.hash, profile_version: DOCUMENT_PROFILE, diagnostics: issues },
+  });
+  if (accepted === false) throw new Error('修复请求未发送，原稿和聊天输入已保留。');
 }

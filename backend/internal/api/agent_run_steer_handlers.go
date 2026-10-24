@@ -49,6 +49,13 @@ func (s *Server) steerAgentRun(ctx context.Context, userID, runID string, body i
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return store.AgentEvent{}, err
 		}
+		pending, err := s.runs.GetPendingMessage(ctx, userID, req.PendingMessageID)
+		if err != nil {
+			return store.AgentEvent{}, err
+		}
+		if pending.DocumentAction != nil {
+			return store.AgentEvent{}, fmt.Errorf("格式修复必须作为独立任务运行")
+		}
 	}
 	run, err := s.runs.GetRun(ctx, userID, runID)
 	if err != nil {

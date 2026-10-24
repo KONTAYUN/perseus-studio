@@ -33,6 +33,13 @@ func (s *Server) handlePendingMessages(w http.ResponseWriter, r *http.Request) {
 				writeError(w, 400, "selected model is not available")
 				return
 			}
+			if err := s.checkDocumentAction(r.Context(), user.UserID, p.DocumentAction); err != nil {
+				writeError(w, 409, err.Error())
+				return
+			}
+			if p.DocumentAction != nil {
+				p.Content = p.DocumentAction.Prompt()
+			}
 			saved, err := s.runs.SavePendingMessage(r.Context(), user.UserID, p)
 			if err != nil {
 				writeRunPreparationError(w, err)
@@ -87,7 +94,8 @@ func (s *Server) handlePendingMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prepared, err := s.runs.PrepareConversationRun(r.Context(), store.PrepareConversationRunInput{
-		UserID: user.UserID, ConversationID: p.ConversationID, ModelProviderID: p.ModelProviderID,
+		MessageMetaJSON: p.DocumentAction.MetaJSON(),
+		UserID:          user.UserID, ConversationID: p.ConversationID, ModelProviderID: p.ModelProviderID,
 		Content: p.Content, AttachmentsJSON: "[]", ThinkingMode: p.ThinkingMode, RequestID: "pending:" + p.ID, PendingMessageID: p.ID,
 	})
 	if err != nil {

@@ -113,6 +113,7 @@ export default function useIdeState(options = {}) {
     editorRef,
     layout,
     loadTree,
+    renamePath,
     setErrorMessage,
     setSelectedItemPath,
     setSelectedItemType,
@@ -173,6 +174,7 @@ export default function useIdeState(options = {}) {
 
   return {
     ...layout,
+    setLayoutColumns: editorState.setLayoutColumns,
     ...settings,
     ...skillsState,
     ...chat,

@@ -49,7 +49,7 @@ func (s *Service) readDir(absDir, relDir string) ([]TreeNode, error) {
 	}
 	nodes := make([]TreeNode, 0, len(entries))
 	for _, entry := range entries {
-		if relDir == "" && (entry.Name() == TrashDirName || entry.Name() == LegacyTrashDirName) {
+		if s.hideDocumentImageEntry(relDir, entry.Name()) || relDir == "" && (entry.Name() == TrashDirName || entry.Name() == LegacyTrashDirName) {
 			continue
 		}
 		info, err := entry.Info()
@@ -95,7 +95,7 @@ func (s *Service) readDirLimited(absDir, relDir string, remainingDepth, maxItems
 	nodes := make([]TreeNode, 0, len(entries))
 	limited := false
 	for _, entry := range entries {
-		if relDir == "" && (entry.Name() == TrashDirName || entry.Name() == LegacyTrashDirName) {
+		if s.hideDocumentImageEntry(relDir, entry.Name()) || relDir == "" && (entry.Name() == TrashDirName || entry.Name() == LegacyTrashDirName) {
 			continue
 		}
 		if *count >= maxItems {
@@ -147,7 +147,7 @@ func (s *Service) readDirShallow(absDir, relDir string) ([]TreeNode, error) {
 	}
 	nodes := make([]TreeNode, 0, len(entries))
 	for _, entry := range entries {
-		if relDir == "" && (entry.Name() == TrashDirName || entry.Name() == LegacyTrashDirName) {
+		if s.hideDocumentImageEntry(relDir, entry.Name()) || relDir == "" && (entry.Name() == TrashDirName || entry.Name() == LegacyTrashDirName) {
 			continue
 		}
 		info, err := entry.Info()

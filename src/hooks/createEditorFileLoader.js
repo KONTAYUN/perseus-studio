@@ -1,4 +1,5 @@
 import { apiGet } from '../api/client.js';
+import { hasPendingDocumentSessions } from '../components/editor/document/registry.js';
 import { detectFileType } from './ideUtils.js';
 
 export function createEditorFileLoader({
@@ -34,7 +35,9 @@ export function createEditorFileLoader({
 
     const requestId = ++editorLoadRequestRef.current;
     const contentAtStart = currentFileContentRef?.current;
-    setIsEditorLoading(true);
+    // A background refresh must keep the live editor mounted until the read and
+    // dirty check finish; unmounting here loses its pending transaction state.
+    if (!options.preserveLocalEdits) setIsEditorLoading(true);
     setErrorMessage?.('');
     if (clearConflict) {
       setExternalFileConflict(null);
@@ -47,10 +50,12 @@ export function createEditorFileLoader({
 
     try {
       const fileType = detectFileType(path);
-      setCurrentFilePath(path);
-      setCurrentFileType(fileType);
-      setCurrentFileHash(hash || '');
-      setCurrentFileVersionId(versionId || '');
+      if (!options.preserveLocalEdits) {
+        setCurrentFilePath(path);
+        setCurrentFileType(fileType);
+        setCurrentFileHash(hash || '');
+        setCurrentFileVersionId(versionId || '');
+      }
 
       if (fileType === 'image') {
         if (requestId !== editorLoadRequestRef.current) return;
@@ -96,7 +101,7 @@ export function createEditorFileLoader({
 
       const file = await apiGet(`/api/files/read?path=${encodeURIComponent(path)}`);
       if (requestId !== editorLoadRequestRef.current) return;
-      if (options.preserveLocalEdits && (isDirtyRef?.current || currentFileContentRef?.current !== contentAtStart)) {
+      if (options.preserveLocalEdits && (isDirtyRef?.current || hasPendingDocumentSessions(path) || currentFileContentRef?.current !== contentAtStart)) {
         setExternalFileConflict({ reloadPath: path, hash: file.hash || '', versionId });
         setEditorStatusMessage('');
         return;

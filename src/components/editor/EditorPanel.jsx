@@ -10,7 +10,6 @@ export default function EditorPanel({ ide, editor, panelId }) {
   const draggingTabRef = useRef(null);
   const [tabDropIndicator, setTabDropIndicator] = useState(null);
   const markdown = editor.isTextFile && isMarkdownFile(editor.currentFilePath);
-  const documentMode = editor.documentMode;
 
   const scrollTabsWithWheel = (event) => {
     const strip = tabsStripRef.current;
@@ -209,8 +208,7 @@ export default function EditorPanel({ ide, editor, panelId }) {
             )}
           </div>
         </div>
-        <EditorDocumentActions ide={ide} editor={editor} markdown={markdown} mode={documentMode}
-          onModeChange={editor.setDocumentMode} />
+        <EditorDocumentActions ide={ide} editor={editor} markdown={markdown} />
       </div>
 
       <div
@@ -305,12 +303,13 @@ export default function EditorPanel({ ide, editor, panelId }) {
               <div className="flex h-full items-center justify-center px-12 py-7 text-sm text-gray-400 dark:text-gray-500 max-[900px]:px-8 max-[640px]:px-5">
                 {editor.currentFileNotice}
               </div>
-            ) : markdown && documentMode === 'rich' ? (
-              <MarkdownDocument key={editor.currentFilePath} content={editor.currentFileContent} onChange={editor.setCurrentFileContent} />
+            ) : markdown ? (
+              <MarkdownDocument key={editor.currentFilePath} content={editor.currentFileContent} onChange={editor.setCurrentFileContent} path={editor.currentFilePath} userId={ide.currentUser?.id || ide.currentUser?.user_id} />
             ) : (
               <textarea
                 data-testid="editor-textarea"
                 value={editor.currentFileContent}
+                readOnly={editor.isConvertingFile}
                 onChange={(e) => editor.setCurrentFileContent(e.target.value)}
                 className="editor-textarea custom-scrollbar block h-full min-h-0 w-full resize-none overflow-y-auto overflow-x-hidden bg-transparent px-12 py-7 pb-36 leading-7 tracking-[0.012em] text-gray-800 outline-none placeholder-gray-400 dark:text-gray-300 dark:placeholder-gray-500 max-[900px]:px-8 max-[640px]:px-5"
                 spellCheck={false}

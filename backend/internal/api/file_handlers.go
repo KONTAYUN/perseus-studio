@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"webide-backend/internal/document"
 
 	"webide-backend/internal/workspace"
 )
@@ -148,6 +149,12 @@ func (s *Server) handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
+	if req.ProfileVersion != "" {
+		if _, err := document.Validate([]byte(req.Content), req.ProfileVersion); err != nil {
+			s.writeFileError(w, err)
+			return
+		}
+	}
 	result, err := files.WriteFileIfUnchanged(r.Context(), req.Path, req.Content, "write", req.ExpectedHash)
 	if errors.Is(err, workspace.ErrFileConflict) {
 		writeError(w, http.StatusConflict, err.Error())
@@ -221,7 +228,20 @@ func (s *Server) handleFilesRename(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
-	result, err := files.Rename(req.OldPath, req.NewPath)
+	var result map[string]string
+	if req.ExpectedHash != nil {
+		result, err = files.RenameIfUnchanged(r.Context(), req.OldPath, req.NewPath, *req.ExpectedHash)
+	} else {
+		result, err = files.Rename(req.OldPath, req.NewPath)
+	}
+	if errors.Is(err, workspace.ErrFileConflict) {
+		writeError(w, http.StatusConflict, "文件已变化，请重新加载后再转换")
+		return
+	}
+	if errors.Is(err, workspace.ErrPathExists) {
+		writeError(w, http.StatusConflict, "目标文件已存在，请先更改文件名")
+		return
+	}
 	if err != nil {
 		s.writeFileError(w, err)
 		return
@@ -366,6 +386,9 @@ func (s *Server) handleFilesEmptyTrash(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writeFileError(w http.ResponseWriter, err error) {
+	if writeDocumentError(w, err) {
+		return
+	}
 	switch {
 	case workspace.IsPathError(err):
 		writeError(w, http.StatusBadRequest, err.Error())

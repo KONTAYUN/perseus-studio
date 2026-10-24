@@ -1,5 +1,9 @@
 # Perseus Project Health and Evidence
 
+Document image upload/library and conservative resource collection were verified on 2026-10-24. Evidence and limits: [DOCUMENT_IMAGES_20261024.md](DOCUMENT_IMAGES_20261024.md). Editor uploads are hidden workspace resources; ordinary user images remain visible and outside collection. History/trash references and a persisted seven-day grace period protect recovery.
+
+Document editing closure is in progress; see DOCUMENT_EDITING_IMPLEMENTATION.md. New adapter/session, backend document policy and constrained repair boundaries are authorized behavior changes. Previous test totals are historical evidence, not acceptance of this work.
+
 This document records behavioral evidence and structure standards. Numeric self-ratings have been retired; they did not measure correctness, security or release readiness.
 
 ## Design audit remediation — 2026-10-21
@@ -79,7 +83,7 @@ Perseus follows the same broad separation used by OpenCode, Cline, Roo/Kilo, and
 
 ## Required Verification
 
-Inline HTML span compatibility must cover code/bold children, nested spans, quoted `>` attributes, inert event/style attributes, unchanged source on open, and wrapper preservation after editing/saving. This is limited span support, not general HTML/frontmatter/math editing. Existing Markdown serialization may normalize bullet markers, whitespace and entity spelling after an edit.
+Inline HTML span compatibility must cover code/bold children, nested spans, quoted `>` attributes, inert event/style attributes, unchanged source on open, and wrapper preservation after editing/saving. Balanced spans have editable child text. Other HTML/frontmatter/math use inert local preservation nodes with explicit local editing, rather than full visual editors for those languages. Existing Markdown serialization may normalize bullet markers, whitespace and entity spelling after an edit.
 
 For structural work, run:
 
@@ -123,3 +127,9 @@ Conversation lifecycle regressions must include deletion racing foreground/backg
 Interrupted background AI work must never automatically replay without a durable recovery contract. Check restart failure/cancellation and atomic recovery logs. Background AI checkpoint/resume is still an open capability, not implied by foreground run recovery.
 
 `workspace` owns bounded change previews and hash-checked reversal of one persisted tool change. `api/workspace_changes` resolves the authenticated user's tool ledger entry and schedules reversals through the shared workspace queue. A durable reversal journal prevents replay after an ambiguous filesystem/database failure. Chat renders this through a dedicated change-review component; it does not trust client-supplied paths, hashes or snapshots. This is per-file tool-change recovery, not a shell-command or whole-workspace checkpoint.
+
+### Extended Markdown acceptance — 2026-10-23
+
+Require regressions for editable prose beside metadata, HTML, references, footnotes, math, directives and wiki links; lossless protected payload after save/reload; local editing, undo, insertion, clipboard and inert HTML. Opening and section navigation must not write. Evidence and limitations will be recorded in `EXTENDED_MARKDOWN_EDITING_20261023.md`.
+
+Verified delivery: [EXTENDED_MARKDOWN_EDITING_20261023.md](EXTENDED_MARKDOWN_EDITING_20261023.md). 173 unit tests; full Chrome run 83 passed/1 opt-in skipped, final extension subset 11 passed after closing parser edges. Manual 8080 upgrade preserved hashes of 26 tables/7668 rows/109 files. Complex extensions remain local raw-content editors; long-document section changes reset section undo history.

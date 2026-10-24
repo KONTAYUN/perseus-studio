@@ -169,6 +169,12 @@ func (s *Service) executeAndRecordTool(ctx context.Context, conversationID, mess
 		}
 	}
 	event.Label = completedToolLabel(event)
+	if event.Operation == "document_repair_staged" {
+		event.Label = "已暂存格式建议，原稿未修改"
+	}
+	if event.Operation == "document_chunk_staged" {
+		event.Label = "已暂存文稿分块，正式文件未修改"
+	}
 	eventPayload["label"] = event.Label
 	eventPayload["failure_class"] = event.FailureClass
 	changedPathsJSON := ""
@@ -292,6 +298,9 @@ func jsonObjectHasField(raw string, field string) bool {
 }
 
 func shouldEmitWorkspaceFileChanged(name string, event ToolEvent) bool {
+	if event.Operation == "document_repair_staged" || event.Operation == "document_chunk_staged" {
+		return false
+	}
 	if len(event.ChangedPaths) == 0 && event.Path == "" && event.OldPath == "" && event.NewPath == "" {
 		return false
 	}
@@ -302,6 +311,9 @@ func shouldEmitWorkspaceFileChanged(name string, event ToolEvent) bool {
 }
 
 func workspaceFileChangedOperation(name string, event ToolEvent) string {
+	if event.Operation == "document_repair_staged" || event.Operation == "document_chunk_staged" {
+		return event.Operation
+	}
 	switch name {
 	case "apply_workspace_patch":
 		return "patch"

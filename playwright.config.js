@@ -25,5 +25,9 @@ export default defineConfig({
         channel: 'chrome',
       },
     },
+    ...(process.env.PERSEUS_E2E_CROSS_BROWSER === '1' ? [
+      { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+      { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+    ] : []),
   ],
 });

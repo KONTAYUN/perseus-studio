@@ -1,4 +1,5 @@
 import { apiGet } from '../api/client.js';
+import { hasPendingDocumentSessions } from '../components/editor/document/registry.js';
 import {
   buildActiveFileToolPlan,
   buildInactiveTabWriteConflict,
@@ -83,7 +84,7 @@ export function createEditorToolRefreshActions({
 
     const { activePath: plannedActivePath, reloadPlan, conflictPlan, closeNotice } = buildActiveFileToolPlan(successfulEvents, {
       activePath,
-      dirty: isDirtyRef.current,
+      dirty: isDirtyRef.current || hasPendingDocumentSessions(originalActivePath),
     });
     if (plannedActivePath && plannedActivePath !== activePath) {
       setCurrentFilePath(plannedActivePath);
@@ -128,7 +129,7 @@ export function createEditorToolRefreshActions({
       await Promise.all(matching.map(async (tab) => {
         const metadata = fileMetadataFromToolEvent(event, tab.path);
         const conflict = buildInactiveTabWriteConflict({ ...event, path: tab.path, hash: metadata.hash, version_id: metadata.versionId });
-        if (isTabDirty(tab)) {
+        if (isTabDirty(tab) || hasPendingDocumentSessions(tab.path)) {
           setOpenTabs((current) => current.map((item) => item.path === tab.path ? { ...item, conflict } : item));
           return;
         }

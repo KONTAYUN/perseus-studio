@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"webide-backend/internal/ai"
+	"webide-backend/internal/document"
 	"webide-backend/internal/store"
 )
 
@@ -244,11 +245,20 @@ func (s *Server) handleConversationRoutes(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusBadRequest, "selected model is not available")
 			return
 		}
+		action, _ := r.Context().Value(documentActionKey{}).(*document.Action)
+		if err := s.checkDocumentAction(r.Context(), user.UserID, action); err != nil {
+			writeError(w, 409, err.Error())
+			return
+		}
+		if action != nil {
+			content = action.Prompt()
+		}
 		prepared, err := s.runs.PrepareConversationRun(r.Context(), store.PrepareConversationRunInput{
 			UserID: user.UserID, ConversationID: conversationID, ModelProviderID: modelProviderID,
 			Content: content, AttachmentsJSON: string(attachmentsJSON), ThinkingMode: thinkingMode,
 			AttachmentPayloadsJSON: ai.PersistedAttachmentPayloads(attachmentPayloads),
 			RequestID:              r.Header.Get("Idempotency-Key"),
+			MessageMetaJSON:        action.MetaJSON(),
 		})
 		if err != nil {
 			writeRunPreparationError(w, err)

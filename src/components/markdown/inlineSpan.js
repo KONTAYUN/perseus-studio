@@ -24,18 +24,3 @@ export function readInlineSpan(source) {
   }
   return null;
 }
-
-export function withoutSupportedSpans(source) {
-  const starts = /<span(?=[\s>])/ig;
-  let result = '';
-  let cursor = 0;
-  let start;
-  while ((start = starts.exec(source))) {
-    const span = readInlineSpan(source.slice(start.index));
-    if (!span) continue;
-    result += source.slice(cursor, start.index) + span.inner.replace(spanTag, '');
-    cursor = start.index + span.raw.length;
-    starts.lastIndex = cursor;
-  }
-  return result + source.slice(cursor);
-}

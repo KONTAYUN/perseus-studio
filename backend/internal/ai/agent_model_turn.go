@@ -175,12 +175,27 @@ func (r *agentRuntime) forceContextOverflowCompaction(ctx context.Context, round
 
 func (r *agentRuntime) tools() []map[string]any {
 	includeLoader := r.includeToolsetLoader()
+	var tools []map[string]any
 	switch r.protocol {
 	case agentProtocolAnthropic:
-		return anthropicToolsForLoadedToolsets(r.loadedToolsets, includeLoader, r.opts.UserRole)
+		tools = anthropicToolsForLoadedToolsets(r.loadedToolsets, includeLoader, r.opts.UserRole)
 	default:
-		return openAIToolsForLoadedToolsetsWithNativePatch(r.loadedToolsets, includeLoader, r.opts.UserRole, providerNativePatchEnabled(r.provider))
+		tools = openAIToolsForLoadedToolsetsWithNativePatch(r.loadedToolsets, includeLoader, r.opts.UserRole, providerNativePatchEnabled(r.provider))
 	}
+	if r.opts.DocumentAction == nil {
+		return tools
+	}
+	filtered := make([]map[string]any, 0, 4)
+	for _, tool := range tools {
+		name, _ := tool["name"].(string)
+		if fn, ok := tool["function"].(map[string]any); ok {
+			name, _ = fn["name"].(string)
+		}
+		if name != "" && r.opts.DocumentAction.Allows(name) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 func (r *agentRuntime) currentModelActionManifest() ModelActionManifest {

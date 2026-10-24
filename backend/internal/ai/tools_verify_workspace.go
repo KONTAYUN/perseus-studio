@@ -28,15 +28,42 @@ func (s *Service) verifyToolResult(ctx context.Context, toolName, resultJSON str
 	}
 
 	var meta struct {
-		Path    string `json:"path"`
-		OldPath string `json:"old_path"`
-		NewPath string `json:"new_path"`
-		Hash    string `json:"hash"`
+		Operation  string `json:"operation"`
+		Path       string `json:"path"`
+		OldPath    string `json:"old_path"`
+		NewPath    string `json:"new_path"`
+		Hash       string `json:"hash"`
+		ChunkIndex int    `json:"chunk_index"`
 	}
 	if err := json.Unmarshal([]byte(resultJSON), &meta); err != nil {
 		return ToolVerification{Status: "failed", Message: "tool result was not valid JSON"}
 	}
+	if toolName == "write_workspace_chunk" && meta.Operation == "document_chunk_staged" {
+		if err := files.VerifyDocumentChunk(ctx, opts.RunID, meta.Path, meta.Hash, meta.ChunkIndex); err == nil {
+			return ToolVerification{Status: "verified", Message: "chunk durably staged; original file unchanged", Path: meta.Path}
+		}
+		return ToolVerification{Status: "failed", Message: "staged document chunk could not be verified"}
+	}
 	if toolName == "apply_workspace_patch" {
+		// Repair candidates have a separate durable verification boundary below.
+		if opts.DocumentAction != nil {
+			var staged struct {
+				CandidateID string `json:"candidate_id"`
+				Hash        string `json:"hash"`
+			}
+			if err := json.Unmarshal([]byte(resultJSON), &staged); err != nil {
+				return ToolVerification{Status: "failed", Message: "invalid candidate result"}
+			}
+			items, err := files.DocumentRepairCandidates(ctx, opts.DocumentAction.Path)
+			if err == nil {
+				for _, c := range items {
+					if c.ID == staged.CandidateID && c.Hash == staged.Hash {
+						return ToolVerification{Status: "verified", Message: "candidate is durably staged; original file unchanged", Path: c.Path}
+					}
+				}
+			}
+			return ToolVerification{Status: "failed", Message: "staged candidate could not be verified"}
+		}
 		return verifyWorkspacePatchChanges(files, resultJSON)
 	}
 

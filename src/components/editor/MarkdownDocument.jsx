@@ -1,9 +1,8 @@
 import React, { lazy, Suspense, useLayoutEffect, useRef, useState } from 'react';
-import MarkdownContent from '../markdown/MarkdownContent.jsx';
-import { richEditingRestriction } from '../markdown/markdownPolicy.js';
+import DocumentEditorBoundary from './DocumentEditorBoundary.jsx';
 const RichTextEditor = lazy(() => import('./richText/RichTextEditor.jsx'));
 
-export default function MarkdownDocument({ content, onChange }) {
+export default function MarkdownDocument({ content, onChange, path, userId }) {
   const echoed = useRef(content);
   const [revision, setRevision] = useState(0);
   useLayoutEffect(() => {
@@ -14,14 +13,10 @@ export default function MarkdownDocument({ content, onChange }) {
       setRevision(value => value + 1);
     }
   }, [content]);
-  const restriction = richEditingRestriction(content);
-  if (restriction) return (
-    <div className="markdown-document-preview custom-scrollbar">
-      <p className="rich-document-notice" role="status">{restriction}</p>
-      <MarkdownContent content={content} />
-    </div>
-  );
-  return <Suspense fallback={<div className="rich-document-loading">正在打开文档…</div>}>
-    <RichTextEditor key={revision} content={content} onChange={next => { echoed.current = next; onChange(next); }} />
-  </Suspense>;
+  const change = next => { echoed.current = next; onChange(next); };
+  return <DocumentEditorBoundary key={revision} content={content} onChange={change}>
+    <Suspense fallback={<div className="rich-document-loading">正在打开文档…</div>}>
+      <RichTextEditor content={content} onChange={change} path={path} userId={userId} />
+    </Suspense>
+  </DocumentEditorBoundary>;
 }

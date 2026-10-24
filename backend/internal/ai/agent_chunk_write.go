@@ -134,7 +134,9 @@ func (r *agentRuntime) annotateChunkWriteResult(call agentToolCall, result strin
 	payload["total_chars"] = state.TotalChars
 	payload["current_hash"] = state.CurrentHash
 	payload["needs_finalize"] = true
-	payload["next_hint"] = "The compatibility write was applied. Continue only if this existing write sequence requires more content."
+	if payload["operation"] != "document_chunk_staged" {
+		payload["next_hint"] = "The compatibility write was applied. Continue only if this existing write sequence requires more content."
+	}
 	return mustJSON(payload)
 }
 

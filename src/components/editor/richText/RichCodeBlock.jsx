@@ -16,5 +16,6 @@ function CodeBlockView({ node }) {
 }
 
 export const RichCodeBlock = CodeBlock.extend({
+  addAttributes() { return { ...this.parent?.(), meta: { default: null, rendered: false } }; },
   addNodeView() { return ReactNodeViewRenderer(CodeBlockView); },
 });

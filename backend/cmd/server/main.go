@@ -128,6 +128,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	imageCollectionDone := make(chan struct{})
+	go func() { defer close(imageCollectionDone); factory.RunDocumentImageCollection(ctx) }()
+	defer func() { stop(); <-imageCollectionDone }()
 
 	manager.Start(ctx)
 

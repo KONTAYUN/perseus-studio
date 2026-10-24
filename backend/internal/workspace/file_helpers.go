@@ -14,10 +14,14 @@ import (
 
 func (s *Service) createFileVersion(ctx context.Context, path string, content []byte, source string) (string, error) {
 	versionID := idgen.New("fv")
+	var documentID string
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE((SELECT id FROM workspace_documents WHERE user_id=? AND path=?),'')`, s.userID, path).Scan(&documentID); err != nil {
+		return "", err
+	}
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO file_versions (id, user_id, path, content_text, size_bytes, content_hash, source, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`, versionID, s.userID, path, string(content), len(content), hashBytes(content), source, time.Now().UTC())
+INSERT INTO file_versions (id, user_id, path, content_text, size_bytes, content_hash, source, created_at, document_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, versionID, s.userID, path, string(content), len(content), hashBytes(content), source, time.Now().UTC(), documentID)
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +96,7 @@ func isTextPath(path string) bool {
 	name := strings.ToLower(filepath.Base(path))
 	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	textExtensions := map[string]bool{
-		"txt": true, "md": true, "markdown": true, "json": true, "js": true, "jsx": true, "ts": true, "tsx": true,
+		"txt": true, "md": true, "markdown": true, "mdown": true, "json": true, "js": true, "jsx": true, "ts": true, "tsx": true,
 		"css": true, "html": true, "go": true, "py": true, "yaml": true, "yml": true, "toml": true,
 		"env": true, "gitignore": true, "xml": true, "csv": true, "log": true, "sh": true,
 	}

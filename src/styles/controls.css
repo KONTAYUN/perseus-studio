@@ -213,7 +213,8 @@
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.04);
 }
 
-.app-shell:not(.dark) .ui-segmented-control {
+.app-shell:not(.dark) .ui-segmented-control,
+:root:not(.dark) .modal-backdrop .ui-segmented-control {
   border-color: rgb(15 23 42 / 0.1);
   background: rgb(255 255 255 / 0.72);
   box-shadow:
@@ -221,16 +222,19 @@
     inset 0 -1px 0 rgb(15 23 42 / 0.04);
 }
 
-.app-shell:not(.dark) .ui-segmented-option {
+.app-shell:not(.dark) .ui-segmented-option,
+:root:not(.dark) .modal-backdrop .ui-segmented-option {
   color: rgb(107 114 128);
 }
 
-.app-shell:not(.dark) .ui-segmented-option:hover {
+.app-shell:not(.dark) .ui-segmented-option:hover,
+:root:not(.dark) .modal-backdrop .ui-segmented-option:hover {
   color: rgb(37 99 235);
   background: rgb(59 130 246 / 0.08);
 }
 
-.app-shell:not(.dark) .ui-segmented-option[data-active="true"] {
+.app-shell:not(.dark) .ui-segmented-option[data-active="true"],
+:root:not(.dark) .modal-backdrop .ui-segmented-option[data-active="true"] {
   color: rgb(31 41 55);
   background: rgb(255 255 255 / 0.92);
   box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.035);

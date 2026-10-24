@@ -1,4 +1,7 @@
 import { apiGet, apiPost } from '../api/client.js';
+import { flushDocumentSessions } from '../components/editor/document/registry.js';
+import { DOCUMENT_PROFILE } from '../components/editor/document/profile.js';
+import { isMarkdownFile } from '../components/markdown/markdownPolicy.js';
 
 export function createEditorSaveAction({
   currentFilePathRef, currentFileContentRef, currentFileHashRef, savedFileContentRef,
@@ -7,6 +10,7 @@ export function createEditorSaveAction({
   setCurrentFileHash, setCurrentFileVersionId, setOpenTabs, setExternalFileConflict, loadTree,
 }) {
   return async function saveFileContent({ auto = false } = {}) {
+    await flushDocumentSessions(currentFilePathRef.current);
     while (saveRequestRef.current) await saveRequestRef.current;
     const path = currentFilePathRef.current;
     const content = currentFileContentRef.current;
@@ -24,7 +28,7 @@ export function createEditorSaveAction({
         const hash = conflict?.keepLocal
           ? (await apiGet(`/api/files/read?path=${encodeURIComponent(path)}`)).hash
           : currentFileHashRef.current;
-        const result = await apiPost('/api/files/write', { path, content, expected_hash: hash });
+        const result = await apiPost('/api/files/write', { path, content, expected_hash: hash, ...(isMarkdownFile(path) ? { profile_version: DOCUMENT_PROFILE } : {}) });
         if (currentFilePathRef.current === path) {
           savedFileContentRef.current = content;
           currentFileHashRef.current = result.hash || '';

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"webide-backend/internal/document"
 	"webide-backend/internal/failure"
 	"webide-backend/internal/store"
 	"webide-backend/internal/usersvc"
@@ -136,6 +137,7 @@ type ModelIdentity struct {
 }
 
 type RunOptions struct {
+	DocumentAction *document.Action
 	// AllowedWorkspacePaths is an exact-path restriction, independent of references.
 	// Nil means ordinary workspace policy. Empty non-nil denies filesystem access.
 	AllowedWorkspacePaths       []string

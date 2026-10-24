@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"webide-backend/internal/document"
 	"webide-backend/internal/store"
 )
 
@@ -241,6 +242,7 @@ func cloneMapAnySlice(input []map[string]any) []map[string]any {
 }
 
 type AgentRuntimeCheckpoint struct {
+	DocumentAction            *document.Action                    `json:"document_action,omitempty"`
 	UnresolvedCommands        map[string]string                   `json:"unresolved_commands,omitempty"`
 	AllowedWorkspacePaths     []string                            `json:"allowed_workspace_paths"`
 	CompletedOutcome          string                              `json:"completed_outcome,omitempty"`
@@ -269,6 +271,7 @@ type AgentRuntimeCheckpoint struct {
 
 func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 	checkpoint := AgentRuntimeCheckpoint{
+		DocumentAction:            r.opts.DocumentAction,
 		UnresolvedCommands:        cloneStringMap(r.unresolvedCommands),
 		AllowedWorkspacePaths:     cloneScopePaths(r.opts.AllowedWorkspacePaths),
 		CompletedOutcome:          r.completedOutcome,
@@ -306,6 +309,10 @@ func (r *agentRuntime) checkpoint() AgentRuntimeCheckpoint {
 }
 
 func (r *agentRuntime) restoreCheckpoint(checkpoint AgentRuntimeCheckpoint) {
+	// A checkpoint cannot remove a restriction from the authoritative message.
+	if r.opts.DocumentAction == nil {
+		r.opts.DocumentAction = checkpoint.DocumentAction
+	}
 	r.opts.AllowedWorkspacePaths = intersectWorkspaceScopes(r.opts.AllowedWorkspacePaths, checkpoint.AllowedWorkspacePaths)
 	r.completedOutcome = checkpoint.CompletedOutcome
 	r.unresolvedCommands = cloneStringMap(checkpoint.UnresolvedCommands)

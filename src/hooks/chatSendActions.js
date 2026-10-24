@@ -38,7 +38,7 @@ export function createChatSendActions({
   waitForAgentRun,
   warnUnsupportedRuntimeGuidance,
 }) {
-  async function sendChatMessage(overrideContent = null) {
+  async function sendChatMessage(overrideContent = null, options = {}) {
     const usingOverride = typeof overrideContent === 'string';
     const trimmedContent = (usingOverride ? overrideContent : chatInput).trim();
     const attachmentsForSend = usingOverride ? [] : chatAttachments;
@@ -57,6 +57,9 @@ export function createChatSendActions({
     const targetConversationId = currentConversationIdRef?.current || currentConversationId;
     const activeRunConversationId = activeAgentRunRef?.current?.conversationId || activeChatAbortRef.current?.conversationId || '';
     const isBusyInSameConversation = isChatSending && (!activeRunConversationId || activeRunConversationId === targetConversationId);
+    if (isChatSending && options.documentAction) {
+      return createPendingRunMessage(trimmedContent, { conversationId: targetConversationId, documentAction: options.documentAction });
+    }
     if (isBusyInSameConversation && !usingOverride) {
       if (hasUnsupportedRuntimeGuidance) {
         warnUnsupportedRuntimeGuidance();
@@ -74,6 +77,7 @@ export function createChatSendActions({
       return;
     }
     const payload = {
+      documentAction: options.documentAction,
       content: trimmedContent,
       conversationId: currentConversationIdRef?.current || currentConversationId,
       attachments: attachmentsForSend.map((item) => ({
@@ -338,6 +342,7 @@ async function waitForConversationTransition(conversationTransitionRef) {
 function buildMessageFormData(payload, modelProviderId, defaultThinkingMode, filesToSend) {
   const formData = new FormData();
   formData.append('content', payload.content.trim());
+  if (payload.documentAction) formData.append('document_action', JSON.stringify(payload.documentAction));
   formData.append('model_provider_id', modelProviderId);
   formData.append('thinking_mode', payload.thinkingMode || defaultThinkingMode || 'standard');
   for (const attachment of payload.attachments) {

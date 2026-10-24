@@ -1,0 +1,7 @@
+{
+  "version": "perseus-markdown-v1",
+  "max_bytes": 8388608,
+  "native": ["paragraph", "heading", "bold", "italic", "strike", "code", "hardBreak", "blockquote", "bulletList", "orderedList", "taskList", "codeBlock", "horizontalRule", "link", "image", "table", "footnoteReference", "footnoteDefinition", "inlineMath", "blockMath", "callout", "documentMetadata"],
+  "preserved": ["html", "platform-container", "wiki", "complex-metadata"],
+  "categories": ["compatible", "preserved", "format_issue", "editor_failure"]
+}

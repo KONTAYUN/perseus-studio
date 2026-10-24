@@ -5,11 +5,19 @@ import (
 	"fmt"
 	"sort"
 	"time"
+	"webide-backend/internal/document"
 	"webide-backend/internal/failure"
 	"webide-backend/internal/workspace"
 )
 
 func commitWorkspacePatch(ctx context.Context, files *workspace.Service, writes []plannedWorkspacePatchWrite, moves []plannedWorkspacePatchMove, deletes []plannedWorkspacePatchDelete, added, updated, deleted int) (out workspacePatchApplyResult, commitErr error) {
+	for _, item := range writes {
+		if document.IsMarkdown(item.path) {
+			if _, err := document.Validate([]byte(item.content), ""); err != nil {
+				return out, err
+			}
+		}
+	}
 	entries, err := workspacePatchJournalEntries(files, writes, moves, deletes)
 	if err != nil {
 		return out, err

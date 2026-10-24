@@ -14,6 +14,10 @@ func (s *Service) runAnthropicAgent(ctx context.Context, conversationID, message
 }
 func (s *Service) runAgent(ctx context.Context, conversationID, messageID string, protocol agentProtocol, provider store.ModelProvider, messages []store.Message, attachments []AttachmentPayload, opts RunOptions) (Reply, error) {
 	profile := runtimeProfileForProvider(provider)
+	if opts.DocumentAction != nil {
+		opts.AllowedWorkspacePaths = []string{opts.DocumentAction.Path}
+		attachments = nil
+	}
 	messages = sanitizeConversationMessages(messages, profile)
 	attachments = sanitizeAttachmentPayloads(attachments, profile)
 	attachments = s.prefetchWorkspaceFileAttachments(ctx, opts.UserID, attachments)

@@ -54,13 +54,16 @@ func (s *Service) moveToTrash(path string) (PathChangeResult, error) {
 	if err := movePathWithFallback(absPath, absTrashPath); err != nil {
 		return PathChangeResult{}, err
 	}
-	if err := s.recordTrashItem(cleanPath, trashPath, info); err != nil {
+	if err := s.moveDocumentIdentity(cleanPath, trashPath); err != nil {
 		return PathChangeResult{}, errors.Join(err, os.Rename(absTrashPath, absPath))
+	}
+	if err := s.recordTrashItem(cleanPath, trashPath, info); err != nil {
+		return PathChangeResult{}, errors.Join(err, os.Rename(absTrashPath, absPath), s.moveDocumentIdentity(trashPath, cleanPath))
 	}
 	if err := s.removeOrderMetadataForPath(cleanPath); err != nil {
 		rollbackErr := os.Rename(absTrashPath, absPath)
 		if rollbackErr == nil {
-			rollbackErr = s.deleteTrashItemRecord(trashPath)
+			rollbackErr = errors.Join(s.deleteTrashItemRecord(trashPath), s.moveDocumentIdentity(trashPath, cleanPath))
 		}
 		return PathChangeResult{}, errors.Join(err, rollbackErr)
 	}
@@ -210,6 +213,9 @@ func (s *Service) restoreTrashItem(trashPath string, overwrite bool) (PathChange
 		if err == nil {
 			err = s.deleteTrashItemRecord(backup.NewPath)
 		}
+		if err == nil {
+			err = s.moveDocumentIdentity(backup.NewPath, cleanOriginalPath)
+		}
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(absOriginalPath), 0o755); err != nil {
@@ -218,10 +224,13 @@ func (s *Service) restoreTrashItem(trashPath string, overwrite bool) (PathChange
 	if err := movePathWithFallback(absTrashPath, absOriginalPath); err != nil {
 		return PathChangeResult{}, errors.Join(err, rollbackBackup())
 	}
+	if err := s.moveDocumentIdentity(cleanTrashPath, cleanOriginalPath); err != nil {
+		return PathChangeResult{}, errors.Join(err, os.Rename(absOriginalPath, absTrashPath), rollbackBackup())
+	}
 	if err := s.deleteTrashItemRecord(cleanTrashPath); err != nil {
 		rollbackErr := os.Rename(absOriginalPath, absTrashPath)
 		if rollbackErr == nil {
-			rollbackErr = rollbackBackup()
+			rollbackErr = errors.Join(s.moveDocumentIdentity(cleanOriginalPath, cleanTrashPath), rollbackBackup())
 		}
 		return PathChangeResult{}, errors.Join(err, rollbackErr)
 	}
@@ -247,6 +256,9 @@ func (s *Service) DeleteTrashItem(trashPath string) (map[string]any, error) {
 		return nil, ErrInvalidPath
 	}
 	if err := os.RemoveAll(absTrashPath); err != nil {
+		return nil, err
+	}
+	if err := s.retireDocumentIdentity(cleanTrashPath); err != nil {
 		return nil, err
 	}
 	if err := s.deleteTrashItemRecord(cleanTrashPath); err != nil {
@@ -362,6 +374,9 @@ func (s *Service) EmptyTrash() (map[string]any, error) {
 			return nil, fmt.Errorf("trash path escapes workspace")
 		}
 		if err := os.RemoveAll(target); err != nil {
+			return nil, err
+		}
+		if err := s.retireDocumentIdentity(TrashDirName + "/" + entry.Name()); err != nil {
 			return nil, err
 		}
 		if err := s.deleteTrashItemRecord(TrashDirName + "/" + entry.Name()); err != nil {

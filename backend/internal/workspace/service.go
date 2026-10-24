@@ -95,6 +95,18 @@ CREATE TABLE IF NOT EXISTS workspace_change_reverts (
 	if err := store.AddColumnIfNotExists(ctx, s.db, "file_versions", "user_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.migrateDocuments(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateDocumentRepairs(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateDocumentChunks(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateDocumentImages(ctx); err != nil {
+		return err
+	}
 	if err := store.AddColumnIfNotExists(ctx, s.db, "trash_items", "user_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}

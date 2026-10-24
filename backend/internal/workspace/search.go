@@ -34,7 +34,7 @@ func (s *Service) Search(query string, maxResults int) ([]SearchResult, error) {
 			return err
 		}
 		relPath := filepath.ToSlash(rel)
-		if isAnyTrashPath(relPath) {
+		if isAnyTrashPath(relPath) || s.hideDocumentImageEntry(getParentPath(relPath), entry.Name()) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -344,7 +344,7 @@ func shouldSkipSearchPath(path string, isDir bool) bool {
 	if clean == "." || clean == "" {
 		return false
 	}
-	if isAnyTrashPath(clean) {
+	if isAnyTrashPath(clean) || clean == DocumentImageDir || strings.HasPrefix(clean, DocumentImageDir+"/") || documentImageToken(clean) != "" {
 		return true
 	}
 	if !isDir {

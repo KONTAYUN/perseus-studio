@@ -67,8 +67,7 @@ for (const protocol of ['openai', 'anthropic']) {
       await page.reload();
       await page.getByTestId('layout-3').click();
       await page.getByTestId(`file-row-${path}`).click();
-      await page.getByRole('button', { name: '切换为纯文本（当前：富文本）', exact: true }).click();
-      await expect(page.getByTestId('editor-textarea')).toHaveValue('before\n');
+      await expect(page.getByTestId('rich-text-editor')).toHaveText('before');
       let acceptedRun;
       let recoveredRequests = 0;
       if (protocol === 'openai') {
@@ -87,7 +86,7 @@ for (const protocol of ['openai', 'anthropic']) {
       }
       await page.getByTestId('chat-input').fill(`把 ${path} 中的 before 改为 after，并保存文件。`);
       await page.getByTestId('chat-send-button').click();
-      await expect(page.getByTestId('editor-textarea')).toHaveValue('after\n', { timeout: 20_000 });
+      await expect(page.getByTestId('rich-text-editor')).toHaveText('after', { timeout: 20_000 });
       const file = await api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET');
       expect(file.content).toBe('after\n');
       expect(patchVisible).toBe(true);
@@ -127,7 +126,7 @@ for (const protocol of ['openai', 'anthropic']) {
       await page.getByRole('button', { name: '撤销这一处', exact: true }).click();
       await page.getByRole('button', { name: '确认撤销', exact: true }).click();
       await expect(page.getByText('已撤销此处变更。', { exact: true })).toBeVisible();
-      await expect(page.getByTestId('editor-textarea')).toHaveValue('before\n');
+      await expect(page.getByTestId('rich-text-editor')).toHaveText('before');
 
       if (protocol === 'openai') {
         expect(systemCounts.every((count) => count === 1)).toBe(true);
@@ -165,13 +164,12 @@ test('autosave preserves external changes until the user explicitly saves the lo
     await page.reload();
     await page.getByTestId('layout-3').click();
     await page.getByTestId(`file-row-${path}`).click();
-    await page.getByRole('button', { name: '切换为纯文本（当前：富文本）', exact: true }).click();
-    const editor = page.getByTestId('editor-textarea');
-    await expect(editor).toHaveValue('original');
+    const editor = page.getByTestId('rich-text-editor');
+    await expect(editor).toHaveText('original');
     await api(page, '/api/files/write', { path, content: 'external AI version' });
     await editor.fill('local unsaved version');
     await expect(page.getByRole('button', { name: '保留本地修改', exact: true })).toBeVisible();
-    await expect(editor).toHaveValue('local unsaved version');
+    await expect(editor).toHaveText('local unsaved version');
     const read = () => api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET');
     expect((await read()).content).toBe('external AI version');
     await page.getByRole('button', { name: '保留本地修改', exact: true }).click();

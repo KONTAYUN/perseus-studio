@@ -88,11 +88,12 @@ export function createFileTreeMutationActions({
     }
   }
 
-  async function renamePath(oldPath, newPath) {
+  async function renamePath(oldPath, newPath, options = {}) {
     setErrorMessage('');
     setEditorStatusMessage?.('');
     try {
-      await apiPost('/api/files/rename', { old_path: oldPath, new_path: newPath });
+      await apiPost('/api/files/rename', { old_path: oldPath, new_path: newPath,
+        ...(options.expectedHash !== undefined ? { expected_hash: options.expectedHash } : {}) });
       applyPathUpdate(oldPath, newPath);
       applyEditorPathUpdate?.(oldPath, newPath);
       await loadTree();
@@ -197,7 +198,7 @@ export function createFileTreeMutationActions({
   }
 
   async function openCreateFileModal(basePath = getDefaultCreateBasePath()) {
-    const path = nextAvailablePath(basePath, '新建 文本文档.txt');
+    const path = nextAvailablePath(basePath, '新建文稿.md');
     await createFile(path, '', { renameAfterCreate: true, openAfterCreate: false });
     setIsAddMenuOpen?.(false);
   }

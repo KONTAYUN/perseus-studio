@@ -1,5 +1,9 @@
 # Perseus Studio Architecture
 
+Document images: `DocumentImagePicker` provides upload and searchable workspace thumbnails without a URL-entry field. `/api/documents/images` validates bitmap bytes and stores editor uploads under the hidden `.perseus-images/` workspace directory; `/api/files/image` remains the authenticated display boundary. Workspace owns persisted leases and conservative reference collection; the usersvc worker follows server cancellation. Legacy UUID-prefixed `图片/` uploads remain readable and are hidden individually; ordinary user image files remain visible and are never collected. See `docs/DOCUMENT_IMAGES_20261024.md`.
+
+Document editing closure: Markdown remains the sole content source. The document adapter/session owns remark/mdast conversion, root source mapping, revision-aware candidate checks and ProseMirror transactions. Backend document policy uses Goldmark and shared versioned fixtures. Writes retain hash conflicts, snapshots and atomic replacement. UI distinguishes preserved content, confirmed conversion problems and resource failures. See docs/DOCUMENT_EDITING_IMPLEMENTATION.md for staged evidence.
+
 Design-audit migration (2026-10-20): only structured tool calls execute actions; completion consumes explicit outcomes and verified events. Error identity is retained across AI/API boundaries. Provider capability settings are explicit; reference attachments do not grant or restrict permissions. Workspace owns persistent patch recovery and bounded change observation; host commands are disabled unless explicitly enabled for trusted administrators. Chat utilities own authoritative terminal reconciliation. A full session reducer migration remains pending; existing facade/action interfaces are retained. These changes refine existing packages; the detailed migration and evidence are recorded in `docs/DESIGN_AUDIT_REMEDIATION.md`.
 
 Single-container web IDE: React frontend + Go backend, served from one binary. Multi-user with per-user data isolation.
@@ -8,7 +12,7 @@ Single-container web IDE: React frontend + Go backend, served from one binary. M
 
 Markdown format checks are conservative, bounded frontend diagnostics. The editor header offers one icon to switch rich/source views and a warning icon only for suspected issues. Confirmed repair reuses chat submission with a dedicated formatting prompt; it first saves and validates the selected file snapshot through existing editor save actions. Local conflicts, save errors and target changes prevent submission. Scrollbar visuals are shared across application and portalled surfaces.
 
-Markdown messages share a safe React Markdown renderer with GFM and copyable fenced code. Markdown documents can switch between source and a Tiptap document editor, using Markdown as the sole persisted format. The rich editor owns selection/block controls and local document transactions; existing editor hooks retain file identity, per-file display mode, autosave and conflict ownership. Keyboard saves reuse the manual save action. Merely opening a document must not rewrite it. Unsupported document syntax remains available as rendered preview/source instead of silently discarding content.
+Markdown messages share a safe React Markdown renderer with GFM and copyable fenced code. Markdown documents can switch between source and a Tiptap document editor, using Markdown as the sole persisted format. The rich editor owns selection/block controls and local document transactions; existing editor hooks retain file identity, per-file display mode, autosave and conflict ownership. Keyboard saves reuse the manual save action. Merely opening a document must not rewrite it. Unsupported document syntax remains available in inert local preservation nodes, with editable surrounding prose and explicit local controls.
 
 ```
 src/                        React frontend (Vite + Tailwind)
@@ -200,7 +204,7 @@ Runtime data belongs in `data/`. Local exports, binary builds, and deployment pa
 
 ## Frontend UI Governance
 
-Markdown rich editing supports balanced single-line HTML spans through a source-preserving inline Tiptap node. Its recognizer is shared with the compatibility guard. HTML wrappers remain inert data while child text/marks remain editable; unsupported block HTML, frontmatter and other extensions still fall back to preview/source. Both modes retain the existing Markdown save/conflict pipeline.
+Markdown rich editing supports balanced single-line HTML spans through a source-preserving inline Tiptap node. Its recognizer is shared with the local preservation tokenizer. HTML wrappers remain inert data while child text/marks remain editable; block HTML, frontmatter and other extensions use local preservation nodes rather than locking the entire document. Both modes retain the existing Markdown save/conflict pipeline.
 
 Frontend UI changes should follow [docs/UI_DESIGN_SYSTEM.md](docs/UI_DESIGN_SYSTEM.md). That document is the source of truth for UI tokens, button/input/menu/dialog standards, panel headers, chat composer behavior, file tree interaction, animation rules, dark-mode parity, and future component extraction.
 
@@ -239,3 +243,7 @@ Conversation deletion is serialized with foreground/background admission in SQLi
 Background task startup recovery is conservative: cancellation remains canceled, interrupted AI/unknown work fails with an explicit artifact-verification requirement, and only mock jobs can requeue automatically. Recovery state and logs are atomic. Full background task checkpoint/resume remains unimplemented.
 
 `workspace` owns bounded change previews and hash-checked reversal of one persisted tool change. `api/workspace_changes` resolves the authenticated user's tool ledger entry and schedules reversals through the shared workspace queue. A durable reversal journal prevents replay after an ambiguous filesystem/database failure. Chat renders this through a dedicated change-review component; it does not trust client-supplied paths, hashes or snapshots. This is per-file tool-change recovery, not a shell-command or whole-workspace checkpoint.
+
+### Extended Markdown editing — 2026-10-23
+
+Unsupported Markdown is represented by inert block/inline preservation nodes rather than a whole-document read-only preview. Raw content never becomes executable DOM. Local editing and insertion use normal editor transactions, including undo. Long documents use source-preserving sections to bound the mounted rich editor. Opening or navigating sections does not write files.

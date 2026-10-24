@@ -2,7 +2,17 @@ import { getParentPath, pathMatches, remapPathPrefix, remapPathSet, removeFolder
 
 export function nextAvailablePathInTree(flatFiles, basePath, defaultName) {
   const buildPath = (name) => (basePath ? `${basePath}/${name}` : name);
-  const exists = (path) => flatFiles.some((item) => item.path === path);
+  const paths = new Set();
+  const collect = items => {
+    for (const item of items) {
+      if (paths.has(item.path)) continue;
+      paths.add(item.path);
+      collect(item.children || []);
+    }
+  };
+  // Visible rows still contain their collapsed children; include those in name checks.
+  collect(flatFiles);
+  const exists = path => paths.has(path);
   if (!exists(buildPath(defaultName))) return buildPath(defaultName);
 
   const dotIndex = defaultName.lastIndexOf('.');

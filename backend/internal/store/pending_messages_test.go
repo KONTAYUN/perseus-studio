@@ -3,9 +3,30 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"webide-backend/internal/document"
 )
+
+func TestQueuedDocumentRepairCannotReplaceOrdinaryPendingMessage(t *testing.T) {
+	_, runs, _, conversation := runPreparationEnv(t)
+	p := PendingMessage{ID: "ordinary", ConversationID: conversation.ID, Content: "用户已挂起的消息", ModelProviderID: "model"}
+	if _, err := runs.SavePendingMessage(t.Context(), "u", p); err != nil {
+		t.Fatal(err)
+	}
+	repair := p
+	repair.ID = "repair"
+	repair.Content = "repair"
+	repair.DocumentAction = &document.Action{Type: "format_repair", Path: "a.md", BaseHash: strings.Repeat("a", 64), Profile: document.Version, Diagnostics: []document.Issue{{Code: "test", Message: "test"}}}
+	if _, err := runs.SavePendingMessage(t.Context(), "u", repair); !errors.Is(err, ErrRequestConflict) {
+		t.Fatal("pending overwritten", err)
+	}
+	got, err := runs.GetPendingMessage(t.Context(), "u", p.ID)
+	if err != nil || got.Content != p.Content {
+		t.Fatal("user queue lost", got, err)
+	}
+}
 
 func TestPendingMessagesSurviveReloadAndAdmitExactlyOnce(t *testing.T) {
 	db, runs, conversations, conversation := runPreparationEnv(t)

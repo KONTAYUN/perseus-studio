@@ -23,6 +23,7 @@ type PrepareConversationRunInput struct {
 	RegenerateMessageID, RequestID          string
 	PendingMessageID                        string `json:",omitempty"`
 	AttachmentPayloadsJSON                  string `json:",omitempty"`
+	MessageMetaJSON                         string `json:",omitempty"`
 }
 
 type PreparedConversationRun struct {
@@ -95,7 +96,7 @@ func (s *AgentRunStore) PrepareConversationRun(ctx context.Context, in PrepareCo
 		if in.AttachmentsJSON == "" {
 			in.AttachmentsJSON = "[]"
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO messages (id,user_id,conversation_id,role,content,attachments_json,status,segment_index,meta_json,created_at,updated_at) VALUES (?,?,?,'user',?,?,'final',0,'',?,?)`, messageID, in.UserID, in.ConversationID, strings.TrimSpace(in.Content), in.AttachmentsJSON, now, now)
+		_, err = tx.ExecContext(ctx, `INSERT INTO messages (id,user_id,conversation_id,role,content,attachments_json,status,segment_index,meta_json,created_at,updated_at) VALUES (?,?,?,'user',?,?,'final',0,?,?,?)`, messageID, in.UserID, in.ConversationID, strings.TrimSpace(in.Content), in.AttachmentsJSON, in.MessageMetaJSON, now, now)
 		if err != nil {
 			return PreparedConversationRun{}, err
 		}

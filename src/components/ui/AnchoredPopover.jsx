@@ -53,6 +53,10 @@ export function AnchoredPopover({
 
   React.useEffect(() => {
     if (!open) return undefined;
+    const onPointerDown = (event) => {
+      if (showBackdrop || anchorRef?.current?.contains(event.target) || popoverRef.current?.contains(event.target)) return;
+      onClose?.();
+    };
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -61,9 +65,13 @@ export function AnchoredPopover({
         anchorRef?.current?.focus({ preventScroll: true });
       }
     };
+    document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown, true);
-    return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [anchorRef, onClose, open]);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [anchorRef, onClose, open, showBackdrop]);
 
   if (!present || typeof document === 'undefined') return null;
 

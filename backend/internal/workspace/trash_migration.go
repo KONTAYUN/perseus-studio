@@ -37,7 +37,13 @@ func (s *Service) migrateLegacyTrashDirLocked() error {
 	currentInfo, err := os.Stat(currentAbs)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return movePathWithFallback(legacyAbs, currentAbs)
+			if err := movePathWithFallback(legacyAbs, currentAbs); err != nil {
+				return err
+			}
+			if err := s.moveDocumentIdentity(LegacyTrashDirName, TrashDirName); err != nil {
+				return errors.Join(err, os.Rename(currentAbs, legacyAbs))
+			}
+			return nil
 		}
 		return err
 	}
@@ -56,6 +62,9 @@ func (s *Service) migrateLegacyTrashDirLocked() error {
 		}
 		if err := movePathWithFallback(filepath.Join(legacyAbs, entry.Name()), filepath.Join(currentAbs, targetName)); err != nil {
 			return err
+		}
+		if err := s.moveDocumentIdentity(LegacyTrashDirName+"/"+entry.Name(), TrashDirName+"/"+targetName); err != nil {
+			return errors.Join(err, os.Rename(filepath.Join(currentAbs, targetName), filepath.Join(legacyAbs, entry.Name())))
 		}
 	}
 	return os.Remove(legacyAbs)

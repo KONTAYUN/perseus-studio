@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"webide-backend/internal/document"
 	"webide-backend/internal/failure"
 )
 
@@ -46,6 +47,14 @@ func (s *Service) writeBytes(ctx context.Context, path string, content []byte, s
 	}
 	if isAnyTrashPath(cleanPath) {
 		return FileWriteResult{}, trashManagedOnlyError()
+	}
+	if document.IsMarkdown(cleanPath) {
+		if _, err := document.Validate(content, ""); err != nil {
+			return FileWriteResult{}, err
+		}
+		if _, err := s.documentIdentity(ctx, cleanPath); err != nil {
+			return FileWriteResult{}, err
+		}
 	}
 
 	if source == "" {

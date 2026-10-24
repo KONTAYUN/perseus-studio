@@ -23,19 +23,4 @@ export const PreservedSpan = Node.create({
   renderHTML({ node }) {
     return ['span', { 'data-preserved-span': '', 'data-span-opening': node.attrs.opening, 'data-span-closing': node.attrs.closing }, 0];
   },
-  markdownTokenizer: {
-    name: 'preservedSpan', level: 'inline',
-    start: source => source.search(/<span(?=[\s>])/i),
-    tokenize(source, _tokens, helpers) {
-      const span = readInlineSpan(source);
-      if (!span) return undefined;
-      return { type: 'preservedSpan', ...span, tokens: helpers.inlineTokens(span.inner) };
-    },
-  },
-  parseMarkdown(token, helpers) {
-    return helpers.createNode('preservedSpan', { opening: token.opening, closing: token.closing }, helpers.parseInline(token.tokens));
-  },
-  renderMarkdown(node, helpers) {
-    return `${node.attrs.opening}${helpers.renderChildren(node.content || [])}${node.attrs.closing}`;
-  },
 });

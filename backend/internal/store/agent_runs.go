@@ -162,6 +162,9 @@ CREATE TABLE IF NOT EXISTS pending_conversation_messages (
 	if _, err := s.db.ExecContext(ctx, tables); err != nil {
 		return err
 	}
+	if err := AddColumnIfNotExists(ctx, s.db, "pending_conversation_messages", "document_action_json", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	indexes := `
 CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_conversation ON agent_runs(user_id, conversation_id, created_at DESC);

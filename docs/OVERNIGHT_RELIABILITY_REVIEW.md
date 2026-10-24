@@ -112,3 +112,24 @@
 - 故障注入确认：合法 JSON 内的恢复原文损坏会被恢复写回，缺少与 BeforeHash 的核验。现先验证整份计划的原文哈希/路径/操作/预期哈希格式，再进行任何逆序写入；损坏时保留 pending 证据并拒绝全部写入。独立库先红后绿日志 design-fix-journal-integrity-{before,after}.log。
 - 最后代码再次通过 Go 全包（design-fix-delivery-go.log）、vet（design-fix-delivery-vet.log）、结构门禁（135 前端/300 Go 文件，扫描含测试）及 Windows 构建。最终二进制在独立实例再跑两协议编辑/外部冲突保护 3/3，design-fix-delivery-edit-e2e.log；前端未变，152 项单测与构建沿用本轮最终记录。
 - **当前 8080** 为 perseus-design-audit-20261021-verified.exe，PID 62968，00:11 启动。升级前再次核对任务空闲并完整离线备份 manual-backups/20261021-journal-integrity-final/；23 表512行（含新迁移表和前次登录 session）及3文件摘要、数据库检查、实际登录/配置/布局与0页面异常均通过。证据 design-fix-delivery-manual-{integrity,ui}.log。独立18080再次停止，8080继续运行。
+
+## 2026-10-24 接续验收
+
+本轮在当前工作树重新验证了上一轮实现，并修复了一个可复现的编辑器边界：脚注弹层在 WebKit 下快速点击“应用”时可能只提交旧的外层快照。脚注编辑器现在打开时自动获得焦点，提交时直接读取嵌套编辑器的最新 JSON，同时保留更新回调；跨引擎重复回归确认多段脚注、粗体、链接和第二段修改均写回 Markdown。滚动条断言改为按浏览器能力检查实际可滚动性，剪贴板测试在不支持权限枚举的引擎中使用受控内存剪贴板，不改变产品行为。
+
+本轮证据：
+
+- `npm run test:unit`：188/188 通过。
+- `npm run test:ui`：180 个前端文件门禁通过。
+- `npm run test:structure`：180 个前端、356 个 Go 文件扫描通过。
+- `npm run build`：通过；仍有主包约 963 KB、PreservedMarkdown 约 521 KB 的分包提示。
+- Chrome 完整 E2E：89 项中 87 通过，性能和未配置真实供应商两项按 opt-in 设计跳过。
+- Firefox、WebKit、Chrome 文稿关键集：126/126 通过；包含表格、扩展语法保留、脚注、公式、元数据、草稿、冲突、TXT→MD、修复候选和复制行为。WebKit 脚注专项重复 3 次通过。
+- `git diff --check`：通过。
+- 18096 隔离实例与 8080 手动实例 `/api/ready` 均返回成功，running=0、queued=0；8080 未重启、未替换。
+
+本次 PowerShell 会话没有可用 Go 工具链，因而 `go test ./...` 与 `go vet ./...` 未能执行；此前通过日志仍是历史证据，不能冒充本轮结果。`npm audit --omit=dev` 当前报告 3 个 low，来源是 remark-math 依赖链中的旧嵌套 KaTeX 公告；没有执行破坏性 `audit fix --force`。
+
+剩余限制仍包括：超大单根文档 500k 输入 P95 约 153 ms、超大包分割、真实 Windows 中文 IME 人工检查、宿主命令缺少 OS 级沙箱、整轮多文件崩溃事务、后台 AI checkpoint/resume、Linux 原生/race/容器运行，以及云端部署验收。当前结果不宣称零缺陷。
+
+下一步：在具备 Go 1.25 工具链的环境重新执行全包测试和 vet；若通过，再按空闲检查、离线备份、构建资源核对流程评估是否更新 8080。继续保持隔离写入测试，不输出凭证、不推送、不部署。

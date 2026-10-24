@@ -25,12 +25,18 @@ func (s *Server) parseConversationMessageRequest(r *http.Request) (string, strin
 	if len(req.AttachmentsJSON) > 0 {
 		attachmentsJSON = req.AttachmentsJSON
 	}
+	if err := setRequestDocumentAction(r, req.DocumentAction); err != nil {
+		return "", "", "", nil, nil, err
+	}
 	return req.Content, req.ModelProviderID, req.ThinkingMode, attachmentsJSON, nil, nil
 }
 
 func (s *Server) parseMultipartConversationMessage(r *http.Request) (string, string, string, []byte, []ai.AttachmentPayload, error) {
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		return "", "", "", nil, nil, fmt.Errorf("invalid multipart body")
+	}
+	if err := parseRequestDocumentAction(r, r.FormValue("document_action")); err != nil {
+		return "", "", "", nil, nil, err
 	}
 
 	var metadata []chatAttachmentMetadata

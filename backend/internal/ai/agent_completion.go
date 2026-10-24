@@ -191,6 +191,9 @@ func (r *agentRuntime) completionPathsMissingMutations(paths []string) []string 
 }
 
 func eventCountsAsWorkspaceMutation(event ToolEvent) bool {
+	if event.Operation == "document_repair_staged" || event.Operation == "document_chunk_staged" {
+		return false
+	}
 	if isWorkspaceMutationTool(event.ToolName) {
 		return true
 	}

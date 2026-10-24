@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { createEditorSaveAction } from './editorSaveActions';
+import { createMarkdownConversionAction } from './editorMarkdownConversion';
 import { createEditorFileLoader } from './createEditorFileLoader';
 import { createEditorToolRefreshActions } from './editorToolRefreshActions';
 import { detectFileType } from './ideUtils';
@@ -11,11 +12,13 @@ import {
 } from './editorTabUtils';
 import useActiveEditorTabSync from './useActiveEditorTabSync';
 import useEditorTabAutoSave from './useEditorTabAutoSave';
+import { flushDocumentSessions } from '../components/editor/document/registry.js';
 import useEditorTabRefSync from './useEditorTabRefSync';
 
 export default function useEditorTabs({
   confirm,
   loadTree,
+  renamePath,
   setActivePanel,
   setErrorMessage,
   setSelectedItemPath,
@@ -23,6 +26,8 @@ export default function useEditorTabs({
 } = {}) {
   const [isEditorLoading, setIsEditorLoading] = useState(false);
   const [isSavingFile, setIsSavingFile] = useState(false);
+  const [isConvertingFile, setIsConvertingFile] = useState(false);
+  const conversionRequestRef = useRef(null);
   const [currentFilePath, setCurrentFilePath] = useState('');
   const [currentFileContent, setCurrentFileContent] = useState('');
   const [savedFileContent, setSavedFileContent] = useState('');
@@ -34,7 +39,6 @@ export default function useEditorTabs({
   const [editorStatusMessage, setEditorStatusMessage] = useState('');
   const [openTabs, setOpenTabs] = useState([]);
   const [activeTabPath, setActiveTabPath] = useState('');
-  const [documentModes, setDocumentModes] = useState({});
 
   const currentFileHashRef = useRef('');
   currentFileHashRef.current = currentFileHash;
@@ -96,7 +100,7 @@ export default function useEditorTabs({
     isDirty,
     isDirtyRef,
     isEditorLoading,
-    isSavingFile,
+    isSavingFile: isSavingFile || isConvertingFile,
     isTextFile,
     saveFileContent,
     savedFileContent,
@@ -128,18 +132,19 @@ export default function useEditorTabs({
     await flushAutoSave();
     const existing = openTabsRef.current.find((tab) => tab.path === path);
     if (existing) {
-      activateTab(path);
+      await activateTab(path);
       return;
     }
     await loadFileIntoEditor(path);
   }
 
   async function activateTab(path, options = {}) {
-    const tab = openTabsRef.current.find((item) => item.path === path);
-    if (!tab) return;
     if (!options.skipFlush) {
       await flushAutoSave();
     }
+    const tab = openTabsRef.current.find((item) => item.path === path);
+    if (!tab) return;
+    if (currentFilePathRef.current === path) { setActivePanel?.('editor'); return; }
     editorLoadRequestRef.current += 1;
     setActiveTabPath(tab.path);
     setCurrentFilePath(tab.path);
@@ -157,7 +162,9 @@ export default function useEditorTabs({
   }
 
   async function closeTab(path) {
-    const tabs = openTabsRef.current;
+    await flushDocumentSessions(path);
+    if (conversionRequestRef.current) return;
+    const tabs = openTabsRef.current.map(tab => tab.path === currentFilePathRef.current ? { ...tab, ...buildTabSnapshot({ path: tab.path }) } : tab);
     const tab = tabs.find((item) => item.path === path);
     if (!tab) return;
     if (isTabDirty(tab)) {
@@ -197,7 +204,9 @@ export default function useEditorTabs({
   }
 
   async function detachTab(path) {
-    const tabs = openTabsRef.current;
+    await flushDocumentSessions(path);
+    if (conversionRequestRef.current) return false;
+    const tabs = openTabsRef.current.map(tab => tab.path === currentFilePathRef.current ? { ...tab, ...buildTabSnapshot({ path: tab.path }) } : tab);
     const tab = tabs.find((item) => item.path === path);
     if (!tab) return true;
     if (isTabDirty(tab)) {
@@ -287,6 +296,8 @@ export default function useEditorTabs({
   }
 
   async function flushAutoSave() {
+    await flushDocumentSessions(currentFilePathRef.current);
+    if (conversionRequestRef.current) await conversionRequestRef.current;
     if (autoSaveTimerRef.current) {
       window.clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
@@ -299,6 +310,7 @@ export default function useEditorTabs({
   }
 
   async function saveFileContent(options) {
+    if (conversionRequestRef.current && !options?.conversion) return;
     return createEditorSaveAction({
       currentFilePathRef, currentFileContentRef, currentFileHashRef, savedFileContentRef,
       isTextFileRef, externalFileConflictRef, saveRequestRef,
@@ -308,10 +320,11 @@ export default function useEditorTabs({
   }
 
   async function prepareCurrentFileForAgent({ path, content }) {
+    await flushDocumentSessions(path);
     const matches = () => currentFilePathRef.current === path && currentFileContentRef.current === content
       && isTextFileRef.current && !externalFileConflictRef.current;
     if (!matches()) throw new Error('文件已变化或存在保存冲突，请先处理后再修复。');
-    await saveFileContent({ auto: true });
+    if (savedFileContentRef.current !== content) await saveFileContent({ auto: true });
     if (!matches() || savedFileContentRef.current !== content) {
       throw new Error('未能保存当前版本，已停止发送修复请求。');
     }
@@ -373,6 +386,12 @@ export default function useEditorTabs({
   });
 
   return {
+    convertToMarkdown: createMarkdownConversionAction({
+      conversionRequestRef, autoSaveTimerRef, currentFilePathRef, currentFileContentRef,
+      savedFileContentRef, currentFileHashRef, externalFileConflictRef, isTextFileRef,
+      saveFileContent, renamePath, setIsConvertingFile, setErrorMessage,
+    }),
+    isConvertingFile,
     activeTabPath,
     activeTabPathRef,
     activateTab,
@@ -391,8 +410,7 @@ export default function useEditorTabs({
     editorStatusMessage,
     externalFileConflict,
     flushAutoSave,
-    documentMode: documentModes[currentFilePath] || 'rich',
-    setDocumentMode: mode => setDocumentModes(current => ({ ...current, [currentFilePath]: mode })),
+    getCurrentDocumentSnapshot: () => ({ path: currentFilePathRef.current, content: currentFileContentRef.current, hash: currentFileHashRef.current, conflict: externalFileConflictRef.current }),
     getTabSnapshot,
     isDirty,
     isDirtyRef,
@@ -409,7 +427,11 @@ export default function useEditorTabs({
     reloadCurrentFileFromConflict,
     reorderTab,
     saveCurrentFile,
-    setCurrentFileContent,
+    setCurrentFileContent: value => {
+      const next = typeof value === 'function' ? value(currentFileContentRef.current) : value;
+      currentFileContentRef.current = next;
+      setCurrentFileContent(next);
+    },
     setEditorStatusMessage,
   };
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"webide-backend/internal/document"
 	"webide-backend/internal/failure"
 )
 
@@ -36,6 +37,15 @@ func parseBackgroundTaskRequest(argumentsJSON, fallbackGoal string) (BackgroundT
 func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, opts RunOptions) (string, string, string, string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", "", "", "", err
+	}
+	if !opts.DocumentAction.Allows(name) {
+		return "", "", "", "", failure.New("document_repair_scope_rejected", "格式修复任务不允许使用此工具", nil)
+	}
+	if opts.DocumentAction != nil {
+		opts.AllowedWorkspacePaths = []string{opts.DocumentAction.Path}
+		if name == "apply_workspace_patch" {
+			return s.execDocumentRepairPatch(ctx, argumentsJSON, opts)
+		}
 	}
 	if name == "run_workspace_command" && !toolVisibleForRole(name, opts.UserRole) {
 		return "", "", "", "", failure.New("command_disabled", "Command execution requires explicit trusted_host mode and administrator role", nil)
@@ -101,8 +111,18 @@ func (s *Service) executeTool(ctx context.Context, name, argumentsJSON string, o
 	case "save_workspace_file":
 		return s.execSaveWorkspaceFile(ctx, opts.UserID, argumentsJSON)
 	case "write_workspace_chunk":
+		var chunk chunkWriteArgs
+		_ = json.Unmarshal([]byte(argumentsJSON), &chunk)
+		if document.IsMarkdown(chunk.Path) {
+			return s.execStagedDocumentChunk(ctx, argumentsJSON, opts, false)
+		}
 		return s.execWriteWorkspaceChunk(ctx, opts.UserID, argumentsJSON)
 	case "finalize_workspace_write":
+		var final finalizeWriteArgs
+		_ = json.Unmarshal([]byte(argumentsJSON), &final)
+		if document.IsMarkdown(final.Path) {
+			return s.execStagedDocumentChunk(ctx, argumentsJSON, opts, true)
+		}
 		return s.execFinalizeWorkspaceWrite(ctx, opts.UserID, argumentsJSON)
 	case "manage_workspace_path":
 		return s.execManageWorkspacePath(ctx, opts.UserID, argumentsJSON)

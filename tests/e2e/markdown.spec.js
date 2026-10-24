@@ -58,11 +58,14 @@ async function dragSelectText(page, text) {
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(text);
   await expect(page.getByTestId('selection-toolbar')).toBeVisible();
 }
-const sourceButton = page => page.getByRole('button', { name: '切换为纯文本（当前：富文本）', exact: true });
-const richButton = page => page.getByRole('button', { name: '切换为富文本（当前：纯文本）', exact: true });
 
-test('assistant Markdown renders safely and command copy keeps exact text', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+test('assistant Markdown renders safely and command copy keeps exact text', async ({ page, context, browserName }) => {
+  if (browserName === 'chromium') await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  else await page.addInitScript(() => {
+    let value = '';
+    const clipboard = { writeText: async text => { value = String(text); }, readText: async () => value };
+    try { Object.defineProperty(Navigator.prototype, 'clipboard', { configurable: true, get: () => clipboard }); } catch {}
+  });
   const content = '# 部署步骤\n\n**登录服务器**，执行 `ssh`：\n\n```bash\nssh root@YOUR_SERVER_IP\nprintf "hello"\n```\n\n- 第一步\n- 第二步\n\n| 名称 | 状态 |\n| --- | --- |\n| API | 就绪 |\n\n[危险链接](javascript:alert(1))\n\n<img src=x onerror="window.markdownXSS=1">';
   await page.route(/\/api\/conversations$/, route => route.fulfill({ json: { items: [{ id: 'md-fixture', title: 'Markdown 显示测试' }] } }));
   await page.route('**/api/conversations/md-fixture/messages', route => route.fulfill({ json: { items: [{ id: 'md-answer', role: 'assistant', content, attachments: [] }] } }));
@@ -94,10 +97,8 @@ test('rich document formats selection and paragraphs then persists Markdown with
     await openDocument(page, path, content);
     const editor = page.getByTestId('rich-text-editor');
     await expect(editor.getByRole('heading', { name: '文档规则' })).toBeVisible();
-    await sourceButton(page).click();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue(content);
+    expect((await api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET')).content).toBe(content);
     expect(writes).toBe(0);
-    await richButton(page).click();
     await dragSelectText(page, '这段文字');
     await page.getByTestId('selection-toolbar').getByRole('button', { name: '粗体', exact: true }).click();
     await expect(editor.locator('strong')).toHaveText('这段文字');
@@ -105,12 +106,9 @@ test('rich document formats selection and paragraphs then persists Markdown with
     await page.getByTestId('block-format-handle').click();
     await page.getByTestId('block-format-menu').getByRole('menuitem', { name: '二级标题', exact: true }).click();
     await expect(editor.locator('h2')).toHaveText('普通段落');
-    await sourceButton(page).click();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue(/选择\*\*这段文字\*\*调整格式/);
     const read = () => api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET');
     await expect.poll(async () => (await read()).content).toContain('## 普通段落');
     expect((await read()).content).toContain('**这段文字**');
-    await richButton(page).click();
     await editor.getByText('容器关系', { exact: true }).click();
     await expect(page.getByTestId('block-format-handle')).toBeVisible();
     await page.screenshot({ path: '_local_artifacts/markdown-document-light.png', fullPage: true });
@@ -123,16 +121,16 @@ test('rich document formats selection and paragraphs then persists Markdown with
   } finally { await api(page, '/api/files/delete', { path }).catch(() => {}); }
 });
 
-test('extended Markdown is previewed without rewriting and remains editable as source', async ({ page }) => {
+test('extended Markdown preserves local structures without locking the rich document', async ({ page }) => {
   const path = `rich-preserve-${Date.now()}.md`;
   const content = '---\ntitle: 原始配置\n---\n\n# 标题\n\n<details>不丢失原始结构</details>\n';
   await login(page);
   try {
     await openDocument(page, path, content);
-    await expect(page.getByText('此文档包含扩展语法', { exact: false })).toBeVisible();
-    await expect(page.getByTestId('rich-text-editor')).toHaveCount(0);
-    await sourceButton(page).click();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue(content);
+    await expect(page.getByTestId('rich-text-editor')).toBeVisible();
+    await expect(page.getByTestId('preserved-block')).toHaveCount(1);
+    await expect(page.getByTestId('document-documentMetadata')).toBeVisible();
+    await expect(page.getByTestId('editor-mode-toggle')).toHaveCount(0);
     expect((await api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET')).content).toBe(content);
   } finally { await api(page, '/api/files/delete', { path }).catch(() => {}); }
 });
@@ -153,10 +151,8 @@ test('inline HTML spans remain editable and preserve inert attributes on save', 
     await expect(span.locator('code')).toHaveText('example');
     await expect(span).not.toHaveAttribute('onclick');
     await expect(span).not.toHaveAttribute('style');
-    await sourceButton(page).click();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue(content);
+    expect((await api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET')).content).toBe(content);
     expect(writes).toBe(0);
-    await richButton(page).click();
     await dragSelectText(page, 'example');
     await page.keyboard.press('ArrowRight');
     await expect.poll(() => page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(true);
@@ -166,9 +162,7 @@ test('inline HTML spans remain editable and preserve inert attributes on save', 
     const read = () => api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET');
     await expect.poll(async () => (await read()).content).toContain(`${opening}\`example-edited\`</span>`);
     await expect.poll(async () => (await read()).content).toContain('**尾段文字**');
-    await sourceButton(page).click();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue(new RegExp('example-edited'));
-    await richButton(page).click();
+    await page.reload(); await page.getByTestId(`file-row-${path}`).click();
     await expect(span.locator('code')).toHaveText('example-edited');
     expect(await page.evaluate(() => window.spanXSS)).toBeUndefined();
     expect(errors).toEqual([]);
@@ -204,7 +198,7 @@ test('rich editor supports links and undo and preserves both sides of an externa
   } finally { await api(page, '/api/files/delete', { path }).catch(() => {}); }
 });
 
-test('document modes track file identity and plain text edits return to rich view', async ({ page }) => {
+test('rich drafts track file identity through panel and tab navigation', async ({ page }) => {
   const one = `rich-first-${Date.now()}.md`;
   const two = `rich-second-${Date.now()}.md`;
   await login(page);
@@ -212,20 +206,18 @@ test('document modes track file identity and plain text edits return to rich vie
     await api(page, '/api/files/create', { path: one, content: '# 第一份\n' });
     await openDocument(page, two, '# 第二份\n');
     await expect(page.getByTestId('rich-text-editor').locator('h1')).toHaveText('第二份');
-    await sourceButton(page).click();
-    await page.getByTestId('editor-textarea').fill('# 第二份更新\n\n**保留内容**\n');
+    await page.getByTestId('rich-text-editor').locator('h1').click();
+    await page.keyboard.press('End'); await page.keyboard.insertText('更新');
     await page.getByTestId('layout-1').click();
     await page.getByTestId('layout-3').click();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue('# 第二份更新\n\n**保留内容**\n');
+    await expect(page.getByTestId('rich-text-editor').locator('h1')).toHaveText('第二份更新');
     await page.getByTestId(`file-row-${one}`).click();
     await expect(page.getByTestId('rich-text-editor').locator('h1')).toHaveText('第一份');
     await page.getByTestId(`editor-tab-${two}`).click();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue('# 第二份更新\n\n**保留内容**\n');
-    await richButton(page).click();
-    await expect(page.getByTestId('rich-text-editor').locator('strong')).toHaveText('保留内容');
-    expect((await api(page, `/api/files/read?path=${encodeURIComponent(two)}`, undefined, 'GET')).content).toBe('# 第二份更新\n\n**保留内容**\n');
+    await expect(page.getByTestId('rich-text-editor').locator('h1')).toHaveText('第二份更新');
+    await expect.poll(async () => (await api(page, `/api/files/read?path=${encodeURIComponent(two)}`, undefined, 'GET')).content).toBe('# 第二份更新\n');
     await page.setViewportSize({ width: 760, height: 720 });
-    await selectText(page, '保留内容');
+    await selectText(page, '第二份更新');
     const toolbar = await page.getByTestId('selection-toolbar').boundingBox();
     expect(toolbar.x).toBeGreaterThanOrEqual(0);
     expect(toolbar.x + toolbar.width).toBeLessThanOrEqual(760);
@@ -270,9 +262,7 @@ test('empty rich document accepts typing, task checkboxes, tables, and immediate
     await page.keyboard.insertText('快捷保存');
     await page.keyboard.press('Control+s');
     expect((await saved).postDataJSON().content).toContain('- [x] 待完成事项');
-    await sourceButton(page).click();
-    await expect(page.getByTestId('editor-textarea')).toHaveValue(/\|.*字段.*快捷保存/);
-    await richButton(page).click();
+    await expect.poll(async () => (await api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET')).content).toMatch(/\|.*字段.*快捷保存/);
     await expect(editor.getByRole('checkbox')).toBeChecked();
     await expect(editor.locator('th').first()).toContainText('快捷保存');
     await editor.locator('th').first().click();
