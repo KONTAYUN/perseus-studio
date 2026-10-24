@@ -154,7 +154,7 @@ test('inline HTML spans remain editable and preserve inert attributes on save', 
     expect((await api(page, `/api/files/read?path=${encodeURIComponent(path)}`, undefined, 'GET')).content).toBe(content);
     expect(writes).toBe(0);
     await dragSelectText(page, 'example');
-    await page.keyboard.press('ArrowRight');
+    await editor.press('ArrowRight');
     await expect.poll(() => page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(true);
     await page.keyboard.insertText('-edited');
     await selectText(page, '尾段文字');

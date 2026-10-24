@@ -50,10 +50,13 @@ test('Enter and Shift+Enter in a table remain editable through autosave and relo
   const path = await open(page, source);
   const cell = rich(page).locator('td').first();
   await cell.click();
-  await page.keyboard.press('End');
-  await page.keyboard.press('Enter');
+  await expect(rich(page)).toBeFocused();
+  await rich(page).press('End');
+  await rich(page).press('Enter');
+  await expect(cell.locator('br:not(.ProseMirror-trailingBreak)')).toHaveCount(1);
   await page.keyboard.insertText('第二行');
-  await page.keyboard.press('Shift+Enter');
+  await expect(cell).toContainText('第二行');
+  await rich(page).press('Shift+Enter');
   await page.keyboard.insertText('第三行');
   await expect(rich(page)).toBeVisible();
   await expect(cell.locator('br')).toHaveCount(2);
@@ -125,7 +128,7 @@ test('one remaining row/column is protected; delete table is undoable and prose 
   }
   await tools(page).getByRole('button', { name: '删除表格（可撤销）', exact: true }).click();
   await expect(rich(page).locator('table')).toHaveCount(0);
-  await page.keyboard.press('Control+z');
+  await rich(page).press('Control+z');
   await expect(rich(page).locator('th')).toHaveText('唯一单元格');
   await rich(page).locator('th').click();
   await tools(page).getByRole('button', { name: '继续写', exact: true }).click();

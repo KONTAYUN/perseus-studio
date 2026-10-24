@@ -16,8 +16,11 @@ test('native extensions and inert special payloads survive adjacent prose edits 
 test('special blocks offer continue/delete/undo and assistant confirmation without a source editor', async ({ page }) => {
   const original = '<details>唯一内容</details>', path = await open(page, original);
   const block = page.getByTestId('preserved-block');
-  await block.getByRole('button', { name: '在后面写', exact: true }).click(); await page.keyboard.insertText('尾段');
-  await block.getByRole('button', { name: '在前面写', exact: true }).click(); await page.keyboard.insertText('前段');
+  await block.getByRole('button', { name: '在后面写', exact: true }).click();
+  await expect(rich(page)).toBeFocused(); await page.keyboard.insertText('尾段');
+  await expect(rich(page).locator(':scope > p').last()).toHaveText('尾段');
+  await block.getByRole('button', { name: '在前面写', exact: true }).click();
+  await expect(rich(page)).toBeFocused(); await page.keyboard.insertText('前段');
   await expect.poll(async () => (await read(page, path)).content).toBe(`前段\n\n${original}\n\n尾段`);
   await block.getByRole('button', { name: '让助手调整', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '让助手调整特殊内容' })).toBeVisible();

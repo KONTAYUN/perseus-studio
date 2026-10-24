@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { login } from './helpers/document.js';
 
 async function request(page, path, body) {
   return page.evaluate(async ({ path, body }) => {
@@ -8,11 +9,7 @@ async function request(page, path, body) {
   }, { path, body });
 }
 async function open(page, content) {
-  await page.goto('/');
-  await page.getByPlaceholder('用户名').fill('admin');
-  await page.getByPlaceholder('密码').fill('admin');
-  await page.getByRole('button', { name: /进入|登录/ }).click();
-  await expect(page.getByTestId('chat-send-button')).toBeVisible();
+  await login(page);
   const path = `document-closure-${crypto.randomUUID()}.md`;
   await request(page, '/api/files/create', { path, content });
   await page.reload(); await page.getByTestId('layout-3').click();
