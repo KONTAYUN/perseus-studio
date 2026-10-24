@@ -91,14 +91,21 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 			})
 			continue
 		}
-		var skippedToolCalls int
+		var skippedToolCalls []agentToolCall
 		turn, skippedToolCalls = prepareToolTurnForExecution(turn)
-		if skippedToolCalls > 0 {
+		if len(skippedToolCalls) > 0 {
+			held := shouldHoldToolBatch(turn.ToolCalls, skippedToolCalls)
+			executed, message := 1, "model returned multiple tool calls; executing one before asking for the next step"
+			if held {
+				executed, message = 0, "model returned multiple tool calls led by a deletion; none executed"
+			}
 			emitToolLifecycleEvent(r.opts, "tool_calls_serialized", "info", map[string]any{
 				"round":         round + 1,
-				"executed":      1,
-				"skipped":       skippedToolCalls,
-				"message":       "model returned multiple tool calls; executing one before asking for the next step",
+				"executed":      executed,
+				"skipped":       len(skippedToolCalls),
+				"held":          held,
+				"skipped_tools": toolCallNames(skippedToolCalls),
+				"message":       message,
 				"safe_boundary": "after_each_tool",
 			})
 		}
@@ -113,7 +120,7 @@ func (r *agentRuntime) run(ctx context.Context) (Reply, error) {
 		r.lastProviderEmptyResponse = false
 		r.appendAssistantTurn(turn)
 
-		if request, completed, err := r.processToolCalls(ctx, turn.ToolCalls); request != nil || completed || err != nil {
+		if request, completed, err := r.processSerializedToolCalls(ctx, turn.ToolCalls, skippedToolCalls); request != nil || completed || err != nil {
 			if err != nil {
 				return Reply{}, err
 			}

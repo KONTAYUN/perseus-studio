@@ -33,7 +33,7 @@ func openAIWorkspaceToolByName(name string) map[string]any {
 	case "read_workspace_files":
 		return openAIFunctionTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
 	case "manage_workspace_path":
-		return openAIFunctionTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams())
+		return openAIFunctionTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools. trash only when the user asked to remove the path; never trash a file to rewrite or reformat it (use apply_workspace_patch with *** Replace File).", workspaceManageParams())
 	case "organize_workspace_matches":
 		return openAIFunctionTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
 	case "apply_workspace_patch":
@@ -56,7 +56,7 @@ func anthropicWorkspaceToolByName(name string) map[string]any {
 	case "read_workspace_files":
 		return anthropicTool(name, "Read multiple supported plain-text files from the current user's workspace in one call. Do not use for binary/document formats such as .docx.", workspaceReadFilesParams())
 	case "manage_workspace_path":
-		return anthropicTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools.", workspaceManageParams())
+		return anthropicTool(name, "Perform a validated workspace path operation: mkdir, rename, move, or trash. Use this instead of primitive file operation tools. trash only when the user asked to remove the path; never trash a file to rewrite or reformat it (use apply_workspace_patch with *** Replace File).", workspaceManageParams())
 	case "organize_workspace_matches":
 		return anthropicTool(name, "Deterministically organize workspace items whose path/name contains a match text into a target folder. The backend creates the target folder if needed, moves matching files by default, and verifies the result. Use for requests like sorting episodes/files into one folder.", workspaceOrganizeParams())
 	case "apply_workspace_patch":
@@ -210,7 +210,7 @@ func workspacePatchParams() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Complete patch: *** Begin Patch\n*** Add File: path\n+new line\n*** End Patch. To edit: *** Update File: path\n@@\n unchanged context\n-old line\n+new line. Context lines start with a space, removed lines with -, added lines with +. Use exact file text without read-tool line numbers. Optional *** Move to: new/path after Update File moves the file. *** Delete File: path moves it to trash. Always end with *** End Patch. " + WorkspacePatchExecutionRule,
+				"description": "Complete patch: *** Begin Patch\n*** Add File: path\n+new line\n*** End Patch. To edit: *** Update File: path\n@@\n unchanged context\n-old line\n+new line. Context lines start with a space, removed lines with -, added lines with +. Use exact file text without read-tool line numbers. Optional *** Move to: new/path after Update File moves the file. To rewrite or reformat a whole existing file in place: *** Replace File: path, then every line of the complete new content prefixed with +. *** Delete File: path moves it to trash; use it only when the user asked to remove the file, never to rewrite, reformat or recreate it. Always end with *** End Patch. " + WorkspacePatchExecutionRule,
 			},
 		},
 	}

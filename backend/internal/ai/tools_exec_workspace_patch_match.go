@@ -413,7 +413,7 @@ func workspacePatchCandidatePathsLoose(patchText string) []string {
 	var paths []string
 	for _, line := range lines {
 		header := strings.TrimSpace(strings.TrimSuffix(line, "\n"))
-		for _, prefix := range []string{"*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "} {
+		for _, prefix := range []string{"*** Add File: ", "*** Replace File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "} {
 			if strings.HasPrefix(header, prefix) {
 				paths = append(paths, strings.TrimSpace(strings.TrimPrefix(header, prefix)))
 				break

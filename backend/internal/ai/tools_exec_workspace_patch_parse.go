@@ -49,6 +49,9 @@ func parseWorkspacePatch(input string) (workspacePatch, error) {
 		case strings.HasPrefix(header, "*** Add File: "):
 			finishOp()
 			current = &workspacePatchOperation{Kind: workspacePatchAdd, Path: strings.TrimSpace(strings.TrimPrefix(header, "*** Add File: "))}
+		case strings.HasPrefix(header, "*** Replace File: "):
+			finishOp()
+			current = &workspacePatchOperation{Kind: workspacePatchReplace, Path: strings.TrimSpace(strings.TrimPrefix(header, "*** Replace File: "))}
 		case strings.HasPrefix(header, "*** Update File: "):
 			finishOp()
 			current = &workspacePatchOperation{Kind: workspacePatchUpdate, Path: strings.TrimSpace(strings.TrimPrefix(header, "*** Update File: "))}
@@ -103,9 +106,9 @@ func parseWorkspacePatch(input string) (workspacePatch, error) {
 			prefix := line[0]
 			content := line[1:]
 			switch current.Kind {
-			case workspacePatchAdd:
+			case workspacePatchAdd, workspacePatchReplace:
 				if prefix != '+' {
-					return workspacePatch{}, parsePatchApplyError("patch apply failed: add file lines must start with +", "add file lines must start with +", i+1, patchDiagnosticLineWindow(lines, i), workspacePatchCandidatePathsLoose(text))
+					return workspacePatch{}, parsePatchApplyError(fmt.Sprintf("patch apply failed: %s file lines must start with +", current.Kind), fmt.Sprintf("%s file lines must start with +", current.Kind), i+1, patchDiagnosticLineWindow(lines, i), workspacePatchCandidatePathsLoose(text))
 				}
 				current.Lines = append(current.Lines, content)
 			case workspacePatchUpdate:
@@ -137,7 +140,7 @@ func isWorkspacePatchSeparator(lines []string, index int) bool {
 			continue
 		}
 		header := strings.TrimSpace(line)
-		return header == "*** End Patch" || strings.HasPrefix(header, "*** Add File: ") ||
+		return header == "*** End Patch" || strings.HasPrefix(header, "*** Add File: ") || strings.HasPrefix(header, "*** Replace File: ") ||
 			strings.HasPrefix(header, "*** Update File: ") || strings.HasPrefix(header, "*** Delete File: ") || strings.HasPrefix(header, "@@")
 	}
 	return false

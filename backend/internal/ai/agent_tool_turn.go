@@ -7,9 +7,11 @@ import (
 
 const agentToolPreambleMaxRunes = 220
 
-func prepareToolTurnForExecution(turn agentModelTurn) (agentModelTurn, int) {
+// prepareToolTurnForExecution keeps the first tool call and returns the calls it
+// removed, so the runtime can report them to the model instead of dropping them.
+func prepareToolTurnForExecution(turn agentModelTurn) (agentModelTurn, []agentToolCall) {
 	if len(turn.ToolCalls) == 0 {
-		return turn, 0
+		return turn, nil
 	}
 	turn.Content = conciseToolPreamble(turn.Content)
 	turn.OpenAIMessage.Content = turn.Content
@@ -69,12 +71,12 @@ func firstSentenceWithin(content string, maxRunes int) string {
 	return ""
 }
 
-func keepFirstToolCall(turn agentModelTurn) (agentModelTurn, int) {
+func keepFirstToolCall(turn agentModelTurn) (agentModelTurn, []agentToolCall) {
 	if len(turn.ToolCalls) <= 1 {
-		return turn, 0
+		return turn, nil
 	}
 	first := turn.ToolCalls[0]
-	skipped := len(turn.ToolCalls) - 1
+	skipped := append([]agentToolCall(nil), turn.ToolCalls[1:]...)
 	turn.ToolCalls = []agentToolCall{first}
 	if len(turn.OpenAIMessage.ToolCalls) > 1 {
 		turn.OpenAIMessage.ToolCalls = firstOpenAIToolCall(turn.OpenAIMessage.ToolCalls, first)

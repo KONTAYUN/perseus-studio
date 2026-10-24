@@ -14,9 +14,10 @@ import (
 type workspacePatchOperationKind string
 
 const (
-	workspacePatchAdd    workspacePatchOperationKind = "add"
-	workspacePatchUpdate workspacePatchOperationKind = "update"
-	workspacePatchDelete workspacePatchOperationKind = "delete"
+	workspacePatchAdd     workspacePatchOperationKind = "add"
+	workspacePatchUpdate  workspacePatchOperationKind = "update"
+	workspacePatchDelete  workspacePatchOperationKind = "delete"
+	workspacePatchReplace workspacePatchOperationKind = "replace"
 )
 
 type workspacePatch struct {
@@ -263,7 +264,7 @@ func applyWorkspacePatch(ctx context.Context, files *workspace.Service, patchTex
 			return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: operation %d missing path", operationIndex), "", operationIndex, 0, "operation missing path", nil)
 		}
 		if seen[path] {
-			return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: path %q appears in multiple operations", path), path, operationIndex, 0, "path appears in multiple operations", nil)
+			return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: path %q appears in multiple operations; to rewrite a whole file use one *** Replace File: operation", path), path, operationIndex, 0, "path appears in multiple operations", nil)
 		}
 		seen[path] = true
 		if seenChangePaths[path] {
@@ -299,6 +300,17 @@ func applyWorkspacePatch(ctx context.Context, files *workspace.Service, patchTex
 			}
 			writes = append(writes, plannedWorkspacePatchWrite{path: path, content: strings.Join(op.Lines, ""), create: true})
 			added++
+		case workspacePatchReplace:
+			// Whole-file rewrite in place: one hash-checked write, never delete plus create.
+			read, err := files.ReadFile(path)
+			if err != nil {
+				return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: replace file not readable %q: %v", path, err), path, operationIndex, 0, "replace file not readable", nil)
+			}
+			if len(op.Lines) == 0 {
+				return workspacePatchApplyResult{}, patchApplyError(fmt.Sprintf("patch apply failed: replace file %q has no content lines", path), path, operationIndex, 0, "replace file has no content", nil)
+			}
+			writes = append(writes, plannedWorkspacePatchWrite{path: path, content: strings.Join(op.Lines, ""), oldContent: read.Content})
+			updated++
 		case workspacePatchUpdate:
 			read, err := files.ReadFile(path)
 			if err != nil {

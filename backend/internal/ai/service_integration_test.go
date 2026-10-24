@@ -895,8 +895,8 @@ func TestGenerateReplyOpenAIRequiredToolUsesConcisePreambleBeforeTool(t *testing
 	}
 	turn.ToolCalls = normalizeAgentToolCallIDs(turn.ToolCalls)
 	turn, skipped := prepareToolTurnForExecution(turn)
-	if skipped != 0 {
-		t.Fatalf("expected no skipped tools, got %d", skipped)
+	if len(skipped) != 0 {
+		t.Fatalf("expected no skipped tools, got %d", len(skipped))
 	}
 	if turn.Content != "我先读取完整文件，看清当前第103镜前后的全貌。" {
 		t.Fatalf("expected concise first preamble, got %q", turn.Content)
