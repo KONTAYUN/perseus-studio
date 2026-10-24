@@ -1874,7 +1874,11 @@ func TestExecuteToolRunWorkspaceCommand(t *testing.T) {
 	t.Setenv("PERSEUS_COMMAND_EXECUTION", "trusted_host")
 	service, _, _, _ := newTestAIService(t)
 
-	result, _, _, path, err := service.executeTool(context.Background(), "run_workspace_command", `{"command":"go version","timeout_sec":30}`, RunOptions{UserID: testUserID, UserRole: "admin"})
+	// Exercise the shell without Go's detached telemetry process writing into
+	// the isolated command home while t.TempDir removes the test directory.
+	const command = "echo perseus-command-ok"
+	args, _ := json.Marshal(map[string]any{"command": command, "timeout_sec": 30})
+	result, _, _, path, err := service.executeTool(context.Background(), "run_workspace_command", string(args), RunOptions{UserID: testUserID, UserRole: "admin"})
 	if err != nil {
 		t.Fatalf("executeTool returned error: %v", err)
 	}
@@ -1885,11 +1889,14 @@ func TestExecuteToolRunWorkspaceCommand(t *testing.T) {
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
 		t.Fatalf("invalid result json: %v", err)
 	}
-	if payload["command"] != "go version" || payload["timed_out"] != false {
+	if payload["command"] != command || payload["timed_out"] != false {
 		t.Fatalf("unexpected command payload: %#v", payload)
 	}
 	if int(payload["exit_code"].(float64)) != 0 {
 		t.Fatalf("expected exit code 0, got %#v", payload["exit_code"])
+	}
+	if output, ok := payload["stdout"].(string); !ok || strings.TrimSpace(output) != "perseus-command-ok" {
+		t.Fatalf("unexpected command stdout: %#v", payload["stdout"])
 	}
 	if _, ok := payload["changed_paths"]; ok {
 		t.Fatalf("read-only command should not report changed paths: %#v", payload)
