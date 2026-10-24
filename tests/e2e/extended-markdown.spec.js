@@ -82,7 +82,8 @@ test('merged tables and script payloads are preserved locally and never execute'
 
 test('paste in code blocks preserves literal text rather than interpreting Markdown', async ({ page }) => {
   const path = await open(page, '```txt\n原文\n```');
-  await rich(page).locator('pre code').click(); await page.keyboard.press('End');
+  await rich(page).locator('pre code').getByText('原文', { exact: true }).click();
+  await rich(page).press('Control+End');
   await paste(page, { text: '\n# 原样标题\n**文字**' });
   await expect.poll(async () => (await read(page, path)).content).toContain('原文\n# 原样标题\n**文字**');
   await expect(rich(page).locator('h1,strong')).toHaveCount(0);

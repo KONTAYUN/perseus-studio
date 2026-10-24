@@ -45,6 +45,24 @@ async function reload(page, path) {
 }
 const source = '| 字段 | 内容 |\n| --- | --- |\n| A1 | B1 |\n| A2 | B2 |\n';
 
+test('table controls do not move the clicked cell before pointer release', async ({ page }) => {
+  await open(page, source);
+  const cell = rich(page).locator('td').first();
+  const before = await cell.boundingBox();
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down();
+  try {
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(tools(page)).toHaveCount(0);
+    expect((await cell.boundingBox()).y).toBeCloseTo(before.y, 1);
+  } finally { await page.mouse.up(); }
+  await expect(tools(page)).toBeVisible();
+  await rich(page).press('End');
+  await page.keyboard.insertText('正确单元格');
+  await expect(cell).toContainText('A1正确单元格');
+  await expect(rich(page).locator('th').first()).toHaveText('字段');
+});
+
 test('Enter and Shift+Enter in a table remain editable through autosave and reload', async ({ page }) => {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   const path = await open(page, source);

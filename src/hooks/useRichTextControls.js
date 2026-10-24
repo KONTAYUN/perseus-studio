@@ -6,10 +6,11 @@ export default function useRichTextControls(editor, scrollRef, ownerId) {
   useEffect(() => {
     if (!editor) return undefined;
     let frame;
+    let pointerId = null;
     const update = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        if (editor.isDestroyed || !scrollRef.current) return;
+        if (editor.isDestroyed || !scrollRef.current || pointerId !== null) return;
         const { selection } = editor.state;
         const viewport = scrollRef.current.getBoundingClientRect();
         const inside = editor.isFocused || document.activeElement?.closest('[data-rich-controls]')?.getAttribute('data-rich-controls') === ownerId;
@@ -36,6 +37,20 @@ export default function useRichTextControls(editor, scrollRef, ownerId) {
         }));
       });
     };
+    // A toolbar changes the document's vertical position. Publishing controls
+    // between pointerdown and pointerup can move a different cell under the
+    // pointer before the browser finishes placing the caret.
+    const onPointerDown = event => { pointerId = event.pointerId; };
+    const releasePointer = event => {
+      if (pointerId === null || (event.type !== 'blur' && event.pointerId !== pointerId)) return;
+      pointerId = null;
+      update();
+    };
+    const editorDOM = editor.view.dom;
+    editorDOM.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('pointerup', releasePointer, true);
+    document.addEventListener('pointercancel', releasePointer, true);
+    window.addEventListener('blur', releasePointer);
     for (const name of ['selectionUpdate', 'transaction', 'focus', 'blur']) editor.on(name, update);
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
@@ -44,6 +59,10 @@ export default function useRichTextControls(editor, scrollRef, ownerId) {
     update();
     return () => {
       cancelAnimationFrame(frame);
+      editorDOM.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('pointerup', releasePointer, true);
+      document.removeEventListener('pointercancel', releasePointer, true);
+      window.removeEventListener('blur', releasePointer);
       for (const name of ['selectionUpdate', 'transaction', 'focus', 'blur']) editor.off(name, update);
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
