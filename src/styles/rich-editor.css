@@ -140,6 +140,10 @@
 .rich-preserved-input { width: 100%; min-height: 200px; max-height: 60vh; resize: vertical; font: 13px/1.7 ui-monospace, monospace; }
 .dark .rich-preserved-header, .dark .rich-preserved-actions { color: #a1a9b7; }
 .rich-section-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--surface-line); color: #64748b; font: 12px/1.6 ui-sans-serif, system-ui, sans-serif; }
+.rich-pager { gap: 4px 8px; min-height: 40px; }
+.rich-pager > span { margin-right: auto; }
+.rich-pager-form { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.rich-pager-form input { width: 52px; height: 28px; padding: 0 6px; border-radius: 8px; font-size: 12px; text-align: center; }
 .rich-long-section { flex: 1; width: 100%; min-height: 0; resize: none; padding: 24px; font: 15px/1.9 ui-sans-serif, system-ui, sans-serif; background: transparent; color: inherit; }
 .rich-footnote-input { min-height: 120px; max-height: 40vh; overflow: auto; padding: 12px; border: 1px solid var(--border-color, #ddd); border-radius: 8px; }
 .document-history-dialog { --history-text: #334155; --history-muted: #64748b; --history-line: #e2e8f0; --history-sidebar: #f8fafc; --history-paper: #fff; width: min(1040px, calc(100vw - 48px)); height: min(720px, calc(100dvh - 64px)); display: flex; flex-direction: column; overflow: hidden; color: var(--history-text); background: var(--history-paper); border-radius: 16px; font: 13px/1.6 ui-sans-serif, system-ui, sans-serif; }

@@ -28,12 +28,12 @@ export default function RichTextEditor({ content, onChange, path, userId }) {
       }}>导出草稿</Button>
     </div>}
     {document.view ? <>
-      {document.view.pages > 1 && <div className="rich-section-toolbar" role="group" aria-label="长文档分段编辑">
-        <span>第 {document.view.page + 1} / {document.view.pages} 段 · 全文引用与撤销保持连续</span>
+      {document.view.pages > 1 && <div className="rich-section-toolbar rich-pager" role="group" aria-label="长文档分段编辑">
+        <span title="长文稿自动分段显示；各段之间的全文引用与撤销历史保持连续">第 {document.view.page + 1} / {document.view.pages} 段 · 长文稿自动分段</span>
         <Button size="xs" variant="ghost" disabled={!document.view.page} onClick={() => changePage(document.view.page - 1)}>上一段</Button>
         <Button size="xs" variant="ghost" disabled={document.view.page + 1 === document.view.pages} onClick={() => changePage(document.view.page + 1)}>下一段</Button>
-        <form onSubmit={event => { event.preventDefault(); const page = Number(new FormData(event.currentTarget).get('page')); if (page >= 1 && page <= document.view.pages) changePage(page - 1); }}>
-          <Input key={document.view.page} name="page" aria-label="跳转到第几段" type="number" min="1" max={document.view.pages} defaultValue={document.view.page + 1} className="w-20" />
+        <form className="rich-pager-form" onSubmit={event => { event.preventDefault(); const page = Number(new FormData(event.currentTarget).get('page')); if (page >= 1 && page <= document.view.pages) changePage(page - 1); }}>
+          <Input key={document.view.page} name="page" aria-label="跳转到第几段" type="number" min="1" max={document.view.pages} defaultValue={document.view.page + 1} />
           <Button size="xs" variant="ghost" type="submit">前往</Button>
         </form>
       </div>}
