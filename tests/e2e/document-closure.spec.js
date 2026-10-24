@@ -50,8 +50,13 @@ test('native footnotes, formulas, callouts, references and metadata remain edita
 
 test('table native line breaks and column alignment survive save and reload', async ({ page }) => {
   const path = await open(page, '| A | B |\n| --- | --- |\n| 内容 | 其他 |');
-  await page.getByTestId('rich-text-editor').locator('td').first().click();
-  await page.keyboard.press('End'); await page.keyboard.press('Enter'); await page.keyboard.insertText('下一行');
+  const editor = page.getByTestId('rich-text-editor'), cell = editor.locator('td').first();
+  await cell.getByText('内容', { exact: true }).click();
+  await expect(page.getByTestId('table-toolbar')).toBeVisible();
+  await expect.poll(() => cell.evaluate(element => element.contains(window.getSelection()?.anchorNode))).toBe(true);
+  await editor.press('End'); await editor.press('Enter');
+  await expect(cell.locator('br:not(.ProseMirror-trailingBreak)')).toHaveCount(1);
+  await page.keyboard.insertText('下一行');
   await page.getByRole('button', { name: '当前列居中', exact: true }).click();
   await expect.poll(async () => (await read(page, path)).content).toContain('内容<br>下一行');
   await expect(page.getByRole('alert')).toHaveCount(0);
